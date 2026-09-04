@@ -11,6 +11,7 @@
     "scan": "tsx src/scanner/runScan.ts",
     "sync:candidates": "tsx src/candidate/runCandidateSync.ts",
     "resolve": "tsx src/resolver/runResolver.ts",
+    "dashboard": "tsx src/server/index.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -33,12 +34,16 @@
     "fuse.js": "^7.1.0",
     "openai": "^4.86.1",
     "playwright": "^1.50.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.5",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3"

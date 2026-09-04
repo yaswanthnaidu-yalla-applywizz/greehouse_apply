@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Greenhouse Automation Platform — Operator Dashboard (V1)</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            supabase: '#10B981',
+            ai: '#8B5CF6'
+          }
+        }
+      }
+    }
+  </script>
+  <!-- React & Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* Custom dark scrollbar */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased overflow-hidden select-none">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+    const API_BASE_URL = window.location.origin;
+
+    function SourceBadge({ source, confidence }) {
+      if (source === 'supabase') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-emerald-950/70 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-950/50">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>supabase</span>
+            {confidence !== undefined && (
+              <span className="text-[10px] text-emerald-500/80">({(confidence * 100).toFixed(0)}%)</span>
+            )}
+          </span>
+        );
+      }
+
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-violet-950/70 text-violet-400 border border-violet-500/40 shadow-sm shadow-violet-950/50">
+          <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
+          <span>ai</span>
+          {confidence !== undefined && (
+            <span className="text-[10px] text-violet-500/80">({(confidence * 100).toFixed(0)}%)</span>
+          )}
+        </span>
+      );
+    }
+
+    function CandidateList({ candidates, selectedId, onSelectCandidate, isLoading }) {
+      const [searchTerm, setSearchTerm] = useState('');
+
+      const filteredCandidates = useMemo(() => {
+        const query = searchTerm.toLowerCase().trim();
+        if (!query) return candidates;
+        return candidates.filter(
+          (c) =>
+            c.clientName.toLowerCase().includes(query) ||
+            c.applywizzId.toLowerCase().includes(query) ||
+            (c.email && c.email.toLowerCase().includes(query))
+        );
+      }, [candidates, searchTerm]);
+
+      return (
+        <aside className="w-80 flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col h-full overflow-hidden">
+          <div className="p-4 border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Candidates Directory
+              </h2>
+              <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-semibold">
+                {filteredCandidates.length} of {candidates.length}
+              </span>
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search name or AWL-ID..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300 text-xs"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60 p-2 space-y-1.5 custom-scrollbar">
+            {isLoading ? (
+              <div className="p-6 text-center text-xs text-slate-500 animate-pulse">
+                Loading candidate records...
+              </div>
+            ) : filteredCandidates.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500">
+                No candidates matching <span className="text-slate-300">"{searchTerm}"</span>
+              </div>
+            ) : (
+              filteredCandidates.map((c) => {
+                const isSelected = c.applywizzId === selectedId;
+                return (
+                  <button
+                    key={c.applywizzId}
+                    type="button"
+                    onClick={() => onSelectCandidate(c.applywizzId)}
+                    className={`w-full text-left p-3 rounded-lg transition-all duration-150 relative ${
+                      isSelected
+                        ? 'bg-slate-800 border-2 border-emerald-500 shadow-md shadow-emerald-950/20'
+                        : 'bg-slate-800/40 border border-slate-800/80 hover:bg-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded">
+                        {c.applywizzId}
+                      </span>
+                      {c.status === 'READY' && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-800/40">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Ready
+                        </span>
+                      )}
+                      {c.status === 'PENDING' && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-800/40">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                          Pending
+                        </span>
+                      )}
+                      {c.status === 'EXPIRED' && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded-full">
+                          Expired
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-sm font-semibold text-slate-100 truncate mb-1">
+                      {c.clientName}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span className="truncate max-w-[140px] text-slate-400 font-mono">
+                        {c.email || c.location || 'Profile Synced'}
+                      </span>
+                      <span className="bg-slate-900 border border-slate-700/80 text-slate-300 px-2 py-0.5 rounded text-[10px] font-semibold">
+                        {c.totalJobs} {c.totalJobs === 1 ? 'Job' : 'Jobs'}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </aside>
+      );
+    }
+
+    function JobQueueView({ candidate, selectedJobUrl, onSelectJob }) {
+      if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
+        return (
+          <div className="p-4 bg-slate-900/60 border-b border-slate-800 text-xs text-slate-500">
+            No jobs assigned for this candidate.
+          </div>
+        );
+      }
+
+      return (
+        <div className="bg-slate-900 border-b border-slate-800 px-6 pt-3">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Assigned Applications Queue
+              </span>
+              <span className="text-[11px] font-mono bg-blue-950/60 border border-blue-800/40 text-blue-400 px-2 py-0.5 rounded-full font-semibold">
+                {candidate.jobs.length} Total
+              </span>
+            </div>
+
+            {candidate.resumeUrl && (
+              <a
+                href={candidate.resumeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 border border-emerald-800/50 hover:border-emerald-700 px-3 py-1 rounded-md transition-colors"
+              >
+                <span>📄</span>
+                <span>Master Resume PDF</span>
+              </a>
+            )}
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-3 custom-scrollbar">
+            {candidate.jobs.map((job, idx) => {
+              const jobKey = job.canonicalUrl || job.rawUrl;
+              const isSelected =
+                selectedJobUrl === jobKey ||
+                selectedJobUrl === job.rawUrl ||
+                selectedJobUrl === job.canonicalUrl;
+
+              return (
+                <button
+                  key={`${jobKey}-${idx}`}
+                  type="button"
+                  onClick={() => onSelectJob(jobKey)}
+                  className={`flex-shrink-0 text-left px-4 py-2.5 rounded-lg border transition-all duration-150 min-w-[220px] max-w-[280px] ${
+                    isSelected
+                      ? 'bg-slate-800 border-blue-500 shadow-sm shadow-blue-950/30'
+                      : 'bg-slate-950/60 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-slate-200 truncate">
+                      {job.companyName || 'Company'}
+                    </span>
+                    {job.status === 'READY_FOR_REVIEW' && (
+                      <span className="text-[10px] font-mono text-emerald-400 font-semibold">
+                        🟢 Ready
+                      </span>
+                    )}
+                    {job.status === 'EXPIRED' && (
+                      <span className="text-[10px] font-mono text-rose-400 font-semibold">
+                        🔴 Expired
+                      </span>
+                    )}
+                    {job.status === 'PENDING' && (
+                      <span className="text-[10px] font-mono text-amber-400 font-semibold">
+                        🟡 Pending
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-xs text-slate-300 truncate font-medium">
+                    {job.jobTitle || 'Job Application'}
+                  </div>
+
+                  <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                    <span>{job.fieldsCount ? `${job.fieldsCount} Questions` : 'Scanned'}</span>
+                    <span className="font-mono text-slate-600">#{idx + 1}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    function FormRenderer({ application, isLoading }) {
+      if (isLoading) {
+        return (
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-slate-500">
+            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p className="text-xs font-mono">Loading resolved application questions...</p>
+          </div>
+        );
+      }
+
+      if (!application) {
+        return (
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-slate-500">
+            <div className="text-3xl mb-2">📋</div>
+            <p className="text-sm font-semibold text-slate-400">No Job Selected</p>
+            <p className="text-xs text-slate-600 mt-1">
+              Select a candidate and job tab to inspect pre-populated form questions.
+            </p>
+          </div>
+        );
+      }
+
+      const supabaseCount = application.resolvedFields.filter((f) => f.source === 'supabase').length;
+      const aiCount = application.resolvedFields.filter((f) => f.source === 'ai').length;
+
+      return (
+        <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full custom-scrollbar">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8 shadow-lg shadow-black/20">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5 mb-5">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    {application.companyName || 'Greenhouse Posting'}
+                  </span>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-xs font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                    {application.applywizzId}
+                  </span>
+                </div>
+                <h1 className="text-xl font-bold text-slate-100">
+                  {application.jobTitle || 'Application Form'}
+                </h1>
+                <a
+                  href={application.jobUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-400 hover:text-blue-300 font-mono underline break-all mt-1 inline-block"
+                >
+                  {application.jobUrl}
+                </a>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <div className="bg-emerald-950/40 border border-emerald-800/40 px-3 py-2 rounded-lg text-center">
+                  <div className="text-xs font-mono font-bold text-emerald-400">{supabaseCount}</div>
+                  <div className="text-[10px] text-emerald-500/80 uppercase tracking-wider">supabase</div>
+                </div>
+                <div className="bg-violet-950/40 border border-violet-800/40 px-3 py-2 rounded-lg text-center">
+                  <div className="text-xs font-mono font-bold text-violet-400">{aiCount}</div>
+                  <div className="text-[10px] text-violet-500/80 uppercase tracking-wider">ai</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-950/80 border border-slate-800 rounded-lg px-4 py-2.5 flex items-center justify-between text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-400">🔒</span>
+                <span>Readonly Operator Mode (V1) — Pre-populated for verification and QA review</span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-500">
+                {application.resolvedFields.length} Form Fields
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            {application.resolvedFields.length === 0 ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-400">
+                <p className="text-sm">No interactive form fields extracted for this job posting.</p>
+                {application.status === 'EXPIRED' && (
+                  <p className="text-xs text-rose-400 mt-1">This job posting appears to be closed or expired.</p>
+                )}
+              </div>
+            ) : (
+              application.resolvedFields.map((field, index) => {
+                return (
+                  <div
+                    key={`${field.fieldId}-${index}`}
+                    className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <label className="text-sm font-semibold text-slate-200 leading-snug">
+                        <span className="text-slate-500 font-mono text-xs mr-2">#{index + 1}</span>
+                        {field.label || field.name || field.fieldId}
+                        <span className="text-rose-500 ml-1 font-bold">*</span>
+                      </label>
+
+                      <div className="flex-shrink-0">
+                        <SourceBadge source={field.source} confidence={field.confidence} />
+                      </div>
+                    </div>
+
+                    <div className="mt-2">
+                      {field.type === 'textarea' ? (
+                        <textarea
+                          readOnly
+                          rows={3}
+                          value={field.value || '(No answer provided)'}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 font-sans leading-relaxed focus:outline-none cursor-default resize-none"
+                        />
+                      ) : field.type === 'file' ? (
+                        <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 font-mono">
+                          <span>📎</span>
+                          <span className="truncate">{field.value || 'Master Resume PDF'}</span>
+                        </div>
+                      ) : field.type === 'select' || field.type === 'radio' ? (
+                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs text-slate-200 font-medium">
+                          <span>{field.value || '(No option selected)'}</span>
+                          <span className="text-[10px] uppercase font-mono text-slate-500 bg-slate-900 px-2 py-0.5 rounded">
+                            {field.type}
+                          </span>
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          readOnly
+                          value={field.value || ''}
+                          placeholder="(Empty)"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-200 font-sans focus:outline-none cursor-default"
+                        />
+                      )}
+                    </div>
+
+                    <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                      <span>ID: {field.fieldId}</span>
+                      <span className="capitalize text-slate-500">{field.type}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [candidates, setCandidates] = useState([]);
+      const [stats, setStats] = useState(null);
+      const [selectedCandidateId, setSelectedCandidateId] = useState(null);
+      const [candidateDetail, setCandidateDetail] = useState(null);
+      const [selectedJobUrl, setSelectedJobUrl] = useState(null);
+      const [application, setApplication] = useState(null);
+
+      const [isLoadingCandidates, setIsLoadingCandidates] = useState(true);
+      const [isLoadingApplication, setIsLoadingApplication] = useState(false);
+
+      const fetchInitialData = useCallback(async () => {
+        setIsLoadingCandidates(true);
+        try {
+          const [candidatesRes, statsRes] = await Promise.all([
+            fetch(`${API_BASE_URL}/api/candidates`),
+            fetch(`${API_BASE_URL}/api/stats`),
+          ]);
+
+          if (candidatesRes.ok) {
+            const candidateData = await candidatesRes.json();
+            setCandidates(candidateData);
+            if (candidateData.length > 0 && !selectedCandidateId) {
+              setSelectedCandidateId(candidateData[0].applywizzId);
+            }
+          }
+
+          if (statsRes.ok) {
+            const statsData = await statsRes.json();
+            setStats(statsData);
+          }
+        } catch (err) {
+          console.error('Failed to load initial data:', err);
+        } finally {
+          setIsLoadingCandidates(false);
+        }
+      }, [selectedCandidateId]);
+
+      useEffect(() => {
+        fetchInitialData();
+      }, [fetchInitialData]);
+
+      const fetchCandidateDetail = useCallback(async (applywizzId) => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}`);
+          if (res.ok) {
+            const detail = await res.json();
+            setCandidateDetail(detail);
+
+            if (detail.jobs && detail.jobs.length > 0) {
+              const firstJobUrl = detail.jobs[0].canonicalUrl || detail.jobs[0].rawUrl;
+              setSelectedJobUrl(firstJobUrl);
+            } else {
+              setSelectedJobUrl(null);
+              setApplication(null);
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to fetch candidate ${applywizzId}:`, err);
+        }
+      }, []);
+
+      useEffect(() => {
+        if (selectedCandidateId) {
+          fetchCandidateDetail(selectedCandidateId);
+        }
+      }, [selectedCandidateId, fetchCandidateDetail]);
+
+      const fetchJobApplication = useCallback(async (applywizzId, jobUrl) => {
+        setIsLoadingApplication(true);
+        try {
+          const encodedUrl = encodeURIComponent(jobUrl);
+          const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}/jobs/${encodedUrl}`);
+
+          if (res.ok) {
+            const appData = await res.json();
+            setApplication(appData);
+          } else {
+            setApplication(null);
+          }
+        } catch (err) {
+          console.error(`Failed to fetch application for ${applywizzId} / ${jobUrl}:`, err);
+          setApplication(null);
+        } finally {
+          setIsLoadingApplication(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        if (selectedCandidateId && selectedJobUrl) {
+          fetchJobApplication(selectedCandidateId, selectedJobUrl);
+        }
+      }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
+
+      return (
+        <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
+          <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 flex-shrink-0">
+            <div className="flex items-center gap-3">
+              <span className="text-xl">🟢</span>
+              <div>
+                <h1 className="text-sm font-bold tracking-tight text-slate-100">
+                  Greenhouse Automation Platform
+                </h1>
+                <p className="text-[10px] text-slate-400 font-mono">
+                  Phase V1-5 Operator Dashboard · Dual-Branch Pipeline
+                </p>
+              </div>
+            </div>
+
+            {stats && (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
+                  <span className="text-slate-400">Candidates:</span>
+                  <span className="text-emerald-400 font-bold">{stats.totalCandidates}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
+                  <span className="text-slate-400">Jobs:</span>
+                  <span className="text-blue-400 font-bold">{stats.totalApplications}</span>
+                </div>
+
+                <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
+                  <span className="text-emerald-400 font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
+                  <span className="text-slate-600">|</span>
+                  <span className="text-violet-400 font-bold">🟣 ai: {stats.aiPercentage}%</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchInitialData}
+                  className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1 rounded-md transition-colors font-medium"
+                >
+                  ↻ Refresh
+                </button>
+              </div>
+            )}
+          </header>
+
+          <div className="flex flex-1 overflow-hidden">
+            <CandidateList
+              candidates={candidates}
+              selectedId={selectedCandidateId}
+              onSelectCandidate={(id) => setSelectedCandidateId(id)}
+              isLoading={isLoadingCandidates}
+            />
+
+            <main className="flex-1 flex flex-col bg-slate-950 overflow-hidden">
+              {candidateDetail ? (
+                <>
+                  <JobQueueView
+                    candidate={candidateDetail}
+                    selectedJobUrl={selectedJobUrl}
+                    onSelectJob={(url) => setSelectedJobUrl(url)}
+                  />
+                  <FormRenderer application={application} isLoading={isLoadingApplication} />
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+                  <p className="text-sm">Select a candidate to view assigned applications.</p>
+                </div>
+              )}
+            </main>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
