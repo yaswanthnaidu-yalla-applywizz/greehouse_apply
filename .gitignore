@@ -12,6 +12,7 @@ dist/
 # Pipeline generated directories
 resumes/
 output/
+cache/
 *.pdf
 
 # Logs

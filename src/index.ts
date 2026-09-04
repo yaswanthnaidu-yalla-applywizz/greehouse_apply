@@ -11,6 +11,7 @@ import { config } from './config/env.js';
 export * from './types/index.js';
 export * from './config/env.js';
 export * from './scanner/index.js';
+export * from './candidate/index.js';
 
 /**
  * Bootstraps the application runtime, checks essential file paths,
@@ -35,9 +36,13 @@ export function bootstrap(): void {
   console.log(`• Resumes Directory:  ${config.RESUMES_DIR}`);
   console.log('================================================================');
   console.log('• Subsystems:');
-  console.log('  - Branch 1 Scanner: READY (CSV Deduplicator, Playwright Scanner, Exporter)');
+  console.log('  - Branch 1 Scanner:   READY (CSV Deduplicator, Playwright Scanner, Exporter)');
+  console.log('  - Branch 2 Candidate: READY (ApplyWizz API Client, Segregator, Resume Downloader)');
   console.log('================================================================');
-  console.log('Run "npm run scan" to execute Branch 1 URL deduplication and scanning.');
+  console.log('Commands:');
+  console.log('  - npm run scan             Run Branch 1 URL deduplication and DOM scanning');
+  console.log('  - npm run sync:candidates  Run Branch 2 candidate segregation and profile sync');
+  console.log('================================================================');
 }
 
 // Execute bootstrap when invoked as main module

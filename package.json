@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "scan": "tsx src/scanner/runScan.ts",
+    "sync:candidates": "tsx src/candidate/runCandidateSync.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

@@ -107,6 +107,22 @@ export interface CandidateWorkExperience {
 }
 
 /**
+ * Demographic and survey preferences from ApplyWizz additional information.
+ */
+export interface CandidateDemographics {
+  gender?: string;
+  isHispanicLatino?: string;
+  raceEthnicity?: string;
+  veteranStatus?: string;
+  disabilityStatus?: string;
+  willingToRelocate?: boolean;
+  canWorkInOffice?: boolean;
+  salaryRange?: string;
+  yearsOfExperience?: string;
+  currentRole?: string;
+}
+
+/**
  * Rich candidate profile retrieved from the ApplyWizz Client API.
  */
 export interface ApplyWizzProfile {
@@ -142,12 +158,50 @@ export interface ApplyWizzProfile {
   resumeUrl: string;
   /** Local filesystem path where the downloaded PDF resume is stored */
   localResumePath: string;
+  /** Optional demographic and survey metadata */
+  demographics?: CandidateDemographics;
 }
 
 /**
  * Type alias for ApplyWizzProfile providing explicit candidate terminology.
  */
 export type ApplyWizzCandidateProfile = ApplyWizzProfile;
+
+/**
+ * Represents a single job assignment mapped to a candidate in the CSV.
+ */
+export interface CandidateJobRecord {
+  /** Original raw job URL from CSV */
+  rawUrl: string;
+  /** Canonical normalized Greenhouse URL */
+  canonicalUrl: string;
+  /** Batch date string */
+  date: string;
+  /** Internal job match score */
+  score: string | number;
+  /** Internal scored job reference ID */
+  scoredJobId: string;
+  /** Status in CSV (e.g., 'PENDING') */
+  status: string;
+}
+
+/**
+ * Segregated candidate record linking candidate profile with all assigned jobs.
+ */
+export interface CandidateSegment {
+  /** Unique candidate identifier */
+  applywizzId: string;
+  /** Candidate full name */
+  clientName: string;
+  /** Candidate profile details synced from ApplyWizz API or local cache */
+  profile?: ApplyWizzCandidateProfile;
+  /** List of job postings assigned to this candidate */
+  jobs: CandidateJobRecord[];
+  /** Total number of assigned jobs */
+  totalJobs: number;
+  /** ISO timestamp when the candidate segment was processed */
+  syncedAt: string;
+}
 
 // ============================================================================
 // Multi-Tier Answer Resolution & Queue Schemas
