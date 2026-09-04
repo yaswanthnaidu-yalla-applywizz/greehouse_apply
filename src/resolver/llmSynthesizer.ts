@@ -33,8 +33,8 @@ export interface JobContext {
  * Options configuring the LLMSynthesizer.
  */
 export interface LLMSynthesizerOptions {
-  /** Active LLM provider ('gemini' or 'openai') */
-  provider?: 'gemini' | 'openai';
+  /** Active LLM provider ('openrouter' | 'gemini' | 'openai') */
+  provider?: 'openrouter' | 'gemini' | 'openai';
   /** LLM API Key override */
   apiKey?: string;
   /** Model name override */
@@ -85,10 +85,10 @@ function alignToOption(text: string, options?: string[]): string {
 }
 
 /**
- * Tier 2 Answer Synthesizer invoking Google Gemini or OpenAI.
+ * Tier 2 Answer Synthesizer invoking OpenRouter, Google Gemini, or OpenAI.
  */
 export class LLMSynthesizer {
-  private readonly provider: 'gemini' | 'openai';
+  private readonly provider: 'openrouter' | 'gemini' | 'openai';
   private readonly apiKey: string;
   private readonly modelName: string;
   private geminiClient: GoogleGenerativeAI | null = null;
@@ -103,7 +103,19 @@ export class LLMSynthesizer {
     this.provider = options.provider ?? config.LLM_PROVIDER;
     this.apiKey = options.apiKey ?? config.ACTIVE_LLM_API_KEY;
 
-    if (this.provider === 'openai') {
+    if (this.provider === 'openrouter') {
+      this.modelName = options.modelName ?? config.OPENROUTER_MODEL;
+      if (this.apiKey) {
+        this.openaiClient = new OpenAI({
+          baseURL: 'https://openrouter.ai/api/v1',
+          apiKey: this.apiKey,
+          defaultHeaders: {
+            'HTTP-Referer': 'https://apply-wizz.me',
+            'X-Title': 'Greenhouse Automation Operator',
+          },
+        });
+      }
+    } else if (this.provider === 'openai') {
       this.modelName = options.modelName ?? 'gpt-4o-mini';
       if (this.apiKey) {
         this.openaiClient = new OpenAI({ apiKey: this.apiKey });
@@ -136,7 +148,7 @@ export class LLMSynthesizer {
     // If API key is configured, execute real LLM call
     if (this.apiKey) {
       try {
-        if (this.provider === 'openai' && this.openaiClient) {
+        if ((this.provider === 'openrouter' || this.provider === 'openai') && this.openaiClient) {
           const completion = await this.openaiClient.chat.completions.create({
             model: this.modelName,
             messages: [{ role: 'user', content: prompt }],

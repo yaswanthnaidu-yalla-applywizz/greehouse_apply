@@ -25,7 +25,13 @@ const envSchema = z.object({
   APPLYWIZZ_API_URL: z.string().url().default('https://www.apply-wizz.me/api'),
 
   /** Selected LLM provider for synthesis */
-  LLM_PROVIDER: z.enum(['gemini', 'openai']).default('gemini'),
+  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai']).default('openrouter'),
+
+  /** OpenRouter API key */
+  OPENROUTER_API_KEY: z.string().optional(),
+
+  /** OpenRouter Model ID */
+  OPENROUTER_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
 
   /** Generic LLM API key fallback */
   LLM_API_KEY: z.string().optional(),
@@ -81,12 +87,19 @@ function resolveLlmApiKey(env: typeof rawEnv): string {
   if (env.LLM_API_KEY && env.LLM_API_KEY.trim().length > 0) {
     return env.LLM_API_KEY.trim();
   }
+  if (env.LLM_PROVIDER === 'openrouter' && env.OPENROUTER_API_KEY) {
+    return env.OPENROUTER_API_KEY.trim();
+  }
   if (env.LLM_PROVIDER === 'gemini' && env.GEMINI_API_KEY) {
     return env.GEMINI_API_KEY.trim();
   }
   if (env.LLM_PROVIDER === 'openai' && env.OPENAI_API_KEY) {
     return env.OPENAI_API_KEY.trim();
   }
+  // Auto-fallback: check if any key exists
+  if (env.OPENROUTER_API_KEY) return env.OPENROUTER_API_KEY.trim();
+  if (env.GEMINI_API_KEY) return env.GEMINI_API_KEY.trim();
+  if (env.OPENAI_API_KEY) return env.OPENAI_API_KEY.trim();
   return '';
 }
 
