@@ -12,7 +12,6 @@
 
 import fs from 'fs';
 import * as fastCsv from 'fast-csv';
-import axios from 'axios';
 
 /**
  * Options configuring the CSV deduplication and shortlink resolution pipeline.
@@ -132,49 +131,36 @@ export async function resolveShortlink(shortUrl: string): Promise<string> {
   }
 
   try {
-    const response = await axios.get(normalizedInput, {
-      method: 'HEAD',
-      maxRedirects: 5,
-      timeout: 10000,
-      validateStatus: (status) => status < 400 || status === 405,
+    const response = await fetch(normalizedInput, {
+      method: 'GET',
+      redirect: 'manual',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
+      signal: AbortSignal.timeout(8000),
     });
 
-    let finalUrl: string = normalizedInput;
-    if (response.request?.res?.responseUrl) {
-      finalUrl = response.request.res.responseUrl;
-    } else if (response.headers?.location) {
-      finalUrl = response.headers.location;
-    }
-
-    const canonical = normalizeGreenhouseUrl(finalUrl);
-    shortlinkCache.set(normalizedInput, canonical);
-    return canonical;
-  } catch (headError) {
-    // Fallback: try minimal GET request if HEAD is rejected
-    try {
-      const getResponse = await axios.get(normalizedInput, {
-        maxRedirects: 5,
-        timeout: 10000,
-        validateStatus: (status) => status < 400,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Range: 'bytes=0-1024',
-        },
-      });
-
-      const finalUrl = getResponse.request?.res?.responseUrl || getResponse.config?.url || normalizedInput;
-      const canonical = normalizeGreenhouseUrl(finalUrl);
+    const locationHeader = response.headers.get('location');
+    if (locationHeader) {
+      const canonical = normalizeGreenhouseUrl(locationHeader);
       shortlinkCache.set(normalizedInput, canonical);
       return canonical;
-    } catch {
-      // If network fails, return the original normalized URL
-      shortlinkCache.set(normalizedInput, normalizedInput);
-      return normalizedInput;
     }
+
+    if (response.url && response.url !== normalizedInput) {
+      const canonical = normalizeGreenhouseUrl(response.url);
+      shortlinkCache.set(normalizedInput, canonical);
+      return canonical;
+    }
+
+    shortlinkCache.set(normalizedInput, normalizedInput);
+    return normalizedInput;
+  } catch {
+    // If network fails, return the original normalized URL
+    shortlinkCache.set(normalizedInput, normalizedInput);
+    return normalizedInput;
   }
 }
 

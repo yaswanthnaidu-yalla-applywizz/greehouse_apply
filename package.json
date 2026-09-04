@@ -10,6 +10,7 @@
     "dev": "tsx src/index.ts",
     "scan": "tsx src/scanner/runScan.ts",
     "sync:candidates": "tsx src/candidate/runCandidateSync.ts",
+    "resolve": "tsx src/resolver/runResolver.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
