@@ -100,17 +100,25 @@ export class ProfileMatcher {
       {
         key: 'first_name',
         aliases: ['first name', 'given name', 'legal first name', 'forename', 'first_name'],
-        getValue: (p) => p.firstName || p.clientName.split(' ')[0] || '',
+        getValue: (p) =>
+          p.firstName ||
+          (p.clientName ? p.clientName.split(' ')[0] : '') ||
+          ((p as any).name ? (p as any).name.split(' ')[0] : '') ||
+          '',
       },
       {
         key: 'last_name',
         aliases: ['last name', 'family name', 'surname', 'legal last name', 'last_name'],
-        getValue: (p) => p.lastName || p.clientName.split(' ').slice(1).join(' ') || '',
+        getValue: (p) =>
+          p.lastName ||
+          (p.clientName ? p.clientName.split(' ').slice(1).join(' ') : '') ||
+          ((p as any).name ? (p as any).name.split(' ').slice(1).join(' ') : '') ||
+          '',
       },
       {
         key: 'full_name',
         aliases: ['full name', 'candidate name', 'applicant name', 'your name', 'client_name'],
-        getValue: (p) => p.clientName || `${p.firstName} ${p.lastName}`.trim(),
+        getValue: (p) => p.clientName || (p as any).name || `${p.firstName || ''} ${p.lastName || ''}`.trim(),
       },
       {
         key: 'email',

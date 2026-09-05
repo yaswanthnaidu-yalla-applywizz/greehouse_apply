@@ -156,7 +156,7 @@ export class LLMSynthesizer {
             max_tokens: 300,
           });
 
-          const rawAnswer = completion.choices[0]?.message?.content?.trim() || '';
+          const rawAnswer = completion?.choices?.[0]?.message?.content?.trim() || '';
           const finalAnswer = field.options ? alignToOption(rawAnswer, field.options) : rawAnswer;
 
           return {
