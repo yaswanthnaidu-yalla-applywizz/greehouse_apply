@@ -157,16 +157,18 @@ export class AnswerResolver {
     const shortlinksToResolve = new Set<string>();
     for (const seg of segments) {
       for (const job of seg.jobs) {
-        const u = job.canonicalUrl || job.rawUrl;
-        if (u && u.includes('grnh.se')) {
-          shortlinksToResolve.add(u);
+        if (job.rawUrl && job.rawUrl.includes('grnh.se')) {
+          shortlinksToResolve.add(job.rawUrl);
+        }
+        if (job.canonicalUrl && job.canonicalUrl.includes('grnh.se')) {
+          shortlinksToResolve.add(job.canonicalUrl);
         }
       }
     }
 
     if (shortlinksToResolve.size > 0) {
       console.log(`[Answer Resolver] 🔗 Pre-resolving ${shortlinksToResolve.size} unique shortlinks concurrently...`);
-      await resolveShortlinksBatch(Array.from(shortlinksToResolve), 30);
+      await resolveShortlinksBatch(Array.from(shortlinksToResolve), 50);
     }
 
     let resolvedCount = 0;
@@ -192,15 +194,15 @@ export class AnswerResolver {
           );
 
         if (!template) {
-          applications.push({
-            applywizzId: seg.applywizzId,
-            candidateName: seg.clientName,
-            jobUrl: canonical,
-            companyName: '',
-            jobTitle: '',
-            status: 'PENDING',
-            resolvedFields: [],
-          });
+          continue;
+        }
+
+        // Question count gating filter: Only process jobs with < MAX_JOB_QUESTIONS (default: < 23)
+        const questionCount = template.fields?.length || 0;
+        if (questionCount >= config.MAX_JOB_QUESTIONS) {
+          console.log(
+            `[Answer Resolver] ⏩ Deferring job ${template.jobUrl} (${questionCount} questions >= ${config.MAX_JOB_QUESTIONS} threshold for initial phase).`
+          );
           continue;
         }
 

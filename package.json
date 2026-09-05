@@ -12,6 +12,9 @@
     "sync:candidates": "tsx src/candidate/runCandidateSync.ts",
     "resolve": "tsx src/resolver/runResolver.ts",
     "dashboard": "tsx src/server/index.ts",
+    "pipeline": "tsx src/orchestrator/runPipeline.ts",
+    "test": "tsx tests/e2e.test.ts",
+    "test:e2e": "tsx tests/e2e.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

@@ -62,6 +62,9 @@ const envSchema = z.object({
 
   /** Local directory for cached candidate master PDF resumes */
   RESUMES_DIR: z.string().default('./resumes'),
+
+  /** Maximum question/field count allowed for active candidate queue insertion (default: 23, i.e., < 23 questions) */
+  MAX_JOB_QUESTIONS: z.coerce.number().int().positive().default(23),
 });
 
 /**

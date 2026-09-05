@@ -14,6 +14,7 @@ export * from './scanner/index.js';
 export * from './candidate/index.js';
 export * from './resolver/index.js';
 export * from './server/index.js';
+export * from './orchestrator/index.js';
 
 /**
  * Bootstraps the application runtime, checks essential file paths,
@@ -42,12 +43,15 @@ export function bootstrap(): void {
   console.log('  - Branch 2 Candidate: READY (ApplyWizz API Client, Segregator, Resume Downloader)');
   console.log('  - Answer Resolver:    READY (Profile Matcher, LLM Synthesizer, Q&A Bank)');
   console.log('  - Operator Dashboard: READY (Express REST API, Split-Screen Viewer on port ' + config.PORT + ')');
+  console.log('  - Master Pipeline:    READY (V1Pipeline Orchestrator & E2E Test Suite)');
   console.log('================================================================');
   console.log('Commands:');
+  console.log('  - npm run pipeline         Run full End-to-End automation pipeline');
   console.log('  - npm run scan             Run Branch 1 URL deduplication and DOM scanning');
   console.log('  - npm run sync:candidates  Run Branch 2 candidate segregation and profile sync');
   console.log('  - npm run resolve          Run multi-tier answer resolution (supabase vs ai)');
   console.log('  - npm run dashboard        Start operator dashboard and REST API on port ' + config.PORT);
+  console.log('  - npm test                 Run comprehensive End-to-End verification tests');
   console.log('================================================================');
 }
 

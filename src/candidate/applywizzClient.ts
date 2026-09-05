@@ -208,15 +208,20 @@ export class ApplyWizzClient {
       } catch {}
     }
 
-    if (!resumeUrl || typeof resumeUrl !== 'string' || !resumeUrl.startsWith('http')) {
+    if (!resumeUrl || typeof resumeUrl !== 'string' || resumeUrl.trim().length === 0) {
       return destinationPath;
+    }
+
+    let targetUrl = resumeUrl.trim();
+    if (!targetUrl.startsWith('http')) {
+      targetUrl = `https://applywizz-prod.s3.us-east-2.amazonaws.com/${encodeURI(targetUrl.replace(/^\/+/, ''))}`;
     }
 
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await axios.get(resumeUrl, {
+        const response = await axios.get(targetUrl, {
           responseType: 'arraybuffer',
           timeout: 20000,
           headers: {
@@ -308,7 +313,10 @@ export class ApplyWizzClient {
       });
     }
 
-    const resumeUrl = addInfo.resume_url || client.resume_url || '';
+    let resumeUrl = (addInfo.resume_url || client.resume_url || '').trim();
+    if (resumeUrl && !resumeUrl.startsWith('http')) {
+      resumeUrl = `https://applywizz-prod.s3.us-east-2.amazonaws.com/${encodeURI(resumeUrl.replace(/^\/+/, ''))}`;
+    }
     const localResumePath = path.join(this.resumesDir, `${applywizzId}_resume.pdf`);
 
     // Demographic and Survey Attributes

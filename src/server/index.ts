@@ -138,7 +138,8 @@ export function loadArtifacts(outputDir: string = config.OUTPUT_DIR): void {
  *
  * @returns Configured Express application.
  */
-export function createServer(): express.Application {
+export function createServer(outputDir: string = config.OUTPUT_DIR): express.Application {
+  loadArtifacts(outputDir);
   const app = express();
 
   app.use(cors());
@@ -216,13 +217,28 @@ export function createServer(): express.Application {
       const readyCount = candidateApps.filter((a) => a.status === 'READY_FOR_REVIEW').length;
       const expiredCount = candidateApps.filter((a) => a.status === 'EXPIRED').length;
 
+      // Filter to only jobs eligible under current question threshold (< MAX_JOB_QUESTIONS)
+      const eligibleJobs = seg.jobs.filter((job) => {
+        const canonical = job.canonicalUrl || job.rawUrl;
+        const template =
+          state.templatesMap.get(canonical) ||
+          state.templatesMap.get(job.rawUrl) ||
+          Array.from(state.templatesMap.values()).find(
+            (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
+          );
+        if (template && template.fields && template.fields.length >= config.MAX_JOB_QUESTIONS) {
+          return false;
+        }
+        return true;
+      });
+
       const resumePath = path.join(config.RESUMES_DIR, `${seg.applywizzId}_resume.pdf`);
       const resumeAvailable = fs.existsSync(resumePath);
 
       let status: 'READY' | 'PENDING' | 'EXPIRED' = 'PENDING';
       if (readyCount > 0) {
         status = 'READY';
-      } else if (expiredCount === seg.jobs.length && seg.jobs.length > 0) {
+      } else if (expiredCount === eligibleJobs.length && eligibleJobs.length > 0) {
         status = 'EXPIRED';
       }
 
@@ -231,7 +247,7 @@ export function createServer(): express.Application {
         clientName: seg.clientName,
         email: seg.profile?.email || '',
         location: seg.profile?.location || '',
-        totalJobs: seg.jobs.length,
+        totalJobs: eligibleJobs.length,
         readyCount,
         expiredCount,
         status,
@@ -245,7 +261,7 @@ export function createServer(): express.Application {
 
   /**
    * GET /api/candidates/:applywizzId
-   * Returns candidate full profile, resume details, and assigned job queue.
+   * Returns candidate full profile, resume details, and assigned job queue (< MAX_JOB_QUESTIONS).
    */
   app.get('/api/candidates/:applywizzId', (req: Request, res: Response) => {
     const applywizzId = Array.isArray(req.params.applywizzId)
@@ -263,35 +279,39 @@ export function createServer(): express.Application {
 
     const candidateApps = state.applications.filter((a) => a.applywizzId === applywizzId);
 
-    // Enrich jobs with resolved application status and metadata
-    const jobsWithStatus = seg.jobs.map((job) => {
-      const canonical = job.canonicalUrl || job.rawUrl;
-      const appItem =
-        candidateApps.find(
-          (a) =>
-            a.jobUrl === canonical ||
-            canonical.includes(a.jobUrl) ||
-            a.jobUrl.includes(canonical)
-        ) ||
-        state.applicationsMap.get(`${applywizzId}::${canonical}`) ||
-        state.applicationsMap.get(`${applywizzId}::${job.rawUrl}`);
+    // Enrich jobs with resolved application status and metadata, filtering to < MAX_JOB_QUESTIONS
+    const eligibleJobsWithStatus = seg.jobs
+      .map((job) => {
+        const canonical = job.canonicalUrl || job.rawUrl;
+        const appItem =
+          candidateApps.find(
+            (a) =>
+              a.jobUrl === canonical ||
+              canonical.includes(a.jobUrl) ||
+              a.jobUrl.includes(canonical)
+          ) ||
+          state.applicationsMap.get(`${applywizzId}::${canonical}`) ||
+          state.applicationsMap.get(`${applywizzId}::${job.rawUrl}`);
 
-      const template =
-        state.templatesMap.get(canonical) ||
-        state.templatesMap.get(job.rawUrl) ||
-        Array.from(state.templatesMap.values()).find(
-          (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
-        );
+        const template =
+          state.templatesMap.get(canonical) ||
+          state.templatesMap.get(job.rawUrl) ||
+          Array.from(state.templatesMap.values()).find(
+            (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
+          );
 
-      return {
-        ...job,
-        canonicalUrl: appItem?.jobUrl || canonical,
-        companyName: appItem?.companyName || template?.companyName || 'Greenhouse Company',
-        jobTitle: appItem?.jobTitle || template?.jobTitle || 'Job Opening',
-        status: appItem?.status || (template?.isExpired ? 'EXPIRED' : 'PENDING'),
-        fieldsCount: appItem?.resolvedFields.length || template?.fields.length || 0,
-      };
-    });
+        const fieldsCount = appItem?.resolvedFields.length || template?.fields.length || 0;
+
+        return {
+          ...job,
+          canonicalUrl: appItem?.jobUrl || canonical,
+          companyName: appItem?.companyName || template?.companyName || 'Greenhouse Company',
+          jobTitle: appItem?.jobTitle || template?.jobTitle || 'Job Opening',
+          status: appItem?.status || (template?.isExpired ? 'EXPIRED' : 'PENDING'),
+          fieldsCount,
+        };
+      })
+      .filter((job) => job.fieldsCount < config.MAX_JOB_QUESTIONS);
 
     res.json({
       applywizzId: seg.applywizzId,
@@ -299,7 +319,7 @@ export function createServer(): express.Application {
       profile: seg.profile,
       resumeUrl: resumeExists ? `/resumes/${resumeFilename}` : null,
       resumeFilename: resumeExists ? resumeFilename : null,
-      jobs: jobsWithStatus,
+      jobs: eligibleJobsWithStatus,
     });
   });
 

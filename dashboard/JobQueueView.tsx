@@ -51,7 +51,10 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             Assigned Applications Queue
           </span>
           <span className="text-[11px] font-mono bg-blue-950/60 border border-blue-800/40 text-blue-400 px-2 py-0.5 rounded-full font-semibold">
-            {candidate.jobs.length} Total
+            {candidate.jobs.length} Active
+          </span>
+          <span className="text-[11px] font-mono bg-emerald-950/60 border border-emerald-800/40 text-emerald-400 px-2 py-0.5 rounded-full font-semibold">
+            ⚡ &lt; 23 Qs
           </span>
         </div>
 
