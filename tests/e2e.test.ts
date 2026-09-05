@@ -63,53 +63,53 @@ export async function runE2ETests(): Promise<void> {
   // If live CSV is missing (e.g. in CI environment), provision a self-contained mock fixture
   if (!fs.existsSync(inputCsvPath)) {
     console.log('ℹ️ Live input CSV not found. Provisioning mock test fixture for CI...');
-    const mockCsvPath = path.join(testOutputDir, 'ci_test_sample.csv');
-    const mockCsvContent = [
-      'Date,Applywizz ID,Client Name,url,score,scored_jobId,status',
-      '2/9/2026,AWL-CI001,Test Candidate,https://job-boards.greenhouse.io/examplecompany/jobs/10001,0,10001_1,PENDING',
-    ].join('\n');
-    fs.writeFileSync(mockCsvPath, mockCsvContent, 'utf-8');
-    inputCsvPath = mockCsvPath;
-
-    // Seed mock profile cache for AWL-CI001
-    const mockProfile = {
-      applywizz_id: 'AWL-CI001',
-      name: 'Test Candidate',
-      email: 'candidate@example.com',
-      phone: '+1 (555) 000-0000',
-      location: 'San Francisco, CA',
-      linkedin: 'https://linkedin.com/in/testcandidate',
-      work_authorization: 'US Citizen',
-      require_sponsorship: 'No',
-      experience: '5 years of software engineering',
-      skills: 'TypeScript, Node.js, React',
-      education: 'B.S. Computer Science',
-    };
-    fs.writeFileSync('./cache/profiles/AWL-CI001.json', JSON.stringify(mockProfile, null, 2), 'utf-8');
-
-    // Seed mock resume
-    const dummyResumePath = path.join(config.RESUMES_DIR, 'AWL-CI001_resume.pdf');
-    if (!fs.existsSync(dummyResumePath)) {
-      fs.writeFileSync(dummyResumePath, '%PDF-1.4 Mock PDF Resume', 'utf-8');
-    }
-
-    // Seed mock scanned job template if missing
     const scannedPath = path.join(testOutputDir, 'scanned_jobs.json');
-    if (!fs.existsSync(scannedPath)) {
+    let testJobUrl = 'https://job-boards.greenhouse.io/examplecompany/jobs/10001';
+
+    if (fs.existsSync(scannedPath)) {
+      try {
+        const existing: ScannedJobTemplate[] = JSON.parse(fs.readFileSync(scannedPath, 'utf-8'));
+        const valid = existing.find(
+          (t) => t.fields && t.fields.length > 0 && t.fields.length < config.MAX_JOB_QUESTIONS && !t.isExpired
+        );
+        if (valid) {
+          testJobUrl = valid.jobUrl;
+        } else {
+          existing.unshift({
+            jobUrl: testJobUrl,
+            companyName: 'Example Company',
+            jobTitle: 'Senior Software Engineer',
+            scannedAt: new Date().toISOString(),
+            isExpired: false,
+            fields: [
+              { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name *', isRequired: true },
+              { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name *', isRequired: true },
+              { fieldId: 'email', name: 'email', type: 'text', label: 'Email *', isRequired: true },
+              { fieldId: 'phone', name: 'phone', type: 'text', label: 'Phone *', isRequired: true },
+              { fieldId: 'work_auth', name: 'work_auth', type: 'radio', label: 'Are you authorized to work in the US? *', isRequired: true, options: ['Yes', 'No'] },
+              { fieldId: 'why_company', name: 'why_company', type: 'textarea', label: 'Why do you want to work here? *', isRequired: true },
+            ],
+          });
+          fs.writeFileSync(scannedPath, JSON.stringify(existing, null, 2), 'utf-8');
+        }
+      } catch {
+        // Ignored
+      }
+    } else {
       const mockTemplates: ScannedJobTemplate[] = [
         {
-          jobUrl: 'https://job-boards.greenhouse.io/examplecompany/jobs/10001',
+          jobUrl: testJobUrl,
           companyName: 'Example Company',
           jobTitle: 'Senior Software Engineer',
           scannedAt: new Date().toISOString(),
           isExpired: false,
           fields: [
-            { fieldId: 'first_name', name: 'job_application[first_name]', type: 'text', label: 'First Name *', isRequired: true },
-            { fieldId: 'last_name', name: 'job_application[last_name]', type: 'text', label: 'Last Name *', isRequired: true },
-            { fieldId: 'email', name: 'job_application[email]', type: 'text', label: 'Email *', isRequired: true },
-            { fieldId: 'phone', name: 'job_application[phone]', type: 'text', label: 'Phone *', isRequired: true },
-            { fieldId: 'work_auth', name: 'job_application[work_auth]', type: 'radio', label: 'Are you authorized to work in the US? *', isRequired: true, options: ['Yes', 'No'] },
-            { fieldId: 'why_company', name: 'job_application[why_company]', type: 'textarea', label: 'Why do you want to work here? *', isRequired: true },
+            { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name *', isRequired: true },
+            { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name *', isRequired: true },
+            { fieldId: 'email', name: 'email', type: 'text', label: 'Email *', isRequired: true },
+            { fieldId: 'phone', name: 'phone', type: 'text', label: 'Phone *', isRequired: true },
+            { fieldId: 'work_auth', name: 'work_auth', type: 'radio', label: 'Are you authorized to work in the US? *', isRequired: true, options: ['Yes', 'No'] },
+            { fieldId: 'why_company', name: 'why_company', type: 'textarea', label: 'Why do you want to work here? *', isRequired: true },
           ],
         },
       ];
@@ -119,6 +119,70 @@ export async function runE2ETests(): Promise<void> {
         'jobUrl,companyName,jobTitle,fieldId,type,label,isRequired,options\nhttps://job-boards.greenhouse.io/examplecompany/jobs/10001,Example Company,Senior Software Engineer,first_name,text,First Name *,true,\n',
         'utf-8'
       );
+    }
+
+    const mockCsvPath = path.join(testOutputDir, 'ci_test_sample.csv');
+    const mockCsvContent = [
+      'Date,Applywizz ID,Client Name,url,score,scored_jobId,status',
+      `2/9/2026,AWL-CI001,Test Candidate,${testJobUrl},0,10001_1,PENDING`,
+    ].join('\n');
+    fs.writeFileSync(mockCsvPath, mockCsvContent, 'utf-8');
+    inputCsvPath = mockCsvPath;
+
+    // Seed mock profile cache for AWL-CI001
+    const mockProfile = {
+      applywizzId: 'AWL-CI001',
+      applywizz_id: 'AWL-CI001',
+      clientName: 'Test Candidate',
+      client_name: 'Test Candidate',
+      firstName: 'Test',
+      first_name: 'Test',
+      lastName: 'Candidate',
+      last_name: 'Candidate',
+      name: 'Test Candidate',
+      email: 'candidate@example.com',
+      phone: '+1 (555) 000-0000',
+      location: 'San Francisco, CA',
+      linkedinUrl: 'https://linkedin.com/in/testcandidate',
+      linkedin: 'https://linkedin.com/in/testcandidate',
+      workAuthorization: 'US Citizen',
+      work_authorization: 'US Citizen',
+      requiresSponsorship: false,
+      require_sponsorship: 'No',
+      experience: '5 years of software engineering',
+      skills: 'TypeScript, Node.js, React',
+      education: [
+        {
+          institution: 'Grand Valley State University',
+          degree: "Master's Degree",
+          fieldOfStudy: 'Computer Science',
+        },
+      ],
+      workExperience: [
+        {
+          company: 'Technology Solutions',
+          title: 'Software Engineer',
+        },
+      ],
+      demographics: {
+        gender: 'Decline To Self Identify',
+        isHispanicLatino: 'No',
+        raceEthnicity: 'Asian',
+        veteranStatus: 'I am not a protected veteran',
+        disabilityStatus: 'No, I do not have a disability and have not had one in the past',
+        willingToRelocate: true,
+        canWorkInOffice: true,
+        salaryRange: '$120,000 - $140,000',
+        yearsOfExperience: '5',
+        currentRole: 'Senior Software Engineer',
+      },
+    };
+    fs.writeFileSync('./cache/profiles/AWL-CI001.json', JSON.stringify(mockProfile, null, 2), 'utf-8');
+
+    // Seed mock resume
+    const dummyResumePath = path.join(config.RESUMES_DIR, 'AWL-CI001_resume.pdf');
+    if (!fs.existsSync(dummyResumePath)) {
+      fs.writeFileSync(dummyResumePath, '%PDF-1.4 Mock PDF Resume', 'utf-8');
     }
   }
 
