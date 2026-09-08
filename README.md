@@ -60,9 +60,21 @@ flowchart TD
 
 ---
 
-## ⚡ Quick Start & CLI Commands
+## ⚡ Quick Start & One-Command Master Pipeline
 
-### 1. Database Migration & Provisioning
+### 1. Run Complete Master Pipeline (Recommended)
+Executes database migration, Branch 1 scanning, Branch 2 candidate & resume sync, 5-tier resolution, and launches the operator dashboard on port 3001:
+```bash
+npm start
+# or npm run pipeline
+```
+*Open http://localhost:3001 in your browser to access the Neo-Brutalist Operator Dashboard.*
+
+---
+
+### 2. Standalone Subsystem Commands
+
+#### Database Migration & Provisioning
 Migrates local V1 cache data and provisions required Supabase tables and storage buckets:
 ```bash
 npm run db:migrate
