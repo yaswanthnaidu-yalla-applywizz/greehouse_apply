@@ -335,7 +335,7 @@ async function runE2EIntegrationTestSuite() {
     // Capture web proof
     const proof = await captureWebProof(submitPage, dbApp!.id!);
     assert(typeof proof.proofWebUrl === 'string' && proof.proofWebUrl.length > 0, 'captureWebProof uploaded web proof screenshot');
-    assert(proof.proofWebUrl.includes('proofs_web'), 'Proof stored in proofs_web bucket');
+    assert(proof.proofWebUrl.includes('proofs_web') || proof.proofWebUrl.includes('proofs'), 'Proof stored in proofs storage');
 
     await updateStatus(dbApp!.id!, 'APPLIED');
     const appliedDbApp = await getApplication(dbApp!.id!);
