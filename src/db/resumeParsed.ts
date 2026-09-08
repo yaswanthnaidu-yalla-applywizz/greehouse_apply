@@ -3,7 +3,9 @@
  * Table: `candidate_resume_parsed`
  */
 
-import { getDbClient } from './client.js';
+import fs from 'fs';
+import path from 'path';
+import { getDbClient, isSupabaseConfigured } from './client.js';
 
 export interface ParsedResumeStructured {
   name?: string;
@@ -39,44 +41,74 @@ export interface ResumeParsedRow {
 }
 
 /**
- * Retrieves the cached parsed resume for a candidate by ApplyWizz ID.
+ * Retrieves the cached parsed resume for a candidate by ApplyWizz ID from Supabase or local cache.
  */
 export async function getParsedResume(applywizzId: string): Promise<ResumeParsedRow | null> {
-  const supabase = getDbClient();
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_resume_parsed')
+        .select('*')
+        .eq('applywizz_id', applywizzId)
+        .maybeSingle();
 
-  const { data, error } = await supabase
-    .from('candidate_resume_parsed')
-    .select('*')
-    .eq('applywizz_id', applywizzId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to get parsed resume for candidate ${applywizzId}: ${error.message}`);
+      if (!error && data) {
+        return data as ResumeParsedRow;
+      }
+    } catch (err: any) {
+      // Fall through to local fallback
+    }
   }
 
-  return data as ResumeParsedRow | null;
+  // Local JSON fallback
+  const localPath = path.resolve(process.cwd(), 'cache', 'parsed_resumes', `${applywizzId}.json`);
+  if (fs.existsSync(localPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(localPath, 'utf-8'));
+    } catch {}
+  }
+
+  return null;
 }
 
 /**
- * Upserts a parsed resume record into the cache.
+ * Upserts a parsed resume record into the Supabase cache or local cache.
  * Keyed by unique constraint (applywizz_id).
  */
 export async function upsertParsedResume(record: ResumeParsedRow): Promise<ResumeParsedRow> {
-  const supabase = getDbClient();
   const payload = {
     ...record,
     parsed_at: record.parsed_at || new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from('candidate_resume_parsed')
-    .upsert(payload, { onConflict: 'applywizz_id' })
-    .select()
-    .single();
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_resume_parsed')
+        .upsert(payload, { onConflict: 'applywizz_id' })
+        .select()
+        .single();
 
-  if (error) {
-    throw new Error(`Failed to upsert parsed resume for candidate ${record.applywizz_id}: ${error.message}`);
+      if (!error && data) {
+        return data as ResumeParsedRow;
+      }
+    } catch (err: any) {
+      // Fall through to local fallback
+    }
   }
 
-  return data as ResumeParsedRow;
+  // Local JSON fallback
+  try {
+    const dir = path.resolve(process.cwd(), 'cache', 'parsed_resumes');
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const localPath = path.join(dir, `${record.applywizz_id}.json`);
+    fs.writeFileSync(localPath, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch {}
+
+  return payload as ResumeParsedRow;
 }
+

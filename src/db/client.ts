@@ -11,6 +11,21 @@ import config from '../config/env.js';
 let supabaseClientInstance: SupabaseClient | null = null;
 
 /**
+ * Checks whether Supabase URL and Service Key are properly configured.
+ */
+export function isSupabaseConfigured(): boolean {
+  const supabaseUrl = config.SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseServiceKey = config.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  return Boolean(
+    supabaseUrl &&
+      supabaseServiceKey &&
+      supabaseUrl.trim().length > 0 &&
+      supabaseServiceKey.trim().length > 0 &&
+      supabaseUrl.startsWith('http')
+  );
+}
+
+/**
  * Gets or initializes the Supabase client singleton.
  * Throws an explicit error if SUPABASE_URL or SUPABASE_SERVICE_KEY are not configured.
  */
@@ -22,7 +37,7 @@ export function getDbClient(): SupabaseClient {
   const supabaseUrl = config.SUPABASE_URL || process.env.SUPABASE_URL;
   const supabaseServiceKey = config.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
-  if (!supabaseUrl || !supabaseServiceKey) {
+  if (!supabaseUrl || !supabaseServiceKey || !supabaseUrl.startsWith('http')) {
     throw new Error(
       '❌ Supabase credentials missing. Please set SUPABASE_URL and SUPABASE_SERVICE_KEY in your .env file.'
     );
@@ -54,3 +69,4 @@ export const supabase = new Proxy({} as SupabaseClient, {
 });
 
 export default supabase;
+

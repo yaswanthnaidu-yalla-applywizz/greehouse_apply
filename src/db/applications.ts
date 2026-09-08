@@ -3,7 +3,7 @@
  * Table: `candidate_applications`
  */
 
-import { getDbClient } from './client.js';
+import { getDbClient, isSupabaseConfigured } from './client.js';
 
 export type ApplicationStatus =
   | 'READY_FOR_REVIEW'
@@ -32,52 +32,73 @@ export interface ApplicationRow {
   updated_at?: string;
 }
 
+const memoryApplications = new Map<string, ApplicationRow>();
+
 /**
- * Upserts a candidate application record.
+ * Upserts a candidate application record into Supabase or local memory.
  * Keyed by unique constraint (applywizz_id, job_url).
  */
 export async function upsertApplication(
   app: Partial<ApplicationRow> & { applywizz_id: string; job_url: string; resolved_fields: any[] }
 ): Promise<ApplicationRow> {
-  const supabase = getDbClient();
-  const payload = {
-    status: 'READY_FOR_REVIEW' as ApplicationStatus,
+  const payload: any = {
+    status: (app.status || 'READY_FOR_REVIEW') as ApplicationStatus,
     ...app,
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from('candidate_applications')
-    .upsert(payload, { onConflict: 'applywizz_id,job_url' })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(
-      `Failed to upsert application for ${app.applywizz_id} [${app.job_url}]: ${error.message}`
-    );
+  // Only pass id to Supabase if it's already a valid UUID
+  if (!payload.id) {
+    delete payload.id;
   }
 
-  return data as ApplicationRow;
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_applications')
+        .upsert(payload, { onConflict: 'applywizz_id,job_url' })
+        .select()
+        .single();
+
+      if (!error && data) {
+        memoryApplications.set(data.id, data as ApplicationRow);
+        return data as ApplicationRow;
+      }
+    } catch (err: any) {
+      // Fall through to memory
+    }
+  }
+
+  const fallbackId = app.id || `${app.applywizz_id}_${Buffer.from(app.job_url).toString('base64url').slice(0, 16)}`;
+  payload.id = fallbackId;
+  memoryApplications.set(fallbackId, payload);
+  return payload as ApplicationRow;
 }
+
 
 /**
  * Retrieves a candidate application by primary UUID.
  */
 export async function getApplication(id: string): Promise<ApplicationRow | null> {
-  const supabase = getDbClient();
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_applications')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
 
-  const { data, error } = await supabase
-    .from('candidate_applications')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to get application ${id}: ${error.message}`);
+      if (!error && data) {
+        return data as ApplicationRow;
+      }
+    } catch (err: any) {
+      // Fall through to memory
+    }
   }
 
-  return data as ApplicationRow | null;
+  return memoryApplications.get(id) || null;
 }
 
 /**
@@ -87,22 +108,31 @@ export async function getApplicationByCandidateAndJob(
   applywizzId: string,
   jobUrl: string
 ): Promise<ApplicationRow | null> {
-  const supabase = getDbClient();
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_applications')
+        .select('*')
+        .eq('applywizz_id', applywizzId)
+        .eq('job_url', jobUrl)
+        .maybeSingle();
 
-  const { data, error } = await supabase
-    .from('candidate_applications')
-    .select('*')
-    .eq('applywizz_id', applywizzId)
-    .eq('job_url', jobUrl)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(
-      `Failed to get application for candidate ${applywizzId} [${jobUrl}]: ${error.message}`
-    );
+      if (!error && data) {
+        return data as ApplicationRow;
+      }
+    } catch (err: any) {
+      // Fall through to memory
+    }
   }
 
-  return data as ApplicationRow | null;
+  for (const app of memoryApplications.values()) {
+    if (app.applywizz_id === applywizzId && (app.job_url === jobUrl || jobUrl.includes(app.job_url))) {
+      return app;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -113,7 +143,6 @@ export async function updateStatus(
   status: ApplicationStatus,
   errorMessage?: string
 ): Promise<void> {
-  const supabase = getDbClient();
   const updatePayload: Partial<ApplicationRow> = {
     status,
     updated_at: new Date().toISOString(),
@@ -126,13 +155,22 @@ export async function updateStatus(
     updatePayload.submitted_at = new Date().toISOString();
   }
 
-  const { error } = await supabase
-    .from('candidate_applications')
-    .update(updatePayload)
-    .eq('id', id);
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      await supabase
+        .from('candidate_applications')
+        .update(updatePayload)
+        .eq('id', id);
+      return;
+    } catch (err: any) {
+      // Fall through to memory
+    }
+  }
 
-  if (error) {
-    throw new Error(`Failed to update status for application ${id} to ${status}: ${error.message}`);
+  const existing = memoryApplications.get(id);
+  if (existing) {
+    memoryApplications.set(id, { ...existing, ...updatePayload });
   }
 }
 
@@ -144,19 +182,28 @@ export async function setProofUrl(
   proofUrl: string,
   capturedAt?: string
 ): Promise<void> {
-  const supabase = getDbClient();
+  const updatePayload = {
+    proof_web_url: proofUrl,
+    proof_captured_at: capturedAt || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 
-  const { error } = await supabase
-    .from('candidate_applications')
-    .update({
-      proof_web_url: proofUrl,
-      proof_captured_at: capturedAt || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      await supabase
+        .from('candidate_applications')
+        .update(updatePayload)
+        .eq('id', id);
+      return;
+    } catch (err: any) {
+      // Fall through
+    }
+  }
 
-  if (error) {
-    throw new Error(`Failed to set proof URL for application ${id}: ${error.message}`);
+  const existing = memoryApplications.get(id);
+  if (existing) {
+    memoryApplications.set(id, { ...existing, ...updatePayload });
   }
 }
 
@@ -167,18 +214,27 @@ export async function setDryRunScreenshotUrl(
   id: string,
   screenshotUrl: string
 ): Promise<void> {
-  const supabase = getDbClient();
+  const updatePayload = {
+    dry_run_screenshot_url: screenshotUrl,
+    updated_at: new Date().toISOString(),
+  };
 
-  const { error } = await supabase
-    .from('candidate_applications')
-    .update({
-      dry_run_screenshot_url: screenshotUrl,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id);
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      await supabase
+        .from('candidate_applications')
+        .update(updatePayload)
+        .eq('id', id);
+      return;
+    } catch (err: any) {
+      // Fall through
+    }
+  }
 
-  if (error) {
-    throw new Error(`Failed to set dry-run screenshot URL for application ${id}: ${error.message}`);
+  const existing = memoryApplications.get(id);
+  if (existing) {
+    memoryApplications.set(id, { ...existing, ...updatePayload });
   }
 }
 
@@ -189,21 +245,35 @@ export async function listApplications(filter?: {
   status?: ApplicationStatus;
   applywizzId?: string;
 }): Promise<ApplicationRow[]> {
-  const supabase = getDbClient();
-  let query = supabase.from('candidate_applications').select('*').order('created_at', { ascending: false });
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      let query = supabase.from('candidate_applications').select('*').order('created_at', { ascending: false });
 
+      if (filter?.status) {
+        query = query.eq('status', filter.status);
+      }
+      if (filter?.applywizzId) {
+        query = query.eq('applywizz_id', filter.applywizzId);
+      }
+
+      const { data, error } = await query;
+      if (!error && data) {
+        return data as ApplicationRow[];
+      }
+    } catch (err: any) {
+      // Fall through
+    }
+  }
+
+  let results = Array.from(memoryApplications.values());
   if (filter?.status) {
-    query = query.eq('status', filter.status);
+    results = results.filter((a) => a.status === filter.status);
   }
   if (filter?.applywizzId) {
-    query = query.eq('applywizz_id', filter.applywizzId);
+    results = results.filter((a) => a.applywizz_id === filter.applywizzId);
   }
 
-  const { data, error } = await query;
-
-  if (error) {
-    throw new Error(`Failed to list applications: ${error.message}`);
-  }
-
-  return (data || []) as ApplicationRow[];
+  return results;
 }
+

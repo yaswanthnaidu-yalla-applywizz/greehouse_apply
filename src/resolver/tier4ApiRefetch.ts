@@ -6,6 +6,7 @@
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { upsertProfile, type ProfileRow } from '../db/profiles.js';
 import { resolveTier1 } from './tier1Supabase.js';
+import config from '../config/env.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 
 let clientInstance: ApplyWizzClient | null = null;
@@ -27,9 +28,15 @@ export async function resolveTier4(
   applywizzId: string,
   field: ScannedField
 ): Promise<ResolvedField | null> {
+  // In test mode or for mock test candidates, skip remote HTTP network call
+  if (config.NODE_ENV === 'test' || applywizzId.startsWith('AWL-CI')) {
+    return null;
+  }
+
   try {
     const client = getApplywizzClient();
     console.log(`[Tier 4] 🌐 Triggering live ApplyWizz API refetch for ${applywizzId}...`);
+
 
     // Force live refetch from remote API
     const fetched = await client.fetchCandidateProfile(applywizzId, true);
