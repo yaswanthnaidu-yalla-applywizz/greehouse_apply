@@ -19,6 +19,8 @@ import {
   registerSubmissionSession,
   verifySubmissionSignals,
 } from './captchaResume.js';
+
+export { verifySubmissionSignals };
 import {
   getApplication,
   updateStatus,

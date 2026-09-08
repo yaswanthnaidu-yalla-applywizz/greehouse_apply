@@ -21,6 +21,7 @@ import { resolveTier2 } from './tier2ResumeParse.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier4 } from './tier4ApiRefetch.js';
 import { resolveTier5 } from './tier5LLM.js';
+import { upsertApplication } from '../db/applications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
 import type {
   ApplicationStatus,
@@ -244,6 +245,19 @@ export class AnswerResolver {
         const app = await this.resolveJobApplication(seg.applywizzId, template);
         applications.push(app);
         resolvedCount++;
+
+        // Persist resolved application record to Supabase (candidate_applications table)
+        try {
+          await upsertApplication({
+            applywizz_id: app.applywizzId,
+            job_url: app.jobUrl,
+            company_name: app.companyName,
+            job_title: app.jobTitle,
+            resolved_fields: app.resolvedFields,
+          });
+        } catch (dbErr: any) {
+          console.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
+        }
 
         const t1 = app.resolvedFields.filter((f) => f.resolvedByTier === 1).length;
         const t2 = app.resolvedFields.filter((f) => f.resolvedByTier === 2).length;
