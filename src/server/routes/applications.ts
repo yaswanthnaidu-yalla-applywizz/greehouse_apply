@@ -54,14 +54,13 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
 
     if (isUuid) {
       application = await getApplication(appId);
-    }
-
-    if (!application) {
-      // Try searching candidate_applications by applywizz_id or composite id
+    } else {
+      // Search candidate_applications by applywizz_id
       const { data } = await supabase
         .from('candidate_applications')
         .select('*')
-        .or(`id.eq.${appId},applywizz_id.eq.${appId}`)
+        .eq('applywizz_id', appId)
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -154,20 +153,54 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
 
 /**
  * GET /api/applications/:id
- * Retrieves an application record.
+ * Retrieves an application record with complete status, fields, and proof URLs.
  */
 applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
   const rawAppId = req.params.id;
   const appId = Array.isArray(rawAppId) ? rawAppId[0] : String(rawAppId || '');
 
   try {
-    const app = await getApplication(appId);
+    const supabase = getDbClient();
+    let app: any = null;
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
+    if (isUuid) {
+      app = await getApplication(appId);
+    } else {
+      const { data } = await supabase
+        .from('candidate_applications')
+        .select('*')
+        .eq('applywizz_id', appId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      app = data;
+    }
+
     if (!app) {
       res.status(404).json({ error: `Application '${appId}' not found.` });
       return;
     }
-    res.json(app);
+
+    res.json({
+      id: app.id,
+      applywizz_id: app.applywizz_id,
+      job_url: app.job_url,
+      company_name: app.company_name,
+      job_title: app.job_title,
+      status: app.status,
+      resolved_fields: app.resolved_fields || [],
+      proof_web_url: app.proof_web_url || null,
+      proof_captured_at: app.proof_captured_at || null,
+      dry_run_screenshot_url: app.dry_run_screenshot_url || null,
+      error_message: app.error_message || null,
+      submitted_at: app.submitted_at || null,
+      created_at: app.created_at,
+      updated_at: app.updated_at,
+    });
   } catch (err: any) {
+    console.error(`[Applications Router] ❌ Error fetching application ${appId}:`, err);
     res.status(500).json({ error: err.message });
   }
 });
