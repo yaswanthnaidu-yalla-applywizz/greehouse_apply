@@ -18,6 +18,7 @@ import path from 'path';
 import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
+import { submissionsRouter } from './routes/submissions.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -159,7 +160,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     app.use(express.static(publicDir));
   }
 
-  // Applications and field patch routes
+  // Applications, field patch, dry-run, and submission routes
+  app.use('/api/applications', submissionsRouter);
   app.use('/api/applications', applicationsRouter);
 
   /**

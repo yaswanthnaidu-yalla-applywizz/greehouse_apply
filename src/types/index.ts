@@ -32,6 +32,10 @@ export interface ScannedFieldMetadata {
   selector?: string;
   /** Grouping section name (e.g., 'Personal Information', 'Demographics') */
   section?: string;
+  /** Field identifier upon which this conditional field depends */
+  dependsOn?: string;
+  /** Option or toggle value on parent field that triggers this field's visibility */
+  triggerValue?: string;
 }
 
 /**
