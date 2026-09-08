@@ -166,6 +166,7 @@ export class LLMSynthesizer {
             label: field.label,
             value: finalAnswer,
             source: 'ai',
+            resolvedByTier: 5,
             confidence: 0.9,
           };
         }
@@ -183,6 +184,7 @@ export class LLMSynthesizer {
             label: field.label,
             value: finalAnswer,
             source: 'ai',
+            resolvedByTier: 5,
             confidence: 0.9,
           };
         }
@@ -201,6 +203,7 @@ export class LLMSynthesizer {
       label: field.label,
       value: fallbackAnswer,
       source: 'ai',
+      resolvedByTier: 5,
       confidence: 0.8,
     };
   }
