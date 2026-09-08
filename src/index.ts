@@ -106,6 +106,9 @@ export async function main(): Promise<void> {
   console.log(`• Input CSV:          ${options.inputCsv}`);
   console.log(`• Output Dir:         ${options.outputDir}`);
   console.log(`• Express Port:       ${options.port}`);
+  if (options.limit) {
+    console.log(`• Candidate Limit:    ${options.limit} candidate(s)`);
+  }
   console.log(`• Verbose Telemetry:  ${options.verbose ? 'Enabled' : 'Disabled'}`);
   console.log(`• Supabase Ready:     ${config.SUPABASE_URL ? 'Configured' : 'Missing'}`);
   console.log(`• LLM Provider:       ${config.LLM_PROVIDER}`);
@@ -142,28 +145,44 @@ export async function main(): Promise<void> {
     if (!fs.existsSync(resolvedCsv)) {
       console.log(`ℹ️ Input CSV not found at "${resolvedCsv}". Using cached database records.`);
     } else {
+      let targetJobUrls: string[] = [];
+
+      // Run Branch 2 (Candidate Sync) first so we know exact jobs needed for candidate batch
+      if (!options.skipSync) {
+        console.log('\n👥 [Step 3a/5] Branch 2: Syncing Candidate Profiles & Uploading Master Resumes...');
+        const candidateSegments = await segregateCandidatesByApplyWizzId(resolvedCsv, {
+          syncProfiles: true,
+          downloadResumes: true,
+          limit: options.limit,
+        });
+        await exportCandidateSegments(candidateSegments, options.outputDir);
+        console.log(`✅ Candidate sync completed. ${candidateSegments.size} candidate segment(s) synchronized.`);
+
+        if (options.limit && candidateSegments.size > 0) {
+          const urlSet = new Set<string>();
+          for (const segment of candidateSegments.values()) {
+            for (const job of segment.jobs) {
+              if (job.canonicalUrl) {
+                urlSet.add(job.canonicalUrl);
+              }
+            }
+          }
+          targetJobUrls = Array.from(urlSet);
+          console.log(`🎯 Targeted ${targetJobUrls.length} unique job URL(s) for the ${candidateSegments.size} selected candidate(s).`);
+        }
+      }
+
+      // Run Branch 1 (Form Scanning) for the targeted job URLs (or all URLs if no limit)
       if (!options.skipScan) {
-        console.log('\n🔍 [Step 3a/5] Branch 1: Ingesting CSV and Scanning Unique Greenhouse Jobs...');
-        const uniqueUrls = await readAndDeduplicateUrls(resolvedCsv);
+        console.log('\n🔍 [Step 3b/5] Branch 1: Ingesting CSV and Scanning Unique Greenhouse Jobs...');
+        const uniqueUrls = targetJobUrls.length > 0 ? targetJobUrls : await readAndDeduplicateUrls(resolvedCsv);
         const scanner = new PlaywrightScanner({
           workerPoolSize: config.WORKER_POOL_SIZE,
           timeoutMs: config.PLAYWRIGHT_TIMEOUT,
         });
-        const scannedTemplates = await scanner.scanUniqueUrls(
-          options.limit ? uniqueUrls.slice(0, options.limit) : uniqueUrls
-        );
+        const scannedTemplates = await scanner.scanUniqueUrls(uniqueUrls);
         await exportScannedJobs(scannedTemplates, options.outputDir);
-        console.log(`✅ Branch 1 completed. ${scannedTemplates.length} job template(s) scanned.`);
-      }
-
-      if (!options.skipSync) {
-        console.log('\n👥 [Step 3b/5] Branch 2: Syncing Candidate Profiles & Uploading Master Resumes...');
-        const candidateSegments = await segregateCandidatesByApplyWizzId(resolvedCsv, {
-          syncProfiles: true,
-          downloadResumes: true,
-        });
-        await exportCandidateSegments(candidateSegments, options.outputDir);
-        console.log(`✅ Branch 2 completed. ${candidateSegments.size} candidate segment(s) synchronized.`);
+        console.log(`✅ Form scanning completed. ${scannedTemplates.length} job template(s) scanned.`);
       }
     }
 
