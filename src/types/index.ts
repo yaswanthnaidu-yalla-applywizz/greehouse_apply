@@ -32,6 +32,10 @@ export interface ScannedFieldMetadata {
   selector?: string;
   /** Grouping section name (e.g., 'Personal Information', 'Demographics') */
   section?: string;
+  /** Field identifier upon which this conditional field depends */
+  dependsOn?: string;
+  /** Option or toggle value on parent field that triggers this field's visibility */
+  triggerValue?: string;
 }
 
 /**
@@ -208,11 +212,25 @@ export interface CandidateSegment {
 // ============================================================================
 
 /**
- * Strict source attribution tag indicating how an answer was resolved:
- * - 'supabase': Resolved via direct or fuzzy match against the candidate profile / local DB.
- * - 'ai': Synthesized using LLM (Google Gemini / OpenAI) with resume and job description context.
+ * Granular source attribution tags indicating how an answer was resolved:
+ * - 'supabase': Resolved via Tier 1 profile direct match or exact QA bank lookup.
+ * - 'resume_parse': Resolved via Tier 2 parsed resume cache/extractor.
+ * - 'fuzzy_match': Resolved via Tier 3 Fuse.js match against QA bank.
+ * - 'api': Resolved via Tier 4 ApplyWizz live API refetch.
+ * - 'ai': Synthesized via Tier 5 LLM.
+ * - 'manual': Modified directly by operator.
+ * - 'unresolved': Could not be resolved by any tier.
  */
-export type AnswerSource = 'supabase' | 'ai';
+export type SourceTag =
+  | 'supabase'
+  | 'resume_parse'
+  | 'fuzzy_match'
+  | 'api'
+  | 'ai'
+  | 'manual'
+  | 'unresolved';
+
+export type AnswerSource = SourceTag;
 
 /**
  * Represents a resolved form answer for a specific candidate and job field.
@@ -228,10 +246,14 @@ export interface ResolvedField {
   label: string;
   /** The populated answer value (or selected option) */
   value: string;
-  /** Strict source attribution */
-  source: AnswerSource;
+  /** Granular source attribution tag */
+  source: SourceTag;
+  /** Tier that resolved the answer (1-5), or null if unresolved */
+  resolvedByTier: 1 | 2 | 3 | 4 | 5 | null;
   /** Confidence score between 0.0 and 1.0 */
   confidence: number;
+  /** Flag indicating if the operator has modified this field manually */
+  isEdited?: boolean;
 }
 
 /**

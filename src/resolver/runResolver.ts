@@ -1,5 +1,5 @@
 /**
- * @fileoverview Standalone CLI runner for Answer Resolution Engine (Phase V1-4).
+ * @fileoverview Standalone CLI runner for Answer Resolution Engine (Phase V2).
  *
  * Usage:
  *   npx tsx src/resolver/runResolver.ts [options]
@@ -8,6 +8,7 @@
  *   --candidates=<path>  Path to candidate_segments.json (default: output/candidate_segments.json)
  *   --scanned=<path>     Path to scanned_jobs.json (default: output/scanned_jobs.json)
  *   --output=<path>      Output directory (default: config.OUTPUT_DIR)
+ *   --verbose            Print detailed 5-tier waterfall resolution telemetry
  */
 
 import fs from 'fs';
@@ -26,10 +27,12 @@ export function parseResolverArgs(args: string[]): {
   candidatesPath: string;
   scannedPath: string;
   outputDir: string;
+  verbose: boolean;
 } {
   let candidatesPath = path.join(config.OUTPUT_DIR, 'candidate_segments.json');
   let scannedPath = path.join(config.OUTPUT_DIR, 'scanned_jobs.json');
   let outputDir = config.OUTPUT_DIR;
+  let verbose = false;
 
   for (const arg of args) {
     if (arg.startsWith('--candidates=')) {
@@ -38,24 +41,27 @@ export function parseResolverArgs(args: string[]): {
       scannedPath = arg.slice('--scanned='.length).trim();
     } else if (arg.startsWith('--output=')) {
       outputDir = arg.slice('--output='.length).trim();
+    } else if (arg === '--verbose' || arg === '-v') {
+      verbose = true;
     }
   }
 
-  return { candidatesPath, scannedPath, outputDir };
+  return { candidatesPath, scannedPath, outputDir, verbose };
 }
 
 /**
  * Main execution function orchestrating Answer Resolution.
  */
 export async function main(): Promise<void> {
-  const { candidatesPath, scannedPath, outputDir } = parseResolverArgs(process.argv.slice(2));
+  const { candidatesPath, scannedPath, outputDir, verbose } = parseResolverArgs(process.argv.slice(2));
 
   console.log('================================================================');
-  console.log('  Answer Resolution Engine (Multi-Tier Tagging: supabase vs ai)');
+  console.log('  Answer Resolution Engine (5-Tier Waterfall: V2)');
   console.log('================================================================');
   console.log(`• Candidates File: ${candidatesPath}`);
   console.log(`• Scanned Jobs:    ${scannedPath}`);
   console.log(`• Output Dir:      ${outputDir}`);
+  console.log(`• Verbose Mode:    ${verbose ? 'Enabled (Detailed Telemetry)' : 'Disabled'}`);
   console.log(`• LLM Provider:    ${config.LLM_PROVIDER}`);
   console.log(`• LLM Key Ready:   ${config.ACTIVE_LLM_API_KEY ? 'Yes' : 'No (fallback mode)'}`);
   console.log('================================================================\n');
@@ -87,28 +93,48 @@ export async function main(): Promise<void> {
     const outputPath = await exportResolvedApplications(resolvedApps, outputDir);
 
     let totalFields = 0;
-    let supabaseCount = 0;
-    let aiCount = 0;
+    let tier1Count = 0;
+    let tier2Count = 0;
+    let tier3Count = 0;
+    let tier4Count = 0;
+    let tier5Count = 0;
+    let manualCount = 0;
+    let unresolvedCount = 0;
 
     for (const app of resolvedApps) {
       for (const f of app.resolvedFields) {
         totalFields++;
-        if (f.source === 'supabase') supabaseCount++;
-        if (f.source === 'ai') aiCount++;
+        if (f.source === 'manual') manualCount++;
+        else if (f.source === 'supabase' || f.resolvedByTier === 1) tier1Count++;
+        else if (f.source === 'resume_parse' || f.resolvedByTier === 2) tier2Count++;
+        else if (f.source === 'fuzzy_match' || f.resolvedByTier === 3) tier3Count++;
+        else if (f.source === 'api' || f.resolvedByTier === 4) tier4Count++;
+        else if (f.source === 'ai' || f.resolvedByTier === 5) tier5Count++;
+        else if (f.source === 'unresolved') unresolvedCount++;
+        else tier1Count++;
       }
     }
 
     const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
 
     console.log('\n================================================================');
-    console.log('  Answer Resolution Completed Successfully');
+    console.log('  Answer Resolution Completed Successfully (5-Tier Telemetry)');
     console.log('================================================================');
-    console.log(`• Elapsed Time:         ${elapsedSec}s`);
-    console.log(`• Applications Ready:   ${resolvedApps.length}`);
+    console.log(`• Elapsed Time:           ${elapsedSec}s`);
+    console.log(`• Applications Ready:     ${resolvedApps.length}`);
     console.log(`• Total Fields Populated: ${totalFields}`);
-    console.log(`  - 🟢 'supabase' Tagged: ${supabaseCount} (${totalFields ? ((supabaseCount / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🟣 'ai' Tagged:       ${aiCount} (${totalFields ? ((aiCount / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`• Output JSON:          ${outputPath}`);
+    console.log(`  - 🟢 Tier 1 (Supabase/Exact): ${tier1Count} (${totalFields ? ((tier1Count / totalFields) * 100).toFixed(1) : 0}%)`);
+    console.log(`  - 🔵 Tier 2 (Resume Parse):   ${tier2Count} (${totalFields ? ((tier2Count / totalFields) * 100).toFixed(1) : 0}%)`);
+    console.log(`  - 🔷 Tier 3 (Fuzzy QA Match): ${tier3Count} (${totalFields ? ((tier3Count / totalFields) * 100).toFixed(1) : 0}%)`);
+    console.log(`  - 🟣 Tier 4 (API Live Refetch): ${tier4Count} (${totalFields ? ((tier4Count / totalFields) * 100).toFixed(1) : 0}%)`);
+    console.log(`  - 🟣 Tier 5 (LLM Synthesis):  ${tier5Count} (${totalFields ? ((tier5Count / totalFields) * 100).toFixed(1) : 0}%)`);
+    if (manualCount > 0) {
+      console.log(`  - 🟡 Manual Overrides:        ${manualCount} (${totalFields ? ((manualCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    }
+    if (unresolvedCount > 0) {
+      console.log(`  - 🔴 Unresolved Fields:       ${unresolvedCount} (${totalFields ? ((unresolvedCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    }
+    console.log(`• Output JSON:            ${outputPath}`);
     console.log('================================================================');
   } catch (err: any) {
     console.error(`[Resolver Runner] ❌ Error during answer resolution: ${err.message}`);

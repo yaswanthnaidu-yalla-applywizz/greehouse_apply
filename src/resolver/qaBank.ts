@@ -11,7 +11,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { ResolvedField } from '../types/index.js';
+import type { ResolvedField, SourceTag } from '../types/index.js';
 
 /**
  * Key-value mapping of normalized question keys to resolved answers.
@@ -21,7 +21,7 @@ export interface CandidateQARecord {
   fieldId: string;
   fieldType: string;
   value: string;
-  source: 'supabase' | 'ai';
+  source: SourceTag;
   confidence: number;
   savedAt: string;
 }
@@ -112,6 +112,7 @@ export class QABank {
         label,
         value: record.value,
         source: record.source,
+        resolvedByTier: 1,
         confidence: record.confidence,
       };
     }

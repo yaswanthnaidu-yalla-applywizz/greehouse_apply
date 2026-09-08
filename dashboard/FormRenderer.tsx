@@ -1,219 +1,317 @@
 /**
- * @fileoverview Right Pane Main: Dynamic Form Renderer with Multi-Tier Source Tagging.
+ * @fileoverview Right Pane Main: Dynamic Form Renderer with Submission Controls & Proof Viewer (Phase V2-UI).
  *
- * Renders Greenhouse form questions and answers with strict source attribution badges:
- * - 🟢 `supabase` (emerald-500) for candidate profile / database matches.
- * - 🟣 `ai` (violet-500) for LLM-synthesized responses.
- *
- * All inputs in V1 are readonly for operator review and inspection.
+ * Renders form fields, source attribution breakdown, and live submission controls
+ * using the neo-brutalist job board aesthetic.
  *
  * References:
- * - 04-ui-ux.md (Section 2.3)
- * - 05-backend-schema.md (Section 1.4)
+ * - 04-ui-ux-v2-refined.md
+ * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
-import React from 'react';
-import type { CandidateJobApplication, ResolvedField } from './types.js';
+import React, { useState } from 'react';
+import { EditableFormField } from './components/EditableFormField.js';
+import { SourceBadge } from './components/SourceBadge.js';
+import { ApplicationStatusBadge } from './components/ApplicationStatusBadge.js';
+import { DifficultyBadge } from './components/DifficultyBadge.js';
+import { SubmissionControls } from './components/SubmissionControls.js';
+import { ProofViewer } from './components/ProofViewer.js';
+import type { ResolvedField, ApplicationStatus } from './types.js';
 
-/**
- * Props for FormRenderer component.
- */
+export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
+
 export interface FormRendererProps {
   /** Resolved candidate job application payload */
-  application: CandidateJobApplication | null;
+  application: any | null;
   /** Loading state */
   isLoading?: boolean;
+  /** Candidate client name for metadata */
+  candidateName?: string;
+  /** API Base URL */
+  apiBaseUrl?: string;
+  /** Callback fired when an operator manually modifies a field */
+  onFieldUpdate?: (updatedField: ResolvedField) => void;
+  /** Callback fired when status transitions (e.g. from polling or submission) */
+  onStatusChange?: (newStatus: ApplicationStatus, updatedApp?: any) => void;
 }
 
-/**
- * Renders the source attribution badge.
- *
- * @param source - 'supabase' or 'ai'
- * @param confidence - Match confidence score (0.0 to 1.0)
- * @returns JSX Element
- */
-export const SourceBadge: React.FC<{ source: 'supabase' | 'ai'; confidence?: number }> = ({
-  source,
-  confidence,
-}) => {
-  if (source === 'supabase') {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-emerald-950/70 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-950/50">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-        <span>supabase</span>
-        {confidence !== undefined && (
-          <span className="text-[10px] text-emerald-500/80">({(confidence * 100).toFixed(0)}%)</span>
-        )}
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-violet-950/70 text-violet-400 border border-violet-500/40 shadow-sm shadow-violet-950/50">
-      <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
-      <span>ai</span>
-      {confidence !== undefined && (
-        <span className="text-[10px] text-violet-500/80">({(confidence * 100).toFixed(0)}%)</span>
-      )}
-    </span>
-  );
-};
-
-/**
- * Dynamic Readonly Form Renderer for Greenhouse Applications.
- *
- * @param props - Component properties.
- * @returns React component.
- */
 export const FormRenderer: React.FC<FormRendererProps> = ({
   application,
   isLoading = false,
+  candidateName,
+  apiBaseUrl = '',
+  onFieldUpdate,
+  onStatusChange,
 }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDryRunning, setIsDryRunning] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
+  const [viewerTitle, setViewerTitle] = useState<string>('Application Proof');
+
   if (isLoading) {
     return (
-      <div className="flex-1 p-12 flex flex-col items-center justify-center text-slate-500">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-xs font-mono">Loading resolved application questions...</p>
+      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+        <div className="w-8 h-8 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-xs font-mono font-bold text-[#1A1A2E]">Loading application form...</p>
       </div>
     );
   }
 
   if (!application) {
     return (
-      <div className="flex-1 p-12 flex flex-col items-center justify-center text-slate-500">
-        <div className="text-3xl mb-2">📋</div>
-        <p className="text-sm font-semibold text-slate-400">No Job Selected</p>
-        <p className="text-xs text-slate-600 mt-1">
-          Select a candidate and job tab to inspect pre-populated form questions.
+      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+        <div className="text-4xl mb-3">📋</div>
+        <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
+        <p className="text-xs text-[#64748B] mt-1 font-medium">
+          Select a candidate from the left directory and click a job tab above to review and submit.
         </p>
       </div>
     );
   }
 
-  const supabaseCount = application.resolvedFields.filter((f) => f.source === 'supabase').length;
-  const aiCount = application.resolvedFields.filter((f) => f.source === 'ai').length;
+  const fields: ResolvedField[] = application.resolvedFields || application.resolved_fields || [];
+  const manualCount = fields.filter((f) => f.isEdited || f.source === 'manual').length;
+  const supabaseCount = fields.filter((f) => f.source === 'supabase' && !f.isEdited).length;
+  const aiCount = fields.filter((f) => f.source === 'ai' && !f.isEdited).length;
+  const unresCount = fields.filter((f) => f.source === 'unresolved').length;
+
+  const currentStatus: ApplicationStatus = application.status || 'READY_FOR_REVIEW';
+  const appId = application.id || application.applywizzId || 'app-default';
+
+  const handleTriggerDryRun = async () => {
+    setIsDryRunning(true);
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/dry-run`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headless: false }),
+        }
+      );
+      const data = await res.json();
+      if (data.screenshotUrl) {
+        setViewerImageUrl(data.screenshotUrl);
+        setViewerTitle('Dry-Run Form Verification Screenshot');
+        setViewerOpen(true);
+      }
+      if (onStatusChange) {
+        onStatusChange('DRY_RUN_COMPLETE', data);
+      }
+    } catch (err: any) {
+      console.error('Dry run failed:', err);
+      alert(`Dry run failed: ${err.message}`);
+    } finally {
+      setIsDryRunning(false);
+    }
+  };
+
+  const handleTriggerSubmit = async () => {
+    setIsSubmitting(true);
+    if (onStatusChange) {
+      onStatusChange('APPLYING');
+    }
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/submit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headless: true }),
+        }
+      );
+      const data = await res.json();
+      if (data.status && onStatusChange) {
+        onStatusChange(data.status, data);
+      }
+      if (data.proofWebUrl) {
+        setViewerImageUrl(data.proofWebUrl);
+        setViewerTitle('Live Application Confirmation Proof');
+        setViewerOpen(true);
+      }
+    } catch (err: any) {
+      console.error('Submission failed:', err);
+      if (onStatusChange) {
+        onStatusChange('FAILED', { error: err.message });
+      }
+      alert(`Submission error: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResumeCaptcha = async () => {
+    setIsSubmitting(true);
+    if (onStatusChange) {
+      onStatusChange('APPLYING');
+    }
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/resume-submission`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      const data = await res.json();
+      if (data.status && onStatusChange) {
+        onStatusChange(data.status, data);
+      }
+      if (data.proofWebUrl) {
+        setViewerImageUrl(data.proofWebUrl);
+        setViewerTitle('Live Application Confirmation Proof');
+        setViewerOpen(true);
+      }
+    } catch (err: any) {
+      console.error('Resume submission error:', err);
+      alert(`Resume submission error: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full custom-scrollbar">
+    <div className="flex-1 overflow-y-auto p-6 md:p-8 max-w-5xl mx-auto w-full custom-scrollbar">
+      {/* Proof Viewer Modal */}
+      <ProofViewer
+        isOpen={viewerOpen}
+        onClose={() => setViewerOpen(false)}
+        screenshotUrl={viewerImageUrl}
+        title={viewerTitle}
+        metadata={{
+          candidateName: candidateName || application.clientName,
+          applywizzId: application.applywizzId || application.applywizz_id,
+          companyName: application.companyName || application.company_name,
+          jobTitle: application.jobTitle || application.job_title,
+          jobUrl: application.jobUrl || application.job_url,
+          capturedAt:
+            application.proof_captured_at ||
+            application.submitted_at ||
+            new Date().toISOString(),
+          status: currentStatus,
+        }}
+      />
+
       {/* Job Header Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8 shadow-lg shadow-black/20">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5 mb-5">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                {application.companyName || 'Greenhouse Posting'}
+      <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-6 mb-6 shadow-[4px_4px_0px_#1A1A2E]">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b-2 border-[#1A1A2E] pb-5 mb-5">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+                🏢 {application.companyName || application.company_name || 'Greenhouse Posting'}
               </span>
-              <span className="text-slate-600">•</span>
-              <span className="text-xs font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                {application.applywizzId}
+              <span className="text-[#1A1A2E] font-bold">•</span>
+              <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                {application.applywizzId || application.applywizz_id}
               </span>
+              <DifficultyBadge fieldsCount={fields.length} />
+              <ApplicationStatusBadge
+                status={currentStatus}
+                applicationId={appId}
+                apiBaseUrl={apiBaseUrl}
+                onStatusChange={onStatusChange}
+              />
             </div>
-            <h1 className="text-xl font-bold text-slate-100">
-              {application.jobTitle || 'Application Form'}
+            <h1 className="text-xl font-bold text-[#1A1A2E]">
+              {application.jobTitle || application.job_title || 'Application Form'}
             </h1>
             <a
-              href={application.jobUrl}
+              href={application.jobUrl || application.job_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-blue-400 hover:text-blue-300 font-mono underline break-all mt-1 inline-block"
+              className="text-xs text-[#2563EB] hover:underline font-mono truncate max-w-lg mt-1 inline-block font-medium"
             >
-              {application.jobUrl}
+              {application.jobUrl || application.job_url}
             </a>
           </div>
 
-          {/* Tag Breakdown Pills */}
-          <div className="flex items-center gap-2.5">
-            <div className="bg-emerald-950/40 border border-emerald-800/40 px-3 py-2 rounded-lg text-center">
-              <div className="text-xs font-mono font-bold text-emerald-400">{supabaseCount}</div>
-              <div className="text-[10px] text-emerald-500/80 uppercase tracking-wider">supabase</div>
-            </div>
-            <div className="bg-violet-950/40 border border-violet-800/40 px-3 py-2 rounded-lg text-center">
-              <div className="text-xs font-mono font-bold text-violet-400">{aiCount}</div>
-              <div className="text-[10px] text-violet-500/80 uppercase tracking-wider">ai</div>
-            </div>
+          {/* Submission Action Controls */}
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <SubmissionControls
+              applicationId={appId}
+              status={currentStatus}
+              unresolvedFieldsCount={unresCount}
+              proofWebUrl={application.proof_web_url || application.proofWebUrl}
+              dryRunScreenshotUrl={
+                application.dry_run_screenshot_url || application.dryRunScreenshotUrl
+              }
+              isSubmitting={isSubmitting}
+              isDryRunning={isDryRunning}
+              onTriggerDryRun={handleTriggerDryRun}
+              onTriggerSubmit={handleTriggerSubmit}
+              onResumeCaptcha={handleResumeCaptcha}
+              onViewProof={() => {
+                const url = application.proof_web_url || application.proofWebUrl;
+                if (url) {
+                  setViewerImageUrl(url);
+                  setViewerTitle('Live Application Confirmation Proof');
+                  setViewerOpen(true);
+                }
+              }}
+              onViewDryRun={() => {
+                const url =
+                  application.dry_run_screenshot_url || application.dryRunScreenshotUrl;
+                if (url) {
+                  setViewerImageUrl(url);
+                  setViewerTitle('Dry-Run Form Verification Screenshot');
+                  setViewerOpen(true);
+                }
+              }}
+            />
           </div>
         </div>
 
-        {/* Readonly Notice */}
-        <div className="bg-slate-950/80 border border-slate-800 rounded-lg px-4 py-2.5 flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <span className="text-emerald-400">🔒</span>
-            <span>Readonly Operator Mode (V1) — Pre-populated for verification and QA review</span>
+        {/* Source Breakdown & Interactive Info Banner */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FAF4EB] border border-[#1A1A2E] rounded-lg px-4 py-2.5 text-xs text-[#1A1A2E]">
+          <div className="flex items-center gap-2 font-medium">
+            <span>✏️</span>
+            <span>Operator Review — Click any field value below to edit answers inline</span>
           </div>
-          <span className="text-[11px] font-mono text-slate-500">
-            {application.resolvedFields.length} Form Fields
-          </span>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {manualCount > 0 && (
+              <span className="text-[11px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
+                {manualCount} manual
+              </span>
+            )}
+            <span className="text-[11px] font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
+              {supabaseCount} supabase
+            </span>
+            <span className="text-[11px] font-mono font-bold text-[#5B21B6] bg-[#EDE9FE] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
+              {aiCount} ai
+            </span>
+            {unresCount > 0 && (
+              <span className="text-[11px] font-mono font-bold text-white bg-[#EF4444] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] animate-pulse">
+                {unresCount} unresolved
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Form Fields Section */}
-      <div className="space-y-6">
-        {application.resolvedFields.length === 0 ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-400">
-            <p className="text-sm">No interactive form fields extracted for this job posting.</p>
-            {application.status === 'EXPIRED' && (
-              <p className="text-xs text-rose-400 mt-1">This job posting appears to be closed or expired.</p>
+      <div className="space-y-3.5">
+        {fields.length === 0 ? (
+          <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-8 text-center text-[#64748B] shadow-[3px_3px_0px_#1A1A2E]">
+            <p className="text-sm font-bold text-[#1A1A2E]">
+              No interactive form fields extracted for this job posting.
+            </p>
+            {currentStatus === 'EXPIRED' && (
+              <p className="text-xs text-[#EF4444] font-bold mt-1">
+                This job posting appears to be closed or expired.
+              </p>
             )}
           </div>
         ) : (
-          application.resolvedFields.map((field: ResolvedField, index: number) => {
+          fields.map((field: ResolvedField, index: number) => {
             return (
-              <div
+              <EditableFormField
                 key={`${field.fieldId}-${index}`}
-                className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition-all"
-              >
-                {/* Field Label & Source Badge */}
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <label className="text-sm font-semibold text-slate-200 leading-snug">
-                    <span className="text-slate-500 font-mono text-xs mr-2">#{index + 1}</span>
-                    {field.label || field.name || field.fieldId}
-                    {/* Required Asterisk */}
-                    <span className="text-rose-500 ml-1 font-bold">*</span>
-                  </label>
-
-                  <div className="flex-shrink-0">
-                    <SourceBadge source={field.source} confidence={field.confidence} />
-                  </div>
-                </div>
-
-                {/* Field Input Control (Readonly) */}
-                <div className="mt-2">
-                  {field.type === 'textarea' ? (
-                    <textarea
-                      readOnly
-                      rows={3}
-                      value={field.value || '(No answer provided)'}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 font-sans leading-relaxed focus:outline-none cursor-default resize-none"
-                    />
-                  ) : field.type === 'file' ? (
-                    <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 font-mono">
-                      <span>📎</span>
-                      <span className="truncate">{field.value || 'Master Resume PDF'}</span>
-                    </div>
-                  ) : field.type === 'select' || field.type === 'radio' ? (
-                    <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs text-slate-200 font-medium">
-                      <span>{field.value || '(No option selected)'}</span>
-                      <span className="text-[10px] uppercase font-mono text-slate-500 bg-slate-900 px-2 py-0.5 rounded">
-                        {field.type}
-                      </span>
-                    </div>
-                  ) : (
-                    <input
-                      type="text"
-                      readOnly
-                      value={field.value || ''}
-                      placeholder="(Empty)"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-200 font-sans focus:outline-none cursor-default"
-                    />
-                  )}
-                </div>
-
-                {/* Field Metadata Footer */}
-                <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                  <span>ID: {field.fieldId}</span>
-                  <span className="capitalize text-slate-500">{field.type}</span>
-                </div>
-              </div>
+                field={field}
+                applicationId={appId}
+                onFieldUpdate={onFieldUpdate}
+              />
             );
           })
         )}
@@ -221,3 +319,5 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     </div>
   );
 };
+
+export default FormRenderer;
