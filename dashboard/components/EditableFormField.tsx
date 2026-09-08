@@ -1,12 +1,11 @@
 /**
- * @fileoverview Editable Form Field React Component with Inline Affordances (Phase V2-3).
+ * @fileoverview Editable Form Field React Component with Inline Affordances (Phase V2-UI).
  *
- * Provides:
- * - Hover ✏️ edit affordance
- * - Interactive input/textarea toggle
- * - Keyboard shortcuts: Enter/Blur to save, Escape to cancel
- * - Asynchronous PATCH /api/applications/:id/fields/:fieldId submission
- * - Instant transition to amber 'manual' badge on successful update
+ * Renders individual form fields with neo-brutalist styling matching the reference mockup:
+ * - Crisp dark borders (border border-[#1A1A2E])
+ * - Distinctive inline source attribution badge (SourceBadge)
+ * - Click-to-edit with keyboard shortcuts (Enter to save, Esc to cancel)
+ * - Direct asynchronous PATCH /api/applications/:id/fields/:fieldId integration
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -91,15 +90,23 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   };
 
   const isTextarea = field.type === 'textarea';
+  const isUnresolved = field.source === 'unresolved';
 
   return (
-    <div className="group relative p-4 rounded-xl border border-slate-200/90 hover:border-slate-300 bg-white transition-all shadow-sm">
+    <div
+      className={`group relative p-3.5 rounded-lg bg-white transition-all ${
+        isUnresolved
+          ? 'border-2 border-[#EF4444] shadow-[2px_2px_0px_#EF4444]'
+          : 'border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]'
+      }`}
+    >
       {/* Header with Field Label and Badges */}
-      <div className="flex items-start justify-between gap-3 mb-2">
+      <div className="flex items-start justify-between gap-3 mb-1.5">
         <div className="flex-1">
-          <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+          <label className="text-xs font-bold text-[#1A1A2E] flex items-center gap-1.5">
             <span>{field.label}</span>
-            <span className="text-[10px] font-mono text-slate-400 font-normal">({field.type})</span>
+            {field.isRequired && <span className="text-[#EF4444] font-bold">*</span>}
+            <span className="text-[10px] font-mono text-[#64748B] font-normal">({field.type})</span>
           </label>
         </div>
 
@@ -115,7 +122,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               type="button"
               onClick={() => setIsEditing(true)}
               title="Click to edit field value"
-              className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition text-xs"
+              className="opacity-60 group-hover:opacity-100 p-1 text-[#1A1A2E] hover:bg-[#FAF4EB] border border-transparent hover:border-[#1A1A2E] rounded transition text-xs"
             >
               ✏️
             </button>
@@ -135,7 +142,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onKeyDown={handleKeyDown}
               disabled={isSaving}
               rows={3}
-              className="w-full text-xs font-mono p-2.5 bg-amber-50/20 border-2 border-amber-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 transition text-slate-900"
+              className="w-full text-xs font-mono p-2.5 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E]"
             />
           ) : (
             <input
@@ -146,26 +153,26 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onBlur={handleSave}
               onKeyDown={handleKeyDown}
               disabled={isSaving}
-              className="w-full text-xs font-mono p-2 bg-amber-50/20 border-2 border-amber-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 transition text-slate-900"
+              className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E]"
             />
           )}
 
-          <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400 font-mono">
+          <div className="flex items-center justify-between mt-1 text-[10px] text-[#64748B] font-mono">
             <span>Press Enter to save, Esc to cancel</span>
-            {isSaving && <span className="text-amber-600 font-semibold animate-pulse">Saving...</span>}
-            {error && <span className="text-rose-600 font-semibold">{error}</span>}
+            {isSaving && <span className="text-[#D97706] font-bold animate-pulse">Saving...</span>}
+            {error && <span className="text-[#EF4444] font-bold">{error}</span>}
           </div>
         </div>
       ) : (
         <div
           onClick={() => setIsEditing(true)}
-          title="Click to edit"
-          className="mt-1 p-2.5 rounded-lg bg-slate-50/80 border border-slate-100 hover:bg-slate-100/80 cursor-pointer transition text-xs font-mono break-words"
+          title="Click to edit answer"
+          className="mt-1 p-2 rounded-md bg-[#FAF4EB] border border-[#1A1A2E] hover:bg-[#F5ECE0] cursor-pointer transition text-xs font-mono break-words"
         >
           {field.value && field.value.trim().length > 0 ? (
-            <span className="text-slate-900">{field.value}</span>
+            <span className="text-[#1A1A2E] font-medium">{field.value}</span>
           ) : (
-            <span className="text-slate-400 italic">No answer provided (click to edit)</span>
+            <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved field (click to provide answer)</span>
           )}
         </div>
       )}

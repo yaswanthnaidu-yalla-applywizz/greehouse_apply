@@ -1,9 +1,9 @@
 /**
- * @fileoverview Application Status Badge component with real-time polling during APPLYING state.
+ * @fileoverview Application Status Badge component with real-time polling during APPLYING state (Phase V2-UI).
  *
  * References:
  * - 04-ui-ux.md
- * - V2-implementation.md (Phase V2-5)
+ * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -43,7 +43,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         if (res.ok) {
           const appData = await res.json();
           if (appData.status && appData.status !== statusRef.current) {
-            console.log(`[StatusBadge] 🔄 Application ${applicationId} status updated: ${statusRef.current} -> ${appData.status}`);
+            console.log(
+              `[StatusBadge] 🔄 Application ${applicationId} status updated: ${statusRef.current} -> ${appData.status}`
+            );
             if (onStatusChange) {
               onStatusChange(appData.status as ApplicationStatus, appData);
             }
@@ -61,9 +63,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'APPLIED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-emerald-50 text-emerald-800 border border-emerald-400 shadow-sm ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
         >
-          <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+          <span className="w-2 h-2 rounded-full bg-[#1E4620]"></span>
           <span>Applied &amp; Verified</span>
         </span>
       );
@@ -71,9 +73,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'APPLYING':
       return (
         <span
-          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-amber-50 text-amber-900 border border-amber-400 shadow-sm animate-pulse ${className}`}
+          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
         >
-          <span className="w-2 h-2 rounded-full border-2 border-amber-600 border-t-transparent animate-spin"></span>
+          <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
           <span>Submitting... (Live)</span>
         </span>
       );
@@ -81,9 +83,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'DRY_RUN_COMPLETE':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-blue-50 text-blue-800 border border-blue-400 shadow-sm ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
         >
-          <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+          <span className="w-2 h-2 rounded-full bg-[#1E3A5F]"></span>
           <span>Dry-Run Complete</span>
         </span>
       );
@@ -91,7 +93,7 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'CAPTCHA_REQUIRED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-orange-50 text-orange-900 border border-orange-500 shadow-sm ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
         >
           <span>🛡️</span>
           <span>CAPTCHA Required</span>
@@ -101,9 +103,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'FAILED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-rose-50 text-rose-800 border border-rose-400 shadow-sm ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#EF4444] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
         >
-          <span className="w-2 h-2 rounded-full bg-rose-600"></span>
+          <span className="w-2 h-2 rounded-full bg-white"></span>
           <span>Submission Failed</span>
         </span>
       );
@@ -111,7 +113,7 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'EXPIRED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-slate-100 text-slate-700 border border-slate-300 shadow-sm ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E2E8F0] text-[#475569] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
         >
           <span>Closed / Expired</span>
         </span>
@@ -121,9 +123,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     default:
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-slate-50 text-slate-800 border border-slate-300 shadow-sm ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F4D66B] text-[#5C4A0A] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
         >
-          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span className="w-2 h-2 rounded-full bg-[#5C4A0A]"></span>
           <span>Ready for Review</span>
         </span>
       );
