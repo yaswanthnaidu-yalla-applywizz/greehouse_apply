@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Greenhouse Automation Platform — Operator Dashboard (V1)</title>
+  <title>Greenhouse Automation Platform — Operator Dashboard (V2)</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -74,13 +74,33 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useCallback, useMemo } = React;
+    const { useState, useEffect, useCallback, useMemo, useRef } = React;
     const API_BASE_URL = window.location.origin;
 
-    function SourceBadge({ source, confidence }) {
-      if (source === 'supabase') {
+    function SourceBadge({ source, confidence, isEdited }) {
+      const activeSource = isEdited ? 'manual' : source;
+
+      if (activeSource === 'manual') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-emerald-50 text-emerald-800 border border-emerald-400 shadow-sm">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-amber-50 text-amber-800 border border-amber-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+            <span>manual</span>
+          </span>
+        );
+      }
+
+      if (activeSource === 'unresolved') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-rose-50 text-rose-800 border border-rose-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>
+            <span>unresolved</span>
+          </span>
+        );
+      }
+
+      if (activeSource === 'supabase') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-emerald-50 text-emerald-800 border border-emerald-400 shadow-sm">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
             <span>supabase</span>
             {confidence !== undefined && (
@@ -90,35 +110,193 @@
         );
       }
 
-      if (source === 'manual') {
+      if (activeSource === 'resume_parse') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-amber-50 text-amber-800 border border-amber-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
-            <span>manual</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-cyan-50 text-cyan-800 border border-cyan-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-600"></span>
+            <span>resume</span>
+          </span>
+        );
+      }
+
+      if (activeSource === 'fuzzy_match') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-blue-50 text-blue-800 border border-blue-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+            <span>fuzzy</span>
             {confidence !== undefined && (
-              <span className="text-[10px] text-amber-700/80">({(confidence * 100).toFixed(0)}%)</span>
+              <span className="text-[10px] text-blue-700/80">({(confidence * 100).toFixed(0)}%)</span>
             )}
           </span>
         );
       }
 
-      if (source === 'unresolved') {
+      if (activeSource === 'api') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-rose-50 text-rose-800 border border-rose-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
-            <span>unresolved</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-indigo-50 text-indigo-800 border border-indigo-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>
+            <span>api</span>
           </span>
         );
       }
 
+      // Default: 'ai'
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-purple-50 text-purple-800 border border-purple-400 shadow-sm">
-          <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-pulse"></span>
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-purple-50 text-purple-800 border border-purple-400 shadow-sm">
+          <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
           <span>ai</span>
           {confidence !== undefined && (
             <span className="text-[10px] text-purple-700/80">({(confidence * 100).toFixed(0)}%)</span>
           )}
         </span>
+      );
+    }
+
+    function EditableFormField({ field, applicationId, onFieldUpdate }) {
+      const [isEditing, setIsEditing] = useState(false);
+      const [value, setValue] = useState(field.value || '');
+      const [isSaving, setIsSaving] = useState(false);
+      const [error, setError] = useState(null);
+      const inputRef = useRef(null);
+
+      useEffect(() => {
+        setValue(field.value || '');
+      }, [field.value]);
+
+      useEffect(() => {
+        if (isEditing && inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, [isEditing]);
+
+      const handleSave = async () => {
+        if (value === field.value && !error) {
+          setIsEditing(false);
+          return;
+        }
+
+        setIsSaving(true);
+        setError(null);
+
+        try {
+          const response = await fetch(
+            `${API_BASE_URL}/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ value }),
+            }
+          );
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP error ${response.status}`);
+          }
+
+          const updatedField = await response.json();
+          setIsEditing(false);
+          if (onFieldUpdate) {
+            onFieldUpdate(updatedField);
+          }
+        } catch (err) {
+          console.error('Failed to update field:', err);
+          setError(err.message || 'Failed to save');
+        } finally {
+          setIsSaving(false);
+        }
+      };
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Escape') {
+          setValue(field.value || '');
+          setError(null);
+          setIsEditing(false);
+        } else if (e.key === 'Enter' && field.type !== 'textarea') {
+          e.preventDefault();
+          handleSave();
+        }
+      };
+
+      const isTextarea = field.type === 'textarea';
+
+      return (
+        <div className="group relative p-4 rounded-xl border border-slate-200/90 hover:border-slate-300 bg-white transition-all shadow-sm">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div className="flex-1">
+              <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                <span>{field.label || field.name || field.fieldId}</span>
+                <span className="text-[10px] font-mono text-slate-400 font-normal">({field.type})</span>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <SourceBadge
+                source={field.source}
+                confidence={field.confidence}
+                isEdited={field.isEdited}
+              />
+
+              {!isEditing && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  title="Click to edit field value"
+                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition text-xs"
+                >
+                  ✏️
+                </button>
+              )}
+            </div>
+          </div>
+
+          {isEditing ? (
+            <div className="relative mt-1">
+              {isTextarea ? (
+                <textarea
+                  ref={inputRef}
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  onBlur={handleSave}
+                  onKeyDown={handleKeyDown}
+                  disabled={isSaving}
+                  rows={3}
+                  className="w-full text-xs font-mono p-2.5 bg-amber-50/20 border-2 border-amber-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 transition text-slate-900"
+                />
+              ) : (
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  onBlur={handleSave}
+                  onKeyDown={handleKeyDown}
+                  disabled={isSaving}
+                  className="w-full text-xs font-mono p-2 bg-amber-50/20 border-2 border-amber-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 transition text-slate-900"
+                />
+              )}
+
+              <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400 font-mono">
+                <span>Press Enter to save, Esc to cancel</span>
+                {isSaving && <span className="text-amber-600 font-semibold animate-pulse">Saving...</span>}
+                {error && <span className="text-rose-600 font-semibold">{error}</span>}
+              </div>
+            </div>
+          ) : (
+            <div
+              onClick={() => setIsEditing(true)}
+              title="Click to edit"
+              className="mt-1 p-2.5 rounded-lg bg-slate-50/80 border border-slate-100 hover:bg-slate-100/80 cursor-pointer transition text-xs font-mono break-words"
+            >
+              {field.value && field.value.trim().length > 0 ? (
+                <span className="text-slate-900">{field.value}</span>
+              ) : (
+                <span className="text-slate-400 italic">No answer provided (click to edit)</span>
+              )}
+            </div>
+          )}
+        </div>
       );
     }
 
@@ -328,7 +506,7 @@
       );
     }
 
-    function FormRenderer({ application, isLoading }) {
+    function FormRenderer({ application, isLoading, onFieldUpdate }) {
       if (isLoading) {
         return (
           <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
@@ -344,14 +522,16 @@
             <div className="text-3xl mb-2">📋</div>
             <p className="text-sm font-semibold text-[#1E293B]">No Job Selected</p>
             <p className="text-xs text-[#64748B] mt-1">
-              Select a candidate and job tab to inspect pre-populated form questions.
+              Select a candidate and job tab to inspect and edit pre-populated form questions.
             </p>
           </div>
         );
       }
 
-      const supabaseCount = application.resolvedFields.filter((f) => f.source === 'supabase').length;
-      const aiCount = application.resolvedFields.filter((f) => f.source === 'ai').length;
+      const manualCount = application.resolvedFields.filter((f) => f.isEdited || f.source === 'manual').length;
+      const supabaseCount = application.resolvedFields.filter((f) => f.source === 'supabase' && !f.isEdited).length;
+      const aiCount = application.resolvedFields.filter((f) => f.source === 'ai' && !f.isEdited).length;
+      const unresCount = application.resolvedFields.filter((f) => f.source === 'unresolved').length;
 
       return (
         <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full custom-scrollbar">
@@ -380,22 +560,34 @@
                 </a>
               </div>
 
-              <div className="flex items-center gap-2.5">
-                <div className="bg-[#9AC89A]/30 border border-[#9AC89A] px-3.5 py-2 rounded-xl text-center">
+              <div className="flex items-center gap-2 flex-wrap">
+                {manualCount > 0 && (
+                  <div className="bg-amber-50 border border-amber-300 px-3 py-1.5 rounded-xl text-center">
+                    <div className="text-xs font-mono font-bold text-amber-800">{manualCount}</div>
+                    <div className="text-[10px] text-amber-700 uppercase tracking-wider font-semibold">manual</div>
+                  </div>
+                )}
+                <div className="bg-[#9AC89A]/30 border border-[#9AC89A] px-3 py-1.5 rounded-xl text-center">
                   <div className="text-xs font-mono font-bold text-[#2D5C2D]">{supabaseCount}</div>
                   <div className="text-[10px] text-[#2D5C2D] uppercase tracking-wider font-semibold">supabase</div>
                 </div>
-                <div className="bg-[#8B5CF6]/15 border border-[#8B5CF6]/40 px-3.5 py-2 rounded-xl text-center">
+                <div className="bg-[#8B5CF6]/15 border border-[#8B5CF6]/40 px-3 py-1.5 rounded-xl text-center">
                   <div className="text-xs font-mono font-bold text-[#6D28D9]">{aiCount}</div>
                   <div className="text-[10px] text-[#6D28D9] uppercase tracking-wider font-semibold">ai</div>
                 </div>
+                {unresCount > 0 && (
+                  <div className="bg-rose-50 border border-rose-300 px-3 py-1.5 rounded-xl text-center">
+                    <div className="text-xs font-mono font-bold text-rose-800">{unresCount}</div>
+                    <div className="text-[10px] text-rose-700 uppercase tracking-wider font-semibold">unresolved</div>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="bg-[#FAF6F0] border border-[#E8DCCF] rounded-lg px-4 py-2.5 flex items-center justify-between text-xs text-[#64748B]">
               <div className="flex items-center gap-2">
-                <span className="text-[#059669]">🔒</span>
-                <span>Readonly Operator Mode (V1) — Pre-populated for verification and QA review</span>
+                <span className="text-amber-600">✏️</span>
+                <span>Interactive Operator Review (V2) — Click any field or ✏️ to edit answers inline</span>
               </div>
               <span className="text-[11px] font-mono text-[#64748B]">
                 {application.resolvedFields.length} Form Fields
@@ -403,7 +595,7 @@
             </div>
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-4">
             {application.resolvedFields.length === 0 ? (
               <div className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-8 text-center text-[#64748B] shadow-sm">
                 <p className="text-sm">No interactive form fields extracted for this job posting.</p>
@@ -413,59 +605,14 @@
               </div>
             ) : (
               application.resolvedFields.map((field, index) => {
+                const appId = application.applywizzId || 'app-default';
                 return (
-                  <div
+                  <EditableFormField
                     key={`${field.fieldId}-${index}`}
-                    className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-5 hover:border-[#D4C3B3] shadow-sm transition-all"
-                  >
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <label className="text-sm font-semibold text-[#0F172A] leading-snug">
-                        <span className="text-[#94A3B8] font-mono text-xs mr-2">#{index + 1}</span>
-                        {field.label || field.name || field.fieldId}
-                        <span className="text-[#EF4444] ml-1 font-bold">*</span>
-                      </label>
-
-                      <div className="flex-shrink-0">
-                        <SourceBadge source={field.source} confidence={field.confidence} />
-                      </div>
-                    </div>
-
-                    <div className="mt-2">
-                      {field.type === 'textarea' ? (
-                        <textarea
-                          readOnly
-                          rows={3}
-                          value={field.value || '(No answer provided)'}
-                          className="w-full bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg p-3 text-xs text-[#1E293B] font-sans leading-relaxed focus:outline-none cursor-default resize-none"
-                        />
-                      ) : field.type === 'file' ? (
-                        <div className="flex items-center gap-2 p-3 bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg text-xs text-[#334155] font-mono">
-                          <span>📎</span>
-                          <span className="truncate">{field.value || 'Master Resume PDF'}</span>
-                        </div>
-                      ) : field.type === 'select' || field.type === 'radio' ? (
-                        <div className="p-3 bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg flex items-center justify-between text-xs text-[#1E293B] font-medium">
-                          <span>{field.value || '(No option selected)'}</span>
-                          <span className="text-[10px] uppercase font-mono text-[#64748B] bg-[#FFFFFF] border border-[#E5D7C7] px-2 py-0.5 rounded">
-                            {field.type}
-                          </span>
-                        </div>
-                      ) : (
-                        <input
-                          type="text"
-                          readOnly
-                          value={field.value || ''}
-                          placeholder="(Empty)"
-                          className="w-full bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg px-3 py-2.5 text-xs text-[#1E293B] font-sans focus:outline-none cursor-default"
-                        />
-                      )}
-                    </div>
-
-                    <div className="mt-2.5 flex items-center justify-between text-[11px] text-[#64748B] font-mono">
-                      <span>ID: {field.fieldId}</span>
-                      <span className="capitalize text-[#64748B]">{field.type}</span>
-                    </div>
-                  </div>
+                    field={field}
+                    applicationId={appId}
+                    onFieldUpdate={onFieldUpdate}
+                  />
                 );
               })
             )}
@@ -568,6 +715,19 @@
         }
       }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
+      const handleFieldUpdate = (updatedField) => {
+        if (!application) return;
+
+        const newResolvedFields = application.resolvedFields.map((f) =>
+          f.fieldId === updatedField.fieldId || f.name === updatedField.fieldId ? updatedField : f
+        );
+
+        setApplication({
+          ...application,
+          resolvedFields: newResolvedFields,
+        });
+      };
+
       return (
         <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1E293B] font-sans overflow-hidden select-none">
           <header className="h-16 bg-[#FFFFFF] border-b border-[#E8DCCF] flex items-center justify-between px-6 flex-shrink-0 shadow-sm">
@@ -578,31 +738,27 @@
                   Greenhouse Automation Platform
                 </h1>
                 <p className="text-[10px] text-[#64748B] font-mono">
-                  Phase V1-5 Operator Dashboard · Dual-Branch Pipeline
+                  Phase V2 Operator Dashboard · Interactive Inline Review
                 </p>
               </div>
             </div>
 
             {stats && (
               <div className="flex items-center gap-3">
-                {/* Yellow Card: Candidates */}
                 <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#E5C350] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
                   <span className="text-[#5C4A0A]">Candidates:</span>
                   <span className="text-[#5C4A0A] font-bold">{stats.totalCandidates}</span>
                 </div>
 
-                {/* Blue Card: Jobs */}
                 <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#A2C5DD] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
                   <span className="text-[#2D5C8C]">Jobs:</span>
                   <span className="text-[#2D5C8C] font-bold">{stats.totalApplications}</span>
                 </div>
 
-                {/* Green Card: supabase % */}
                 <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#84B784] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
                   <span className="text-[#2D5C2D] font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
                 </div>
 
-                {/* Coral Card: ai % */}
                 <div className="flex items-center gap-1.5 bg-[#E88474] border border-[#D87060] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
                   <span className="text-[#6B2C2C] font-bold">🟣 ai: {stats.aiPercentage}%</span>
                 </div>
@@ -634,7 +790,11 @@
                     selectedJobUrl={selectedJobUrl}
                     onSelectJob={(url) => setSelectedJobUrl(url)}
                   />
-                  <FormRenderer application={application} isLoading={isLoadingApplication} />
+                  <FormRenderer
+                    application={application}
+                    isLoading={isLoadingApplication}
+                    onFieldUpdate={handleFieldUpdate}
+                  />
                 </>
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-[#64748B]">
