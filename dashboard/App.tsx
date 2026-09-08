@@ -127,16 +127,16 @@ export const App: React.FC = () => {
   }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
+    <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1E293B] font-sans overflow-hidden select-none">
       {/* Top Navigation & Metrics Bar */}
-      <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 flex-shrink-0">
+      <header className="h-16 bg-[#FFFFFF] border-b border-[#E8DCCF] flex items-center justify-between px-6 flex-shrink-0 shadow-sm">
         <div className="flex items-center gap-3">
-          <span className="text-xl">🟢</span>
+          <span className="text-2xl">🟢</span>
           <div>
-            <h1 className="text-sm font-bold tracking-tight text-slate-100">
+            <h1 className="text-sm font-bold tracking-tight text-[#1A1A2E]">
               Greenhouse Automation Platform
             </h1>
-            <p className="text-[10px] text-slate-400 font-mono">
+            <p className="text-[10px] text-[#64748B] font-mono">
               Phase V1-5 Operator Dashboard · Dual-Branch Pipeline
             </p>
           </div>
@@ -145,31 +145,37 @@ export const App: React.FC = () => {
         {/* Live Metrics Pills */}
         {stats && (
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
-              <span className="text-slate-400">Candidates:</span>
-              <span className="text-emerald-400 font-bold">{stats.totalCandidates}</span>
+            {/* Yellow Card: Candidates */}
+            <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#E5C350] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+              <span className="text-[#5C4A0A]">Candidates:</span>
+              <span className="text-[#5C4A0A] font-bold">{stats.totalCandidates}</span>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
-              <span className="text-slate-400">Jobs:</span>
-              <span className="text-blue-400 font-bold">{stats.totalApplications}</span>
+            {/* Blue Card: Jobs */}
+            <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#A2C5DD] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+              <span className="text-[#2D5C8C]">Jobs:</span>
+              <span className="text-[#2D5C8C] font-bold">{stats.totalApplications}</span>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
-              <span className="text-emerald-400 font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
-              <span className="text-slate-600">|</span>
-              <span className="text-violet-400 font-bold">🟣 ai: {stats.aiPercentage}%</span>
+            {/* Green Card: supabase % */}
+            <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#84B784] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+              <span className="text-[#2D5C2D] font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
             </div>
 
-            <button
-              type="button"
-              onClick={fetchInitialData}
-              className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1 rounded-md transition-colors font-medium"
-            >
-              ↻ Refresh
-            </button>
+            {/* Coral Card: ai % */}
+            <div className="flex items-center gap-1.5 bg-[#E88474] border border-[#D87060] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+              <span className="text-[#6B2C2C] font-bold">🟣 ai: {stats.aiPercentage}%</span>
+            </div>
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={fetchInitialData}
+          className="text-xs bg-[#FFFFFF] hover:bg-[#FAF6F0] text-[#1E293B] border border-[#D8C7B5] px-3 py-1.5 rounded-lg transition-colors font-medium shadow-sm"
+        >
+          ↻ Refresh
+        </button>
       </header>
 
       {/* Main Split-Screen Workspace */}
@@ -183,7 +189,7 @@ export const App: React.FC = () => {
         />
 
         {/* Right Pane: Candidate Jobs & Form Viewer */}
-        <main className="flex-1 flex flex-col bg-slate-950 overflow-hidden">
+        <main className="flex-1 flex flex-col bg-[#FFF5EB] overflow-hidden">
           {candidateDetail ? (
             <>
               {/* Right Top: Job Queue Tabs */}
@@ -194,10 +200,14 @@ export const App: React.FC = () => {
               />
 
               {/* Right Main: Form Renderer */}
-              <FormRenderer application={application} isLoading={isLoadingApplication} />
+              <FormRenderer
+                application={application}
+                isLoading={isLoadingApplication}
+                onFieldUpdate={handleFieldUpdate}
+              />
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+            <div className="flex-1 flex flex-col items-center justify-center text-[#64748B]">
               <p className="text-sm">Select a candidate to view assigned applications.</p>
             </div>
           )}

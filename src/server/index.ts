@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
+import { applicationsRouter } from './routes/applications.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -157,6 +158,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   if (fs.existsSync(publicDir)) {
     app.use(express.static(publicDir));
   }
+
+  // Applications and field patch routes
+  app.use('/api/applications', applicationsRouter);
 
   /**
    * GET /api/health
@@ -416,13 +420,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         <!DOCTYPE html>
         <html>
         <head><title>Greenhouse Automation API</title></head>
-        <body style="font-family: sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem;">
-          <h1>🟢 Greenhouse Job Application Automation API (Port ${config.PORT})</h1>
-          <p>API Server is running. Endpoints:</p>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #FFF5EB; color: #1E293B; padding: 2rem;">
+          <h1 style="color: #1A1A2E;">🟢 Greenhouse Job Application Automation API (Port ${config.PORT})</h1>
+          <p style="color: #64748B;">API Server is running. Endpoints:</p>
           <ul>
-            <li><a style="color: #38bdf8;" href="/api/stats">GET /api/stats</a></li>
-            <li><a style="color: #38bdf8;" href="/api/candidates">GET /api/candidates</a></li>
-            <li><a style="color: #38bdf8;" href="/api/health">GET /api/health</a></li>
+            <li><a style="color: #0284C7;" href="/api/stats">GET /api/stats</a></li>
+            <li><a style="color: #0284C7;" href="/api/candidates">GET /api/candidates</a></li>
+            <li><a style="color: #0284C7;" href="/api/health">GET /api/health</a></li>
           </ul>
         </body>
         </html>
