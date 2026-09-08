@@ -10,9 +10,10 @@ import type {
   ApplyWizzCandidateProfile,
   CandidateJobApplication,
   ResolvedField,
+  SourceTag,
 } from '../src/types/index.js';
 
-export type { ApplyWizzCandidateProfile, CandidateJobApplication, ResolvedField };
+export type { ApplyWizzCandidateProfile, CandidateJobApplication, ResolvedField, SourceTag };
 
 /**
  * Candidate summary record returned by `GET /api/candidates`.

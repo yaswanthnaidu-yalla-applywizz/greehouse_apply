@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,12 +8,24 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      darkMode: 'class',
       theme: {
         extend: {
           colors: {
+            page: '#FFF5EB',
+            sidebar: '#1A1A2E',
+            card: '#FFFFFF',
+            'metric-yellow': '#F4D66B',
+            'metric-yellow-text': '#5C4A0A',
+            'metric-coral': '#E88474',
+            'metric-coral-text': '#6B2C2C',
+            'metric-green': '#9AC89A',
+            'metric-green-text': '#2D5C2D',
+            'metric-blue': '#B8D4E8',
+            'metric-blue-text': '#2D5C8C',
             supabase: '#10B981',
-            ai: '#8B5CF6'
+            ai: '#8B5CF6',
+            manual: '#F59E0B',
+            unresolved: '#EF4444'
           }
         }
       }
@@ -25,24 +37,40 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
-    /* Custom dark scrollbar */
+    /* Custom scrollbars */
     .custom-scrollbar::-webkit-scrollbar {
       width: 6px;
       height: 6px;
     }
     .custom-scrollbar::-webkit-scrollbar-track {
-      background: #0f172a;
+      background: #FFF5EB;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #334155;
+      background: #D6C7B7;
       border-radius: 3px;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #475569;
+      background: #BFADA0;
+    }
+
+    /* Sidebar dark scrollbar */
+    .sidebar-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .sidebar-scrollbar::-webkit-scrollbar-track {
+      background: #131322;
+    }
+    .sidebar-scrollbar::-webkit-scrollbar-thumb {
+      background: #2E2E4A;
+      border-radius: 3px;
+    }
+    .sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #3E3E60;
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 antialiased overflow-hidden select-none">
+<body class="bg-[#FFF5EB] text-[#1E293B] antialiased overflow-hidden select-none font-sans">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -52,22 +80,43 @@
     function SourceBadge({ source, confidence }) {
       if (source === 'supabase') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-emerald-950/70 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-950/50">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-emerald-50 text-emerald-800 border border-emerald-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
             <span>supabase</span>
             {confidence !== undefined && (
-              <span className="text-[10px] text-emerald-500/80">({(confidence * 100).toFixed(0)}%)</span>
+              <span className="text-[10px] text-emerald-700/80">({(confidence * 100).toFixed(0)}%)</span>
             )}
           </span>
         );
       }
 
+      if (source === 'manual') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-amber-50 text-amber-800 border border-amber-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+            <span>manual</span>
+            {confidence !== undefined && (
+              <span className="text-[10px] text-amber-700/80">({(confidence * 100).toFixed(0)}%)</span>
+            )}
+          </span>
+        );
+      }
+
+      if (source === 'unresolved') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-rose-50 text-rose-800 border border-rose-400 shadow-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
+            <span>unresolved</span>
+          </span>
+        );
+      }
+
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-violet-950/70 text-violet-400 border border-violet-500/40 shadow-sm shadow-violet-950/50">
-          <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></span>
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold font-mono bg-purple-50 text-purple-800 border border-purple-400 shadow-sm">
+          <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-pulse"></span>
           <span>ai</span>
           {confidence !== undefined && (
-            <span className="text-[10px] text-violet-500/80">({(confidence * 100).toFixed(0)}%)</span>
+            <span className="text-[10px] text-purple-700/80">({(confidence * 100).toFixed(0)}%)</span>
           )}
         </span>
       );
@@ -88,13 +137,13 @@
       }, [candidates, searchTerm]);
 
       return (
-        <aside className="w-80 flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col h-full overflow-hidden">
-          <div className="p-4 border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
+        <aside className="w-80 flex-shrink-0 bg-[#1A1A2E] border-r border-[#131322] flex flex-col h-full overflow-hidden text-white">
+          <div className="p-4 border-b border-[#24243E] bg-[#1A1A2E] sticky top-0 z-10">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
                 Candidates Directory
               </h2>
-              <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full font-semibold">
+              <span className="text-xs font-mono bg-[#24243E] text-[#E2E8F0] px-2 py-0.5 rounded-full font-semibold">
                 {filteredCandidates.length} of {candidates.length}
               </span>
             </div>
@@ -105,13 +154,13 @@
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Search name or AWL-ID..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+                className="w-full bg-[#131324] border border-[#2E2E4A] rounded-lg px-3 py-2 text-xs text-white placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#F4D66B]/50 focus:border-[#F4D66B] transition-all"
               />
               {searchTerm && (
                 <button
                   type="button"
                   onClick={() => setSearchTerm('')}
-                  className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300 text-xs"
+                  className="absolute right-2.5 top-2 text-[#94A3B8] hover:text-white text-xs"
                 >
                   ✕
                 </button>
@@ -119,14 +168,14 @@
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60 p-2 space-y-1.5 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto divide-y divide-[#24243E]/60 p-2 space-y-1.5 sidebar-scrollbar">
             {isLoading ? (
-              <div className="p-6 text-center text-xs text-slate-500 animate-pulse">
+              <div className="p-6 text-center text-xs text-[#94A3B8] animate-pulse">
                 Loading candidate records...
               </div>
             ) : filteredCandidates.length === 0 ? (
-              <div className="p-6 text-center text-xs text-slate-500">
-                No candidates matching <span className="text-slate-300">"{searchTerm}"</span>
+              <div className="p-6 text-center text-xs text-[#94A3B8]">
+                No candidates matching <span className="text-white">"{searchTerm}"</span>
               </div>
             ) : (
               filteredCandidates.map((c) => {
@@ -136,44 +185,44 @@
                     key={c.applywizzId}
                     type="button"
                     onClick={() => onSelectCandidate(c.applywizzId)}
-                    className={`w-full text-left p-3 rounded-lg transition-all duration-150 relative ${
+                    className={`w-full text-left p-3 rounded-xl transition-all duration-150 relative ${
                       isSelected
-                        ? 'bg-slate-800 border-2 border-emerald-500 shadow-md shadow-emerald-950/20'
-                        : 'bg-slate-800/40 border border-slate-800/80 hover:bg-slate-800/80 hover:border-slate-700'
+                        ? 'bg-[#2E2E54] border-2 border-[#F4D66B] shadow-lg shadow-black/20'
+                        : 'bg-[#24243E]/50 border border-[#2F2F4E] hover:bg-[#2A2A48] hover:border-[#3D3D64]'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded">
+                      <span className="text-xs font-mono font-bold text-[#9AC89A] bg-[#1A1A2E] border border-[#355639] px-1.5 py-0.5 rounded">
                         {c.applywizzId}
                       </span>
                       {c.status === 'READY' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-800/40">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#9AC89A] bg-[#9AC89A]/20 px-2 py-0.5 rounded-full border border-[#9AC89A]/40">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#9AC89A] animate-pulse"></span>
                           Ready
                         </span>
                       )}
                       {c.status === 'PENDING' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-800/40">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#F4D66B] bg-[#F4D66B]/20 px-2 py-0.5 rounded-full border border-[#F4D66B]/40">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#F4D66B]"></span>
                           Pending
                         </span>
                       )}
                       {c.status === 'EXPIRED' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded-full">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#94A3B8] bg-[#24243E] px-2 py-0.5 rounded-full border border-[#3D3D64]">
                           Expired
                         </span>
                       )}
                     </div>
 
-                    <div className="text-sm font-semibold text-slate-100 truncate mb-1">
+                    <div className="text-sm font-semibold text-white truncate mb-1">
                       {c.clientName}
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] text-slate-400">
-                      <span className="truncate max-w-[140px] text-slate-400 font-mono">
+                    <div className="flex items-center justify-between text-[11px] text-[#94A3B8]">
+                      <span className="truncate max-w-[140px] text-[#94A3B8] font-mono">
                         {c.email || c.location || 'Profile Synced'}
                       </span>
-                      <span className="bg-slate-900 border border-slate-700/80 text-slate-300 px-2 py-0.5 rounded text-[10px] font-semibold">
+                      <span className="bg-[#131324] border border-[#2E2E4A] text-[#CBD5E1] px-2 py-0.5 rounded text-[10px] font-semibold font-mono">
                         {c.totalJobs} {c.totalJobs === 1 ? 'Job' : 'Jobs'}
                       </span>
                     </div>
@@ -189,23 +238,23 @@
     function JobQueueView({ candidate, selectedJobUrl, onSelectJob }) {
       if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
         return (
-          <div className="p-4 bg-slate-900/60 border-b border-slate-800 text-xs text-slate-500">
+          <div className="p-4 bg-[#FFF5EB] border-b border-[#E8DCCF] text-xs text-[#64748B]">
             No jobs assigned for this candidate.
           </div>
         );
       }
 
       return (
-        <div className="bg-slate-900 border-b border-slate-800 px-6 pt-3">
+        <div className="bg-[#FFF5EB] border-b border-[#E8DCCF] px-6 pt-3">
           <div className="flex items-center justify-between mb-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#1E293B]">
                 Assigned Applications Queue
               </span>
-              <span className="text-[11px] font-mono bg-blue-950/60 border border-blue-800/40 text-blue-400 px-2 py-0.5 rounded-full font-semibold">
+              <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#A2C5DD] text-[#2D5C8C] px-2.5 py-0.5 rounded-full font-semibold">
                 {candidate.jobs.length} Active
               </span>
-              <span className="text-[11px] font-mono bg-emerald-950/60 border border-emerald-800/40 text-emerald-400 px-2 py-0.5 rounded-full font-semibold">
+              <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#84B784] text-[#2D5C2D] px-2.5 py-0.5 rounded-full font-semibold">
                 ⚡ &lt; 23 Qs
               </span>
             </div>
@@ -215,7 +264,7 @@
                 href={candidate.resumeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 bg-emerald-950/40 border border-emerald-800/50 hover:border-emerald-700 px-3 py-1 rounded-md transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#059669] hover:text-[#047857] bg-[#FFFFFF] border border-[#84B784] hover:border-[#059669] px-3 py-1 rounded-lg shadow-sm transition-colors"
               >
                 <span>📄</span>
                 <span>Master Resume PDF</span>
@@ -236,40 +285,40 @@
                   key={`${jobKey}-${idx}`}
                   type="button"
                   onClick={() => onSelectJob(jobKey)}
-                  className={`flex-shrink-0 text-left px-4 py-2.5 rounded-lg border transition-all duration-150 min-w-[220px] max-w-[280px] ${
+                  className={`flex-shrink-0 text-left px-4 py-2.5 rounded-xl border transition-all duration-150 min-w-[220px] max-w-[280px] ${
                     isSelected
-                      ? 'bg-slate-800 border-blue-500 shadow-sm shadow-blue-950/30'
-                      : 'bg-slate-950/60 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
+                      ? 'bg-[#FFFFFF] border-2 border-[#1A1A2E] shadow-md ring-2 ring-[#1A1A2E]/10'
+                      : 'bg-[#FFFFFF] border-[#E8DCCF] hover:border-[#CDBDAE] shadow-sm'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-slate-200 truncate">
+                    <span className="text-xs font-bold text-[#0F172A] truncate">
                       {job.companyName || 'Company'}
                     </span>
                     {job.status === 'READY_FOR_REVIEW' && (
-                      <span className="text-[10px] font-mono text-emerald-400 font-semibold">
+                      <span className="text-[10px] font-mono text-[#059669] font-semibold">
                         🟢 Ready
                       </span>
                     )}
                     {job.status === 'EXPIRED' && (
-                      <span className="text-[10px] font-mono text-rose-400 font-semibold">
+                      <span className="text-[10px] font-mono text-[#E11D48] font-semibold">
                         🔴 Expired
                       </span>
                     )}
                     {job.status === 'PENDING' && (
-                      <span className="text-[10px] font-mono text-amber-400 font-semibold">
+                      <span className="text-[10px] font-mono text-[#D97706] font-semibold">
                         🟡 Pending
                       </span>
                     )}
                   </div>
 
-                  <div className="text-xs text-slate-300 truncate font-medium">
+                  <div className="text-xs text-[#334155] truncate font-medium">
                     {job.jobTitle || 'Job Application'}
                   </div>
 
-                  <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                  <div className="text-[10px] text-[#64748B] mt-1 flex items-center justify-between">
                     <span>{job.fieldsCount ? `${job.fieldsCount} Questions` : 'Scanned'}</span>
-                    <span className="font-mono text-slate-600">#{idx + 1}</span>
+                    <span className="font-mono text-[#94A3B8]">#{idx + 1}</span>
                   </div>
                 </button>
               );
@@ -282,8 +331,8 @@
     function FormRenderer({ application, isLoading }) {
       if (isLoading) {
         return (
-          <div className="flex-1 p-12 flex flex-col items-center justify-center text-slate-500">
-            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+            <div className="w-8 h-8 border-2 border-[#059669] border-t-transparent rounded-full animate-spin mb-4"></div>
             <p className="text-xs font-mono">Loading resolved application questions...</p>
           </div>
         );
@@ -291,10 +340,10 @@
 
       if (!application) {
         return (
-          <div className="flex-1 p-12 flex flex-col items-center justify-center text-slate-500">
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
             <div className="text-3xl mb-2">📋</div>
-            <p className="text-sm font-semibold text-slate-400">No Job Selected</p>
-            <p className="text-xs text-slate-600 mt-1">
+            <p className="text-sm font-semibold text-[#1E293B]">No Job Selected</p>
+            <p className="text-xs text-[#64748B] mt-1">
               Select a candidate and job tab to inspect pre-populated form questions.
             </p>
           </div>
@@ -306,49 +355,49 @@
 
       return (
         <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full custom-scrollbar">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 mb-8 shadow-lg shadow-black/20">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5 mb-5">
+          <div className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-6 mb-8 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#E8DCCF] pb-5 mb-5">
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">
                     {application.companyName || 'Greenhouse Posting'}
                   </span>
-                  <span className="text-slate-600">•</span>
-                  <span className="text-xs font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                  <span className="text-[#CBD5E1]">•</span>
+                  <span className="text-xs font-mono text-[#059669] bg-[#FAF6F0] px-2 py-0.5 rounded border border-[#9AC89A]">
                     {application.applywizzId}
                   </span>
                 </div>
-                <h1 className="text-xl font-bold text-slate-100">
+                <h1 className="text-xl font-bold text-[#0F172A]">
                   {application.jobTitle || 'Application Form'}
                 </h1>
                 <a
                   href={application.jobUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:text-blue-300 font-mono underline break-all mt-1 inline-block"
+                  className="text-xs text-[#0284C7] hover:text-[#0369A1] font-mono underline break-all mt-1 inline-block"
                 >
                   {application.jobUrl}
                 </a>
               </div>
 
               <div className="flex items-center gap-2.5">
-                <div className="bg-emerald-950/40 border border-emerald-800/40 px-3 py-2 rounded-lg text-center">
-                  <div className="text-xs font-mono font-bold text-emerald-400">{supabaseCount}</div>
-                  <div className="text-[10px] text-emerald-500/80 uppercase tracking-wider">supabase</div>
+                <div className="bg-[#9AC89A]/30 border border-[#9AC89A] px-3.5 py-2 rounded-xl text-center">
+                  <div className="text-xs font-mono font-bold text-[#2D5C2D]">{supabaseCount}</div>
+                  <div className="text-[10px] text-[#2D5C2D] uppercase tracking-wider font-semibold">supabase</div>
                 </div>
-                <div className="bg-violet-950/40 border border-violet-800/40 px-3 py-2 rounded-lg text-center">
-                  <div className="text-xs font-mono font-bold text-violet-400">{aiCount}</div>
-                  <div className="text-[10px] text-violet-500/80 uppercase tracking-wider">ai</div>
+                <div className="bg-[#8B5CF6]/15 border border-[#8B5CF6]/40 px-3.5 py-2 rounded-xl text-center">
+                  <div className="text-xs font-mono font-bold text-[#6D28D9]">{aiCount}</div>
+                  <div className="text-[10px] text-[#6D28D9] uppercase tracking-wider font-semibold">ai</div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-950/80 border border-slate-800 rounded-lg px-4 py-2.5 flex items-center justify-between text-xs text-slate-400">
+            <div className="bg-[#FAF6F0] border border-[#E8DCCF] rounded-lg px-4 py-2.5 flex items-center justify-between text-xs text-[#64748B]">
               <div className="flex items-center gap-2">
-                <span className="text-emerald-400">🔒</span>
+                <span className="text-[#059669]">🔒</span>
                 <span>Readonly Operator Mode (V1) — Pre-populated for verification and QA review</span>
               </div>
-              <span className="text-[11px] font-mono text-slate-500">
+              <span className="text-[11px] font-mono text-[#64748B]">
                 {application.resolvedFields.length} Form Fields
               </span>
             </div>
@@ -356,10 +405,10 @@
 
           <div className="space-y-6">
             {application.resolvedFields.length === 0 ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center text-slate-400">
+              <div className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-8 text-center text-[#64748B] shadow-sm">
                 <p className="text-sm">No interactive form fields extracted for this job posting.</p>
                 {application.status === 'EXPIRED' && (
-                  <p className="text-xs text-rose-400 mt-1">This job posting appears to be closed or expired.</p>
+                  <p className="text-xs text-[#E11D48] mt-1">This job posting appears to be closed or expired.</p>
                 )}
               </div>
             ) : (
@@ -367,13 +416,13 @@
                 return (
                   <div
                     key={`${field.fieldId}-${index}`}
-                    className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition-all"
+                    className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-5 hover:border-[#D4C3B3] shadow-sm transition-all"
                   >
                     <div className="flex items-start justify-between gap-4 mb-3">
-                      <label className="text-sm font-semibold text-slate-200 leading-snug">
-                        <span className="text-slate-500 font-mono text-xs mr-2">#{index + 1}</span>
+                      <label className="text-sm font-semibold text-[#0F172A] leading-snug">
+                        <span className="text-[#94A3B8] font-mono text-xs mr-2">#{index + 1}</span>
                         {field.label || field.name || field.fieldId}
-                        <span className="text-rose-500 ml-1 font-bold">*</span>
+                        <span className="text-[#EF4444] ml-1 font-bold">*</span>
                       </label>
 
                       <div className="flex-shrink-0">
@@ -387,17 +436,17 @@
                           readOnly
                           rows={3}
                           value={field.value || '(No answer provided)'}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 font-sans leading-relaxed focus:outline-none cursor-default resize-none"
+                          className="w-full bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg p-3 text-xs text-[#1E293B] font-sans leading-relaxed focus:outline-none cursor-default resize-none"
                         />
                       ) : field.type === 'file' ? (
-                        <div className="flex items-center gap-2 p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 font-mono">
+                        <div className="flex items-center gap-2 p-3 bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg text-xs text-[#334155] font-mono">
                           <span>📎</span>
                           <span className="truncate">{field.value || 'Master Resume PDF'}</span>
                         </div>
                       ) : field.type === 'select' || field.type === 'radio' ? (
-                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex items-center justify-between text-xs text-slate-200 font-medium">
+                        <div className="p-3 bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg flex items-center justify-between text-xs text-[#1E293B] font-medium">
                           <span>{field.value || '(No option selected)'}</span>
-                          <span className="text-[10px] uppercase font-mono text-slate-500 bg-slate-900 px-2 py-0.5 rounded">
+                          <span className="text-[10px] uppercase font-mono text-[#64748B] bg-[#FFFFFF] border border-[#E5D7C7] px-2 py-0.5 rounded">
                             {field.type}
                           </span>
                         </div>
@@ -407,14 +456,14 @@
                           readOnly
                           value={field.value || ''}
                           placeholder="(Empty)"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-200 font-sans focus:outline-none cursor-default"
+                          className="w-full bg-[#FAF6F0] border border-[#E5D7C7] rounded-lg px-3 py-2.5 text-xs text-[#1E293B] font-sans focus:outline-none cursor-default"
                         />
                       )}
                     </div>
 
-                    <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                    <div className="mt-2.5 flex items-center justify-between text-[11px] text-[#64748B] font-mono">
                       <span>ID: {field.fieldId}</span>
-                      <span className="capitalize text-slate-500">{field.type}</span>
+                      <span className="capitalize text-[#64748B]">{field.type}</span>
                     </div>
                   </div>
                 );
@@ -520,15 +569,15 @@
       }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
       return (
-        <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
-          <header className="h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-6 flex-shrink-0">
+        <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1E293B] font-sans overflow-hidden select-none">
+          <header className="h-16 bg-[#FFFFFF] border-b border-[#E8DCCF] flex items-center justify-between px-6 flex-shrink-0 shadow-sm">
             <div className="flex items-center gap-3">
-              <span className="text-xl">🟢</span>
+              <span className="text-2xl">🟢</span>
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-slate-100">
+                <h1 className="text-sm font-bold tracking-tight text-[#1A1A2E]">
                   Greenhouse Automation Platform
                 </h1>
-                <p className="text-[10px] text-slate-400 font-mono">
+                <p className="text-[10px] text-[#64748B] font-mono">
                   Phase V1-5 Operator Dashboard · Dual-Branch Pipeline
                 </p>
               </div>
@@ -536,26 +585,32 @@
 
             {stats && (
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
-                  <span className="text-slate-400">Candidates:</span>
-                  <span className="text-emerald-400 font-bold">{stats.totalCandidates}</span>
+                {/* Yellow Card: Candidates */}
+                <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#E5C350] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+                  <span className="text-[#5C4A0A]">Candidates:</span>
+                  <span className="text-[#5C4A0A] font-bold">{stats.totalCandidates}</span>
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
-                  <span className="text-slate-400">Jobs:</span>
-                  <span className="text-blue-400 font-bold">{stats.totalApplications}</span>
+                {/* Blue Card: Jobs */}
+                <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#A2C5DD] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+                  <span className="text-[#2D5C8C]">Jobs:</span>
+                  <span className="text-[#2D5C8C] font-bold">{stats.totalApplications}</span>
                 </div>
 
-                <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 px-3 py-1 rounded-full text-xs font-mono">
-                  <span className="text-emerald-400 font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
-                  <span className="text-slate-600">|</span>
-                  <span className="text-violet-400 font-bold">🟣 ai: {stats.aiPercentage}%</span>
+                {/* Green Card: supabase % */}
+                <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#84B784] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+                  <span className="text-[#2D5C2D] font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
+                </div>
+
+                {/* Coral Card: ai % */}
+                <div className="flex items-center gap-1.5 bg-[#E88474] border border-[#D87060] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
+                  <span className="text-[#6B2C2C] font-bold">🟣 ai: {stats.aiPercentage}%</span>
                 </div>
 
                 <button
                   type="button"
                   onClick={fetchInitialData}
-                  className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1 rounded-md transition-colors font-medium"
+                  className="text-xs bg-[#FFFFFF] hover:bg-[#FAF6F0] text-[#1E293B] border border-[#D8C7B5] px-3 py-1.5 rounded-lg transition-colors font-medium shadow-sm"
                 >
                   ↻ Refresh
                 </button>
@@ -571,7 +626,7 @@
               isLoading={isLoadingCandidates}
             />
 
-            <main className="flex-1 flex flex-col bg-slate-950 overflow-hidden">
+            <main className="flex-1 flex flex-col bg-[#FFF5EB] overflow-hidden">
               {candidateDetail ? (
                 <>
                   <JobQueueView
@@ -582,7 +637,7 @@
                   <FormRenderer application={application} isLoading={isLoadingApplication} />
                 </>
               ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+                <div className="flex-1 flex flex-col items-center justify-center text-[#64748B]">
                   <p className="text-sm">Select a candidate to view assigned applications.</p>
                 </div>
               )}
