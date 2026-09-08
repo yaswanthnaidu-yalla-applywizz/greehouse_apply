@@ -65,6 +65,18 @@ const envSchema = z.object({
 
   /** Maximum question/field count allowed for active candidate queue insertion (default: 23, i.e., < 23 questions) */
   MAX_JOB_QUESTIONS: z.coerce.number().int().positive().default(23),
+
+  /** Supabase Project URL */
+  SUPABASE_URL: z.string().optional(),
+
+  /** Supabase Service Role Secret Key */
+  SUPABASE_SERVICE_KEY: z.string().optional(),
+
+  /** Supabase Storage bucket for candidate resumes */
+  SUPABASE_STORAGE_BUCKET_RESUMES: z.string().default('resumes'),
+
+  /** Supabase Storage bucket for application confirmation proof screenshots */
+  SUPABASE_STORAGE_BUCKET_PROOFS: z.string().default('proofs_web'),
 });
 
 /**
