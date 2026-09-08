@@ -55,7 +55,7 @@ async function runTests() {
     assert(resT1 !== null, 'Tier 1 resolves standard email field');
     assert(resT1?.source === 'supabase', 'Tier 1 returns source: "supabase"');
     assert(resT1?.resolvedByTier === 1, 'Tier 1 returns resolvedByTier: 1');
-    assert(resT1?.value === 'rajkumarbharath7@gmail.com', 'Tier 1 resolves expected email value');
+    assert(resT1?.value === sampleCandidate.email, 'Tier 1 resolves expected email value');
   }
 
   // --------------------------------------------------------------------------

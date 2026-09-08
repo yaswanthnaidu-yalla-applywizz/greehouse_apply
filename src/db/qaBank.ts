@@ -83,3 +83,5 @@ export async function findAnswersByCandidate(applywizzId: string): Promise<QABan
 
   return (data || []) as QABankRow[];
 }
+
+export const findAnswerByFingerprint = getAnswer;

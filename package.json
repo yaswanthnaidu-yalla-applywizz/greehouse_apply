@@ -6,16 +6,19 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "tsx src/index.ts",
+    "start:dashboard": "tsx src/server/index.ts",
     "dev": "tsx src/index.ts",
     "scan": "tsx src/scanner/runScan.ts",
     "sync:candidates": "tsx src/candidate/runCandidateSync.ts",
     "resolve": "tsx src/resolver/runResolver.ts",
     "dashboard": "tsx src/server/index.ts",
-    "pipeline": "tsx src/orchestrator/runPipeline.ts",
-    "test": "tsx tests/e2e.test.ts",
-    "test:e2e": "tsx tests/e2e.test.ts",
+    "pipeline": "tsx src/index.ts",
+    "dry-run": "tsx src/submitter/runUserApplication.ts",
+    "submit": "tsx src/submitter/runLiveSubmitCli.ts",
     "db:migrate": "tsx src/db/migrate.ts",
+    "test": "tsx tests/e2eIntegration.test.ts",
+    "test:e2e": "tsx tests/e2eIntegration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
