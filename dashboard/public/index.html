@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Greenhouse Automation Platform — Operator Dashboard (V2)</title>
+  <title>ApplyWizz Auto Apply Platform — Operator Dashboard (V2)</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -12,16 +12,17 @@
         extend: {
           colors: {
             page: '#FFF5EB',
-            sidebar: '#1A1A2E',
+            coral: '#E88474',
+            dark: '#1A1A2E',
             card: '#FFFFFF',
             'metric-yellow': '#F4D66B',
             'metric-yellow-text': '#5C4A0A',
             'metric-coral': '#E88474',
             'metric-coral-text': '#6B2C2C',
             'metric-green': '#9AC89A',
-            'metric-green-text': '#2D5C2D',
+            'metric-green-text': '#1E4620',
             'metric-blue': '#B8D4E8',
-            'metric-blue-text': '#2D5C8C',
+            'metric-blue-text': '#1E3A5F',
             supabase: '#10B981',
             ai: '#8B5CF6',
             manual: '#F59E0B',
@@ -46,27 +47,11 @@
       background: #FFF5EB;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #D6C7B7;
+      background: #1A1A2E;
       border-radius: 3px;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #BFADA0;
-    }
-
-    /* Sidebar dark scrollbar */
-    .sidebar-scrollbar::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    .sidebar-scrollbar::-webkit-scrollbar-track {
-      background: #131322;
-    }
-    .sidebar-scrollbar::-webkit-scrollbar-thumb {
-      background: #2E2E4A;
-      border-radius: 3px;
-    }
-    .sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #3E3E60;
+      background: #E88474;
     }
 
     @keyframes fadeIn {
@@ -78,20 +63,58 @@
     }
   </style>
 </head>
-<body class="bg-[#FFF5EB] text-[#1E293B] antialiased overflow-hidden select-none font-sans">
+<body class="bg-[#FFF5EB] text-[#1A1A2E] antialiased overflow-hidden select-none font-sans">
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useCallback, useMemo, useRef } = React;
     const API_BASE_URL = window.location.origin;
 
+    // -------------------------------------------------------------
+    // Difficulty Badge Component
+    // -------------------------------------------------------------
+    function DifficultyBadge({ fieldsCount, level, className = '' }) {
+      let resolvedLevel = level;
+      if (!resolvedLevel) {
+        if (fieldsCount === undefined || fieldsCount === null) resolvedLevel = 'Easy';
+        else if (fieldsCount < 10) resolvedLevel = 'Easy';
+        else if (fieldsCount <= 18) resolvedLevel = 'Medium';
+        else resolvedLevel = 'Hard';
+      }
+
+      if (resolvedLevel === 'Easy') {
+        return (
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+            Easy
+          </span>
+        );
+      }
+
+      if (resolvedLevel === 'Medium') {
+        return (
+          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+            Medium
+          </span>
+        );
+      }
+
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+          Hard
+        </span>
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Source Attribution Badge Component
+    // -------------------------------------------------------------
     function SourceBadge({ source, confidence, isEdited }) {
       const activeSource = isEdited ? 'manual' : source;
 
       if (activeSource === 'manual') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-amber-50 text-amber-800 border border-amber-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]"></span>
             <span>manual</span>
           </span>
         );
@@ -99,8 +122,8 @@
 
       if (activeSource === 'unresolved') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-rose-50 text-rose-800 border border-rose-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444] animate-pulse"></span>
             <span>unresolved</span>
           </span>
         );
@@ -108,11 +131,11 @@
 
       if (activeSource === 'supabase') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-emerald-50 text-emerald-800 border border-emerald-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#D1FAE5] text-[#065F46] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
             <span>supabase</span>
             {confidence !== undefined && (
-              <span className="text-[10px] text-emerald-700/80">({(confidence * 100).toFixed(0)}%)</span>
+              <span className="text-[10px] text-[#047857]">({(confidence * 100).toFixed(0)}%)</span>
             )}
           </span>
         );
@@ -120,8 +143,8 @@
 
       if (activeSource === 'resume_parse') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-cyan-50 text-cyan-800 border border-cyan-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-600"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#CFFAFE] text-[#155E75] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#06B6D4]"></span>
             <span>resume</span>
           </span>
         );
@@ -129,60 +152,54 @@
 
       if (activeSource === 'fuzzy_match') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-blue-50 text-blue-800 border border-blue-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#DBEAFE] text-[#1E40AF] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#3B82F6]"></span>
             <span>fuzzy</span>
-            {confidence !== undefined && (
-              <span className="text-[10px] text-blue-700/80">({(confidence * 100).toFixed(0)}%)</span>
-            )}
           </span>
         );
       }
 
       if (activeSource === 'api') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-indigo-50 text-indigo-800 border border-indigo-400 shadow-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#3730A3] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#6366F1]"></span>
             <span>api</span>
           </span>
         );
       }
 
-      // Default: 'ai'
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-purple-50 text-purple-800 border border-purple-400 shadow-sm">
-          <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#EDE9FE] text-[#5B21B6] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]"></span>
           <span>ai</span>
-          {confidence !== undefined && (
-            <span className="text-[10px] text-purple-700/80">({(confidence * 100).toFixed(0)}%)</span>
-          )}
         </span>
       );
     }
 
+    // -------------------------------------------------------------
+    // Application Status Badge Component
+    // -------------------------------------------------------------
     function ApplicationStatusBadge({ status, applicationId, onStatusChange, className = '' }) {
       const statusRef = useRef(status);
       statusRef.current = status;
 
       useEffect(() => {
-        if (status !== 'APPLYING' || !applicationId) {
-          return;
-        }
+        if (status !== 'APPLYING' || !applicationId) return;
 
         const pollInterval = setInterval(async () => {
           try {
-            const res = await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(applicationId)}`);
+            const url = `/api/applications/${encodeURIComponent(applicationId)}`;
+            const res = await fetch(url);
             if (res.ok) {
               const appData = await res.json();
               if (appData.status && appData.status !== statusRef.current) {
-                console.log(`[StatusBadge] 🔄 Polled status update for ${applicationId}: ${statusRef.current} -> ${appData.status}`);
                 if (onStatusChange) {
                   onStatusChange(appData.status, appData);
                 }
               }
             }
           } catch (err) {
-            console.warn(`[StatusBadge] Polling error for ${applicationId}:`, err);
+            console.warn('Polling error:', err);
           }
         }, 2000);
 
@@ -192,194 +209,59 @@
       switch (status) {
         case 'APPLIED':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-semibold font-mono bg-emerald-50 text-emerald-800 border border-emerald-400 shadow-sm ${className}`}>
-              <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+              <span className="w-2 h-2 rounded-full bg-[#1E4620]"></span>
               <span>Applied &amp; Verified</span>
             </span>
           );
         case 'APPLYING':
           return (
-            <span className={`inline-flex items-center gap-2 px-3 py-0.5 rounded-full text-xs font-semibold font-mono bg-amber-50 text-amber-900 border border-amber-400 shadow-sm animate-pulse ${className}`}>
-              <span className="w-2 h-2 rounded-full border-2 border-amber-600 border-t-transparent animate-spin"></span>
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}>
+              <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
               <span>Submitting... (Live)</span>
             </span>
           );
         case 'DRY_RUN_COMPLETE':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-semibold font-mono bg-blue-50 text-blue-800 border border-blue-400 shadow-sm ${className}`}>
-              <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+              <span className="w-2 h-2 rounded-full bg-[#1E3A5F]"></span>
               <span>Dry-Run Complete</span>
             </span>
           );
         case 'CAPTCHA_REQUIRED':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-semibold font-mono bg-orange-50 text-orange-900 border border-orange-500 shadow-sm ${className}`}>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
               <span>🛡️</span>
-              <span>CAPTCHA Challenge</span>
+              <span>CAPTCHA Required</span>
             </span>
           );
         case 'FAILED':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-semibold font-mono bg-rose-50 text-rose-800 border border-rose-400 shadow-sm ${className}`}>
-              <span className="w-2 h-2 rounded-full bg-rose-600"></span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#EF4444] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+              <span className="w-2 h-2 rounded-full bg-white"></span>
               <span>Submission Failed</span>
             </span>
           );
         case 'EXPIRED':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-semibold font-mono bg-slate-100 text-slate-700 border border-slate-300 shadow-sm ${className}`}>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E2E8F0] text-[#475569] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
               <span>Closed / Expired</span>
             </span>
           );
         case 'READY_FOR_REVIEW':
         default:
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-semibold font-mono bg-slate-50 text-slate-800 border border-slate-300 shadow-sm ${className}`}>
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F4D66B] text-[#5C4A0A] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+              <span className="w-2 h-2 rounded-full bg-[#5C4A0A]"></span>
               <span>Ready for Review</span>
             </span>
           );
       }
     }
 
-    function ProofViewer({ isOpen, onClose, screenshotUrl, title = 'Application Verification Proof', metadata = {} }) {
-      useEffect(() => {
-        const handleKeyDown = (e) => {
-          if (e.key === 'Escape') onClose();
-        };
-        if (isOpen) {
-          window.addEventListener('keydown', handleKeyDown);
-          document.body.style.overflow = 'hidden';
-        }
-        return () => {
-          window.removeEventListener('keydown', handleKeyDown);
-          document.body.style.overflow = 'unset';
-        };
-      }, [isOpen, onClose]);
-
-      if (!isOpen || !screenshotUrl) return null;
-
-      const handleDownload = () => {
-        const link = document.createElement('a');
-        link.href = screenshotUrl;
-        link.download = `${metadata.applywizzId || 'candidate'}_${metadata.companyName || 'proof'}_verification.png`;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      };
-
-      const formattedDate = metadata.capturedAt
-        ? new Date(metadata.capturedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
-        : 'Recently captured';
-
-      return (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn"
-          onClick={onClose}
-        >
-          <div
-            className="relative flex flex-col w-full max-w-5xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden text-slate-900"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50/80">
-              <div className="flex items-center gap-3">
-                <span className="text-xl">📸</span>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">{title}</h2>
-                  <p className="text-xs font-mono text-slate-500">
-                    {metadata.companyName ? `${metadata.companyName} — ` : ''}
-                    {metadata.jobTitle || 'Greenhouse Application'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {metadata.status && <ApplicationStatusBadge status={metadata.status} />}
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors"
-                >
-                  <span>⬇️</span>
-                  <span>Download Image</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            {/* Metadata Banner */}
-            <div className="px-6 py-3 bg-[#FFF5EB] border-b border-[#E8DCCF] flex flex-wrap items-center justify-between gap-4 text-xs font-mono text-slate-700">
-              <div className="flex items-center gap-4 flex-wrap">
-                {metadata.candidateName && (
-                  <div>
-                    <span className="text-slate-500 font-sans">Candidate: </span>
-                    <span className="font-bold text-slate-900 font-sans">{metadata.candidateName}</span>
-                    {metadata.applywizzId && (
-                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-[#FAF6F0] border border-[#D8C7B5] text-[#059669]">
-                        {metadata.applywizzId}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {metadata.capturedAt && (
-                  <div>
-                    <span className="text-slate-500 font-sans">Captured: </span>
-                    <span className="text-slate-800">{formattedDate}</span>
-                  </div>
-                )}
-              </div>
-
-              {metadata.jobUrl && (
-                <a
-                  href={metadata.jobUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-sky-600 hover:text-sky-800 underline truncate max-w-xs"
-                >
-                  {metadata.jobUrl}
-                </a>
-              )}
-            </div>
-
-            {/* Screenshot Viewport */}
-            <div className="flex-1 overflow-auto p-6 bg-slate-900/5 flex justify-center custom-scrollbar">
-              <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden max-w-full">
-                <img
-                  src={screenshotUrl}
-                  alt="Application Confirmation Proof"
-                  className="w-full h-auto object-contain select-text"
-                  loading="lazy"
-                />
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200 bg-slate-50 text-xs text-slate-500">
-              <span className="font-mono">Press Esc to exit proof view</span>
-              <div className="flex items-center gap-2">
-                <a
-                  href={screenshotUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-semibold text-slate-700 hover:text-slate-900 hover:underline"
-                >
-                  Open raw URL ↗
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
+    // -------------------------------------------------------------
+    // Submission Controls Component
+    // -------------------------------------------------------------
     function SubmissionControls({
       applicationId,
       status,
@@ -408,7 +290,7 @@
             <button
               type="button"
               onClick={onResumeCaptcha}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-orange-600 hover:bg-orange-700 shadow-md hover:shadow-lg transition-all animate-bounce"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all animate-bounce"
             >
               <span>🔓</span>
               <span>I Solved CAPTCHA — Resume Submission</span>
@@ -419,21 +301,20 @@
             type="button"
             onClick={onTriggerDryRun}
             disabled={!canDryRun}
-            title={isDryRunning ? 'Running dry-run form fill...' : 'Launch headful browser preview without submitting'}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold font-mono transition-all ${
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold font-mono transition-all ${
               canDryRun
-                ? 'bg-[#FFFFFF] hover:bg-[#F8F3ED] text-[#1E293B] border border-[#D8C7B5] shadow-sm hover:border-[#1A1A2E]'
-                : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                ? 'bg-[#B8D4E8] hover:bg-[#A3C7DF] text-[#1A1A2E] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+                : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
             }`}
           >
             {isDryRunning ? (
               <>
-                <span className="w-2.5 h-2.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin"></span>
+                <span className="w-2.5 h-2.5 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin"></span>
                 <span>Dry-Running...</span>
               </>
             ) : (
               <>
-                <span>🚀</span>
+                <span>🎬</span>
                 <span>Dry-Run (Preview)</span>
               </>
             )}
@@ -443,19 +324,10 @@
             type="button"
             onClick={onTriggerSubmit}
             disabled={!canSubmit}
-            title={
-              hasUnresolved
-                ? `Cannot submit: ${unresolvedFieldsCount} unresolved field(s) require review`
-                : isApplying
-                ? 'Submission in progress...'
-                : isApplied
-                ? 'Application already submitted and verified'
-                : 'Submit verified application via headless Playwright engine'
-            }
-            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold font-mono transition-all shadow-sm ${
+            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold font-mono transition-all ${
               canSubmit
-                ? 'bg-[#059669] hover:bg-[#047857] text-white shadow-emerald-900/20 hover:shadow-md'
-                : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+                ? 'bg-[#E88474] hover:bg-[#D67161] text-white border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+                : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
             }`}
           >
             {isApplying ? (
@@ -468,9 +340,9 @@
                 <span>✅</span>
                 <span>Applied &amp; Verified</span>
               </>
-            ) : (
+            )} : (
               <>
-                <span>⚡</span>
+                <span>🚀</span>
                 <span>Approve &amp; Submit</span>
               </>
             )}
@@ -480,7 +352,7 @@
             <button
               type="button"
               onClick={onViewDryRun}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 border border-sky-300 shadow-sm transition-colors font-mono"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold text-[#1A1A2E] bg-white hover:bg-[#FAF4EB] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
             >
               <span>🖼️</span>
               <span>Dry-Run Screenshot</span>
@@ -491,7 +363,7 @@
             <button
               type="button"
               onClick={onViewProof}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-400 shadow-sm transition-colors font-mono"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E4620] bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
             >
               <span>📸</span>
               <span>View Web Proof</span>
@@ -501,6 +373,9 @@
       );
     }
 
+    // -------------------------------------------------------------
+    // Editable Form Field Component
+    // -------------------------------------------------------------
     function EditableFormField({ field, applicationId, onFieldUpdate }) {
       const [isEditing, setIsEditing] = useState(false);
       const [value, setValue] = useState(field.value || '');
@@ -529,7 +404,7 @@
 
         try {
           const response = await fetch(
-            `${API_BASE_URL}/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}`,
+            `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}`,
             {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
@@ -567,14 +442,22 @@
       };
 
       const isTextarea = field.type === 'textarea';
+      const isUnresolved = field.source === 'unresolved';
 
       return (
-        <div className="group relative p-4 rounded-xl border border-slate-200/90 hover:border-slate-300 bg-white transition-all shadow-sm">
-          <div className="flex items-start justify-between gap-3 mb-2">
+        <div
+          className={`group relative p-3.5 rounded-lg bg-white transition-all ${
+            isUnresolved
+              ? 'border-2 border-[#EF4444] shadow-[2px_2px_0px_#EF4444]'
+              : 'border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3 mb-1.5">
             <div className="flex-1">
-              <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
-                <span>{field.label || field.name || field.fieldId}</span>
-                <span className="text-[10px] font-mono text-slate-400 font-normal">({field.type})</span>
+              <label className="text-xs font-bold text-[#1A1A2E] flex items-center gap-1.5">
+                <span>{field.label}</span>
+                {field.isRequired && <span className="text-[#EF4444] font-bold">*</span>}
+                <span className="text-[10px] font-mono text-[#64748B] font-normal">({field.type})</span>
               </label>
             </div>
 
@@ -584,13 +467,12 @@
                 confidence={field.confidence}
                 isEdited={field.isEdited}
               />
-
               {!isEditing && (
                 <button
                   type="button"
                   onClick={() => setIsEditing(true)}
                   title="Click to edit field value"
-                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition text-xs"
+                  className="opacity-60 group-hover:opacity-100 p-1 text-[#1A1A2E] hover:bg-[#FAF4EB] border border-transparent hover:border-[#1A1A2E] rounded transition text-xs"
                 >
                   ✏️
                 </button>
@@ -609,7 +491,7 @@
                   onKeyDown={handleKeyDown}
                   disabled={isSaving}
                   rows={3}
-                  className="w-full text-xs font-mono p-2.5 bg-amber-50/20 border-2 border-amber-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 transition text-slate-900"
+                  className="w-full text-xs font-mono p-2.5 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E]"
                 />
               ) : (
                 <input
@@ -620,26 +502,25 @@
                   onBlur={handleSave}
                   onKeyDown={handleKeyDown}
                   disabled={isSaving}
-                  className="w-full text-xs font-mono p-2 bg-amber-50/20 border-2 border-amber-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 transition text-slate-900"
+                  className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E]"
                 />
               )}
-
-              <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400 font-mono">
+              <div className="flex items-center justify-between mt-1 text-[10px] text-[#64748B] font-mono">
                 <span>Press Enter to save, Esc to cancel</span>
-                {isSaving && <span className="text-amber-600 font-semibold animate-pulse">Saving...</span>}
-                {error && <span className="text-rose-600 font-semibold">{error}</span>}
+                {isSaving && <span className="text-[#D97706] font-bold animate-pulse">Saving...</span>}
+                {error && <span className="text-[#EF4444] font-bold">{error}</span>}
               </div>
             </div>
           ) : (
             <div
               onClick={() => setIsEditing(true)}
-              title="Click to edit"
-              className="mt-1 p-2.5 rounded-lg bg-slate-50/80 border border-slate-100 hover:bg-slate-100/80 cursor-pointer transition text-xs font-mono break-words"
+              title="Click to edit answer"
+              className="mt-1 p-2 rounded-md bg-[#FAF4EB] border border-[#1A1A2E] hover:bg-[#F5ECE0] cursor-pointer transition text-xs font-mono break-words"
             >
               {field.value && field.value.trim().length > 0 ? (
-                <span className="text-slate-900">{field.value}</span>
+                <span className="text-[#1A1A2E] font-medium">{field.value}</span>
               ) : (
-                <span className="text-slate-400 italic">No answer provided (click to edit)</span>
+                <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved field (click to provide answer)</span>
               )}
             </div>
           )}
@@ -647,6 +528,143 @@
       );
     }
 
+    // -------------------------------------------------------------
+    // Proof Viewer Modal Component
+    // -------------------------------------------------------------
+    function ProofViewer({ isOpen, onClose, screenshotUrl, title = 'Application Verification Proof', metadata = {} }) {
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (e.key === 'Escape') onClose();
+        };
+        if (isOpen) {
+          window.addEventListener('keydown', handleKeyDown);
+          document.body.style.overflow = 'hidden';
+        }
+        return () => {
+          window.removeEventListener('keydown', handleKeyDown);
+          document.body.style.overflow = 'unset';
+        };
+      }, [isOpen, onClose]);
+
+      if (!isOpen || !screenshotUrl) return null;
+
+      const handleDownload = () => {
+        const link = document.createElement('a');
+        link.href = screenshotUrl;
+        link.download = `${metadata.applywizzId || 'candidate'}_${metadata.companyName || 'proof'}_verification.png`;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const formattedDate = metadata.capturedAt
+        ? new Date(metadata.capturedAt).toLocaleString()
+        : 'Recently captured';
+
+      return (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1A2E]/80 backdrop-blur-sm animate-fadeIn"
+          onClick={onClose}
+        >
+          <div
+            className="relative flex flex-col w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-[8px_8px_0px_#1A1A2E] border-2 border-[#1A1A2E] overflow-hidden text-[#1A1A2E]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b-2 border-[#1A1A2E] bg-[#FAF4EB]">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">📸</span>
+                <div>
+                  <h2 className="text-base font-bold text-[#1A1A2E]">{title}</h2>
+                  <p className="text-xs font-mono text-[#64748B]">
+                    {metadata.companyName ? `${metadata.companyName} — ` : ''}
+                    {metadata.jobTitle || 'Greenhouse Application'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {metadata.status && <ApplicationStatusBadge status={metadata.status} />}
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#E88474] hover:bg-[#D67161] border border-[#1A1A2E] rounded-md shadow-[2px_2px_0px_#1A1A2E] transition-all"
+                >
+                  <span>⬇️</span>
+                  <span>Download Image</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="p-1.5 text-[#1A1A2E] hover:bg-[#E8DCCF] border border-[#1A1A2E] rounded-md transition font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="px-6 py-3 bg-[#FFF5EB] border-b border-[#1A1A2E] flex flex-wrap items-center justify-between gap-4 text-xs font-mono text-[#1A1A2E]">
+              <div className="flex items-center gap-4 flex-wrap">
+                {metadata.candidateName && (
+                  <div>
+                    <span className="text-[#64748B] font-sans">Candidate: </span>
+                    <span className="font-bold text-[#1A1A2E] font-sans">{metadata.candidateName}</span>
+                    {metadata.applywizzId && (
+                      <span className="ml-1.5 px-2 py-0.5 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] font-bold">
+                        {metadata.applywizzId}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {metadata.capturedAt && (
+                  <div>
+                    <span className="text-[#64748B] font-sans">Captured: </span>
+                    <span className="text-[#1A1A2E]">{formattedDate}</span>
+                  </div>
+                )}
+              </div>
+              {metadata.jobUrl && (
+                <a
+                  href={metadata.jobUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-[#2563EB] hover:underline font-bold truncate max-w-xs"
+                >
+                  {metadata.jobUrl}
+                </a>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-auto p-6 bg-[#FAF4EB] flex justify-center custom-scrollbar">
+              <div className="bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden max-w-full">
+                <img
+                  src={screenshotUrl}
+                  alt="Application Confirmation Proof"
+                  className="w-full h-auto object-contain select-text"
+                  loading="lazy"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-3 border-t-2 border-[#1A1A2E] bg-[#FAF4EB] text-xs text-[#64748B]">
+              <span className="font-mono">Press Esc to exit proof view</span>
+              <a
+                href={screenshotUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold text-[#1A1A2E] hover:underline"
+              >
+                Open raw URL ↗
+              </a>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Candidate Directory (Left Sidebar) Component
+    // -------------------------------------------------------------
     function CandidateList({ candidates, selectedId, onSelectCandidate, isLoading }) {
       const [searchTerm, setSearchTerm] = useState('');
 
@@ -657,19 +675,22 @@
           (c) =>
             c.clientName.toLowerCase().includes(query) ||
             c.applywizzId.toLowerCase().includes(query) ||
-            (c.email && c.email.toLowerCase().includes(query))
+            c.email.toLowerCase().includes(query)
         );
       }, [candidates, searchTerm]);
 
       return (
-        <aside className="w-80 flex-shrink-0 bg-[#1A1A2E] border-r border-[#131322] flex flex-col h-full overflow-hidden text-white">
-          <div className="p-4 border-b border-[#24243E] bg-[#1A1A2E] sticky top-0 z-10">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
-                Candidates Directory
-              </h2>
-              <span className="text-xs font-mono bg-[#24243E] text-[#E2E8F0] px-2 py-0.5 rounded-full font-semibold">
-                {filteredCandidates.length} of {candidates.length}
+        <aside className="w-80 flex-shrink-0 bg-[#FAF4EB] border-r-2 border-[#1A1A2E] flex flex-col h-full overflow-hidden text-[#1A1A2E]">
+          <div className="p-4 border-b-2 border-[#1A1A2E] bg-[#FFF5EB] sticky top-0 z-10">
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">👥</span>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+                  Candidates Directory
+                </h2>
+              </div>
+              <span className="text-xs font-mono bg-white text-[#1A1A2E] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] font-bold">
+                {filteredCandidates.length} / {candidates.length}
               </span>
             </div>
 
@@ -678,14 +699,14 @@
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search name or AWL-ID..."
-                className="w-full bg-[#131324] border border-[#2E2E4A] rounded-lg px-3 py-2 text-xs text-white placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#F4D66B]/50 focus:border-[#F4D66B] transition-all"
+                placeholder="🔍 Search name or AWL-ID..."
+                className="w-full bg-white border-2 border-[#1A1A2E] rounded-md px-3 py-2 text-xs text-[#1A1A2E] placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#E88474] transition-all font-medium shadow-[1px_1px_0px_#1A1A2E]"
               />
               {searchTerm && (
                 <button
                   type="button"
                   onClick={() => setSearchTerm('')}
-                  className="absolute right-2.5 top-2 text-[#94A3B8] hover:text-white text-xs"
+                  className="absolute right-2.5 top-2.5 text-[#64748B] hover:text-[#1A1A2E] text-xs font-bold"
                 >
                   ✕
                 </button>
@@ -693,61 +714,70 @@
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-[#24243E]/60 p-2 space-y-1.5 sidebar-scrollbar">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
             {isLoading ? (
-              <div className="p-6 text-center text-xs text-[#94A3B8] animate-pulse">
+              <div className="p-6 text-center text-xs text-[#64748B] font-mono animate-pulse">
                 Loading candidate records...
               </div>
             ) : filteredCandidates.length === 0 ? (
-              <div className="p-6 text-center text-xs text-[#94A3B8]">
-                No candidates matching <span className="text-white">"{searchTerm}"</span>
+              <div className="p-6 text-center text-xs text-[#64748B]">
+                No candidates matching <span className="font-bold text-[#1A1A2E]">"{searchTerm}"</span>
               </div>
             ) : (
               filteredCandidates.map((c) => {
                 const isSelected = c.applywizzId === selectedId;
+                const initials = c.clientName
+                  ? c.clientName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+                  : 'AW';
+
                 return (
                   <button
                     key={c.applywizzId}
                     type="button"
                     onClick={() => onSelectCandidate(c.applywizzId)}
-                    className={`w-full text-left p-3 rounded-xl transition-all duration-150 relative ${
+                    className={`w-full text-left p-3 rounded-lg transition-all duration-150 relative ${
                       isSelected
-                        ? 'bg-[#2E2E54] border-2 border-[#F4D66B] shadow-lg shadow-black/20'
-                        : 'bg-[#24243E]/50 border border-[#2F2F4E] hover:bg-[#2A2A48] hover:border-[#3D3D64]'
+                        ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
+                        : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-mono font-bold text-[#9AC89A] bg-[#1A1A2E] border border-[#355639] px-1.5 py-0.5 rounded">
-                        {c.applywizzId}
-                      </span>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-bold">
+                          {initials}
+                        </span>
+                        <span className="text-[11px] font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] border border-[#1A1A2E] px-1.5 py-0.5 rounded">
+                          {c.applywizzId}
+                        </span>
+                      </div>
+
                       {c.status === 'READY' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#9AC89A] bg-[#9AC89A]/20 px-2 py-0.5 rounded-full border border-[#9AC89A]/40">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#9AC89A] animate-pulse"></span>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#1E4620] bg-[#9AC89A] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#1E4620] animate-pulse"></span>
                           Ready
                         </span>
                       )}
                       {c.status === 'PENDING' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#F4D66B] bg-[#F4D66B]/20 px-2 py-0.5 rounded-full border border-[#F4D66B]/40">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#F4D66B]"></span>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#5C4A0A] bg-[#F4D66B] px-2 py-0.5 rounded border border-[#1A1A2E]">
                           Pending
                         </span>
                       )}
                       {c.status === 'EXPIRED' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#94A3B8] bg-[#24243E] px-2 py-0.5 rounded-full border border-[#3D3D64]">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#475569] bg-[#E2E8F0] px-2 py-0.5 rounded border border-[#1A1A2E]">
                           Expired
                         </span>
                       )}
                     </div>
 
-                    <div className="text-sm font-semibold text-white truncate mb-1">
+                    <div className="text-xs font-bold text-[#1A1A2E] truncate mb-1">
                       {c.clientName}
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] text-[#94A3B8]">
-                      <span className="truncate max-w-[140px] text-[#94A3B8] font-mono">
+                    <div className="flex items-center justify-between text-[11px] text-[#64748B]">
+                      <span className="truncate max-w-[130px] font-medium text-[#64748B]">
                         {c.email || c.location || 'Profile Synced'}
                       </span>
-                      <span className="bg-[#131324] border border-[#2E2E4A] text-[#CBD5E1] px-2 py-0.5 rounded text-[10px] font-semibold font-mono">
+                      <span className="bg-[#FAF4EB] border border-[#1A1A2E] text-[#1A1A2E] px-2 py-0.5 rounded text-[10px] font-bold font-mono">
                         {c.totalJobs} {c.totalJobs === 1 ? 'Job' : 'Jobs'}
                       </span>
                     </div>
@@ -760,26 +790,29 @@
       );
     }
 
+    // -------------------------------------------------------------
+    // Horizontal Job Queue Tabs Component
+    // -------------------------------------------------------------
     function JobQueueView({ candidate, selectedJobUrl, onSelectJob }) {
       if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
         return (
-          <div className="p-4 bg-[#FFF5EB] border-b border-[#E8DCCF] text-xs text-[#64748B]">
+          <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
             No jobs assigned for this candidate.
           </div>
         );
       }
 
       return (
-        <div className="bg-[#FFF5EB] border-b border-[#E8DCCF] px-6 pt-3">
+        <div className="bg-[#FFF5EB] border-b-2 border-[#1A1A2E] px-6 pt-3">
           <div className="flex items-center justify-between mb-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#1E293B]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
                 Assigned Applications Queue
               </span>
-              <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#A2C5DD] text-[#2D5C8C] px-2.5 py-0.5 rounded-full font-semibold">
+              <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#1A1A2E] text-[#1E3A5F] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
                 {candidate.jobs.length} Active
               </span>
-              <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#84B784] text-[#2D5C2D] px-2.5 py-0.5 rounded-full font-semibold">
+              <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#1A1A2E] text-[#1E4620] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
                 ⚡ &lt; 23 Qs
               </span>
             </div>
@@ -789,7 +822,7 @@
                 href={candidate.resumeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#059669] hover:text-[#047857] bg-[#FFFFFF] border border-[#84B784] hover:border-[#059669] px-3 py-1 rounded-lg shadow-sm transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1E4620] hover:text-[#143015] bg-[#9AC89A] border border-[#1A1A2E] px-3 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
               >
                 <span>📄</span>
                 <span>Master Resume PDF</span>
@@ -797,79 +830,63 @@
             )}
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-3 custom-scrollbar">
+          <div className="flex gap-2.5 overflow-x-auto pb-3 custom-scrollbar">
             {candidate.jobs.map((job, idx) => {
               const jobKey = job.canonicalUrl || job.rawUrl;
-              const isSelected =
-                selectedJobUrl === jobKey ||
-                selectedJobUrl === job.rawUrl ||
-                selectedJobUrl === job.canonicalUrl;
+              const isSelected = selectedJobUrl === jobKey || selectedJobUrl === job.rawUrl || selectedJobUrl === job.canonicalUrl;
+              const initial = job.companyName ? job.companyName[0].toUpperCase() : 'G';
 
               return (
                 <button
                   key={`${jobKey}-${idx}`}
                   type="button"
                   onClick={() => onSelectJob(jobKey)}
-                  className={`flex-shrink-0 text-left px-4 py-2.5 rounded-xl border transition-all duration-150 min-w-[220px] max-w-[280px] ${
+                  className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
                     isSelected
-                      ? 'bg-[#FFFFFF] border-2 border-[#1A1A2E] shadow-md ring-2 ring-[#1A1A2E]/10'
-                      : 'bg-[#FFFFFF] border-[#E8DCCF] hover:border-[#CDBDAE] shadow-sm'
+                      ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
+                      : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-[#0F172A] truncate">
-                      {job.companyName || 'Company'}
-                    </span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-1.5 truncate max-w-[150px]">
+                      <span className="w-5 h-5 rounded bg-[#FAF4EB] border border-[#1A1A2E] text-[10px] font-bold text-[#1A1A2E] flex items-center justify-center shrink-0">
+                        {initial}
+                      </span>
+                      <span className="text-xs font-bold text-[#1A1A2E] truncate">
+                        {job.companyName || 'Company'}
+                      </span>
+                    </div>
+                    <DifficultyBadge fieldsCount={job.fieldsCount} />
+                  </div>
 
+                  <div className="text-xs text-[#1A1A2E] font-medium truncate mb-1">
+                    {job.jobTitle || 'Job Application'}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#1A1A2E]/20">
+                    <span className="font-mono text-[#64748B]">
+                      {job.fieldsCount ? `${job.fieldsCount} Qs` : 'Scanned'}
+                    </span>
                     {job.status === 'APPLIED' && (
-                      <span className="text-[10px] font-mono text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.2 rounded">
+                      <span className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
                         ✅ Applied
                       </span>
                     )}
                     {job.status === 'APPLYING' && (
-                      <span className="text-[10px] font-mono text-amber-700 font-bold bg-amber-100 px-1.5 py-0.2 rounded animate-pulse">
+                      <span className="text-[10px] font-mono text-white font-bold bg-[#E88474] border border-[#1A1A2E] px-1.5 py-0.2 rounded animate-pulse">
                         ⏳ Submitting
                       </span>
                     )}
                     {job.status === 'DRY_RUN_COMPLETE' && (
-                      <span className="text-[10px] font-mono text-blue-700 font-bold bg-blue-100 px-1.5 py-0.2 rounded">
+                      <span className="text-[10px] font-mono text-[#1E3A5F] font-bold bg-[#B8D4E8] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
                         🚀 Dry-Run
                       </span>
                     )}
-                    {job.status === 'CAPTCHA_REQUIRED' && (
-                      <span className="text-[10px] font-mono text-orange-700 font-bold bg-orange-100 px-1.5 py-0.2 rounded">
-                        🛡️ CAPTCHA
-                      </span>
-                    )}
-                    {job.status === 'FAILED' && (
-                      <span className="text-[10px] font-mono text-rose-700 font-bold bg-rose-100 px-1.5 py-0.2 rounded">
-                        ❌ Failed
-                      </span>
-                    )}
                     {job.status === 'READY_FOR_REVIEW' && (
-                      <span className="text-[10px] font-mono text-[#059669] font-semibold">
-                        🟢 Ready
+                      <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                        🟡 Ready
                       </span>
                     )}
-                    {job.status === 'EXPIRED' && (
-                      <span className="text-[10px] font-mono text-[#E11D48] font-semibold">
-                        🔴 Expired
-                      </span>
-                    )}
-                    {job.status === 'PENDING' && (
-                      <span className="text-[10px] font-mono text-[#D97706] font-semibold">
-                        🟡 Pending
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="text-xs text-[#334155] truncate font-medium">
-                    {job.jobTitle || 'Job Application'}
-                  </div>
-
-                  <div className="text-[10px] text-[#64748B] mt-1 flex items-center justify-between">
-                    <span>{job.fieldsCount ? `${job.fieldsCount} Questions` : 'Scanned'}</span>
-                    <span className="font-mono text-[#94A3B8]">#{idx + 1}</span>
                   </div>
                 </button>
               );
@@ -879,6 +896,9 @@
       );
     }
 
+    // -------------------------------------------------------------
+    // Form Renderer Component
+    // -------------------------------------------------------------
     function FormRenderer({ application, isLoading, candidateName, onFieldUpdate, onStatusChange }) {
       const [isSubmitting, setIsSubmitting] = useState(false);
       const [isDryRunning, setIsDryRunning] = useState(false);
@@ -889,8 +909,8 @@
       if (isLoading) {
         return (
           <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
-            <div className="w-8 h-8 border-2 border-[#059669] border-t-transparent rounded-full animate-spin mb-4"></div>
-            <p className="text-xs font-mono">Loading resolved application questions...</p>
+            <div className="w-8 h-8 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p className="text-xs font-mono font-bold text-[#1A1A2E]">Loading application form...</p>
           </div>
         );
       }
@@ -898,10 +918,10 @@
       if (!application) {
         return (
           <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
-            <div className="text-3xl mb-2">📋</div>
-            <p className="text-sm font-semibold text-[#1E293B]">No Job Selected</p>
-            <p className="text-xs text-[#64748B] mt-1">
-              Select a candidate and job tab to inspect and edit pre-populated form questions.
+            <div className="text-4xl mb-3">📋</div>
+            <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
+            <p className="text-xs text-[#64748B] mt-1 font-medium">
+              Select a candidate from the left directory and click a job tab above to review and submit.
             </p>
           </div>
         );
@@ -912,14 +932,13 @@
       const supabaseCount = fields.filter((f) => f.source === 'supabase' && !f.isEdited).length;
       const aiCount = fields.filter((f) => f.source === 'ai' && !f.isEdited).length;
       const unresCount = fields.filter((f) => f.source === 'unresolved').length;
-
       const currentStatus = application.status || 'READY_FOR_REVIEW';
       const appId = application.id || application.applywizzId || 'app-default';
 
       const handleTriggerDryRun = async () => {
         setIsDryRunning(true);
         try {
-          const res = await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/dry-run`, {
+          const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/dry-run`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ headless: false }),
@@ -930,9 +949,7 @@
             setViewerTitle('Dry-Run Form Verification Screenshot');
             setViewerOpen(true);
           }
-          if (onStatusChange) {
-            onStatusChange('DRY_RUN_COMPLETE', data);
-          }
+          if (onStatusChange) onStatusChange('DRY_RUN_COMPLETE', data);
         } catch (err) {
           console.error('Dry run failed:', err);
           alert(`Dry run failed: ${err.message}`);
@@ -943,19 +960,15 @@
 
       const handleTriggerSubmit = async () => {
         setIsSubmitting(true);
-        if (onStatusChange) {
-          onStatusChange('APPLYING');
-        }
+        if (onStatusChange) onStatusChange('APPLYING');
         try {
-          const res = await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/submit`, {
+          const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ headless: true }),
           });
           const data = await res.json();
-          if (data.status && onStatusChange) {
-            onStatusChange(data.status, data);
-          }
+          if (data.status && onStatusChange) onStatusChange(data.status, data);
           if (data.proofWebUrl) {
             setViewerImageUrl(data.proofWebUrl);
             setViewerTitle('Live Application Confirmation Proof');
@@ -963,9 +976,7 @@
           }
         } catch (err) {
           console.error('Submission failed:', err);
-          if (onStatusChange) {
-            onStatusChange('FAILED', { error: err.message });
-          }
+          if (onStatusChange) onStatusChange('FAILED', { error: err.message });
           alert(`Submission error: ${err.message}`);
         } finally {
           setIsSubmitting(false);
@@ -974,18 +985,14 @@
 
       const handleResumeCaptcha = async () => {
         setIsSubmitting(true);
-        if (onStatusChange) {
-          onStatusChange('APPLYING');
-        }
+        if (onStatusChange) onStatusChange('APPLYING');
         try {
-          const res = await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/resume-submission`, {
+          const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/resume-submission`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
           });
           const data = await res.json();
-          if (data.status && onStatusChange) {
-            onStatusChange(data.status, data);
-          }
+          if (data.status && onStatusChange) onStatusChange(data.status, data);
           if (data.proofWebUrl) {
             setViewerImageUrl(data.proofWebUrl);
             setViewerTitle('Live Application Confirmation Proof');
@@ -1000,7 +1007,7 @@
       };
 
       return (
-        <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-6 md:p-8 max-w-5xl mx-auto w-full custom-scrollbar">
           <ProofViewer
             isOpen={viewerOpen}
             onClose={() => setViewerOpen(false)}
@@ -1017,31 +1024,32 @@
             }}
           />
 
-          <div className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-6 mb-8 shadow-sm">
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-[#E8DCCF] pb-5 mb-5">
+          <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-6 mb-6 shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b-2 border-[#1A1A2E] pb-5 mb-5">
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">
-                    {application.companyName || application.company_name || 'Greenhouse Posting'}
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+                    🏢 {application.companyName || application.company_name || 'Greenhouse Posting'}
                   </span>
-                  <span className="text-[#CBD5E1]">•</span>
-                  <span className="text-xs font-mono text-[#059669] bg-[#FAF6F0] px-2 py-0.5 rounded border border-[#9AC89A]">
+                  <span className="text-[#1A1A2E] font-bold">•</span>
+                  <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] px-2 py-0.5 rounded border border-[#1A1A2E]">
                     {application.applywizzId || application.applywizz_id}
                   </span>
+                  <DifficultyBadge fieldsCount={fields.length} />
                   <ApplicationStatusBadge
                     status={currentStatus}
                     applicationId={appId}
                     onStatusChange={onStatusChange}
                   />
                 </div>
-                <h1 className="text-xl font-bold text-[#0F172A]">
+                <h1 className="text-xl font-bold text-[#1A1A2E]">
                   {application.jobTitle || application.job_title || 'Application Form'}
                 </h1>
                 <a
                   href={application.jobUrl || application.job_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-[#0284C7] hover:text-[#0369A1] font-mono underline break-all mt-1 inline-block"
+                  className="text-xs text-[#2563EB] hover:underline font-mono truncate max-w-lg mt-1 inline-block font-medium"
                 >
                   {application.jobUrl || application.job_url}
                 </a>
@@ -1079,26 +1087,26 @@
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FAF6F0] border border-[#E8DCCF] rounded-lg px-4 py-2.5 text-xs text-[#64748B]">
-              <div className="flex items-center gap-2">
-                <span className="text-amber-600">✏️</span>
-                <span>Interactive Operator Review (V2) — Click any field to edit answers inline</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FAF4EB] border border-[#1A1A2E] rounded-lg px-4 py-2.5 text-xs text-[#1A1A2E]">
+              <div className="flex items-center gap-2 font-medium">
+                <span>✏️</span>
+                <span>Operator Review — Click any field value below to edit answers inline</span>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
                 {manualCount > 0 && (
-                  <span className="text-[11px] font-mono font-bold text-amber-800 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded">
+                  <span className="text-[11px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
                     {manualCount} manual
                   </span>
                 )}
-                <span className="text-[11px] font-mono font-bold text-[#2D5C2D] bg-[#9AC89A]/30 border border-[#9AC89A] px-2 py-0.5 rounded">
+                <span className="text-[11px] font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
                   {supabaseCount} supabase
                 </span>
-                <span className="text-[11px] font-mono font-bold text-[#6D28D9] bg-[#8B5CF6]/15 border border-[#8B5CF6]/40 px-2 py-0.5 rounded">
+                <span className="text-[11px] font-mono font-bold text-[#5B21B6] bg-[#EDE9FE] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
                   {aiCount} ai
                 </span>
                 {unresCount > 0 && (
-                  <span className="text-[11px] font-mono font-bold text-rose-800 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded animate-pulse">
+                  <span className="text-[11px] font-mono font-bold text-white bg-[#EF4444] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] animate-pulse">
                     {unresCount} unresolved
                   </span>
                 )}
@@ -1106,32 +1114,34 @@
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-3.5">
             {fields.length === 0 ? (
-              <div className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-8 text-center text-[#64748B] shadow-sm">
-                <p className="text-sm">No interactive form fields extracted for this job posting.</p>
+              <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-8 text-center text-[#64748B] shadow-[3px_3px_0px_#1A1A2E]">
+                <p className="text-sm font-bold text-[#1A1A2E]">No interactive form fields extracted for this job posting.</p>
                 {currentStatus === 'EXPIRED' && (
-                  <p className="text-xs text-[#E11D48] mt-1">This job posting appears to be closed or expired.</p>
+                  <p className="text-xs text-[#EF4444] font-bold mt-1">This job posting appears to be closed or expired.</p>
                 )}
               </div>
             ) : (
-              fields.map((field, index) => {
-                return (
-                  <EditableFormField
-                    key={`${field.fieldId}-${index}`}
-                    field={field}
-                    applicationId={appId}
-                    onFieldUpdate={onFieldUpdate}
-                  />
-                );
-              })
+              fields.map((field, index) => (
+                <EditableFormField
+                  key={`${field.fieldId}-${index}`}
+                  field={field}
+                  applicationId={appId}
+                  onFieldUpdate={onFieldUpdate}
+                />
+              ))
             )}
           </div>
         </div>
       );
     }
 
+    // -------------------------------------------------------------
+    // Main App Component
+    // -------------------------------------------------------------
     function App() {
+      const [activeTab, setActiveTab] = useState('dashboard');
       const [candidates, setCandidates] = useState([]);
       const [stats, setStats] = useState(null);
       const [selectedCandidateId, setSelectedCandidateId] = useState(null);
@@ -1146,8 +1156,8 @@
         setIsLoadingCandidates(true);
         try {
           const [candidatesRes, statsRes] = await Promise.all([
-            fetch(`${API_BASE_URL}/api/candidates`),
-            fetch(`${API_BASE_URL}/api/stats`),
+            fetch('/api/candidates'),
+            fetch('/api/stats'),
           ]);
 
           if (candidatesRes.ok) {
@@ -1175,7 +1185,7 @@
 
       const fetchCandidateDetail = useCallback(async (applywizzId) => {
         try {
-          const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}`);
+          const res = await fetch(`/api/candidates/${applywizzId}`);
           if (res.ok) {
             const detail = await res.json();
             setCandidateDetail(detail);
@@ -1203,8 +1213,7 @@
         setIsLoadingApplication(true);
         try {
           const encodedUrl = encodeURIComponent(jobUrl);
-          const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}/jobs/${encodedUrl}`);
-
+          const res = await fetch(`/api/candidates/${applywizzId}/jobs/${encodedUrl}`);
           if (res.ok) {
             const appData = await res.json();
             setApplication(appData);
@@ -1227,12 +1236,10 @@
 
       const handleFieldUpdate = (updatedField) => {
         if (!application) return;
-
         const fields = application.resolvedFields || application.resolved_fields || [];
         const newResolvedFields = fields.map((f) =>
           f.fieldId === updatedField.fieldId || f.name === updatedField.fieldId ? updatedField : f
         );
-
         setApplication({
           ...application,
           resolvedFields: newResolvedFields,
@@ -1242,7 +1249,6 @@
 
       const handleStatusChange = (newStatus, updatedPayload) => {
         if (!application) return;
-
         setApplication((prev) => ({
           ...prev,
           status: newStatus,
@@ -1263,82 +1269,206 @@
       };
 
       return (
-        <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1E293B] font-sans overflow-hidden select-none">
-          <header className="h-16 bg-[#FFFFFF] border-b border-[#E8DCCF] flex items-center justify-between px-6 flex-shrink-0 shadow-sm">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🟢</span>
-              <div>
-                <h1 className="text-sm font-bold tracking-tight text-[#1A1A2E]">
-                  Greenhouse Automation Platform
-                </h1>
-                <p className="text-[10px] text-[#64748B] font-mono">
-                  Phase V2 Operator Dashboard · Verification Proofs &amp; Status Lifecycle
-                </p>
+        <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1A1A2E] font-sans overflow-hidden select-none">
+          <header className="h-16 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] flex items-center justify-between px-6 flex-shrink-0">
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-sm border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
+                  AW
+                </div>
+                <div>
+                  <span className="text-sm font-black tracking-tight text-[#1A1A2E] uppercase">
+                    ApplyWizz
+                  </span>
+                  <span className="text-[10px] block font-mono text-[#64748B] font-bold">
+                    Auto Apply V2
+                  </span>
+                </div>
               </div>
-            </div>
 
-            {stats && (
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#E5C350] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
-                  <span className="text-[#5C4A0A]">Candidates:</span>
-                  <span className="text-[#5C4A0A] font-bold">{stats.totalCandidates}</span>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#A2C5DD] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
-                  <span className="text-[#2D5C8C]">Jobs:</span>
-                  <span className="text-[#2D5C8C] font-bold">{stats.totalApplications}</span>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#84B784] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
-                  <span className="text-[#2D5C2D] font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-[#E88474] border border-[#D87060] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
-                  <span className="text-[#6B2C2C] font-bold">🟣 ai: {stats.aiPercentage}%</span>
-                </div>
-
+              <nav className="hidden md:flex items-center gap-2 bg-white border border-[#1A1A2E] rounded-md p-1 shadow-[2px_2px_0px_#1A1A2E]">
                 <button
                   type="button"
-                  onClick={fetchInitialData}
-                  className="text-xs bg-[#FFFFFF] hover:bg-[#FAF6F0] text-[#1E293B] border border-[#D8C7B5] px-3 py-1.5 rounded-lg transition-colors font-medium shadow-sm"
+                  onClick={() => setActiveTab('find-jobs')}
+                  className={`px-3 py-1 text-xs font-bold rounded transition-all ${
+                    activeTab === 'find-jobs'
+                      ? 'bg-[#E88474] text-white'
+                      : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
+                  }`}
                 >
-                  ↻ Refresh
+                  Find Jobs
                 </button>
-              </div>
-            )}
-          </header>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('dashboard')}
+                  className={`px-3 py-1 text-xs font-bold rounded transition-all ${
+                    activeTab === 'dashboard'
+                      ? 'bg-[#E88474] text-white'
+                      : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
+                  }`}
+                >
+                  Dashboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('stats')}
+                  className={`px-3 py-1 text-xs font-bold rounded transition-all ${
+                    activeTab === 'stats'
+                      ? 'bg-[#E88474] text-white'
+                      : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
+                  }`}
+                >
+                  Stats
+                </button>
+              </nav>
+            </div>
 
-          <div className="flex flex-1 overflow-hidden">
-            <CandidateList
-              candidates={candidates}
-              selectedId={selectedCandidateId}
-              onSelectCandidate={(id) => setSelectedCandidateId(id)}
-              isLoading={isLoadingCandidates}
-            />
+            <div className="flex items-center gap-3">
+              {stats && (
+                <div className="hidden lg:flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5C4A0A] shadow-[1px_1px_0px_#1A1A2E]">
+                    <span>Candidates:</span>
+                    <span>{stats.totalCandidates}</span>
+                  </div>
 
-            <main className="flex-1 flex flex-col bg-[#FFF5EB] overflow-hidden">
-              {candidateDetail ? (
-                <>
-                  <JobQueueView
-                    candidate={candidateDetail}
-                    selectedJobUrl={selectedJobUrl}
-                    onSelectJob={(url) => setSelectedJobUrl(url)}
-                  />
-                  <FormRenderer
-                    application={application}
-                    isLoading={isLoadingApplication}
-                    candidateName={candidateDetail.clientName}
-                    onFieldUpdate={handleFieldUpdate}
-                    onStatusChange={handleStatusChange}
-                  />
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-[#64748B]">
-                  <p className="text-sm">Select a candidate to view assigned applications.</p>
+                  <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E3A5F] shadow-[1px_1px_0px_#1A1A2E]">
+                    <span>Jobs:</span>
+                    <span>{stats.totalApplications}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E4620] shadow-[1px_1px_0px_#1A1A2E]">
+                    <span>🌿 supabase: {stats.supabasePercentage}%</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-[#EDE9FE] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5B21B6] shadow-[1px_1px_0px_#1A1A2E]">
+                    <span>🔮 ai: {stats.aiPercentage}%</span>
+                  </div>
                 </div>
               )}
-            </main>
-          </div>
+
+              <button
+                type="button"
+                onClick={fetchInitialData}
+                title="Refresh Data"
+                className="text-xs bg-white hover:bg-[#FAF4EB] text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
+              >
+                ↻
+              </button>
+
+              <div className="relative p-1.5 bg-white border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E] cursor-pointer">
+                <span className="text-xs">🔔</span>
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#E88474] border border-[#1A1A2E] rounded-full"></span>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
+                <div className="w-5 h-5 rounded-full bg-[#E88474] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-black text-white">
+                  OP
+                </div>
+                <span className="text-xs font-bold text-[#1A1A2E] hidden sm:inline">Operator</span>
+              </div>
+            </div>
+          </header>
+
+          {activeTab === 'stats' ? (
+            <div className="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar">
+              <div className="mb-6">
+                <h2 className="text-2xl font-black text-[#1A1A2E]">Application Pipeline Stats</h2>
+                <p className="text-xs text-[#64748B] font-mono mt-0.5">
+                  Real-time throughput metrics, resolution tier breakdowns, and submission telemetry.
+                </p>
+              </div>
+
+              {stats ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                  <div className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#5C4A0A]">
+                      Total Candidates
+                    </span>
+                    <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                      {stats.totalCandidates}
+                    </div>
+                    <div className="text-[11px] font-mono text-[#5C4A0A] mt-1">
+                      Ingested &amp; segregated
+                    </div>
+                  </div>
+
+                  <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#1E3A5F]">
+                      Total Applications
+                    </span>
+                    <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                      {stats.totalApplications}
+                    </div>
+                    <div className="text-[11px] font-mono text-[#1E3A5F] mt-1">
+                      Active job assignments
+                    </div>
+                  </div>
+
+                  <div className="bg-[#E2F5E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#1E4620]">
+                      Supabase Cache
+                    </span>
+                    <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                      {stats.supabasePercentage}%
+                    </div>
+                    <div className="text-[11px] font-mono text-[#1E4620] mt-1">
+                      {stats.supabaseTaggedCount} fields (0 API calls)
+                    </div>
+                  </div>
+
+                  <div className="bg-[#FFEAE8] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#6B2C2C]">
+                      AI Synthesis
+                    </span>
+                    <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                      {stats.aiPercentage}%
+                    </div>
+                    <div className="text-[11px] font-mono text-[#6B2C2C] mt-1">
+                      {stats.aiTaggedCount} fields synthesized
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center text-xs font-mono text-[#64748B]">Loading statistics...</div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-1 overflow-hidden">
+              <CandidateList
+                candidates={candidates}
+                selectedId={selectedCandidateId}
+                onSelectCandidate={(id) => setSelectedCandidateId(id)}
+                isLoading={isLoadingCandidates}
+              />
+
+              <main className="flex-1 flex flex-col bg-[#FFF5EB] overflow-hidden">
+                {candidateDetail ? (
+                  <>
+                    <JobQueueView
+                      candidate={candidateDetail}
+                      selectedJobUrl={selectedJobUrl}
+                      onSelectJob={(url) => setSelectedJobUrl(url)}
+                    />
+                    <FormRenderer
+                      application={application}
+                      isLoading={isLoadingApplication}
+                      candidateName={candidateDetail.clientName}
+                      onFieldUpdate={handleFieldUpdate}
+                      onStatusChange={handleStatusChange}
+                    />
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-[#64748B]">
+                    <div className="text-4xl mb-2">👤</div>
+                    <p className="text-sm font-bold text-[#1A1A2E]">No Candidate Selected</p>
+                    <p className="text-xs text-[#64748B] mt-1 font-medium">
+                      Select a candidate from the left directory to view assigned applications.
+                    </p>
+                  </div>
+                )}
+              </main>
+            </div>
+          )}
         </div>
       );
     }

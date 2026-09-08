@@ -1,12 +1,14 @@
 /**
- * @fileoverview Submission & Dry-Run Action Controls (Phase V2-5).
+ * @fileoverview Submission & Dry-Run Action Controls (Phase V2-UI).
  *
- * Provides operator action buttons for Dry-Run, Live Submission, CAPTCHA Resumption,
- * and Verification Proof inspection.
+ * Provides operator action buttons styled after the neo-brutalist job board reference:
+ * - Approve & Submit: Coral (#E88474) with dark border & hard shadow
+ * - Dry-Run: Soft Sky Blue (#B8D4E8) with dark border & hard shadow
+ * - Proof & Screenshot: Crisp white/green cards with dark borders
  *
  * References:
- * - 04-ui-ux.md
- * - V2-implementation.md (Phase V2-5)
+ * - 04-ui-ux-v2-refined.md
+ * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
 import React from 'react';
@@ -46,7 +48,10 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const isApplied = status === 'APPLIED';
   const isCaptcha = status === 'CAPTCHA_REQUIRED';
 
-  const canSubmit = !hasUnresolved && !isApplying && (status === 'READY_FOR_REVIEW' || status === 'DRY_RUN_COMPLETE' || status === 'FAILED');
+  const canSubmit =
+    !hasUnresolved &&
+    !isApplying &&
+    (status === 'READY_FOR_REVIEW' || status === 'DRY_RUN_COMPLETE' || status === 'FAILED');
   const canDryRun = !isApplying && !isDryRunning;
 
   return (
@@ -56,7 +61,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         <button
           type="button"
           onClick={onResumeCaptcha}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-orange-600 hover:bg-orange-700 shadow-md hover:shadow-lg transition-all animate-bounce"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all animate-bounce"
         >
           <span>🔓</span>
           <span>I Solved CAPTCHA — Resume Submission</span>
@@ -68,27 +73,31 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         type="button"
         onClick={onTriggerDryRun}
         disabled={!canDryRun}
-        title={isDryRunning ? 'Running dry-run form fill...' : 'Launch headful browser preview without submitting'}
-        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold font-mono transition-all ${
+        title={
+          isDryRunning
+            ? 'Running dry-run form fill...'
+            : 'Launch headful browser preview without submitting'
+        }
+        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold font-mono transition-all ${
           canDryRun
-            ? 'bg-[#FFFFFF] hover:bg-[#F8F3ED] text-[#1E293B] border border-[#D8C7B5] shadow-sm hover:border-[#1A1A2E]'
-            : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+            ? 'bg-[#B8D4E8] hover:bg-[#A3C7DF] text-[#1A1A2E] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+            : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
         }`}
       >
         {isDryRunning ? (
           <>
-            <span className="w-2.5 h-2.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin"></span>
+            <span className="w-2.5 h-2.5 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin"></span>
             <span>Dry-Running...</span>
           </>
         ) : (
           <>
-            <span>🚀</span>
+            <span>🎬</span>
             <span>Dry-Run (Preview)</span>
           </>
         )}
       </button>
 
-      {/* Submit Button */}
+      {/* Submit Button (Primary CTA - Coral #E88474) */}
       <button
         type="button"
         onClick={onTriggerSubmit}
@@ -102,10 +111,10 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
             ? 'Application already submitted and verified'
             : 'Submit verified application via headless Playwright engine'
         }
-        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold font-mono transition-all shadow-sm ${
+        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold font-mono transition-all ${
           canSubmit
-            ? 'bg-[#059669] hover:bg-[#047857] text-white shadow-emerald-900/20 hover:shadow-md'
-            : 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300'
+            ? 'bg-[#E88474] hover:bg-[#D67161] text-white border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+            : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
         }`}
       >
         {isApplying ? (
@@ -120,7 +129,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
           </>
         ) : (
           <>
-            <span>⚡</span>
+            <span>🚀</span>
             <span>Approve &amp; Submit</span>
           </>
         )}
@@ -131,7 +140,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         <button
           type="button"
           onClick={onViewDryRun}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 border border-sky-300 shadow-sm transition-colors font-mono"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold text-[#1A1A2E] bg-white hover:bg-[#FAF4EB] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
         >
           <span>🖼️</span>
           <span>Dry-Run Screenshot</span>
@@ -143,7 +152,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         <button
           type="button"
           onClick={onViewProof}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-400 shadow-sm transition-colors font-mono"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E4620] bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
         >
           <span>📸</span>
           <span>View Web Proof</span>

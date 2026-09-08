@@ -1,12 +1,12 @@
 /**
- * @fileoverview Interactive Proof & Screenshot Viewer Modal (Phase V2-5).
+ * @fileoverview Interactive Proof & Screenshot Viewer Modal (Phase V2-UI).
  *
  * Displays full-page confirmation proofs or dry-run screenshots with high-res zoom,
- * downloadable image assets, and application metadata.
+ * downloadable image assets, and application metadata in neo-brutalist styling.
  *
  * References:
- * - 04-ui-ux.md
- * - V2-implementation.md (Phase V2-5)
+ * - 04-ui-ux-v2-refined.md
+ * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
 import React, { useEffect } from 'react';
@@ -77,20 +77,20 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1A2E]/80 backdrop-blur-sm animate-fadeIn"
       onClick={onClose}
     >
       <div
-        className="relative flex flex-col w-full max-w-5xl max-h-[90vh] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden text-slate-900"
+        className="relative flex flex-col w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-[8px_8px_0px_#1A1A2E] border-2 border-[#1A1A2E] overflow-hidden text-[#1A1A2E]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50/80">
+        <div className="flex items-center justify-between px-6 py-4 border-b-2 border-[#1A1A2E] bg-[#FAF4EB]">
           <div className="flex items-center gap-3">
-            <span className="text-xl">📸</span>
+            <span className="text-2xl">📸</span>
             <div>
-              <h2 className="text-base font-bold text-slate-900">{title}</h2>
-              <p className="text-xs font-mono text-slate-500">
+              <h2 className="text-base font-bold text-[#1A1A2E]">{title}</h2>
+              <p className="text-xs font-mono text-[#64748B]">
                 {metadata.companyName ? `${metadata.companyName} — ` : ''}
                 {metadata.jobTitle || 'Greenhouse Application'}
               </p>
@@ -98,14 +98,12 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            {metadata.status && (
-              <ApplicationStatusBadge status={metadata.status} />
-            )}
+            {metadata.status && <ApplicationStatusBadge status={metadata.status} />}
 
             <button
               type="button"
               onClick={handleDownload}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#E88474] hover:bg-[#D67161] border border-[#1A1A2E] rounded-md shadow-[2px_2px_0px_#1A1A2E] transition-all"
             >
               <span>⬇️</span>
               <span>Download Image</span>
@@ -114,7 +112,7 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition"
+              className="p-1.5 text-[#1A1A2E] hover:bg-[#E8DCCF] border border-[#1A1A2E] rounded-md transition font-bold"
             >
               ✕
             </button>
@@ -122,14 +120,14 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
         </div>
 
         {/* Metadata Banner */}
-        <div className="px-6 py-3 bg-[#FFF5EB] border-b border-[#E8DCCF] flex flex-wrap items-center justify-between gap-4 text-xs font-mono text-slate-700">
+        <div className="px-6 py-3 bg-[#FFF5EB] border-b border-[#1A1A2E] flex flex-wrap items-center justify-between gap-4 text-xs font-mono text-[#1A1A2E]">
           <div className="flex items-center gap-4 flex-wrap">
             {metadata.candidateName && (
               <div>
-                <span className="text-slate-500 font-sans">Candidate: </span>
-                <span className="font-bold text-slate-900 font-sans">{metadata.candidateName}</span>
+                <span className="text-[#64748B] font-sans">Candidate: </span>
+                <span className="font-bold text-[#1A1A2E] font-sans">{metadata.candidateName}</span>
                 {metadata.applywizzId && (
-                  <span className="ml-1.5 px-1.5 py-0.5 rounded bg-[#FAF6F0] border border-[#D8C7B5] text-[#059669]">
+                  <span className="ml-1.5 px-2 py-0.5 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] font-bold">
                     {metadata.applywizzId}
                   </span>
                 )}
@@ -138,8 +136,8 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
 
             {metadata.capturedAt && (
               <div>
-                <span className="text-slate-500 font-sans">Captured: </span>
-                <span className="text-slate-800">{formattedDate}</span>
+                <span className="text-[#64748B] font-sans">Captured: </span>
+                <span className="text-[#1A1A2E]">{formattedDate}</span>
               </div>
             )}
           </div>
@@ -149,7 +147,7 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
               href={metadata.jobUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-sky-600 hover:text-sky-800 underline truncate max-w-xs"
+              className="text-xs text-[#2563EB] hover:underline font-bold truncate max-w-xs"
             >
               {metadata.jobUrl}
             </a>
@@ -157,8 +155,8 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
         </div>
 
         {/* Screenshot Viewport */}
-        <div className="flex-1 overflow-auto p-6 bg-slate-900/5 flex justify-center custom-scrollbar">
-          <div className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden max-w-full">
+        <div className="flex-1 overflow-auto p-6 bg-[#FAF4EB] flex justify-center custom-scrollbar">
+          <div className="bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden max-w-full">
             <img
               src={screenshotUrl}
               alt="Application Confirmation Proof"
@@ -169,14 +167,14 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200 bg-slate-50 text-xs text-slate-500">
+        <div className="flex items-center justify-between px-6 py-3 border-t-2 border-[#1A1A2E] bg-[#FAF4EB] text-xs text-[#64748B]">
           <span className="font-mono">Press Esc to exit proof view</span>
           <div className="flex items-center gap-2">
             <a
               href={screenshotUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs font-semibold text-slate-700 hover:text-slate-900 hover:underline"
+              className="text-xs font-bold text-[#1A1A2E] hover:underline"
             >
               Open raw URL ↗
             </a>

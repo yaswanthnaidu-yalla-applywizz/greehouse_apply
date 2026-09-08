@@ -1,20 +1,24 @@
 /**
- * @fileoverview Right Pane Main: Dynamic Form Renderer with Submission Controls & Proof Viewer (Phase V2-5).
+ * @fileoverview Right Pane Main: Dynamic Form Renderer with Submission Controls & Proof Viewer (Phase V2-UI).
+ *
+ * Renders form fields, source attribution breakdown, and live submission controls
+ * using the neo-brutalist job board aesthetic.
  *
  * References:
- * - 04-ui-ux.md
- * - V2-implementation.md (Phase V2-5)
+ * - 04-ui-ux-v2-refined.md
+ * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
 import React, { useState } from 'react';
 import { EditableFormField } from './components/EditableFormField.js';
 import { SourceBadge } from './components/SourceBadge.js';
 import { ApplicationStatusBadge } from './components/ApplicationStatusBadge.js';
+import { DifficultyBadge } from './components/DifficultyBadge.js';
 import { SubmissionControls } from './components/SubmissionControls.js';
 import { ProofViewer } from './components/ProofViewer.js';
 import type { ResolvedField, ApplicationStatus } from './types.js';
 
-export { SourceBadge, ApplicationStatusBadge, SubmissionControls, ProofViewer };
+export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
 
 export interface FormRendererProps {
   /** Resolved candidate job application payload */
@@ -48,8 +52,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   if (isLoading) {
     return (
       <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
-        <div className="w-8 h-8 border-2 border-[#059669] border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-xs font-mono">Loading application form...</p>
+        <div className="w-8 h-8 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-xs font-mono font-bold text-[#1A1A2E]">Loading application form...</p>
       </div>
     );
   }
@@ -57,10 +61,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   if (!application) {
     return (
       <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
-        <div className="text-3xl mb-2">📋</div>
-        <p className="text-sm font-semibold text-[#1E293B]">No Job Selected</p>
-        <p className="text-xs text-[#64748B] mt-1">
-          Select a candidate and job tab to inspect and edit pre-populated form questions.
+        <div className="text-4xl mb-3">📋</div>
+        <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
+        <p className="text-xs text-[#64748B] mt-1 font-medium">
+          Select a candidate from the left directory and click a job tab above to review and submit.
         </p>
       </div>
     );
@@ -78,11 +82,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const handleTriggerDryRun = async () => {
     setIsDryRunning(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/dry-run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headless: false }),
-      });
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/dry-run`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headless: false }),
+        }
+      );
       const data = await res.json();
       if (data.screenshotUrl) {
         setViewerImageUrl(data.screenshotUrl);
@@ -106,11 +113,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       onStatusChange('APPLYING');
     }
     try {
-      const res = await fetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headless: true }),
-      });
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/submit`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headless: true }),
+        }
+      );
       const data = await res.json();
       if (data.status && onStatusChange) {
         onStatusChange(data.status, data);
@@ -137,10 +147,13 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       onStatusChange('APPLYING');
     }
     try {
-      const res = await fetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/resume-submission`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/resume-submission`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
       const data = await res.json();
       if (data.status && onStatusChange) {
         onStatusChange(data.status, data);
@@ -159,7 +172,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-8 max-w-4xl mx-auto w-full custom-scrollbar">
+    <div className="flex-1 overflow-y-auto p-6 md:p-8 max-w-5xl mx-auto w-full custom-scrollbar">
       {/* Proof Viewer Modal */}
       <ProofViewer
         isOpen={viewerOpen}
@@ -172,23 +185,27 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           companyName: application.companyName || application.company_name,
           jobTitle: application.jobTitle || application.job_title,
           jobUrl: application.jobUrl || application.job_url,
-          capturedAt: application.proof_captured_at || application.submitted_at || new Date().toISOString(),
+          capturedAt:
+            application.proof_captured_at ||
+            application.submitted_at ||
+            new Date().toISOString(),
           status: currentStatus,
         }}
       />
 
       {/* Job Header Card */}
-      <div className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-6 mb-8 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-[#E8DCCF] pb-5 mb-5">
+      <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-6 mb-6 shadow-[4px_4px_0px_#1A1A2E]">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b-2 border-[#1A1A2E] pb-5 mb-5">
           <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#64748B]">
-                {application.companyName || application.company_name || 'Greenhouse Posting'}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+                🏢 {application.companyName || application.company_name || 'Greenhouse Posting'}
               </span>
-              <span className="text-[#CBD5E1]">•</span>
-              <span className="text-xs font-mono text-[#059669] bg-[#FAF6F0] px-2 py-0.5 rounded border border-[#9AC89A]">
+              <span className="text-[#1A1A2E] font-bold">•</span>
+              <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] px-2 py-0.5 rounded border border-[#1A1A2E]">
                 {application.applywizzId || application.applywizz_id}
               </span>
+              <DifficultyBadge fieldsCount={fields.length} />
               <ApplicationStatusBadge
                 status={currentStatus}
                 applicationId={appId}
@@ -196,14 +213,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 onStatusChange={onStatusChange}
               />
             </div>
-            <h1 className="text-xl font-bold text-[#0F172A]">
+            <h1 className="text-xl font-bold text-[#1A1A2E]">
               {application.jobTitle || application.job_title || 'Application Form'}
             </h1>
             <a
               href={application.jobUrl || application.job_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-[#0284C7] hover:text-[#0369A1] font-mono underline break-all mt-1 inline-block"
+              className="text-xs text-[#2563EB] hover:underline font-mono truncate max-w-lg mt-1 inline-block font-medium"
             >
               {application.jobUrl || application.job_url}
             </a>
@@ -216,7 +233,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               status={currentStatus}
               unresolvedFieldsCount={unresCount}
               proofWebUrl={application.proof_web_url || application.proofWebUrl}
-              dryRunScreenshotUrl={application.dry_run_screenshot_url || application.dryRunScreenshotUrl}
+              dryRunScreenshotUrl={
+                application.dry_run_screenshot_url || application.dryRunScreenshotUrl
+              }
               isSubmitting={isSubmitting}
               isDryRunning={isDryRunning}
               onTriggerDryRun={handleTriggerDryRun}
@@ -231,7 +250,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 }
               }}
               onViewDryRun={() => {
-                const url = application.dry_run_screenshot_url || application.dryRunScreenshotUrl;
+                const url =
+                  application.dry_run_screenshot_url || application.dryRunScreenshotUrl;
                 if (url) {
                   setViewerImageUrl(url);
                   setViewerTitle('Dry-Run Form Verification Screenshot');
@@ -243,26 +263,26 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         </div>
 
         {/* Source Breakdown & Interactive Info Banner */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FAF6F0] border border-[#E8DCCF] rounded-lg px-4 py-2.5 text-xs text-[#64748B]">
-          <div className="flex items-center gap-2">
-            <span className="text-amber-600">✏️</span>
-            <span>Interactive Operator Review (V2) — Click any field to edit answers inline</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FAF4EB] border border-[#1A1A2E] rounded-lg px-4 py-2.5 text-xs text-[#1A1A2E]">
+          <div className="flex items-center gap-2 font-medium">
+            <span>✏️</span>
+            <span>Operator Review — Click any field value below to edit answers inline</span>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             {manualCount > 0 && (
-              <span className="text-[11px] font-mono font-bold text-amber-800 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded">
+              <span className="text-[11px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
                 {manualCount} manual
               </span>
             )}
-            <span className="text-[11px] font-mono font-bold text-[#2D5C2D] bg-[#9AC89A]/30 border border-[#9AC89A] px-2 py-0.5 rounded">
+            <span className="text-[11px] font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
               {supabaseCount} supabase
             </span>
-            <span className="text-[11px] font-mono font-bold text-[#6D28D9] bg-[#8B5CF6]/15 border border-[#8B5CF6]/40 px-2 py-0.5 rounded">
+            <span className="text-[11px] font-mono font-bold text-[#5B21B6] bg-[#EDE9FE] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
               {aiCount} ai
             </span>
             {unresCount > 0 && (
-              <span className="text-[11px] font-mono font-bold text-rose-800 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded animate-pulse">
+              <span className="text-[11px] font-mono font-bold text-white bg-[#EF4444] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] animate-pulse">
                 {unresCount} unresolved
               </span>
             )}
@@ -271,12 +291,16 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       </div>
 
       {/* Form Fields Section */}
-      <div className="space-y-4">
+      <div className="space-y-3.5">
         {fields.length === 0 ? (
-          <div className="bg-[#FFFFFF] border border-[#E8DCCF] rounded-xl p-8 text-center text-[#64748B] shadow-sm">
-            <p className="text-sm">No interactive form fields extracted for this job posting.</p>
+          <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-8 text-center text-[#64748B] shadow-[3px_3px_0px_#1A1A2E]">
+            <p className="text-sm font-bold text-[#1A1A2E]">
+              No interactive form fields extracted for this job posting.
+            </p>
             {currentStatus === 'EXPIRED' && (
-              <p className="text-xs text-[#E11D48] mt-1">This job posting appears to be closed or expired.</p>
+              <p className="text-xs text-[#EF4444] font-bold mt-1">
+                This job posting appears to be closed or expired.
+              </p>
             )}
           </div>
         ) : (

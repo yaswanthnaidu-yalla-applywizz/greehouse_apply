@@ -1,14 +1,14 @@
 /**
- * @fileoverview Granular Source Attribution Badge Component for Dashboard.
+ * @fileoverview Granular Source Attribution Badge Component for Dashboard (Phase V2-UI).
  *
- * Renders color-coded badges indicating resolution origin:
- * - 'manual': Amber (Operator manual override)
- * - 'unresolved': Rose/Red (Missing or unanswerable)
- * - 'supabase': Emerald (Tier 1 Profile / Exact QA Bank)
- * - 'resume_parse': Cyan (Tier 2 Parsed Resume)
- * - 'fuzzy_match': Blue (Tier 3 Fuzzy Match)
- * - 'api': Indigo (Tier 4 ApplyWizz Refetch)
- * - 'ai': Purple (Tier 5 LLM Synthesis)
+ * Renders crisp, color-coded badges with neo-brutalist dark borders:
+ * - 'manual': Amber (#F59E0B)
+ * - 'unresolved': Rose/Red (#EF4444)
+ * - 'supabase': Emerald (#10B981)
+ * - 'resume_parse': Cyan (#06B6D4)
+ * - 'fuzzy_match': Blue (#3B82F6)
+ * - 'api': Indigo (#6366F1)
+ * - 'ai': Purple (#8B5CF6)
  */
 
 import React from 'react';
@@ -30,8 +30,8 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'manual') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-amber-50 text-amber-800 border border-amber-400 shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]"></span>
         <span>manual</span>
       </span>
     );
@@ -39,8 +39,8 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'unresolved') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-rose-50 text-rose-800 border border-rose-400 shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444] animate-pulse"></span>
         <span>unresolved</span>
       </span>
     );
@@ -48,11 +48,11 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'supabase') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-emerald-50 text-emerald-800 border border-emerald-400 shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#D1FAE5] text-[#065F46] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
         <span>supabase</span>
         {confidence !== undefined && (
-          <span className="text-[10px] text-emerald-700/80">({(confidence * 100).toFixed(0)}%)</span>
+          <span className="text-[10px] text-[#047857]">({(confidence * 100).toFixed(0)}%)</span>
         )}
       </span>
     );
@@ -60,8 +60,8 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'resume_parse') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-cyan-50 text-cyan-800 border border-cyan-400 shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-cyan-600"></span>
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#CFFAFE] text-[#155E75] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#06B6D4]"></span>
         <span>resume</span>
       </span>
     );
@@ -69,11 +69,11 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'fuzzy_match') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-blue-50 text-blue-800 border border-blue-400 shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#DBEAFE] text-[#1E40AF] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#3B82F6]"></span>
         <span>fuzzy</span>
         {confidence !== undefined && (
-          <span className="text-[10px] text-blue-700/80">({(confidence * 100).toFixed(0)}%)</span>
+          <span className="text-[10px] text-[#1D4ED8]">({(confidence * 100).toFixed(0)}%)</span>
         )}
       </span>
     );
@@ -81,8 +81,8 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'api') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-indigo-50 text-indigo-800 border border-indigo-400 shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-indigo-600"></span>
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#3730A3] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#6366F1]"></span>
         <span>api</span>
       </span>
     );
@@ -90,11 +90,11 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   // Default: 'ai'
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-purple-50 text-purple-800 border border-purple-400 shadow-sm">
-      <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#EDE9FE] text-[#5B21B6] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]"></span>
       <span>ai</span>
       {confidence !== undefined && (
-        <span className="text-[10px] text-purple-700/80">({(confidence * 100).toFixed(0)}%)</span>
+        <span className="text-[10px] text-[#6D28D9]">({(confidence * 100).toFixed(0)}%)</span>
       )}
     </span>
   );
