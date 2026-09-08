@@ -124,10 +124,27 @@ async function runE2EIntegrationTestSuite() {
   let browser: Browser | null = null;
 
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    try {
+      browser = await chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+    } catch (launchErr: any) {
+      if (
+        launchErr.message?.includes("Executable doesn't exist") ||
+        launchErr.message?.includes('playwright install')
+      ) {
+        console.log('⚠️ Playwright Chromium binary not found. Auto-installing Chromium binaries...');
+        const { execSync } = await import('child_process');
+        execSync('npx playwright install chromium', { stdio: 'inherit' });
+        browser = await chromium.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
+      } else {
+        throw launchErr;
+      }
+    }
 
     const candidateId = 'AWL-11';
     const testJobUrl = `https://job-boards.greenhouse.io/acme-e2e/jobs/${Date.now()}`;
