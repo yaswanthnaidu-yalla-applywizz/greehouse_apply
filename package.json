@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "tsx src/index.ts",
+    "start:sample": "tsx src/index.ts --limit=10",
     "start:dashboard": "tsx src/server/index.ts",
     "dev": "tsx src/index.ts",
     "scan": "tsx src/scanner/runScan.ts",
