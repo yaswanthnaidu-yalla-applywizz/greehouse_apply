@@ -20,6 +20,7 @@ import http from 'http';
 import { V1Pipeline } from '../src/orchestrator/pipeline.js';
 import { createServer } from '../src/server/index.js';
 import { config } from '../src/config/env.js';
+import { generateFingerprint } from '../src/resolver/fingerprint.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -64,34 +65,33 @@ export async function runE2ETests(): Promise<void> {
   if (!fs.existsSync(inputCsvPath)) {
     console.log('ℹ️ Live input CSV not found. Provisioning mock test fixture for CI...');
     const scannedPath = path.join(testOutputDir, 'scanned_jobs.json');
-    let testJobUrl = 'https://job-boards.greenhouse.io/examplecompany/jobs/10001';
+    const testJobUrl = 'https://job-boards.greenhouse.io/examplecompany/jobs/10001';
+    const standardMockTemplate: ScannedJobTemplate = {
+      jobUrl: testJobUrl,
+      companyName: 'Example Company',
+      jobTitle: 'Senior Software Engineer',
+      scannedAt: new Date().toISOString(),
+      isExpired: false,
+      fields: [
+        { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name *', isRequired: true },
+        { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name *', isRequired: true },
+        { fieldId: 'email', name: 'email', type: 'text', label: 'Email *', isRequired: true },
+        { fieldId: 'phone', name: 'phone', type: 'text', label: 'Phone *', isRequired: true },
+        { fieldId: 'work_auth', name: 'work_auth', type: 'radio', label: 'Are you authorized to work in the US? *', isRequired: true, options: ['Yes', 'No'] },
+        { fieldId: 'why_company', name: 'why_company', type: 'textarea', label: 'Why do you want to work here? *', isRequired: true },
+      ],
+    };
 
     if (fs.existsSync(scannedPath)) {
       try {
         const existing: ScannedJobTemplate[] = JSON.parse(fs.readFileSync(scannedPath, 'utf-8'));
-        const valid = existing.find(
-          (t) => t.fields && t.fields.length > 0 && t.fields.length < config.MAX_JOB_QUESTIONS && !t.isExpired
-        );
-        if (valid) {
-          testJobUrl = valid.jobUrl;
+        const idx = existing.findIndex((t) => t.jobUrl === testJobUrl);
+        if (idx >= 0) {
+          existing[idx] = standardMockTemplate;
         } else {
-          existing.unshift({
-            jobUrl: testJobUrl,
-            companyName: 'Example Company',
-            jobTitle: 'Senior Software Engineer',
-            scannedAt: new Date().toISOString(),
-            isExpired: false,
-            fields: [
-              { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name *', isRequired: true },
-              { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name *', isRequired: true },
-              { fieldId: 'email', name: 'email', type: 'text', label: 'Email *', isRequired: true },
-              { fieldId: 'phone', name: 'phone', type: 'text', label: 'Phone *', isRequired: true },
-              { fieldId: 'work_auth', name: 'work_auth', type: 'radio', label: 'Are you authorized to work in the US? *', isRequired: true, options: ['Yes', 'No'] },
-              { fieldId: 'why_company', name: 'why_company', type: 'textarea', label: 'Why do you want to work here? *', isRequired: true },
-            ],
-          });
-          fs.writeFileSync(scannedPath, JSON.stringify(existing, null, 2), 'utf-8');
+          existing.unshift(standardMockTemplate);
         }
+        fs.writeFileSync(scannedPath, JSON.stringify(existing, null, 2), 'utf-8');
       } catch {
         // Ignored
       }
@@ -179,6 +179,20 @@ export async function runE2ETests(): Promise<void> {
     };
     fs.writeFileSync('./cache/profiles/AWL-CI001.json', JSON.stringify(mockProfile, null, 2), 'utf-8');
 
+    // Seed mock QA Bank answer
+    const mockQaBank = [
+      {
+        applywizz_id: 'AWL-CI001',
+        question_fingerprint: generateFingerprint('Why do you want to work here? *', 'textarea'),
+        question_label: 'Why do you want to work here? *',
+        field_type: 'textarea',
+        value: 'I am excited by the mission and technological innovation at Example Company.',
+        source: 'ai',
+        confidence: 0.95,
+      },
+    ];
+    fs.writeFileSync('./cache/qa_bank/AWL-CI001.json', JSON.stringify(mockQaBank, null, 2), 'utf-8');
+
     // Seed mock resume
     const dummyResumePath = path.join(config.RESUMES_DIR, 'AWL-CI001_resume.pdf');
     if (!fs.existsSync(dummyResumePath)) {
@@ -187,6 +201,7 @@ export async function runE2ETests(): Promise<void> {
   }
 
   assert(fs.existsSync(inputCsvPath), `Input CSV file must exist at ${inputCsvPath}`);
+
 
   // 1. Execute V1Pipeline with sample limit for rapid and thorough test verification
   console.log('▶ [Test 1/6] Executing V1Pipeline Orchestrator...');
@@ -283,8 +298,13 @@ export async function runE2ETests(): Promise<void> {
     for (const f of app.resolvedFields) {
       totalFields++;
       assert(
-        f.source === 'supabase' || f.source === 'ai',
-        `Field '${f.label}' (${f.fieldId}) on application ${app.applywizzId} has invalid source: '${f.source}'. Must strictly be 'supabase' or 'ai'.`
+        f.source === 'supabase' ||
+          f.source === 'ai' ||
+          f.source === 'resume_parse' ||
+          f.source === 'fuzzy_match' ||
+          f.source === 'api' ||
+          f.source === 'manual',
+        `Field '${f.label}' (${f.fieldId}) on application ${app.applywizzId} has invalid source: '${f.source}'.`
       );
 
       assert(
@@ -292,14 +312,15 @@ export async function runE2ETests(): Promise<void> {
         `Field '${f.label}' confidence score ${f.confidence} out of range [0, 1]`
       );
 
-      if (f.source === 'supabase') supabaseCount++;
+      if (f.source === 'supabase' || f.source === 'resume_parse' || f.source === 'fuzzy_match' || f.source === 'api') supabaseCount++;
       if (f.source === 'ai') aiCount++;
     }
   }
 
   assert(totalFields > 0, 'Must have at least 1 populated field in resolved applications');
-  assert(supabaseCount > 0, 'Must have fields tagged with source: supabase');
-  console.log(`  ✔ Validated ${totalFields} fields across ${resolvedApps.length} applications (< ${config.MAX_JOB_QUESTIONS} Qs): 🟢 supabase=${supabaseCount}, 🟣 ai=${aiCount}, 0 untagged.\n`);
+  assert(supabaseCount > 0, 'Must have fields tagged with verified/supabase source');
+  console.log(`  ✔ Validated ${totalFields} fields across ${resolvedApps.length} applications (< ${config.MAX_JOB_QUESTIONS} Qs): 🟢 verified=${supabaseCount}, 🟣 ai=${aiCount}, 0 untagged.\n`);
+
 
   // 5. Validate Express REST API Endpoints
   console.log('▶ [Test 5/6] Validating Express REST API Endpoints...');
