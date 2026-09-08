@@ -341,6 +341,7 @@ export class ProfileMatcher {
             label: field.label,
             value: String(val),
             source: 'supabase',
+            resolvedByTier: 1,
             confidence: 1.0,
           };
         }
@@ -363,6 +364,7 @@ export class ProfileMatcher {
               label: field.label,
               value: String(val),
               source: 'supabase',
+              resolvedByTier: 1,
               confidence: 0.95,
             };
           }
@@ -389,6 +391,7 @@ export class ProfileMatcher {
             label: field.label,
             value: String(val),
             source: 'supabase',
+            resolvedByTier: 1,
             confidence: calculatedConfidence,
           };
         }

@@ -16,6 +16,7 @@
 
 import { chromium, type Browser, type Page } from 'playwright';
 import { config } from '../config/env.js';
+import { getUnmappedVisibleFields, extractVisibleFormFields } from '../submitter/cascadeDetector.js';
 import type {
   ScannedField,
   ScannedFieldType,
@@ -443,7 +444,7 @@ export class PlaywrightScanner {
         }
 
         if (fields.length > 0) {
-          template.fields = fields;
+          template.fields = await this.exploreCascadingFields(page, fields);
           return template;
         }
       }
@@ -509,201 +510,12 @@ export class PlaywrightScanner {
         } catch {}
       }
 
-      const extractedFields: any[] = await page.evaluate(`
-        (() => {
-          if (typeof window.__name === 'undefined') window.__name = function(fn) { return fn; };
-          var fieldsList = [];
-          var form = document.querySelector('form#application_form, form#app_form, form');
-          if (!form) return fieldsList;
+      // Strategy 2: Deep DOM Inspection (Authoritative for boards.greenhouse.io, embed iframes, custom boards)
+      const domFields = await extractVisibleFormFields(page);
 
-          var processedRadioNames = {};
-
-          function clean(str) {
-            if (!str) return '';
-            return str.replace(/\\s*\\*\\s*$/, '').replace(/\\s*\\((?:required|optional)\\)\\s*$/i, '').replace(/\\s+/g, ' ').trim();
-          }
-
-          function getSection(el) {
-            var sectionEl = el.closest('fieldset, section, .application-section, [class*="section"]');
-            if (sectionEl) {
-              var heading = sectionEl.querySelector('legend, h2, h3, h4, .section-header, [class*="header"]');
-              if (heading && heading.textContent) return clean(heading.textContent);
-            }
-            return '';
-          }
-
-          var formElements = Array.from(form.querySelectorAll('input, select, textarea'));
-
-          for (var i = 0; i < formElements.length; i++) {
-            var el = formElements[i];
-            var rawType = (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
-            if (rawType === 'hidden' || rawType === 'submit' || rawType === 'button' || rawType === 'reset') continue;
-
-            var name = el.getAttribute('name') || '';
-            var id = el.getAttribute('id') || '';
-
-            // Ignore unnamed internal search/shadow inputs
-            if (!name && !id) continue;
-
-            var section = getSection(el);
-
-            // 1. Radio Button Groups
-            if (rawType === 'radio') {
-              var groupName = name || id;
-              if (!groupName || processedRadioNames[groupName]) continue;
-              processedRadioNames[groupName] = true;
-
-              var radioGroup = Array.from(form.querySelectorAll('input[type="radio"][name="' + CSS.escape(groupName) + '"]'));
-              if (radioGroup.length === 0) continue;
-
-              var firstRadio = radioGroup[0];
-              var fieldset = firstRadio.closest('fieldset, .field, [class*="field"], tr, div');
-              var groupLabel = '';
-              if (fieldset) {
-                var labelEl = fieldset.querySelector('legend, label, .field-label, [class*="label"]');
-                if (labelEl && labelEl.textContent) groupLabel = clean(labelEl.textContent);
-              }
-
-              var options = [];
-              for (var j = 0; j < radioGroup.length; j++) {
-                var r = radioGroup[j];
-                var rId = r.getAttribute('id');
-                var labelFor = rId ? document.querySelector('label[for="' + CSS.escape(rId) + '"]') : null;
-                var parentLabel = r.closest('label');
-                var optText = clean((labelFor && labelFor.textContent) || (parentLabel && parentLabel.textContent) || r.getAttribute('value') || '');
-                if (optText && options.indexOf(optText) === -1) options.push(optText);
-              }
-
-              var isReq = firstRadio.hasAttribute('required') ||
-                          firstRadio.getAttribute('aria-required') === 'true' ||
-                          (fieldset && fieldset.textContent && fieldset.textContent.indexOf('*') !== -1);
-
-              fieldsList.push({
-                name: groupName,
-                id: firstRadio.getAttribute('id') || groupName,
-                type: 'radio',
-                label: groupLabel || groupName,
-                isRequired: !!isReq,
-                options: options,
-                section: section,
-                selector: 'input[type="radio"][name="' + groupName + '"]'
-              });
-              continue;
-            }
-
-            // 2. Select Dropdowns
-            if (el.tagName.toLowerCase() === 'select') {
-              var selectEl = el;
-              var labelFor = id ? document.querySelector('label[for="' + CSS.escape(id) + '"]') : null;
-              var parentLabel = el.closest('label');
-              var fieldWrapper = el.closest('.field, [class*="field"]');
-              var wrapperLabel = fieldWrapper ? fieldWrapper.querySelector('label, .field-label') : null;
-
-              var rawLabel = (labelFor && labelFor.textContent) || (parentLabel && parentLabel.textContent) || (wrapperLabel && wrapperLabel.textContent) || el.getAttribute('aria-label') || name;
-              var label = clean(rawLabel);
-
-              var options = [];
-              for (var k = 0; k < selectEl.options.length; k++) {
-                var optText = selectEl.options[k].text ? selectEl.options[k].text.trim() : '';
-                if (optText &&
-                    optText.indexOf('--') !== 0 &&
-                    optText.indexOf('Please select') !== 0 &&
-                    optText.indexOf('Select...') !== 0) {
-                  options.push(optText);
-                }
-              }
-
-              var isReq = selectEl.required ||
-                          selectEl.getAttribute('aria-required') === 'true' ||
-                          (rawLabel && rawLabel.indexOf('*') !== -1);
-
-              fieldsList.push({
-                name: name || id,
-                id: id,
-                type: 'select',
-                label: label || name || id,
-                isRequired: !!isReq,
-                options: options,
-                section: section,
-                selector: id ? '#' + id : 'select[name="' + name + '"]'
-              });
-              continue;
-            }
-
-            // 3. Text, Textarea, File, Checkbox, Location
-            var labelFor = id ? document.querySelector('label[for="' + CSS.escape(id) + '"]') : null;
-            var parentLabel = el.closest('label');
-            var fieldWrapper = el.closest('.field, [class*="field"]');
-            var wrapperLabel = fieldWrapper ? fieldWrapper.querySelector('label, .field-label') : null;
-
-            var rawLabel = (labelFor && labelFor.textContent) ||
-                           (parentLabel && parentLabel.textContent) ||
-                           (wrapperLabel && wrapperLabel.textContent) ||
-                           el.getAttribute('aria-label') ||
-                           el.getAttribute('placeholder') ||
-                           name ||
-                           id;
-            var label = clean(rawLabel);
-
-            var detectedType = 'text';
-            if (el.tagName.toLowerCase() === 'textarea') {
-              detectedType = 'textarea';
-            } else if (rawType === 'file') {
-              detectedType = 'file';
-            } else if (rawType === 'checkbox') {
-              detectedType = 'checkbox';
-            } else if (
-              name.toLowerCase().indexOf('location') !== -1 ||
-              id.toLowerCase().indexOf('location') !== -1 ||
-              label.toLowerCase().indexOf('location') !== -1
-            ) {
-              detectedType = 'location_autocomplete';
-            }
-
-            var isReq = el.required ||
-                        el.getAttribute('aria-required') === 'true' ||
-                        (rawLabel && rawLabel.indexOf('*') !== -1);
-
-            fieldsList.push({
-              name: name || id,
-              id: id,
-              type: detectedType,
-              label: label || name || id,
-              isRequired: !!isReq,
-              section: section,
-              selector: id ? '#' + id : 'input[name="' + name + '"]'
-            });
-          }
-
-          return fieldsList;
-        })()
-      `);
-
-      template.fields = extractedFields.map((field) => {
-        const fieldId = generateFieldId(field.name, field.id, field.label);
-        const scannedField: ScannedField = {
-          fieldId,
-          name: field.name,
-          type: field.type as ScannedFieldType,
-          label: sanitizeLabelText(field.label) || fieldId,
-          isRequired: field.isRequired,
-        };
-
-        if (field.options && field.options.length > 0) {
-          scannedField.options = field.options;
-        }
-
-        if (field.section || field.selector) {
-          scannedField.metadata = {
-            section: field.section || undefined,
-            selector: field.selector || undefined,
-          };
-        }
-
-        return scannedField;
-      });
-
-      if (template.fields.length === 0) {
+      if (domFields.length > 0) {
+        template.fields = await this.exploreCascadingFields(page, domFields);
+      } else {
         template.isExpired = true;
       }
 
@@ -713,5 +525,133 @@ export class PlaywrightScanner {
       template.isExpired = true;
       return template;
     }
+  }
+
+  /**
+   * Explores conditional cascading fields in the DOM by testing candidate option values
+   * on select dropdowns, radio groups, and checkbox toggles.
+   */
+  private async exploreCascadingFields(
+    page: Page,
+    baseFields: ScannedField[]
+  ): Promise<ScannedField[]> {
+    const allFields = [...baseFields];
+    const knownFieldIds = new Set(baseFields.map((f) => f.fieldId));
+    const knownNames = new Set(baseFields.map((f) => f.name).filter(Boolean));
+
+    // Identify candidate choice fields that might trigger cascading DOM updates
+    const choiceFields = baseFields.filter(
+      (f) =>
+        (f.type === 'select' || f.type === 'radio' || f.type === 'checkbox') &&
+        ((f.options && f.options.length > 0) || f.type === 'checkbox')
+    );
+
+    // Limit exploration to avoid anti-bot delays (max 6 candidate fields per form)
+    const fieldsToTest = choiceFields.slice(0, 6);
+
+    for (const parentField of fieldsToTest) {
+      // Determine values to test
+      let optionsToTest: string[] = [];
+      if (parentField.type === 'checkbox') {
+        optionsToTest = ['true'];
+      } else if (parentField.options && parentField.options.length > 0) {
+        // Prioritize common conditional trigger options like "No", "Yes", "Other", "Decline"
+        const priorityTokens = ['no', 'yes', 'other', 'decline', 'male', 'female'];
+        const foundPriority = parentField.options.filter((opt) =>
+          priorityTokens.some((pt) => opt.toLowerCase() === pt)
+        );
+        const rest = parentField.options.filter((opt) => !foundPriority.includes(opt));
+        optionsToTest = [...foundPriority, ...rest].slice(0, 3);
+      }
+
+      for (const optVal of optionsToTest) {
+        try {
+          // Select or toggle the option value in the active DOM
+          if (parentField.type === 'select') {
+            const selSelectors = [
+              parentField.metadata?.selector,
+              `select#${parentField.name}`,
+              `select#${parentField.fieldId}`,
+              `#${parentField.name}`,
+              `#${parentField.fieldId}`,
+              `input[id*="${parentField.name}"]`,
+              `input[id*="${parentField.fieldId}"]`,
+            ].filter(Boolean) as string[];
+
+            for (const sel of selSelectors) {
+              const loc = page.locator(sel).first();
+              if ((await loc.count()) > 0) {
+                const tagName = await loc.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'SELECT');
+                if (tagName === 'SELECT') {
+                  await loc.selectOption({ label: optVal }, { timeout: 1500 }).catch(() => {});
+                } else {
+                  // React-Select combobox
+                  await loc.click({ timeout: 1500 }).catch(() => {});
+                  await page.waitForTimeout(100);
+                  await loc.pressSequentially(optVal, { delay: 25 }).catch(() => {});
+                  await page.waitForTimeout(200);
+                  const optLoc = page.locator('.select__option, [id*="-option"]').filter({ hasText: optVal }).first();
+                  if ((await optLoc.count()) > 0) {
+                    await optLoc.click({ timeout: 1500 }).catch(() => {});
+                  }
+                }
+                break;
+              }
+            }
+          } else if (parentField.type === 'radio') {
+            const radioByVal = page
+              .locator(
+                `input[type="radio"][name="${parentField.name}"][value="${optVal}"], input[type="radio"][name="${parentField.fieldId}"][value="${optVal}"]`
+              )
+              .first();
+
+            if ((await radioByVal.count()) > 0) {
+              await radioByVal.check({ force: true }).catch(() => {});
+            } else {
+              const labelLoc = page.locator('label').filter({ hasText: optVal }).first();
+              if ((await labelLoc.count()) > 0) {
+                const innerRadio = labelLoc.locator('input[type="radio"]').first();
+                if ((await innerRadio.count()) > 0) {
+                  await innerRadio.check({ force: true }).catch(() => {});
+                } else {
+                  await labelLoc.click({ force: true }).catch(() => {});
+                }
+              }
+            }
+          } else if (parentField.type === 'checkbox') {
+            const cb = page.locator(parentField.metadata?.selector || `input[type="checkbox"]#${parentField.fieldId}`).first();
+            if ((await cb.count()) > 0) {
+              await cb.check({ force: true }).catch(() => {});
+            }
+          }
+
+          // Wait 500ms for DOM mutations
+          await page.waitForTimeout(500);
+
+          // Check for newly visible form fields
+          const newlyVisible = await getUnmappedVisibleFields(page, knownFieldIds, knownNames);
+
+          for (const newField of newlyVisible) {
+            knownFieldIds.add(newField.fieldId);
+            if (newField.name) knownNames.add(newField.name);
+
+            newField.metadata = {
+              ...(newField.metadata || {}),
+              dependsOn: parentField.fieldId,
+              triggerValue: optVal,
+            };
+
+            allFields.push(newField);
+            console.log(
+              `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
+            );
+          }
+        } catch {
+          // Continue exploration resiliently
+        }
+      }
+    }
+
+    return allFields;
   }
 }

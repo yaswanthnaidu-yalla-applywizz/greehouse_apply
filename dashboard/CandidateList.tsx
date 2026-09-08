@@ -1,36 +1,26 @@
 /**
- * @fileoverview Left Sidebar: Candidate Directory and Filter View.
+ * @fileoverview Left Sidebar: Candidate Directory and Filter View (Phase V2-UI).
  *
- * Provides real-time search filtering, candidate status badges, job count indicators,
- * and active selection highlights for the split-screen operator interface.
+ * Renders candidate directory with neo-brutalist job board styling:
+ * - Warm background (#FAF4EB / #FFF5EB) with crisp dark border (border-r-2 border-[#1A1A2E])
+ * - Search input with dark border and coral active focus
+ * - Card items with dark border, initials avatar, status pills, and hard shadow on active state
  *
  * References:
- * - 04-ui-ux.md (Section 2.2)
+ * - 04-ui-ux-v2-refined.md
+ * - V2-implementation.md (Phase V2-UI)
  */
 
 import React, { useState, useMemo } from 'react';
 import type { CandidateSummary } from './types.js';
 
-/**
- * Props for CandidateList component.
- */
 export interface CandidateListProps {
-  /** Array of candidate summary records */
   candidates: CandidateSummary[];
-  /** Currently active candidate ID */
   selectedId: string | null;
-  /** Callback fired when an operator selects a candidate card */
   onSelectCandidate: (applywizzId: string) => void;
-  /** Whether candidate list is loading */
   isLoading?: boolean;
 }
 
-/**
- * Renders the left-hand sidebar candidate directory.
- *
- * @param props - Component properties.
- * @returns React component.
- */
 export const CandidateList: React.FC<CandidateListProps> = ({
   candidates,
   selectedId,
@@ -53,15 +43,18 @@ export const CandidateList: React.FC<CandidateListProps> = ({
   }, [candidates, searchTerm]);
 
   return (
-    <aside className="w-80 flex-shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col h-full overflow-hidden">
+    <aside className="w-80 flex-shrink-0 bg-[#FAF4EB] border-r-2 border-[#1A1A2E] flex flex-col h-full overflow-hidden text-[#1A1A2E]">
       {/* Search Header */}
-      <div className="p-4 border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
-            Candidates Directory
-          </h2>
-          <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full">
-            {filteredCandidates.length} of {candidates.length}
+      <div className="p-4 border-b-2 border-[#1A1A2E] bg-[#FFF5EB] sticky top-0 z-10">
+        <div className="flex items-center justify-between mb-2.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm">👥</span>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+              Candidates Directory
+            </h2>
+          </div>
+          <span className="text-xs font-mono bg-white text-[#1A1A2E] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] font-bold">
+            {filteredCandidates.length} / {candidates.length}
           </span>
         </div>
 
@@ -71,14 +64,14 @@ export const CandidateList: React.FC<CandidateListProps> = ({
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search name or AWL-ID..."
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all"
+            placeholder="🔍 Search name or AWL-ID..."
+            className="w-full bg-white border-2 border-[#1A1A2E] rounded-md px-3 py-2 text-xs text-[#1A1A2E] placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#E88474] transition-all font-medium shadow-[1px_1px_0px_#1A1A2E]"
           />
           {searchTerm && (
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-300 text-xs"
+              className="absolute right-2.5 top-2.5 text-[#64748B] hover:text-[#1A1A2E] text-xs font-bold"
             >
               ✕
             </button>
@@ -87,18 +80,26 @@ export const CandidateList: React.FC<CandidateListProps> = ({
       </div>
 
       {/* Candidate Card List */}
-      <div className="flex-1 overflow-y-auto divide-y divide-slate-800/60 p-2 space-y-1.5 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
         {isLoading ? (
-          <div className="p-6 text-center text-xs text-slate-500 animate-pulse">
+          <div className="p-6 text-center text-xs text-[#64748B] font-mono animate-pulse">
             Loading candidate records...
           </div>
         ) : filteredCandidates.length === 0 ? (
-          <div className="p-6 text-center text-xs text-slate-500">
-            No candidates matching <span className="text-slate-300">"{searchTerm}"</span>
+          <div className="p-6 text-center text-xs text-[#64748B]">
+            No candidates matching <span className="font-bold text-[#1A1A2E]">"{searchTerm}"</span>
           </div>
         ) : (
           filteredCandidates.map((c) => {
             const isSelected = c.applywizzId === selectedId;
+            const initials = c.clientName
+              ? c.clientName
+                  .split(' ')
+                  .map((n) => n[0])
+                  .join('')
+                  .toUpperCase()
+                  .slice(0, 2)
+              : 'AW';
 
             return (
               <button
@@ -107,48 +108,53 @@ export const CandidateList: React.FC<CandidateListProps> = ({
                 onClick={() => onSelectCandidate(c.applywizzId)}
                 className={`w-full text-left p-3 rounded-lg transition-all duration-150 relative ${
                   isSelected
-                    ? 'bg-slate-800 border-2 border-emerald-500 shadow-md shadow-emerald-950/20'
-                    : 'bg-slate-800/40 border border-slate-800/80 hover:bg-slate-800/80 hover:border-slate-700'
+                    ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
+                    : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
                 }`}
               >
-                {/* Candidate Name & ID */}
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded">
-                    {c.applywizzId}
-                  </span>
+                {/* Top Row: Initials Avatar + ID + Status */}
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-bold">
+                      {initials}
+                    </span>
+                    <span className="text-[11px] font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] border border-[#1A1A2E] px-1.5 py-0.5 rounded">
+                      {c.applywizzId}
+                    </span>
+                  </div>
 
-                  {/* Status Indicator */}
+                  {/* Status Indicator Pill */}
                   {c.status === 'READY' && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-800/40">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#1E4620] bg-[#9AC89A] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#1E4620] animate-pulse"></span>
                       Ready
                     </span>
                   )}
                   {c.status === 'PENDING' && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-800/40">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#5C4A0A] bg-[#F4D66B] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#5C4A0A]"></span>
                       Pending
                     </span>
                   )}
                   {c.status === 'EXPIRED' && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded-full">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#475569] bg-[#E2E8F0] px-2 py-0.5 rounded border border-[#1A1A2E]">
                       Expired
                     </span>
                   )}
                 </div>
 
                 {/* Candidate Full Name */}
-                <div className="text-sm font-semibold text-slate-100 truncate mb-1">
+                <div className="text-xs font-bold text-[#1A1A2E] truncate mb-1">
                   {c.clientName}
                 </div>
 
-                {/* Meta details: Email & Job Pill */}
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="truncate max-w-[140px] text-slate-400 font-mono">
+                {/* Bottom Row: Location/Email & Job Count Pill */}
+                <div className="flex items-center justify-between text-[11px] text-[#64748B]">
+                  <span className="truncate max-w-[130px] font-medium text-[#64748B]">
                     {c.email || c.location || 'Profile Synced'}
                   </span>
 
-                  <span className="bg-slate-900 border border-slate-700/80 text-slate-300 px-2 py-0.5 rounded text-[10px] font-semibold">
+                  <span className="bg-[#FAF4EB] border border-[#1A1A2E] text-[#1A1A2E] px-2 py-0.5 rounded text-[10px] font-bold font-mono">
                     {c.totalJobs} {c.totalJobs === 1 ? 'Job' : 'Jobs'}
                   </span>
                 </div>
@@ -160,3 +166,5 @@ export const CandidateList: React.FC<CandidateListProps> = ({
     </aside>
   );
 };
+
+export default CandidateList;
