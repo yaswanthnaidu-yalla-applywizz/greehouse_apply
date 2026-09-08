@@ -1,13 +1,13 @@
 /**
- * @fileoverview Main Operator Dashboard Application Container.
+ * @fileoverview Main Operator Dashboard Application Container (Phase V2-5).
  *
- * Coordinates split-screen state, real-time candidate selection, job tab switching,
- * and pre-populated form rendering for the Greenhouse Job Application Automation system.
+ * Coordinates split-screen state, candidate selection, job tab switching,
+ * pre-populated form rendering, live submission/dry-run controls, and verification proof viewing.
  *
  * References:
  * - 04-ui-ux.md
  * - 05-backend-schema.md
- * - 06-implementation.md
+ * - V2-implementation.md (Phase V2-5)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -19,9 +19,11 @@ import type {
   CandidateJobApplication,
   CandidateSummary,
   DashboardStats,
+  ResolvedField,
+  ApplicationStatus,
 } from './types.js';
 
-const API_BASE_URL = window.location.origin;
+const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
 /**
  * Main Split-Screen Dashboard Component.
@@ -34,7 +36,7 @@ export const App: React.FC = () => {
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [candidateDetail, setCandidateDetail] = useState<CandidateDetail | null>(null);
   const [selectedJobUrl, setSelectedJobUrl] = useState<string | null>(null);
-  const [application, setApplication] = useState<CandidateJobApplication | null>(null);
+  const [application, setApplication] = useState<any | null>(null);
 
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(true);
   const [isLoadingApplication, setIsLoadingApplication] = useState<boolean>(false);
@@ -107,7 +109,7 @@ export const App: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}/jobs/${encodedUrl}`);
 
       if (res.ok) {
-        const appData: CandidateJobApplication = await res.json();
+        const appData = await res.json();
         setApplication(appData);
       } else {
         setApplication(null);
@@ -126,6 +128,45 @@ export const App: React.FC = () => {
     }
   }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
+  // Field Edit Handler
+  const handleFieldUpdate = (updatedField: ResolvedField) => {
+    if (!application) return;
+
+    const fields = application.resolvedFields || application.resolved_fields || [];
+    const newResolvedFields = fields.map((f: ResolvedField) =>
+      f.fieldId === updatedField.fieldId || f.name === updatedField.fieldId ? updatedField : f
+    );
+
+    setApplication({
+      ...application,
+      resolvedFields: newResolvedFields,
+      resolved_fields: newResolvedFields,
+    });
+  };
+
+  // Status Change Handler (from Submissions, Dry Run, or Polling)
+  const handleStatusChange = (newStatus: ApplicationStatus, updatedPayload?: any) => {
+    if (!application) return;
+
+    setApplication((prev: any) => ({
+      ...prev,
+      status: newStatus,
+      proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || prev.proof_web_url,
+      proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at || prev.proof_captured_at,
+      dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url || prev.dry_run_screenshot_url,
+    }));
+
+    if (candidateDetail && selectedJobUrl) {
+      const updatedJobs = candidateDetail.jobs.map((j) => {
+        if (j.canonicalUrl === selectedJobUrl || j.rawUrl === selectedJobUrl) {
+          return { ...j, status: newStatus };
+        }
+        return j;
+      });
+      setCandidateDetail({ ...candidateDetail, jobs: updatedJobs });
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1E293B] font-sans overflow-hidden select-none">
       {/* Top Navigation & Metrics Bar */}
@@ -137,7 +178,7 @@ export const App: React.FC = () => {
               Greenhouse Automation Platform
             </h1>
             <p className="text-[10px] text-[#64748B] font-mono">
-              Phase V1-5 Operator Dashboard · Dual-Branch Pipeline
+              Phase V2 Operator Dashboard · Verification Proofs &amp; Status Lifecycle
             </p>
           </div>
         </div>
@@ -145,37 +186,33 @@ export const App: React.FC = () => {
         {/* Live Metrics Pills */}
         {stats && (
           <div className="flex items-center gap-3">
-            {/* Yellow Card: Candidates */}
             <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#E5C350] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
               <span className="text-[#5C4A0A]">Candidates:</span>
               <span className="text-[#5C4A0A] font-bold">{stats.totalCandidates}</span>
             </div>
 
-            {/* Blue Card: Jobs */}
             <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#A2C5DD] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
               <span className="text-[#2D5C8C]">Jobs:</span>
               <span className="text-[#2D5C8C] font-bold">{stats.totalApplications}</span>
             </div>
 
-            {/* Green Card: supabase % */}
             <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#84B784] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
               <span className="text-[#2D5C2D] font-bold">🟢 supabase: {stats.supabasePercentage}%</span>
             </div>
 
-            {/* Coral Card: ai % */}
             <div className="flex items-center gap-1.5 bg-[#E88474] border border-[#D87060] px-3 py-1.5 rounded-lg text-xs font-mono font-semibold shadow-sm">
               <span className="text-[#6B2C2C] font-bold">🟣 ai: {stats.aiPercentage}%</span>
             </div>
+
+            <button
+              type="button"
+              onClick={fetchInitialData}
+              className="text-xs bg-[#FFFFFF] hover:bg-[#FAF6F0] text-[#1E293B] border border-[#D8C7B5] px-3 py-1.5 rounded-lg transition-colors font-medium shadow-sm"
+            >
+              ↻ Refresh
+            </button>
           </div>
         )}
-
-        <button
-          type="button"
-          onClick={fetchInitialData}
-          className="text-xs bg-[#FFFFFF] hover:bg-[#FAF6F0] text-[#1E293B] border border-[#D8C7B5] px-3 py-1.5 rounded-lg transition-colors font-medium shadow-sm"
-        >
-          ↻ Refresh
-        </button>
       </header>
 
       {/* Main Split-Screen Workspace */}
@@ -203,7 +240,10 @@ export const App: React.FC = () => {
               <FormRenderer
                 application={application}
                 isLoading={isLoadingApplication}
+                candidateName={candidateDetail.clientName}
+                apiBaseUrl={API_BASE_URL}
                 onFieldUpdate={handleFieldUpdate}
+                onStatusChange={handleStatusChange}
               />
             </>
           ) : (

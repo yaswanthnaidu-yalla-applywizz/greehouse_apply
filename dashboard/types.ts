@@ -64,3 +64,30 @@ export interface DashboardStats {
   aiPercentage: number;
   pipelineStatus: 'READY' | 'IDLE' | 'PROCESSING';
 }
+
+export type ApplicationStatus =
+  | 'READY_FOR_REVIEW'
+  | 'DRY_RUN_COMPLETE'
+  | 'APPLYING'
+  | 'APPLIED'
+  | 'FAILED'
+  | 'EXPIRED'
+  | 'CAPTCHA_REQUIRED';
+
+export interface ApplicationDetail {
+  id?: string;
+  applywizz_id: string;
+  job_url: string;
+  company_name?: string | null;
+  job_title?: string | null;
+  status: ApplicationStatus;
+  resolved_fields: ResolvedField[];
+  proof_web_url?: string | null;
+  proof_captured_at?: string | null;
+  dry_run_screenshot_url?: string | null;
+  error_message?: string | null;
+  submitted_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+

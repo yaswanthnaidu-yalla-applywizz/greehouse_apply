@@ -97,6 +97,31 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                   {job.companyName || 'Company'}
                 </span>
 
+                {job.status === 'APPLIED' && (
+                  <span className="text-[10px] font-mono text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.2 rounded">
+                    ✅ Applied
+                  </span>
+                )}
+                {job.status === 'APPLYING' && (
+                  <span className="text-[10px] font-mono text-amber-700 font-bold bg-amber-100 px-1.5 py-0.2 rounded animate-pulse">
+                    ⏳ Submitting
+                  </span>
+                )}
+                {job.status === 'DRY_RUN_COMPLETE' && (
+                  <span className="text-[10px] font-mono text-blue-700 font-bold bg-blue-100 px-1.5 py-0.2 rounded">
+                    🚀 Dry-Run
+                  </span>
+                )}
+                {job.status === 'CAPTCHA_REQUIRED' && (
+                  <span className="text-[10px] font-mono text-orange-700 font-bold bg-orange-100 px-1.5 py-0.2 rounded">
+                    🛡️ CAPTCHA
+                  </span>
+                )}
+                {job.status === 'FAILED' && (
+                  <span className="text-[10px] font-mono text-rose-700 font-bold bg-rose-100 px-1.5 py-0.2 rounded">
+                    ❌ Failed
+                  </span>
+                )}
                 {job.status === 'READY_FOR_REVIEW' && (
                   <span className="text-[10px] font-mono text-[#059669] font-semibold">
                     🟢 Ready

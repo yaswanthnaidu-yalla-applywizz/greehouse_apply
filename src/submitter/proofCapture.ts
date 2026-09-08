@@ -13,6 +13,8 @@ import { setProofUrl } from '../db/applications.js';
 export interface ProofCaptureResult {
   proofWebUrl: string;
   proofCapturedAt: string;
+  url: string;
+  capturedAt: string;
 }
 
 /**
@@ -49,6 +51,8 @@ export async function captureWebProof(
   return {
     proofWebUrl,
     proofCapturedAt: capturedAt,
+    url: proofWebUrl,
+    capturedAt,
   };
 }
 
