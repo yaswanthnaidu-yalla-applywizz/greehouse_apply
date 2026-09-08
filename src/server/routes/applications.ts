@@ -7,9 +7,9 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { getApplication } from '../../db/applications.js';
+import { getApplication, updateResolvedFields } from '../../db/applications.js';
 import { upsertAnswer } from '../../db/qaBank.js';
-import { getDbClient } from '../../db/client.js';
+import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { generateFingerprint } from '../../resolver/fingerprint.js';
 import type { ResolvedField } from '../../types/index.js';
 
@@ -44,18 +44,11 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
   const trimmedValue = value.trim();
 
   try {
-    const supabase = getDbClient();
+    // 1. Fetch application
+    let application: any = await getApplication(appId);
 
-    // 1. Fetch application from Supabase
-    // Try UUID first; if not found or not UUID, try matching by applywizz_id
-    let application: any = null;
-
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
-
-    if (isUuid) {
-      application = await getApplication(appId);
-    } else {
-      // Search candidate_applications by applywizz_id
+    if (!application && isSupabaseConfigured()) {
+      const supabase = getDbClient();
       const { data } = await supabase
         .from('candidate_applications')
         .select('*')
@@ -109,20 +102,8 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
       resolvedFields.push(updatedField);
     }
 
-    // 3. Persist updated resolved_fields to Supabase candidate_applications
-    const { error: updateError } = await supabase
-      .from('candidate_applications')
-      .update({
-        resolved_fields: resolvedFields,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', application.id);
-
-    if (updateError) {
-      console.error(`[Applications Router] ❌ DB update failed: ${updateError.message}`);
-      res.status(500).json({ error: `Database update failed: ${updateError.message}` });
-      return;
-    }
+    // 3. Persist updated resolved_fields to candidate_applications
+    await updateResolvedFields(application.id, resolvedFields);
 
     // 4. Save to candidate_qa_bank with source: 'manual' for persistent memory
     const fingerprint = generateFingerprint(updatedField.label, updatedField.type);
@@ -160,13 +141,10 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
   const appId = Array.isArray(rawAppId) ? rawAppId[0] : String(rawAppId || '');
 
   try {
-    const supabase = getDbClient();
-    let app: any = null;
+    let app: any = await getApplication(appId);
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
-    if (isUuid) {
-      app = await getApplication(appId);
-    } else {
+    if (!app && isSupabaseConfigured()) {
+      const supabase = getDbClient();
       const { data } = await supabase
         .from('candidate_applications')
         .select('*')

@@ -136,6 +136,37 @@ export async function getApplicationByCandidateAndJob(
 }
 
 /**
+ * Updates the resolved fields payload for an application.
+ */
+export async function updateResolvedFields(
+  id: string,
+  resolvedFields: any[]
+): Promise<void> {
+  const updatePayload = {
+    resolved_fields: resolvedFields,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      await supabase
+        .from('candidate_applications')
+        .update(updatePayload)
+        .eq('id', id);
+      return;
+    } catch (err: any) {
+      // Fall through to memory
+    }
+  }
+
+  const existing = memoryApplications.get(id);
+  if (existing) {
+    memoryApplications.set(id, { ...existing, ...updatePayload });
+  }
+}
+
+/**
  * Updates application lifecycle status.
  */
 export async function updateStatus(
