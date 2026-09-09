@@ -14,6 +14,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CandidateList } from './CandidateList.js';
 import { JobQueueView } from './JobQueueView.js';
 import { FormRenderer } from './FormRenderer.js';
+import { AuthView, type AuthUser } from './components/AuthView.js';
 import type {
   CandidateDetail,
   CandidateSummary,
@@ -25,6 +26,16 @@ import type {
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
 export const App: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const saved = localStorage.getItem('applywizz_auth_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [activeTab, setActiveTab] = useState<'find-jobs' | 'dashboard' | 'stats'>('dashboard');
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -48,7 +59,7 @@ export const App: React.FC = () => {
       if (candidatesRes.ok) {
         const candidateData: CandidateSummary[] = await candidatesRes.json();
         setCandidates(candidateData);
-        if (candidateData.length > 0 && !selectedCandidateId) {
+        if (candidateData.length > 0 && (!selectedCandidateId || selectedCandidateId === 'AWL-YASWANTH')) {
           setSelectedCandidateId(candidateData[0].applywizzId);
         }
       }
@@ -64,9 +75,19 @@ export const App: React.FC = () => {
     }
   }, [selectedCandidateId]);
 
+  const handleSignOut = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('applywizz_auth_token');
+      localStorage.removeItem('applywizz_auth_user');
+    }
+    setCurrentUser(null);
+  };
+
   useEffect(() => {
-    fetchInitialData();
-  }, [fetchInitialData]);
+    if (currentUser) {
+      fetchInitialData();
+    }
+  }, [currentUser, fetchInitialData]);
 
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
@@ -169,6 +190,14 @@ export const App: React.FC = () => {
     }
   };
 
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-screen w-screen bg-[#FFF5EB] p-4 select-none font-sans">
+        <AuthView onAuthSuccess={(user) => setCurrentUser(user)} apiBaseUrl={API_BASE_URL} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1A1A2E] font-sans overflow-hidden select-none">
       {/* Top Navigation & Brand Header */}
@@ -266,13 +295,24 @@ export const App: React.FC = () => {
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#E88474] border border-[#1A1A2E] rounded-full"></span>
           </div>
 
-          {/* User Profile Avatar */}
+          {/* User Profile Avatar & Sign Out */}
           <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
-            <div className="w-5 h-5 rounded-full bg-[#E88474] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-black text-white">
-              OP
+            <div className="w-5 h-5 rounded-full bg-[#E88474] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-black text-white uppercase">
+              {currentUser?.email ? currentUser.email.charAt(0) : 'U'}
             </div>
-            <span className="text-xs font-bold text-[#1A1A2E] hidden sm:inline">Operator</span>
+            <span className="text-xs font-bold text-[#1A1A2E] max-w-[130px] truncate hidden sm:inline" title={currentUser?.email}>
+              {currentUser?.email || 'Operator'}
+            </span>
           </div>
+
+          <button
+            type="button"
+            onClick={handleSignOut}
+            title="Sign Out"
+            className="text-xs bg-[#FFF5EB] hover:bg-[#E88474] hover:text-white text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
+          >
+            Sign Out
+          </button>
         </div>
       </header>
 

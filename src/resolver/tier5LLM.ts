@@ -6,8 +6,8 @@
 import { LLMSynthesizer, type JobContext } from './llmSynthesizer.js';
 import { upsertAnswer } from '../db/qaBank.js';
 import { generateFingerprint } from './fingerprint.js';
-import type { ProfileRow } from '../db/profiles.js';
-import type { ApplyWizzCandidateProfile, ResolvedField, ScannedField } from '../types/index.js';
+import { profileRowToCandidateProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
+import type { ResolvedField, ScannedField } from '../types/index.js';
 
 let synthesizerInstance: LLMSynthesizer | null = null;
 
@@ -21,26 +21,8 @@ function getSynthesizer(): LLMSynthesizer {
 /**
  * Transforms ProfileRow into ApplyWizzCandidateProfile for LLMSynthesizer compatibility.
  */
-function toCandidateProfile(profile: ProfileRow): ApplyWizzCandidateProfile {
-  return {
-    applywizzId: profile.applywizz_id,
-    clientName: profile.client_name,
-    firstName: profile.first_name || '',
-    lastName: profile.last_name || '',
-    email: profile.email || '',
-    phone: profile.phone || '',
-    location: profile.location || '',
-    linkedinUrl: profile.linkedin_url || '',
-    websiteUrl: profile.website_url || undefined,
-    githubUrl: profile.github_url || undefined,
-    workAuthorization: profile.work_authorization || '',
-    requiresSponsorship: Boolean(profile.requires_sponsorship),
-    education: profile.education || [],
-    workExperience: profile.work_experience || [],
-    resumeUrl: profile.resume_url || '',
-    localResumePath: profile.resume_storage_path || '',
-    demographics: profile.raw_api_payload?.demographics,
-  };
+function toCandidateProfile(profile: ProfileRow) {
+  return profileRowToCandidateProfile(profile);
 }
 
 /**
@@ -64,6 +46,25 @@ export async function resolveTier5(
 
   const adaptedProfile = toCandidateProfile(candidateProfile);
   const fingerprint = generateFingerprint(field.label, field.type);
+  const combined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`;
+
+  // Email fields must never be LLM-synthesized — use company email only
+  if (/email/i.test(combined)) {
+    const compEmail = getCompanyEmail(candidateProfile);
+    if (compEmail) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: compEmail,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
+    return null;
+  }
 
   try {
     const rawResult = await synthesizer.synthesizeAnswer(

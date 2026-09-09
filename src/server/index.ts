@@ -19,6 +19,15 @@ import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
+import { authRouter } from './routes/auth.js';
+import { cacheApplicationLocally } from '../db/applications.js';
+import {
+  demoApplication,
+  demoSegment,
+  demoTemplate,
+  toApplicationRow,
+} from '../dashboard/demoFixtures.js';
+import { zohoReader } from '../services/zohoReader.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -57,81 +66,103 @@ export interface DashboardStats {
 }
 
 /**
- * In-memory state cache loaded from disk artifacts.
+ * In-memory artifact cache loaded once at server startup (refreshed via admin endpoint).
  */
-interface ServerState {
-  segments: CandidateSegment[];
-  templates: ScannedJobTemplate[];
-  applications: CandidateJobApplication[];
-  candidatesMap: Map<string, CandidateSegment>;
-  templatesMap: Map<string, ScannedJobTemplate>;
-  applicationsMap: Map<string, CandidateJobApplication>;
+export interface ArtifactCache {
+  candidateSegments: CandidateSegment[];
+  scannedJobs: ScannedJobTemplate[];
+  resolvedApplications: CandidateJobApplication[];
+  lastLoadedAt: string | null;
 }
 
-const state: ServerState = {
-  segments: [],
-  templates: [],
-  applications: [],
-  candidatesMap: new Map(),
-  templatesMap: new Map(),
-  applicationsMap: new Map(),
+export const artifactCache: ArtifactCache = {
+  candidateSegments: [],
+  scannedJobs: [],
+  resolvedApplications: [],
+  lastLoadedAt: null,
 };
 
+/** O(1) lookup maps rebuilt whenever artifacts are loaded. */
+const candidatesMap = new Map<string, CandidateSegment>();
+const templatesMap = new Map<string, ScannedJobTemplate>();
+const applicationsMap = new Map<string, CandidateJobApplication>();
+
+function rebuildLookupMaps(): void {
+  candidatesMap.clear();
+  templatesMap.clear();
+  applicationsMap.clear();
+
+  for (const seg of artifactCache.candidateSegments) {
+    candidatesMap.set(seg.applywizzId, seg);
+  }
+  for (const template of artifactCache.scannedJobs) {
+    templatesMap.set(template.jobUrl, template);
+  }
+  for (const app of artifactCache.resolvedApplications) {
+    const key = `${app.applywizzId}::${app.jobUrl}`;
+    applicationsMap.set(key, app);
+    cacheApplicationLocally(toApplicationRow(app));
+  }
+}
+
+export interface LoadArtifactsOptions {
+  /** Emit the single-line startup summary (default: false). */
+  log?: boolean;
+}
+
 /**
- * Loads generated artifact files from disk into memory.
+ * Loads generated artifact files from disk into the in-memory artifact cache.
+ * Call once at server startup; use POST /api/admin/refresh-artifacts to reload manually.
  */
-export function loadArtifacts(outputDir: string = config.OUTPUT_DIR): void {
+export function loadArtifacts(
+  outputDir: string = config.OUTPUT_DIR,
+  options: LoadArtifactsOptions = {}
+): void {
   const resolvedOutputDir = path.resolve(process.cwd(), outputDir);
 
   const segmentsPath = path.join(resolvedOutputDir, 'candidate_segments.json');
   const templatesPath = path.join(resolvedOutputDir, 'scanned_jobs.json');
   const applicationsPath = path.join(resolvedOutputDir, 'resolved_applications.json');
 
-  state.candidatesMap.clear();
-  state.templatesMap.clear();
-  state.applicationsMap.clear();
+  let segments: CandidateSegment[] = [];
+  let templates: ScannedJobTemplate[] = [];
+  let applications: CandidateJobApplication[] = [];
 
-  // 1. Load Candidate Segments
   if (fs.existsSync(segmentsPath)) {
     try {
-      const raw = fs.readFileSync(segmentsPath, 'utf-8');
-      state.segments = JSON.parse(raw);
-      for (const seg of state.segments) {
-        state.candidatesMap.set(seg.applywizzId, seg);
-      }
-      console.log(`[Express API] 📂 Loaded ${state.segments.length} candidate segments.`);
+      segments = JSON.parse(fs.readFileSync(segmentsPath, 'utf-8'));
     } catch (err: any) {
-      console.warn(`[Express API] ⚠️ Failed to read ${segmentsPath}: ${err.message}`);
+      console.warn(`[Server] ⚠️ Failed to read ${segmentsPath}: ${err.message}`);
     }
   }
 
-  // 2. Load Scanned Job Templates
   if (fs.existsSync(templatesPath)) {
     try {
-      const raw = fs.readFileSync(templatesPath, 'utf-8');
-      state.templates = JSON.parse(raw);
-      for (const t of state.templates) {
-        state.templatesMap.set(t.jobUrl, t);
-      }
-      console.log(`[Express API] 📂 Loaded ${state.templates.length} scanned job templates.`);
+      templates = JSON.parse(fs.readFileSync(templatesPath, 'utf-8'));
     } catch (err: any) {
-      console.warn(`[Express API] ⚠️ Failed to read ${templatesPath}: ${err.message}`);
+      console.warn(`[Server] ⚠️ Failed to read ${templatesPath}: ${err.message}`);
     }
   }
 
-  // 3. Load Resolved Applications
   if (fs.existsSync(applicationsPath)) {
     try {
-      const raw = fs.readFileSync(applicationsPath, 'utf-8');
-      state.applications = JSON.parse(raw);
-      for (const app of state.applications) {
-        const key = `${app.applywizzId}::${app.jobUrl}`;
-        state.applicationsMap.set(key, app);
-      }
-      console.log(`[Express API] 📂 Loaded ${state.applications.length} resolved job applications.`);
+      applications = JSON.parse(fs.readFileSync(applicationsPath, 'utf-8'));
     } catch (err: any) {
-      console.warn(`[Express API] ⚠️ Failed to read ${applicationsPath}: ${err.message}`);
+      console.warn(`[Server] ⚠️ Failed to read ${applicationsPath}: ${err.message}`);
     }
+  }
+
+  artifactCache.candidateSegments = segments.length > 0 ? segments : [demoSegment];
+  artifactCache.scannedJobs = templates.length > 0 ? templates : [demoTemplate];
+  artifactCache.resolvedApplications = applications.length > 0 ? applications : [demoApplication];
+  artifactCache.lastLoadedAt = new Date().toISOString();
+
+  rebuildLookupMaps();
+
+  if (options.log) {
+    console.log(
+      `[Server] ✅ Artifacts loaded: ${artifactCache.candidateSegments.length} candidates, ${artifactCache.scannedJobs.length} templates, ${artifactCache.resolvedApplications.length} applications`
+    );
   }
 }
 
@@ -141,7 +172,7 @@ export function loadArtifacts(outputDir: string = config.OUTPUT_DIR): void {
  * @returns Configured Express application.
  */
 export function createServer(outputDir: string = config.OUTPUT_DIR): express.Application {
-  loadArtifacts(outputDir);
+  loadArtifacts(outputDir, { log: true });
   const app = express();
 
   app.use(cors());
@@ -160,6 +191,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     app.use(express.static(publicDir));
   }
 
+  // Auth routes
+  app.use('/api/auth', authRouter);
+
   // Applications, field patch, dry-run, and submission routes
   app.use('/api/applications', submissionsRouter);
   app.use('/api/applications', applicationsRouter);
@@ -174,9 +208,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       service: 'greenhouse-operator-api',
       timestamp: new Date().toISOString(),
       loaded: {
-        candidates: state.segments.length,
-        templates: state.templates.length,
-        applications: state.applications.length,
+        candidates: artifactCache.candidateSegments.length,
+        templates: artifactCache.scannedJobs.length,
+        applications: artifactCache.resolvedApplications.length,
+        lastLoadedAt: artifactCache.lastLoadedAt,
       },
     });
   });
@@ -190,7 +225,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     let supabaseCount = 0;
     let aiCount = 0;
 
-    for (const appItem of state.applications) {
+    for (const appItem of artifactCache.resolvedApplications) {
       for (const f of appItem.resolvedFields) {
         totalFields++;
         if (f.source === 'supabase') supabaseCount++;
@@ -199,18 +234,27 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     const stats: DashboardStats = {
-      totalCandidates: state.segments.length,
-      totalApplications: state.applications.length,
-      uniqueScannedJobs: state.templates.length,
+      totalCandidates: artifactCache.candidateSegments.length,
+      totalApplications: artifactCache.resolvedApplications.length,
+      uniqueScannedJobs: artifactCache.scannedJobs.length,
       totalFieldsPopulated: totalFields,
       supabaseTaggedCount: supabaseCount,
       aiTaggedCount: aiCount,
       supabasePercentage: totalFields ? Number(((supabaseCount / totalFields) * 100).toFixed(1)) : 0,
       aiPercentage: totalFields ? Number(((aiCount / totalFields) * 100).toFixed(1)) : 0,
-      pipelineStatus: state.applications.length > 0 ? 'READY' : 'IDLE',
+      pipelineStatus: artifactCache.resolvedApplications.length > 0 ? 'READY' : 'IDLE',
     };
 
     res.json(stats);
+  });
+
+  /**
+   * POST /api/admin/refresh-artifacts
+   * Manually reloads pipeline artifacts from disk into memory.
+   */
+  app.post('/api/admin/refresh-artifacts', (_req: Request, res: Response) => {
+    loadArtifacts(outputDir);
+    res.json({ reloaded: true, timestamp: artifactCache.lastLoadedAt });
   });
 
   /**
@@ -218,8 +262,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * Returns summary list of all segregated candidates with job counts and status.
    */
   app.get('/api/candidates', (_req: Request, res: Response) => {
-    const candidateSummaries: CandidateSummary[] = state.segments.map((seg) => {
-      const candidateApps = state.applications.filter((a) => a.applywizzId === seg.applywizzId);
+    const candidateSummaries: CandidateSummary[] = artifactCache.candidateSegments.map((seg) => {
+      const candidateApps = artifactCache.resolvedApplications.filter(
+        (a) => a.applywizzId === seg.applywizzId
+      );
       const readyCount = candidateApps.filter((a) => a.status === 'READY_FOR_REVIEW').length;
       const expiredCount = candidateApps.filter((a) => a.status === 'EXPIRED').length;
 
@@ -227,9 +273,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       const eligibleJobs = seg.jobs.filter((job) => {
         const canonical = job.canonicalUrl || job.rawUrl;
         const template =
-          state.templatesMap.get(canonical) ||
-          state.templatesMap.get(job.rawUrl) ||
-          Array.from(state.templatesMap.values()).find(
+          templatesMap.get(canonical) ||
+          templatesMap.get(job.rawUrl) ||
+          Array.from(templatesMap.values()).find(
             (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
           );
         if (template && template.fields && template.fields.length >= config.MAX_JOB_QUESTIONS) {
@@ -273,7 +319,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
-    const seg = state.candidatesMap.get(applywizzId);
+    const seg = candidatesMap.get(applywizzId);
 
     if (!seg) {
       res.status(404).json({ error: `Candidate with Applywizz ID '${applywizzId}' not found.` });
@@ -283,7 +329,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const resumeFilename = `${applywizzId}_resume.pdf`;
     const resumeExists = fs.existsSync(path.join(config.RESUMES_DIR, resumeFilename));
 
-    const candidateApps = state.applications.filter((a) => a.applywizzId === applywizzId);
+    const candidateApps = artifactCache.resolvedApplications.filter(
+      (a) => a.applywizzId === applywizzId
+    );
 
     // Enrich jobs with resolved application status and metadata, filtering to < MAX_JOB_QUESTIONS
     const eligibleJobsWithStatus = seg.jobs
@@ -296,13 +344,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
               canonical.includes(a.jobUrl) ||
               a.jobUrl.includes(canonical)
           ) ||
-          state.applicationsMap.get(`${applywizzId}::${canonical}`) ||
-          state.applicationsMap.get(`${applywizzId}::${job.rawUrl}`);
+          applicationsMap.get(`${applywizzId}::${canonical}`) ||
+          applicationsMap.get(`${applywizzId}::${job.rawUrl}`);
 
         const template =
-          state.templatesMap.get(canonical) ||
-          state.templatesMap.get(job.rawUrl) ||
-          Array.from(state.templatesMap.values()).find(
+          templatesMap.get(canonical) ||
+          templatesMap.get(job.rawUrl) ||
+          Array.from(templatesMap.values()).find(
             (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
           );
 
@@ -356,12 +404,12 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     // 1. Check exact key match in applicationsMap
     let appItem =
-      state.applicationsMap.get(`${applywizzId}::${decodedUrl}`) ||
-      state.applicationsMap.get(`${applywizzId}::${rawJobUrl}`);
+      applicationsMap.get(`${applywizzId}::${decodedUrl}`) ||
+      applicationsMap.get(`${applywizzId}::${rawJobUrl}`);
 
     // 2. Candidate applications match
     if (!appItem) {
-      appItem = state.applications.find(
+      appItem = artifactCache.resolvedApplications.find(
         (a) =>
           a.applywizzId === applywizzId &&
           (a.jobUrl === decodedUrl ||
@@ -377,12 +425,12 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     // 3. Fallback: construct application payload from template if available
     const template =
-      state.templatesMap.get(decodedUrl) ||
-      Array.from(state.templatesMap.values()).find(
+      templatesMap.get(decodedUrl) ||
+      Array.from(templatesMap.values()).find(
         (t) => t.jobUrl.includes(decodedUrl) || decodedUrl.includes(t.jobUrl)
       );
 
-    const seg = state.candidatesMap.get(applywizzId);
+    const seg = candidatesMap.get(applywizzId);
 
     if (template && seg) {
       res.json({
@@ -446,7 +494,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
  * @returns Running HTTP server instance.
  */
 export function startServer(port: number = config.PORT || 3001): ReturnType<express.Application['listen']> {
-  loadArtifacts();
   const app = createServer();
 
   const server = app.listen(port, () => {
@@ -458,7 +505,19 @@ export function startServer(port: number = config.PORT || 3001): ReturnType<expr
     console.log(`• Candidate List:     http://localhost:${port}/api/candidates`);
     console.log(`• Master Resumes:     http://localhost:${port}/resumes/`);
     console.log('================================================================\n');
+
+    if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
+      zohoReader.init().catch((err: any) => {
+        console.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
+      });
+    }
   });
+
+  const cleanup = async () => {
+    await zohoReader.cleanup().catch(() => {});
+  };
+  process.once('SIGINT', cleanup);
+  process.once('SIGTERM', cleanup);
 
   return server;
 }

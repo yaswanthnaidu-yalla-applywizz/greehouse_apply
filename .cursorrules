@@ -1,0 +1,29 @@
+# Cursor Rules — Greenhouse Job Application Automation
+
+# 🚨 STRICT RULE: ApplyWizz API Usage
+- NEVER call the ApplyWizz API (`https://www.apply-wizz.me/api/get-client-details`) without notifying the user and getting explicit permission first.
+- Always use local cache (`cache/profiles/*.json`) and Supabase (`profiles` table).
+- Never pass `forceRefresh: true` or execute automated batch profile syncs without approval.
+
+# 🛑 STRICT RULE: NO SYNTHETIC TESTS & MAXIMUM TOKEN EFFICIENCY
+- NEVER write throwaway synthetic mock suites, mock HTML pages, or run artificial test loops.
+- Do not invent mock test scenarios or waste tokens/time on testing scaffolding.
+- Implement minimal, production-grade code directly and keep responses ultra-concise.
+- Real flow validation is performed by the user or on real postings when explicitly requested.
+
+# 📋 Immediate Next Tasks (see CODEBASE_ANALYSIS.md §12 for full backlog)
+1. **Paused session persistence**: `PAUSED_SESSIONS` in `liveSubmit.ts` is lost on server restart.
+2. **Dashboard build pipeline**: Stop requiring manual mirroring of `dashboard/*.tsx` into `dashboard/public/index.html`.
+3. **Unify ApplicationStatus types**: Align `src/types/index.ts` with `src/db/applications.ts`.
+
+# ✅ Recently Completed (do not re-implement)
+- Alphanumeric OTP modal & multi-box resolution (`SubmissionControls.tsx`, `index.html`, `liveSubmit.ts`)
+- Company email priority (`applywizzClient.ts`, `profiles.getCompanyEmail()`, `tier1Supabase.ts`)
+- Yes/No question enforcement (`tier1Supabase.ts`, `llmSynthesizer.ts`)
+
+# ⚙️ Environment & Architecture
+- Local LLM: Ollama `llama3.1:latest` on `http://127.0.0.1:11434/v1`.
+- Build verification: `npm run build` must pass with 0 errors.
+- Never upload or fill cover letters.
+- Never write `+1` into phone number fields.
+- Refer to `CODEBASE_ANALYSIS.md`, `handover.md`, and `AGENTS.md` for detailed context.

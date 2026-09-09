@@ -13,7 +13,7 @@ import { fillForm } from './formFiller.js';
 import type { ResolvedField } from '../types/index.js';
 
 async function main() {
-  const targetJobUrl = process.argv[2] || 'https://job-boards.greenhouse.io/pmg/jobs/8765658002';
+  const targetJobUrl = process.argv[2] || 'https://job-boards.greenhouse.io/pmg/jobs/8765658002?gh_src=lcrm1uib2us';
   const resumePath = path.resolve(process.cwd(), 'resumes/my-resume.pdf');
 
   console.log('================================================================');

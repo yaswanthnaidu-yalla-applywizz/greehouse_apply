@@ -1,13 +1,13 @@
 /**
- * @fileoverview 5-Tier Answer Resolution Engine Orchestrator (Greenhouse V2).
+ * @fileoverview 3-Tier Answer Resolution Engine Orchestrator (Greenhouse V2).
  *
- * Coordinates Tiers 1 through 5 in strict waterfall sequence:
+ * Coordinates resolution in strict waterfall sequence (100% offline during resolution):
  * - Tier 1: Supabase profiles + exact candidate_qa_bank match (source: 'supabase', tier: 1)
- * - Tier 2: Parsed resume cache / pdf-parse extraction (source: 'resume_parse', tier: 2)
- * - Tier 3: Fuzzy Fuse.js match against candidate_qa_bank (source: 'fuzzy_match', tier: 3)
- * - Tier 4: ApplyWizz live API refetch + profile upsert + re-run Tier 1 (source: 'api', tier: 4)
- * - Tier 5: LLM synthesis + automatic QA bank writeback (source: 'ai', tier: 5)
+ * - Tier 2: Parsed resume cache / Supabase Storage PDF parse (source: 'resume_parse', tier: 2)
+ * - Tier 5: Local Ollama LLM synthesis + automatic QA bank writeback (source: 'ai', tier: 5)
  * - Fallback: Unresolved field (source: 'unresolved', tier: null)
+ *
+ * No ApplyWizz API calls are made during resolution. New candidates are onboarded at ingestion time only.
  */
 
 import fs from 'fs';
@@ -18,8 +18,6 @@ import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
 import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
-import { resolveTier3 } from './tier3FuzzyMatch.js';
-import { resolveTier4 } from './tier4ApiRefetch.js';
 import { resolveTier5 } from './tier5LLM.js';
 import { upsertApplication } from '../db/applications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
@@ -32,6 +30,36 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 
+/**
+ * Returns a human-readable resolution source label for logging.
+ */
+export function formatResolutionSource(resolved: ResolvedField): string {
+  if (resolved.source === 'unresolved' || resolved.resolvedByTier === null) {
+    return '⚪ Unresolved';
+  }
+  if (resolved.source === 'resume_parse' || resolved.resolvedByTier === 2) {
+    return '🔵 Resume';
+  }
+  if (resolved.source === 'ai' || resolved.resolvedByTier === 5) {
+    return '🤖 LLM';
+  }
+  if (resolved.source === 'supabase' || resolved.resolvedByTier === 1) {
+    return '🟢 Supabase';
+  }
+  return `⚪ ${resolved.source}`;
+}
+
+/**
+ * Returns a short resolution source key for batch summary logs.
+ */
+export function resolutionSourceKey(resolved: ResolvedField): 'supabase' | 'resume' | 'llm' | 'unresolved' | 'other' {
+  if (resolved.source === 'unresolved' || resolved.resolvedByTier === null) return 'unresolved';
+  if (resolved.source === 'resume_parse' || resolved.resolvedByTier === 2) return 'resume';
+  if (resolved.source === 'ai' || resolved.resolvedByTier === 5) return 'llm';
+  if (resolved.source === 'supabase' || resolved.resolvedByTier === 1) return 'supabase';
+  return 'other';
+}
+
 export interface ResolutionTelemetry {
   totalFields: number;
   tier1Hits: number;
@@ -43,11 +71,11 @@ export interface ResolutionTelemetry {
 }
 
 /**
- * Orchestrator running the 5-tier waterfall resolution engine.
+ * Orchestrator running the 3-tier Supabase-only waterfall resolution engine.
  */
 export class AnswerResolver {
   /**
-   * Resolves a single scanned form field through the 5-tier waterfall.
+   * Resolves a single scanned form field through the 3-tier waterfall.
    */
   public async resolveField(
     applywizzId: string,
@@ -61,6 +89,21 @@ export class AnswerResolver {
   ): Promise<ResolvedField> {
     const profile = context?.profile || (await getProfile(applywizzId));
     const jobContext = context?.jobContext || { companyName: 'Company', jobTitle: 'Position' };
+    const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+
+    // Never fill cover letters under any circumstances
+    if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: '',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
 
     // ------------------------------------------------------------------------
     // Tier 1: Supabase Profile & Exact QA Bank
@@ -68,6 +111,21 @@ export class AnswerResolver {
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
       return tier1;
+    }
+
+    // If the field is NOT mandatory and wasn't found in Supabase/Profile, do NOT spend time
+    // running Tier 2 (resume parse) or Tier 5 (LLM). Leave it clean and empty.
+    if (!isRequired) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: '',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
     }
 
     // ------------------------------------------------------------------------
@@ -84,23 +142,8 @@ export class AnswerResolver {
     }
 
     // ------------------------------------------------------------------------
-    // Tier 3: Fuzzy Match against candidate_qa_bank
-    // ------------------------------------------------------------------------
-    const tier3 = await resolveTier3(applywizzId, field, context?.qaEntries);
-    if (tier3) {
-      return tier3;
-    }
-
-    // ------------------------------------------------------------------------
-    // Tier 4: ApplyWizz Live API Refetch
-    // ------------------------------------------------------------------------
-    const tier4 = await resolveTier4(applywizzId, field);
-    if (tier4) {
-      return tier4;
-    }
-
-    // ------------------------------------------------------------------------
-    // Tier 5: LLM Synthesis with QA Bank Writeback
+    // Tier 5: Local LLM Synthesis with QA Bank Writeback
+    // Streamlined Flow: Supabase ➔ Resume Parse (Supabase Storage) ➔ Local Ollama LLM
     // ------------------------------------------------------------------------
     if (profile) {
       const tier5 = await resolveTier5(
@@ -160,6 +203,7 @@ export class AnswerResolver {
     }
 
     const resolvedFields: ResolvedField[] = [];
+    console.log(`\n[Answer Resolver] 👤 Resolving [${candidateName}] for "${template.jobTitle}" at "${template.companyName}" (${template.fields.length} questions)...`);
 
     for (const field of template.fields) {
       const resolved = await this.resolveField(applywizzId, field, {
@@ -169,6 +213,11 @@ export class AnswerResolver {
         jobContext,
       });
       resolvedFields.push(resolved);
+
+      const preview = resolved.value
+        ? (resolved.value.length > 35 ? resolved.value.slice(0, 32) + '...' : resolved.value)
+        : '<blank>';
+      console.log(`  • [${formatResolutionSource(resolved)}] "${field.label}" ➔ "${preview}"`);
     }
 
     return {
@@ -202,7 +251,7 @@ export class AnswerResolver {
     }
 
     console.log(
-      `[Answer Resolver] 🚀 Resolving answers across ${segments.length} candidates and ${totalPairs} job assignments using 5-tier waterfall...`
+      `[Answer Resolver] 🚀 Resolving answers across ${segments.length} candidates and ${totalPairs} job assignments (Supabase → Resume → LLM)...`
     );
 
     // Pre-resolve shortlinks if any
@@ -259,15 +308,13 @@ export class AnswerResolver {
           console.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
         }
 
-        const t1 = app.resolvedFields.filter((f) => f.resolvedByTier === 1).length;
-        const t2 = app.resolvedFields.filter((f) => f.resolvedByTier === 2).length;
-        const t3 = app.resolvedFields.filter((f) => f.resolvedByTier === 3).length;
-        const t4 = app.resolvedFields.filter((f) => f.resolvedByTier === 4).length;
-        const t5 = app.resolvedFields.filter((f) => f.resolvedByTier === 5).length;
-        const unres = app.resolvedFields.filter((f) => f.resolvedByTier === null).length;
+        const counts = { supabase: 0, resume: 0, llm: 0, unresolved: 0, other: 0 };
+        for (const f of app.resolvedFields) {
+          counts[resolutionSourceKey(f)]++;
+        }
 
         console.log(
-          `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [T1:${t1} T2:${t2} T3:${t3} T4:${t4} T5:${t5} Unres:${unres}]`
+          `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [Supabase:${counts.supabase} Resume:${counts.resume} LLM:${counts.llm} Unresolved:${counts.unresolved}]`
         );
       }
     }

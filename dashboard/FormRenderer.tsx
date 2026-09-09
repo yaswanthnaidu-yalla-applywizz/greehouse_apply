@@ -77,7 +77,28 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const unresCount = fields.filter((f) => f.source === 'unresolved').length;
 
   const currentStatus: ApplicationStatus = application.status || 'READY_FOR_REVIEW';
-  const appId = application.id || application.applywizzId || 'app-default';
+  const appId = application.applywizzId || application.applywizz_id || application.id || 'app-default';
+  const jobUrl = application.jobUrl || application.job_url || '';
+
+  const resolveProofFromSubmitResponse = async (data: any) => {
+    let proofWebUrl = data.proofWebUrl;
+    let proofCapturedAt = data.proofCapturedAt;
+
+    if (data.status === 'APPLIED' && !proofWebUrl) {
+      try {
+        const proofRes = await fetch(
+          `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/proof`
+        );
+        if (proofRes.ok) {
+          const proofData = await proofRes.json();
+          proofWebUrl = proofData.proofWebUrl;
+          proofCapturedAt = proofData.proofCapturedAt;
+        }
+      } catch {}
+    }
+
+    return { proofWebUrl, proofCapturedAt };
+  };
 
   const handleTriggerDryRun = async () => {
     setIsDryRunning(true);
@@ -122,11 +143,13 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         }
       );
       const data = await res.json();
+      const { proofWebUrl, proofCapturedAt } = await resolveProofFromSubmitResponse(data);
+
       if (data.status && onStatusChange) {
-        onStatusChange(data.status, data);
+        onStatusChange(data.status, { ...data, proofWebUrl, proofCapturedAt });
       }
-      if (data.proofWebUrl) {
-        setViewerImageUrl(data.proofWebUrl);
+      if (proofWebUrl) {
+        setViewerImageUrl(proofWebUrl);
         setViewerTitle('Live Application Confirmation Proof');
         setViewerOpen(true);
       }
@@ -136,36 +159,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         onStatusChange('FAILED', { error: err.message });
       }
       alert(`Submission error: ${err.message}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleResumeCaptcha = async () => {
-    setIsSubmitting(true);
-    if (onStatusChange) {
-      onStatusChange('APPLYING');
-    }
-    try {
-      const res = await fetch(
-        `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/resume-submission`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-      const data = await res.json();
-      if (data.status && onStatusChange) {
-        onStatusChange(data.status, data);
-      }
-      if (data.proofWebUrl) {
-        setViewerImageUrl(data.proofWebUrl);
-        setViewerTitle('Live Application Confirmation Proof');
-        setViewerOpen(true);
-      }
-    } catch (err: any) {
-      console.error('Resume submission error:', err);
-      alert(`Resume submission error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -230,22 +223,40 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           <div className="shrink-0 flex flex-col items-end gap-2">
             <SubmissionControls
               applicationId={appId}
+              jobUrl={jobUrl}
               status={currentStatus}
               unresolvedFieldsCount={unresCount}
               proofWebUrl={application.proof_web_url || application.proofWebUrl}
+              proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
               dryRunScreenshotUrl={
                 application.dry_run_screenshot_url || application.dryRunScreenshotUrl
               }
               isSubmitting={isSubmitting}
               isDryRunning={isDryRunning}
+              apiBaseUrl={apiBaseUrl}
               onTriggerDryRun={handleTriggerDryRun}
               onTriggerSubmit={handleTriggerSubmit}
-              onResumeCaptcha={handleResumeCaptcha}
+              onStatusChange={onStatusChange}
+              onOtpVerified={({ proofWebUrl, proofCapturedAt }) => {
+                if (proofWebUrl) {
+                  setViewerImageUrl(proofWebUrl);
+                  setViewerTitle('Live Application Confirmation Proof');
+                  setViewerOpen(true);
+                }
+              }}
               onViewProof={() => {
                 const url = application.proof_web_url || application.proofWebUrl;
                 if (url) {
                   setViewerImageUrl(url);
                   setViewerTitle('Live Application Confirmation Proof');
+                  setViewerOpen(true);
+                }
+              }}
+              onViewEmailProof={() => {
+                const url = application.proof_email_url || application.proofEmailUrl;
+                if (url) {
+                  setViewerImageUrl(url);
+                  setViewerTitle('Zoho Confirmation Email Proof');
                   setViewerOpen(true);
                 }
               }}

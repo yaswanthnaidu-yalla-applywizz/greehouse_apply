@@ -126,9 +126,9 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                     🚀 Dry-Run
                   </span>
                 )}
-                {job.status === 'CAPTCHA_REQUIRED' && (
+                {job.status === 'OTP_REQUIRED' && (
                   <span className="text-[10px] font-mono text-white font-bold bg-[#F59E0B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    🛡️ CAPTCHA
+                    🔒 OTP
                   </span>
                 )}
                 {job.status === 'FAILED' && (

@@ -11,61 +11,382 @@
  * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { ApplicationStatus } from '../../src/db/applications.js';
+import { ProofViewer } from './ProofViewer.js';
 
 export interface SubmissionControlsProps {
   applicationId: string;
+  jobUrl?: string;
   status: ApplicationStatus | string;
   unresolvedFieldsCount: number;
   proofWebUrl?: string | null;
+  proofEmailUrl?: string | null;
   dryRunScreenshotUrl?: string | null;
   isSubmitting?: boolean;
   isDryRunning?: boolean;
+  apiBaseUrl?: string;
   onTriggerDryRun: () => void;
   onTriggerSubmit: () => void;
-  onResumeCaptcha?: () => void;
+  onStatusChange?: (newStatus: ApplicationStatus, updatedApp?: any) => void;
+  onOtpVerified?: (payload: { proofWebUrl?: string; proofCapturedAt?: string }) => void;
   onViewProof?: () => void;
+  onViewEmailProof?: () => void;
   onViewDryRun?: () => void;
 }
 
 export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   applicationId,
+  jobUrl = '',
   status,
   unresolvedFieldsCount,
   proofWebUrl,
+  proofEmailUrl,
   dryRunScreenshotUrl,
   isSubmitting = false,
   isDryRunning = false,
+  apiBaseUrl = '',
   onTriggerDryRun,
   onTriggerSubmit,
-  onResumeCaptcha,
+  onStatusChange,
+  onOtpVerified,
   onViewProof,
+  onViewEmailProof,
   onViewDryRun,
 }) => {
+  const [applicationStatus, setApplicationStatus] = useState<ApplicationStatus | string>(status);
+  const [otpValue, setOtpValue] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [proofUrl, setProofUrl] = useState<string | null>(proofWebUrl || null);
+  const [emailProof, setEmailProof] = useState<string | null>(proofEmailUrl || null);
+  const [showProofViewer, setShowProofViewer] = useState(false);
+
+  const [isOpeningCaptcha, setIsOpeningCaptcha] = useState(false);
+  const [isResumingCaptcha, setIsResumingCaptcha] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setApplicationStatus(status);
+    if (status === 'OTP_REQUIRED') {
+      setShowOtpModal(true);
+      setOtpError(null);
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (proofWebUrl) {
+      setProofUrl(proofWebUrl);
+    }
+  }, [proofWebUrl]);
+
   const hasUnresolved = unresolvedFieldsCount > 0;
-  const isApplying = status === 'APPLYING' || isSubmitting;
-  const isApplied = status === 'APPLIED';
-  const isCaptcha = status === 'CAPTCHA_REQUIRED';
+  const isApplying = applicationStatus === 'APPLYING' || isSubmitting;
+  const isApplied = applicationStatus === 'APPLIED';
+  const isOtp = applicationStatus === 'OTP_REQUIRED';
+
+  const pollStatusUpdate = async () => {
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`
+      );
+      if (res.ok) {
+        const appData = await res.json();
+        if (appData.status && onStatusChange) {
+          onStatusChange(appData.status as ApplicationStatus, appData);
+        }
+      }
+    } catch (err) {
+      console.warn(`[SubmissionControls] Status poll error for ${applicationId}:`, err);
+    }
+  };
+
+  const handleOpenCaptchaBrowser = async () => {
+    setIsOpeningCaptcha(true);
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/open-captcha-session`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobUrl: jobUrl || undefined }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to open CAPTCHA browser');
+        return;
+      }
+      await pollStatusUpdate();
+    } catch (err: any) {
+      console.error('Open CAPTCHA browser failed:', err);
+      alert(`Open CAPTCHA browser failed: ${err.message}`);
+    } finally {
+      setIsOpeningCaptcha(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const cleanOtp = otpValue.trim();
+    if (!cleanOtp) {
+      setOtpError('Please enter the OTP code.');
+      return;
+    }
+
+    setOtpLoading(true);
+    setOtpError(null);
+    setApplicationStatus('APPLYING');
+    if (onStatusChange) {
+      onStatusChange('APPLYING');
+    }
+
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/submit-otp`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ otp: cleanOtp, jobUrl: jobUrl || undefined }),
+        }
+      );
+      const data = await res.json();
+      const resolvedProofUrl = data.proofUrl || data.proofWebUrl;
+      const proofCapturedAt = data.proofCapturedAt;
+
+      if (!res.ok || data.status !== 'APPLIED') {
+        setOtpError(data.error || 'OTP verification failed.');
+        setApplicationStatus('OTP_REQUIRED');
+        await pollStatusUpdate();
+        return;
+      }
+
+      setApplicationStatus('APPLIED');
+      setProofUrl(resolvedProofUrl);
+      setShowOtpModal(false);
+      setShowProofViewer(true);
+      setOtpValue('');
+      setToastMessage('🎉 Application submitted! Proof captured.');
+      setTimeout(() => setToastMessage(null), 6000);
+
+      if (onStatusChange) {
+        onStatusChange('APPLIED', {
+          ...data,
+          proofWebUrl: resolvedProofUrl,
+          proof_web_url: resolvedProofUrl,
+          proofCapturedAt,
+          proof_captured_at: proofCapturedAt,
+        });
+      }
+
+      if (onOtpVerified) {
+        onOtpVerified({ proofWebUrl: resolvedProofUrl, proofCapturedAt });
+      } else if (resolvedProofUrl && onViewProof) {
+        onViewProof();
+      }
+    } catch (err: any) {
+      console.error('OTP verification failed:', err);
+      setOtpError(err.message || 'OTP verification failed.');
+      setApplicationStatus('OTP_REQUIRED');
+      await pollStatusUpdate();
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleResumeSubmission = async () => {
+    setIsResumingCaptcha(true);
+    setApplicationStatus('APPLYING');
+    if (onStatusChange) {
+      onStatusChange('APPLYING');
+    }
+    try {
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/resume-submission`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobUrl: jobUrl || undefined }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to resume submission');
+        await pollStatusUpdate();
+        return;
+      }
+      if (data.status) {
+        setApplicationStatus(data.status as ApplicationStatus);
+        if (onStatusChange) {
+          onStatusChange(data.status as ApplicationStatus, data);
+        }
+      }
+      await pollStatusUpdate();
+    } catch (err: any) {
+      console.error('Resume submission failed:', err);
+      alert(`Resume submission failed: ${err.message}`);
+    } finally {
+      setIsResumingCaptcha(false);
+    }
+  };
 
   const canSubmit =
     !hasUnresolved &&
     !isApplying &&
-    (status === 'READY_FOR_REVIEW' || status === 'DRY_RUN_COMPLETE' || status === 'FAILED');
+    (applicationStatus === 'READY_FOR_REVIEW' ||
+      applicationStatus === 'DRY_RUN_COMPLETE' ||
+      applicationStatus === 'FAILED');
   const canDryRun = !isApplying && !isDryRunning;
 
   return (
-    <div className="flex items-center gap-2.5 flex-wrap">
-      {/* CAPTCHA Resume Button */}
-      {isCaptcha && onResumeCaptcha && (
-        <button
-          type="button"
-          onClick={onResumeCaptcha}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all animate-bounce"
-        >
-          <span>🔓</span>
-          <span>I Solved CAPTCHA — Resume Submission</span>
-        </button>
+    <>
+      {/* OTP Entry Modal */}
+      {isOtp && showOtpModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1A1A2E]/50 p-4">
+          <div
+            className="bg-white border-2 border-[#1A1A2E] rounded-xl p-6 w-full max-w-md shadow-[6px_6px_0px_#1A1A2E]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="otp-modal-title"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h2
+                id="otp-modal-title"
+                className="text-lg font-bold text-[#1A1A2E] flex items-center gap-2"
+              >
+                <span>🔐</span>
+                <span>Enter OTP</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowOtpModal(false)}
+                className="text-[#64748B] hover:text-[#1A1A2E] text-sm font-bold px-1.5 py-0.5 rounded"
+                title="Close modal"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-[#64748B] mb-4 font-medium">
+              A verification code was sent after submission. Enter it below to complete the
+              application.
+            </p>
+            {otpError && (
+              <div className="mb-3 px-3 py-2 bg-[#FEE2E2] border border-[#EF4444] rounded text-xs text-[#991B1B] font-semibold flex items-center gap-2">
+                <span>⚠️</span>
+                <span>{otpError}</span>
+              </div>
+            )}
+            <input
+              type="text"
+              inputMode="text"
+              maxLength={16}
+              autoComplete="one-time-code"
+              placeholder="Enter OTP code (e.g. Aebf0aDc)"
+              value={otpValue}
+              disabled={otpLoading}
+              onChange={(e) => {
+                setOtpValue(e.target.value);
+                if (otpError) setOtpError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !otpLoading) {
+                  handleVerifyOtp();
+                }
+              }}
+              className="w-full px-3 py-2.5 mb-4 rounded-md border-2 border-[#1A1A2E] text-sm font-mono text-[#1A1A2E] placeholder:text-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#F59E0B] disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={handleVerifyOtp}
+              disabled={otpLoading || !otpValue.trim()}
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {otpLoading ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>Submitting...</span>
+                </>
+              ) : (
+                <span>Submit OTP</span>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Proof Viewer Modal */}
+      {showProofViewer && proofUrl && (
+        <ProofViewer
+          isOpen={showProofViewer}
+          onClose={() => setShowProofViewer(false)}
+          screenshotUrl={proofUrl}
+          title="Application Confirmation Proof"
+          metadata={{
+            applywizzId: applicationId,
+            jobUrl,
+            status: 'APPLIED',
+          }}
+        />
+      )}
+
+      {/* Success Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[110] bg-[#9AC89A] border-2 border-[#1A1A2E] text-[#1E4620] px-4 py-3 rounded-lg font-bold shadow-[4px_4px_0px_#1A1A2E] flex items-center gap-2 animate-bounce">
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2.5 flex-wrap">
+      {/* CAPTCHA Action Buttons */}
+      {isOtp && (
+        <>
+          {!showOtpModal && (
+            <button
+              type="button"
+              onClick={() => setShowOtpModal(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-[#451A03] bg-[#F59E0B] hover:bg-[#D97706] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+            >
+              <span>🔐</span>
+              <span>Enter OTP</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleOpenCaptchaBrowser}
+            disabled={isOpeningCaptcha || isResumingCaptcha}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {isOpeningCaptcha ? (
+              <>
+                <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Opening...</span>
+              </>
+            ) : (
+              <>
+                <span>🔓</span>
+                <span>Open Browser for CAPTCHA</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={handleResumeSubmission}
+            disabled={isOpeningCaptcha || isResumingCaptcha}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all animate-bounce disabled:opacity-60 disabled:cursor-not-allowed disabled:animate-none"
+          >
+            {isResumingCaptcha ? (
+              <>
+                <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Resuming...</span>
+              </>
+            ) : (
+              <>
+                <span>✅</span>
+                <span>Resume Submission</span>
+              </>
+            )}
+          </button>
+        </>
       )}
 
       {/* Dry-Run Button */}
@@ -148,17 +469,43 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       )}
 
       {/* View Web Proof Button */}
-      {(proofWebUrl || isApplied) && onViewProof && (
+      {(proofUrl || isApplied) && (
         <button
           type="button"
-          onClick={onViewProof}
+          onClick={() => {
+            if (onViewProof) {
+              onViewProof();
+            } else if (proofUrl) {
+              setShowProofViewer(true);
+            }
+          }}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E4620] bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
         >
           <span>📸</span>
           <span>View Web Proof</span>
         </button>
       )}
-    </div>
+
+      {/* View Email Proof Button */}
+      {(emailProof || proofEmailUrl) && (
+        <button
+          type="button"
+          onClick={() => {
+            if (onViewEmailProof) {
+              onViewEmailProof();
+            } else if (emailProof || proofEmailUrl) {
+              setProofUrl(emailProof || proofEmailUrl);
+              setShowProofViewer(true);
+            }
+          }}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#BFDBFE] hover:bg-[#93C5FD] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
+        >
+          <span>📧</span>
+          <span>View Email Proof</span>
+        </button>
+      )}
+      </div>
+    </>
   );
 };
 
