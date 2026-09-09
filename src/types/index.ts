@@ -144,6 +144,10 @@ export interface ApplyWizzProfile {
   phone: string;
   /** Primary residential location (City, State / Country) */
   location: string;
+  /** Primary residential country (e.g., "India", "United States") */
+  country?: string;
+  /** Primary phone country calling code (e.g., "+91", "+1") */
+  countryCode?: string;
   /** Candidate LinkedIn profile URL */
   linkedinUrl: string;
   /** Optional portfolio / personal website URL */
@@ -259,7 +263,16 @@ export interface ResolvedField {
 /**
  * Application processing status in the review queue.
  */
-export type ApplicationStatus = 'READY_FOR_REVIEW' | 'EXPIRED' | 'PENDING';
+export type ApplicationStatus =
+  | 'READY_FOR_REVIEW'
+  | 'DRY_RUN_COMPLETE'
+  | 'APPLYING'
+  | 'APPLIED'
+  | 'FAILED'
+  | 'EXPIRED'
+  | 'OTP_REQUIRED'
+  | 'CAPTCHA_TIMEOUT'
+  | 'PENDING';
 
 /**
  * Segregated candidate job queue item rendered in the operator dashboard.

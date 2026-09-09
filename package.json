@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "tsx src/index.ts",
-    "start:sample": "tsx src/index.ts --limit=10",
+    "start:sample": "tsx src/index.ts --candidate=AWL-31428 --maxJobs=10",
     "start:dashboard": "tsx src/server/index.ts",
     "dev": "tsx src/index.ts",
     "scan": "tsx src/scanner/runScan.ts",
@@ -18,6 +18,8 @@
     "dry-run": "tsx src/submitter/runUserApplication.ts",
     "submit": "tsx src/submitter/runLiveSubmitCli.ts",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:backfill-company-email": "tsx src/db/backfillCompanyEmail.ts",
+    "db:clear": "tsx src/db/clearAnswers.ts",
     "test": "tsx tests/e2eIntegration.test.ts",
     "test:e2e": "tsx tests/e2eIntegration.test.ts",
     "typecheck": "tsc --noEmit"

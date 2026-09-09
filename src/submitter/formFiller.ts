@@ -12,7 +12,7 @@ import type { Page, Locator } from 'playwright';
 import { downloadResumeTempFile } from '../db/storage.js';
 import { getUnmappedVisibleFields } from './cascadeDetector.js';
 import { AnswerResolver } from '../resolver/answerResolver.js';
-import { getProfile, type ProfileRow } from '../db/profiles.js';
+import { getProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
 import { getOrParseResume, type ResumeParsedRow } from '../resolver/tier2ResumeParse.js';
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import type {
@@ -111,7 +111,7 @@ export async function fillSingleField(
   options: FormFillerOptions = {}
 ): Promise<FieldFillResult> {
   const timeoutMs = options.timeoutMs ?? 5000;
-  const val = (field.value ?? '').trim();
+  let val = (field.value ?? '').trim();
   const rawType = (field.type || 'text').toLowerCase();
   const name = field.name || field.fieldId || '';
   const fieldId = field.fieldId || field.name || '';
@@ -126,6 +126,20 @@ export async function fillSingleField(
     success: false,
   };
 
+  // 0. Cover Letter Prohibition - NEVER fill or upload cover letters per policy
+  if (/cover\s*letter|cover_letter/i.test(`${name} ${fieldId} ${label}`)) {
+    console.log(`[Form Filler] ⏭️ Skipping cover letter field "${label}" (${name}) per policy.`);
+    fillResult.success = true;
+    fillResult.valuePopulated = '';
+    return fillResult;
+  }
+
+  // Strip +1 country code prefix from phone numbers
+  if (fieldId === 'phone' || name === 'phone' || /phone/i.test(label)) {
+    val = val.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
+    fillResult.valuePopulated = val;
+  }
+
   // Skip empty non-required fields if no value provided
   if (!val && rawType !== 'file') {
     fillResult.success = true;
@@ -134,17 +148,26 @@ export async function fillSingleField(
 
   try {
     if (rawType === 'file' || fieldId === 'resume' || name.toLowerCase().includes('resume')) {
+      // Policy: The bot ONLY fills resume file upload. Never fill or attach cover letters.
+      const isResume = fieldId === 'resume' || name.toLowerCase().includes('resume') || /resume|cv\b/i.test(label);
+      if (!isResume || /cover/i.test(`${name} ${fieldId} ${label}`)) {
+        console.log(`[Form Filler] ⏭️ Skipping non-resume / cover letter file upload ("${label}").`);
+        fillResult.success = true;
+        fillResult.valuePopulated = '';
+        return fillResult;
+      }
+
       // ==========================================
-      // File Upload (Master Resume PDF)
+      // File Upload (Master Resume PDF ONLY)
       // ==========================================
       const fileSelectors = [
         (field as any).metadata?.selector,
-        `input[type="file"]#${escapeId(name)}`,
-        `input[type="file"]#${escapeId(fieldId)}`,
         'input[type="file"]#resume',
         'input[type="file"][name*="resume"]',
+        'input[type="file"][id*="resume"]',
         '#resume_file',
-        'input[type="file"]',
+        `input[type="file"]#${escapeId(name)}`,
+        `input[type="file"]#${escapeId(fieldId)}`,
       ].filter(Boolean);
 
       const found = await findElementLocator(page, fileSelectors, timeoutMs);
@@ -226,7 +249,7 @@ export async function fillSingleField(
       }
     } else if (rawType === 'select') {
       // ==========================================
-      // Select Dropdown (Native & React-Select)
+      // Select Dropdown (Native, Select2, React-Select)
       // ==========================================
       const selectSelectors = [
         (field as any).metadata?.selector,
@@ -247,37 +270,62 @@ export async function fillSingleField(
       // Retry finding locator if field was conditionally rendered
       let found = await findElementLocator(page, selectSelectors, timeoutMs);
       if (!found) {
-        await page.waitForTimeout(600);
+        await page.waitForTimeout(400);
         found = await findElementLocator(page, selectSelectors, timeoutMs);
+      }
+
+      // Fallback: search by label
+      if (!found) {
+        const labelLoc = page.locator(`label:has-text("${label}")`).first();
+        if ((await labelLoc.count()) > 0) {
+          const parent = labelLoc.locator('..').first();
+          const candidateSelect = parent.locator('select, input[role="combobox"], .select__input, .select2-selection').first();
+          if ((await candidateSelect.count()) > 0) {
+            found = { locator: candidateSelect, selector: `label("${label}") -> dropdown` };
+          }
+        }
       }
 
       if (found) {
         const tagName = await found.locator.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'SELECT');
+        const role = await found.locator.getAttribute('role').catch(() => null);
+        const className = (await found.locator.getAttribute('class').catch(() => '')) || '';
 
-        if (tagName === 'INPUT' || tagName === 'DIV' || tagName === 'BUTTON') {
+        if (tagName === 'INPUT' || tagName === 'DIV' || tagName === 'BUTTON' || role === 'combobox' || className.includes('select__input')) {
           // Modern React-Select combobox input
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
-          await found.locator.click().catch(() => {});
+          await found.locator.click({ force: true }).catch(() => {});
           await page.waitForTimeout(150);
           await found.locator.pressSequentially(val, { delay: 35 });
           await page.waitForTimeout(350);
 
           const escapedVal = val.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-          const exactOpt = page.locator('.select__option, [id*="-option"], [role="option"]').filter({
+          const optionCandidates = page.locator('.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country)');
+
+          // 1. Exact match
+          let matchedOpt = optionCandidates.filter({
             hasText: new RegExp(`^${escapedVal}$`, 'i'),
           }).first();
 
-          if ((await exactOpt.count()) > 0) {
-            await exactOpt.click({ timeout: 2000 }).catch(() => {});
-          } else {
-            const fuzzyOpt = page.locator('.select__option, [id*="-option"], [role="option"]').filter({
+          // 2. Prefix match (e.g., "United States" matching "United States +1")
+          if ((await matchedOpt.count()) === 0) {
+            matchedOpt = optionCandidates.filter({
+              hasText: new RegExp(`^${escapedVal}`, 'i'),
+            }).first();
+          }
+
+          // 3. Substring / fuzzy match
+          if ((await matchedOpt.count()) === 0) {
+            matchedOpt = optionCandidates.filter({
               hasText: new RegExp(escapedVal, 'i'),
             }).first();
-            if ((await fuzzyOpt.count()) > 0) {
-              await fuzzyOpt.click({ timeout: 2000 }).catch(() => {});
-            } else {
-              await page.keyboard.press('Tab').catch(() => {});
-            }
+          }
+
+          if ((await matchedOpt.count()) > 0) {
+            await matchedOpt.click({ force: true, timeout: 2500 }).catch(() => {});
+          } else {
+            await page.keyboard.press('Enter').catch(() => {});
+            await page.keyboard.press('Tab').catch(() => {});
           }
 
           // If this was hispanic_ethnicity, give DOM time to render conditional race field
@@ -287,18 +335,18 @@ export async function fillSingleField(
 
           fillResult.success = true;
         } else {
-          // Native HTML <select>
+          // Native HTML <select> (supports Select2 hidden elements via force: true)
           let selected = false;
           // 1. Try exact label match
           try {
-            await found.locator.selectOption({ label: val }, { timeout: 2000 });
+            await found.locator.selectOption({ label: val }, { force: true, timeout: 2000 });
             selected = true;
           } catch {}
 
           // 2. Try value match
           if (!selected) {
             try {
-              await found.locator.selectOption({ value: val }, { timeout: 2000 });
+              await found.locator.selectOption({ value: val }, { force: true, timeout: 2000 });
               selected = true;
             } catch {}
           }
@@ -310,14 +358,22 @@ export async function fillSingleField(
               const lowerVal = val.toLowerCase().trim();
               const matchedOpt = optionsList.find((opt) => {
                 const o = opt.toLowerCase().trim();
-                return o === lowerVal || o.includes(lowerVal) || lowerVal.includes(o);
+                return o === lowerVal || o.startsWith(lowerVal) || o.includes(lowerVal) || lowerVal.includes(o);
               });
               if (matchedOpt) {
-                await found.locator.selectOption({ label: matchedOpt.trim() }, { timeout: 2000 });
+                await found.locator.selectOption({ label: matchedOpt.trim() }, { force: true, timeout: 2000 });
                 selected = true;
               }
             } catch {}
           }
+
+          // Trigger change events natively and on jQuery for Select2 UI sync
+          await found.locator.evaluate((el: HTMLSelectElement) => {
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            if (typeof (window as any).$ !== 'undefined') {
+              (window as any).$(el).trigger('change');
+            }
+          }).catch(() => {});
 
           if (selected) {
             fillResult.success = true;
@@ -335,10 +391,10 @@ export async function fillSingleField(
         if (count > 0) {
           await select2Trigger.click();
           await page.waitForTimeout(300);
-          const optLoc = page.locator(`.select2-results__option, [role="option"]`).filter({ hasText: val }).first();
+          const optLoc = page.locator(`.select2-results__option:not(.iti__country), [role="option"]:not(.iti__country)`).filter({ hasText: val }).first();
           const optCount = await optLoc.count();
           if (optCount > 0) {
-            await optLoc.click();
+            await optLoc.click({ force: true });
             fillResult.success = true;
           } else {
             throw new Error(`Custom select option "${val}" not found`);
@@ -497,10 +553,54 @@ export async function fillSingleField(
       }
     } else {
       // ==========================================
-      // Default: Standard Text Input
+      // Default: Standard Text Input / Auto-Detected Dropdown
       // ==========================================
-      const textSelectors = [
+      const textSelectors: (string | undefined)[] = [
         (field as any).metadata?.selector,
+      ];
+
+      // Prioritize standard field selectors
+      if (fieldId === 'first_name' || name === 'first_name' || /first\s*name|given\s*name/i.test(label)) {
+        textSelectors.push(
+          '#first_name',
+          'input#first_name',
+          'input[name="first_name"]',
+          'input[name="job_application[first_name]"]',
+          'input[autocomplete="given-name"]',
+          'input[id*="first_name"]',
+          'input[name*="first_name"]'
+        );
+      } else if (fieldId === 'last_name' || name === 'last_name' || /last\s*name|family\s*name/i.test(label)) {
+        textSelectors.push(
+          '#last_name',
+          'input#last_name',
+          'input[name="last_name"]',
+          'input[name="job_application[last_name]"]',
+          'input[autocomplete="family-name"]',
+          'input[id*="last_name"]',
+          'input[name*="last_name"]'
+        );
+      } else if (fieldId === 'email' || /email/i.test(label)) {
+        textSelectors.push(
+          '#email',
+          'input#email',
+          'input[name="email"]',
+          'input[name="job_application[email]"]',
+          'input[type="email"]',
+          'input[autocomplete="email"]'
+        );
+      } else if (fieldId === 'phone' || /phone|mobile/i.test(label)) {
+        textSelectors.push(
+          '#phone',
+          'input#phone',
+          'input[name="phone"]',
+          'input[name="job_application[phone]"]',
+          'input[type="tel"]',
+          'input[id*="phone"]'
+        );
+      }
+
+      textSelectors.push(
         `input#${escapeId(name)}`,
         `input#${escapeId(fieldId)}`,
         `input#${escapeId(name.replace(/_/g, '-'))}`,
@@ -512,38 +612,98 @@ export async function fillSingleField(
         `input[name="${escapeAttr(name)}"]`,
         `input[name="${escapeAttr(fieldId)}"]`,
         `input[id*="${escapeAttr(fieldId)}"]`,
-        `input[id*="${escapeAttr(name)}"]`,
-      ].filter(Boolean);
+        `input[id*="${escapeAttr(name)}"]`
+      );
 
-      const found = await findElementLocator(page, textSelectors, timeoutMs);
-      if (found) {
-        await found.locator.scrollIntoViewIfNeeded().catch(() => {});
-        await found.locator.click().catch(() => {});
-        await found.locator.fill(val, { timeout: timeoutMs });
-        await found.locator.evaluate((el: HTMLInputElement) => {
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }).catch(() => {});
-        fillResult.success = true;
-      } else {
+      const validSelectors = textSelectors.filter(Boolean) as string[];
+      let found = await findElementLocator(page, validSelectors, timeoutMs);
+
+      // Label fallback if not found by selector
+      if (!found) {
         const labelLoc = page.locator(`label:has-text("${label}")`).first();
         if ((await labelLoc.count()) > 0) {
-          const inputLoc = labelLoc.locator('..').locator('input').first();
-          if ((await inputLoc.count()) > 0) {
-            await inputLoc.scrollIntoViewIfNeeded().catch(() => {});
-            await inputLoc.click().catch(() => {});
-            await inputLoc.fill(val, { timeout: timeoutMs });
-            await inputLoc.evaluate((el: HTMLInputElement) => {
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-            }).catch(() => {});
-            fillResult.success = true;
-          } else {
-            throw new Error(`Text input element not found for ${name} (${label})`);
+          const parent = labelLoc.locator('..').first();
+          const targetInput = parent.locator('input, select, textarea').first();
+          if ((await targetInput.count()) > 0) {
+            found = { locator: targetInput, selector: `label("${label}") -> control` };
           }
-        } else {
-          throw new Error(`Text input element not found for ${name} (${label})`);
         }
+      }
+
+      if (found) {
+        const tagName = await found.locator.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'INPUT');
+        const role = await found.locator.getAttribute('role').catch(() => null);
+        const className = await found.locator.getAttribute('class').catch(() => '');
+
+        if (tagName === 'SELECT') {
+          // Element was misclassified as text but is actually a native select
+          let selected = false;
+          try {
+            await found.locator.selectOption({ label: val }, { force: true, timeout: 2000 });
+            selected = true;
+          } catch {}
+          if (!selected) {
+            try {
+              await found.locator.selectOption({ value: val }, { force: true, timeout: 2000 });
+              selected = true;
+            } catch {}
+          }
+          await found.locator.evaluate((el: HTMLSelectElement) => {
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            if (typeof (window as any).$ !== 'undefined') {
+              (window as any).$(el).trigger('change');
+            }
+          }).catch(() => {});
+          fillResult.success = true;
+        } else if (role === 'combobox' || (className && className.includes('select__input'))) {
+          // Element was misclassified as text but is actually a React-Select combobox
+          await found.locator.scrollIntoViewIfNeeded().catch(() => {});
+          await found.locator.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(150);
+          await found.locator.pressSequentially(val, { delay: 35 });
+          await page.waitForTimeout(350);
+
+          const escapedVal = val.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+          const optionCandidates = page.locator('.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country)');
+
+          let matchedOpt = optionCandidates.filter({ hasText: new RegExp(`^${escapedVal}$`, 'i') }).first();
+          if ((await matchedOpt.count()) === 0) {
+            matchedOpt = optionCandidates.filter({ hasText: new RegExp(`^${escapedVal}`, 'i') }).first();
+          }
+          if ((await matchedOpt.count()) === 0) {
+            matchedOpt = optionCandidates.filter({ hasText: new RegExp(escapedVal, 'i') }).first();
+          }
+
+          if ((await matchedOpt.count()) > 0) {
+            await matchedOpt.click({ force: true, timeout: 2500 }).catch(() => {});
+          } else {
+            await page.keyboard.press('Enter').catch(() => {});
+            await page.keyboard.press('Tab').catch(() => {});
+          }
+          fillResult.success = true;
+        } else {
+          // Standard text input
+          await found.locator.scrollIntoViewIfNeeded().catch(() => {});
+          await found.locator.click().catch(() => {});
+          await found.locator.fill(val, { timeout: timeoutMs });
+          await found.locator.evaluate((el: HTMLInputElement) => {
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }).catch(() => {});
+          fillResult.success = true;
+
+          const isEmailField =
+            fieldId === 'email' ||
+            name === 'email' ||
+            /email/i.test(label) ||
+            /email/i.test(name) ||
+            /email/i.test(fieldId);
+          if (isEmailField) {
+            console.log(`[Form Filler] 📧 Email field filled with company email: ${val} (source: company_email)`);
+          }
+        }
+      } else {
+        throw new Error(`Text or dropdown element not found for ${name} (${label})`);
       }
     }
   } catch (fieldErr: any) {
@@ -678,6 +838,112 @@ export async function fillForm(
           await sleepRandomJitter(minJitterMs, maxJitterMs);
         }
       }
+    }
+
+    // 4. Standard Fields Safety Sweep (Ensure First Name, Last Name, Email, Phone are populated)
+    try {
+      if (!profile && applywizzId) {
+        profile = await getProfile(applywizzId);
+      }
+      if (!parsedResume && applywizzId) {
+        parsedResume = await getOrParseResume(applywizzId);
+      }
+
+      // 4a. Check First Name
+      const firstNameLoc = page.locator('#first_name, input[name="first_name"], input[name="job_application[first_name]"], input[autocomplete="given-name"]').first();
+      if ((await firstNameLoc.count()) > 0 && (await firstNameLoc.isVisible())) {
+        const currentVal = await firstNameLoc.inputValue().catch(() => '');
+        if (!currentVal || currentVal.trim() === '') {
+          let fName = profile?.first_name || '';
+          if (!fName && profile?.client_name && !profile.client_name.startsWith('AWL-')) {
+            fName = profile.client_name.trim().split(/\s+/)[0];
+          }
+          if (!fName && parsedResume?.raw_text) {
+            const firstLine = parsedResume.raw_text.split('\n')[0].trim();
+            fName = firstLine.split(/\s+/)[0];
+          }
+          if (fName) {
+            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty First Name with "${fName}"`);
+            await firstNameLoc.fill(fName);
+            await firstNameLoc.evaluate((el: HTMLInputElement) => {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }).catch(() => {});
+            results.push({
+              fieldId: 'first_name',
+              name: 'first_name',
+              type: 'text',
+              label: 'First Name',
+              valuePopulated: fName,
+              success: true,
+            });
+          }
+        }
+      }
+
+      // 4b. Check Last Name
+      const lastNameLoc = page.locator('#last_name, input[name="last_name"], input[name="job_application[last_name]"], input[autocomplete="family-name"]').first();
+      if ((await lastNameLoc.count()) > 0 && (await lastNameLoc.isVisible())) {
+        const currentVal = await lastNameLoc.inputValue().catch(() => '');
+        if (!currentVal || currentVal.trim() === '') {
+          let lName = profile?.last_name || '';
+          if (!lName && profile?.client_name && !profile.client_name.startsWith('AWL-')) {
+            const parts = profile.client_name.trim().split(/\s+/);
+            lName = parts.slice(1).join(' ') || parts[0];
+          }
+          if (!lName && parsedResume?.raw_text) {
+            const firstLine = parsedResume.raw_text.split('\n')[0].trim();
+            const parts = firstLine.split(/\s+/);
+            lName = parts.slice(1).join(' ') || parts[0];
+          }
+          if (lName) {
+            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty Last Name with "${lName}"`);
+            await lastNameLoc.fill(lName);
+            await lastNameLoc.evaluate((el: HTMLInputElement) => {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }).catch(() => {});
+            results.push({
+              fieldId: 'last_name',
+              name: 'last_name',
+              type: 'text',
+              label: 'Last Name',
+              valuePopulated: lName,
+              success: true,
+            });
+          }
+        }
+      }
+
+      // 4c. Check Email
+      const emailLoc = page.locator('#email, input#email, input[name="email"], input[name="job_application[email]"], input[type="email"], input[autocomplete="email"]').first();
+      if ((await emailLoc.count()) > 0 && (await emailLoc.isVisible())) {
+        const currentVal = await emailLoc.inputValue().catch(() => '');
+        if (!currentVal || currentVal.trim() === '') {
+          const compEmail = (profile?.company_email && profile.company_email.trim().length > 0)
+            ? profile.company_email.trim()
+            : (profile ? getCompanyEmail(profile) : null);
+          if (compEmail) {
+            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty Email with company email "${compEmail}"`);
+            await emailLoc.fill(compEmail);
+            await emailLoc.evaluate((el: HTMLInputElement) => {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }).catch(() => {});
+            console.log(`[Form Filler] 📧 Email field filled with company email: ${compEmail} (source: company_email)`);
+            results.push({
+              fieldId: 'email',
+              name: 'email',
+              type: 'text',
+              label: 'Email',
+              valuePopulated: compEmail,
+              success: true,
+            });
+          }
+        }
+      }
+    } catch (sweepErr: any) {
+      console.warn(`[Form Filler] ⚠️ Safety sweep notice: ${sweepErr.message}`);
     }
   } finally {
     // Guaranteed cleanup of downloaded temporary resume PDFs

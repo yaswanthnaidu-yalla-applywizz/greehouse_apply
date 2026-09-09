@@ -72,7 +72,7 @@ export type ApplicationStatus =
   | 'APPLIED'
   | 'FAILED'
   | 'EXPIRED'
-  | 'CAPTCHA_REQUIRED';
+  | 'OTP_REQUIRED';
 
 export interface ApplicationDetail {
   id?: string;
@@ -84,6 +84,8 @@ export interface ApplicationDetail {
   resolved_fields: ResolvedField[];
   proof_web_url?: string | null;
   proof_captured_at?: string | null;
+  proof_email_url?: string | null;
+  proof_email_captured_at?: string | null;
   dry_run_screenshot_url?: string | null;
   error_message?: string | null;
   submitted_at?: string | null;

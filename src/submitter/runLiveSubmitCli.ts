@@ -94,8 +94,8 @@ export async function main(): Promise<void> {
     console.log(`• Application ID:  ${result.applicationId}`);
     console.log(`• Status:          ${result.status}`);
     console.log(`• Verified:        ${result.success ? '✅ Yes' : '❌ No'}`);
-    if (result.requiresCaptcha) {
-      console.log(`• CAPTCHA:         ⚠️ Requires human intervention`);
+    if (result.requiresOtp || result.requiresCaptcha) {
+      console.log(`• OTP/CAPTCHA:     ⚠️ Requires human intervention`);
     }
     if (result.proofWebUrl) {
       console.log(`• Proof Web URL:   ${result.proofWebUrl}`);

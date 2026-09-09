@@ -90,13 +90,14 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         </span>
       );
 
-    case 'CAPTCHA_REQUIRED':
+    case 'OTP_REQUIRED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-[#451A03] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ring-2 ring-[#FBBF24] animate-pulse ${className}`}
+          title="Verification code required — enter OTP to complete submission"
         >
-          <span>🛡️</span>
-          <span>CAPTCHA Required</span>
+          <span className="text-sm leading-none">🔐</span>
+          <span>OTP Required</span>
         </span>
       );
 

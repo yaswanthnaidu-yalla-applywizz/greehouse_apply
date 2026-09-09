@@ -122,7 +122,7 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       console.log(`[Captcha Resume] ✅ Confirmation verified via signal: ${verification.signal}`);
 
       // 4. Capture full-page proof screenshot & upload to Supabase Storage
-      const proofResult = await captureWebProof(page, applicationId);
+      const proofResult = await captureWebProof(page, application);
 
       // 5. Update DB status to APPLIED
       if (application.id) {
@@ -136,6 +136,7 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
         status: 'APPLIED',
         applicationId,
         proofWebUrl: proofResult.proofWebUrl,
+        proofCapturedAt: proofResult.proofCapturedAt,
       };
     } else {
       const errorMsg = verification.error || 'Submission confirmation signals not detected within 30 seconds.';

@@ -21,17 +21,23 @@ const envSchema = z.object({
   /** Runtime environment */
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
-  /** Base URL for ApplyWizz candidate details API */
-  APPLYWIZZ_API_URL: z.string().url().default('https://www.apply-wizz.me/api'),
+  /** Base URL or full endpoint for ApplyWizz candidate details API */
+  APPLYWIZZ_API_URL: z.string().default('https://www.apply-wizz.me/api/get-client-details?applywizz_id='),
 
   /** Selected LLM provider for synthesis */
-  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai']).default('openrouter'),
+  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama']).default('ollama'),
+
+  /** Ollama Base URL */
+  OLLAMA_BASE_URL: z.string().default('http://127.0.0.1:11434/v1'),
+
+  /** Ollama Model ID */
+  OLLAMA_MODEL: z.string().default('llama3.1:latest'),
 
   /** OpenRouter API key */
   OPENROUTER_API_KEY: z.string().optional(),
 
   /** OpenRouter Model ID */
-  OPENROUTER_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
+  OPENROUTER_MODEL: z.string().default('google/gemma-4-26b-a4b-it:free'),
 
   /** Generic LLM API key fallback */
   LLM_API_KEY: z.string().optional(),
@@ -77,6 +83,21 @@ const envSchema = z.object({
 
   /** Supabase Storage bucket for application confirmation proof screenshots */
   SUPABASE_STORAGE_BUCKET_PROOFS: z.string().default('proofs_web'),
+
+  /** Zoho Mail Reader Connector URL */
+  ZOHO_CONNECTOR_URL: z.string().default('https://zoho-mail-reader.onrender.com/'),
+
+  /** Zoho Mail Reader Login Username / Email */
+  ZOHO_CONNECTOR_USER: z.string().optional(),
+
+  /** Zoho Mail Reader Login Password */
+  ZOHO_CONNECTOR_PASS: z.string().optional(),
+
+  /** Zoho Mail Reader timeout in milliseconds (default: 90000) */
+  ZOHO_CONNECTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
+
+  /** Zoho Mail Reader polling interval in milliseconds (default: 3000) */
+  ZOHO_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
 });
 
 /**
@@ -99,6 +120,9 @@ const rawEnv = parseResult.data;
  * @returns The active LLM API key string, or empty string if not configured
  */
 function resolveLlmApiKey(env: typeof rawEnv): string {
+  if (env.LLM_PROVIDER === 'ollama') {
+    return 'ollama';
+  }
   if (env.LLM_API_KEY && env.LLM_API_KEY.trim().length > 0) {
     return env.LLM_API_KEY.trim();
   }

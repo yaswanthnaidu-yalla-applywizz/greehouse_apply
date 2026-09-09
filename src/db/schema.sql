@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     client_name TEXT NOT NULL,
     first_name TEXT,
     last_name TEXT,
-    email TEXT,
+    email TEXT,                                          -- Legacy contact email (prefer company_email)
+    company_email TEXT,                                  -- ApplyWizz company email (always used for forms)
     phone TEXT,
     location TEXT,
     linkedin_url TEXT,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 CREATE INDEX IF NOT EXISTS idx_profiles_applywizz_id ON profiles(applywizz_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
+CREATE INDEX IF NOT EXISTS idx_profiles_company_email ON profiles(company_email);
 
 -- ============================================================================
 -- 2. scanned_job_templates — Greenhouse Form Schema Cache
@@ -114,11 +116,13 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
             'APPLIED',
             'FAILED',
             'EXPIRED',
-            'CAPTCHA_REQUIRED'
+            'OTP_REQUIRED'
         )),
     resolved_fields JSONB NOT NULL,                     -- Array<ResolvedField> snapshot
     proof_web_url TEXT,                                  -- Supabase Storage public/signed URL of confirmation screenshot
     proof_captured_at TIMESTAMPTZ,
+    proof_email_url TEXT,                                -- Supabase Storage URL of confirmation email proof screenshot
+    proof_email_captured_at TIMESTAMPTZ,
     error_message TEXT,                                 -- Populated on FAILED status
     dry_run_screenshot_url TEXT,                        -- Supabase Storage URL of dry-run form screenshot
     submitted_at TIMESTAMPTZ,

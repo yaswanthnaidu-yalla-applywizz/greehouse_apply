@@ -17,6 +17,8 @@ import * as fastCsv from 'fast-csv';
 import { config } from '../config/env.js';
 import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
+import { profileRowToCandidateProfile, upsertProfile, getProfile, updateResumeStoragePath } from '../db/profiles.js';
+import { uploadResume } from '../db/storage.js';
 import type { CandidateSegment } from '../types/index.js';
 
 /**
@@ -30,10 +32,21 @@ export interface SegregatorOptions {
   limit?: number;
 
   /**
+   * Maximum number of jobs per candidate.
+   * @default undefined (processes all candidate jobs)
+   */
+  maxJobsPerCandidate?: number;
+
+  /**
    * Maximum simultaneous HTTP requests when syncing candidate profiles.
    * @default 10
    */
   concurrency?: number;
+
+  /**
+   * Optional candidate identifier to specifically filter for (e.g. 'AWL-31428').
+   */
+  candidateId?: string;
 
   /**
    * Whether to fetch candidate profiles from ApplyWizz API or cache.
@@ -75,10 +88,12 @@ export async function segregateCandidatesByApplyWizzId(
 ): Promise<Map<string, CandidateSegment>> {
   const {
     limit,
+    maxJobsPerCandidate,
     concurrency = 10,
     syncProfiles = true,
     downloadResumes = true,
     client = new ApplyWizzClient(),
+    candidateId,
     onProgress,
   } = options;
 
@@ -112,9 +127,16 @@ export async function segregateCandidatesByApplyWizzId(
           return;
         }
 
+        if (candidateId && applywizzId.toUpperCase() !== candidateId.toUpperCase()) {
+          return;
+        }
+
         const canonicalUrl = normalizeGreenhouseUrl(rawUrl);
 
         if (!segmentsMap.has(applywizzId)) {
+          if (limit && segmentsMap.size >= limit) {
+            return; // Skip candidates beyond the limit
+          }
           segmentsMap.set(applywizzId, {
             applywizzId,
             clientName: clientName || applywizzId,
@@ -126,22 +148,19 @@ export async function segregateCandidatesByApplyWizzId(
 
         const segment = segmentsMap.get(applywizzId)!;
 
-        // Add job if not duplicate for this candidate
+        // Add job if not duplicate for this candidate and below maxJobs limit
         if (!segment.jobs.some((j) => j.canonicalUrl === canonicalUrl)) {
-          segment.jobs.push({
-            rawUrl,
-            canonicalUrl,
-            date,
-            score,
-            scoredJobId,
-            status,
-          });
-          segment.totalJobs = segment.jobs.length;
-        }
-
-        if (limit && segmentsMap.size >= limit) {
-          stream.destroy();
-          resolve();
+          if (!maxJobsPerCandidate || segment.jobs.length < maxJobsPerCandidate) {
+            segment.jobs.push({
+              rawUrl,
+              canonicalUrl,
+              date,
+              score,
+              scoredJobId,
+              status,
+            });
+            segment.totalJobs = segment.jobs.length;
+          }
         }
       })
       .on('end', () => resolve());
@@ -156,10 +175,12 @@ export async function segregateCandidatesByApplyWizzId(
     const candidateIds = Array.from(segmentsMap.keys());
     const totalCandidates = candidateIds.length;
     console.log(
-      `[Candidate Segregator] 🔄 Syncing ${totalCandidates.toLocaleString()} candidate profiles via ApplyWizz API (Concurrency: ${concurrency})...`
+      `[Candidate Segregator] 🔄 Syncing ${totalCandidates.toLocaleString()} candidate profiles (Supabase-first, API only for new candidates) (Concurrency: ${concurrency})...`
     );
 
     let completed = 0;
+    let fromSupabase = 0;
+    let fromApi = 0;
     const queue = [...candidateIds];
     const workers: Promise<void>[] = [];
 
@@ -172,16 +193,77 @@ export async function segregateCandidatesByApplyWizzId(
         if (!segment) continue;
 
         try {
-          const profile = await client.fetchCandidateProfile(id);
-          segment.profile = profile;
+          // Check Supabase first — zero network requests for existing candidates
+          const existingProfile = await getProfile(id);
+          if (existingProfile) {
+            segment.profile = profileRowToCandidateProfile(existingProfile);
+            if (existingProfile.client_name && existingProfile.client_name !== id) {
+              segment.clientName = existingProfile.client_name;
+            }
+            fromSupabase++;
+          } else {
+            // ONLY for new candidates not in Supabase
+            console.log(
+              `[Candidate Ingestion] ℹ️ Candidate ${id} profile lookup (checking cache first)...`
+            );
+            const { profile, raw } = await client.fetchCandidateProfileWithRaw(id, false);
+            segment.profile = profile;
 
-          // If clientName in CSV was fallback, update with full name from API
-          if (profile.clientName && profile.clientName !== id) {
-            segment.clientName = profile.clientName;
-          }
+            if (profile.clientName && profile.clientName !== id) {
+              segment.clientName = profile.clientName;
+            }
 
-          if (downloadResumes && profile.resumeUrl) {
-            await client.downloadResume(id, profile.resumeUrl);
+            let resumeStoragePath: string | null = null;
+            if (downloadResumes && profile.resumeUrl) {
+              const localPath = await client.downloadResume(id, profile.resumeUrl);
+              try {
+                if (fs.existsSync(localPath) && fs.statSync(localPath).size > 100) {
+                  const buffer = await fs.promises.readFile(localPath);
+                  resumeStoragePath = await uploadResume(id, buffer);
+                }
+              } catch (uploadErr: any) {
+                console.warn(
+                  `[Candidate Ingestion] ⚠️ Could not upload resume for ${id} to Supabase Storage: ${uploadErr.message}`
+                );
+              }
+            }
+
+            try {
+              await upsertProfile({
+                applywizz_id: profile.applywizzId,
+                client_name: profile.clientName || id,
+                first_name: profile.firstName || null,
+                last_name: profile.lastName || null,
+                company_email: profile.email || null,
+                email: profile.email || null,
+                phone: profile.phone || null,
+                country: profile.country || null,
+                country_code: profile.countryCode || null,
+                location: profile.location || null,
+                linkedin_url: profile.linkedinUrl || null,
+                website_url: profile.websiteUrl || null,
+                github_url: profile.githubUrl || null,
+                work_authorization: profile.workAuthorization || null,
+                requires_sponsorship: Boolean(profile.requiresSponsorship),
+                education: profile.education || [],
+                work_experience: profile.workExperience || [],
+                resume_url: profile.resumeUrl || null,
+                resume_storage_path: resumeStoragePath,
+                raw_api_payload: {
+                  ...raw,
+                  demographics: profile.demographics || raw.demographics,
+                },
+                last_api_fetch_at: new Date().toISOString(),
+              });
+              if (resumeStoragePath) {
+                await updateResumeStoragePath(id, resumeStoragePath);
+              }
+            } catch (dbErr: any) {
+              console.warn(
+                `[Candidate Ingestion] ⚠️ Could not upsert new candidate profile ${id} to Supabase: ${dbErr.message}`
+              );
+            }
+            fromApi++;
           }
         } catch (err: any) {
           console.warn(`[Candidate Segregator] ⚠️ Failed to sync candidate ${id}: ${err.message}. Skipping profile sync.`);
@@ -204,7 +286,9 @@ export async function segregateCandidatesByApplyWizzId(
     }
 
     await Promise.all(workers);
-    console.log(`[Candidate Segregator] ✅ Profile synchronization complete for ${completed}/${totalCandidates} candidates.`);
+    console.log(
+      `[Candidate Segregator] ✅ Profile sync complete: ${fromSupabase} from Supabase (0 API calls), ${fromApi} new via API (${completed}/${totalCandidates} total).`
+    );
   }
 
   return segmentsMap;

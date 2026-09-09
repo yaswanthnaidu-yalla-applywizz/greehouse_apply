@@ -6,6 +6,10 @@ import config from '../config/env.js';
 
 export const RESUMES_BUCKET = config.SUPABASE_STORAGE_BUCKET_RESUMES || 'resumes';
 export const PROOFS_BUCKET = config.SUPABASE_STORAGE_BUCKET_PROOFS || 'proofs_web';
+export const PROOFS_FAILED_BUCKET = 'proofs_failed';
+export const PROOFS_JOB_OPEN_BUCKET = 'proofs_job_open';
+export const PROOFS_JOB_SUBMITTED_BUCKET = 'proofs_job_submitted';
+export const PROOFS_MAIL_BUCKET = 'proofs_mail';
 
 /**
  * Ensures required storage buckets exist in Supabase.
@@ -22,6 +26,10 @@ export async function ensureBucketsExist(): Promise<void> {
       { name: RESUMES_BUCKET, public: false },
       { name: PROOFS_BUCKET, public: true },
       { name: 'proofs_dry_run', public: true },
+      { name: PROOFS_FAILED_BUCKET, public: true },
+      { name: PROOFS_JOB_OPEN_BUCKET, public: true },
+      { name: PROOFS_JOB_SUBMITTED_BUCKET, public: true },
+      { name: PROOFS_MAIL_BUCKET, public: true },
     ];
 
     const { data: existingBuckets, error: listError } = await supabase.storage.listBuckets();
@@ -158,34 +166,179 @@ export async function uploadDryRunScreenshot(
 }
 
 /**
- * Downloads candidate master resume from Supabase Storage or returns local disk file.
+ * Uploads a failure screenshot to the proofs_failed bucket or local folder.
+ */
+export async function uploadFailedScreenshot(
+  applicationId: string,
+  imageBuffer: Buffer
+): Promise<string> {
+  const storagePath = `${applicationId}_failed.png`;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { error } = await supabase.storage
+        .from(PROOFS_FAILED_BUCKET)
+        .upload(storagePath, imageBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        });
+
+      if (!error) {
+        const { data } = supabase.storage.from(PROOFS_FAILED_BUCKET).getPublicUrl(storagePath);
+        return data.publicUrl;
+      }
+    } catch {}
+  }
+
+  // Local filesystem fallback
+  const failDir = path.resolve(process.cwd(), 'output', 'proofs_failed');
+  if (!fs.existsSync(failDir)) {
+    fs.mkdirSync(failDir, { recursive: true });
+  }
+  const localPath = path.join(failDir, `${applicationId}_failed.png`);
+  fs.writeFileSync(localPath, imageBuffer);
+  return `file://${localPath}`;
+}
+
+/**
+ * Uploads a job-opened screenshot to the proofs_job_open bucket or local folder.
+ */
+export async function uploadJobOpenScreenshot(
+  applicationId: string,
+  imageBuffer: Buffer
+): Promise<string> {
+  const storagePath = `${applicationId}_open.png`;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { error } = await supabase.storage
+        .from(PROOFS_JOB_OPEN_BUCKET)
+        .upload(storagePath, imageBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        });
+
+      if (!error) {
+        const { data } = supabase.storage.from(PROOFS_JOB_OPEN_BUCKET).getPublicUrl(storagePath);
+        return data.publicUrl;
+      }
+    } catch {}
+  }
+
+  // Local filesystem fallback
+  const openDir = path.resolve(process.cwd(), 'output', 'proofs_job_open');
+  if (!fs.existsSync(openDir)) {
+    fs.mkdirSync(openDir, { recursive: true });
+  }
+  const localPath = path.join(openDir, `${applicationId}_open.png`);
+  fs.writeFileSync(localPath, imageBuffer);
+  return `file://${localPath}`;
+}
+
+/**
+ * Uploads a post-submit click screenshot to the proofs_job_submitted bucket or local folder.
+ */
+export async function uploadJobSubmittedScreenshot(
+  applicationId: string,
+  imageBuffer: Buffer
+): Promise<string> {
+  const storagePath = `${applicationId}_submitted.png`;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { error } = await supabase.storage
+        .from(PROOFS_JOB_SUBMITTED_BUCKET)
+        .upload(storagePath, imageBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        });
+
+      if (!error) {
+        const { data } = supabase.storage.from(PROOFS_JOB_SUBMITTED_BUCKET).getPublicUrl(storagePath);
+        return data.publicUrl;
+      }
+    } catch {}
+  }
+
+  // Local filesystem fallback
+  const submittedDir = path.resolve(process.cwd(), 'output', 'proofs_job_submitted');
+  if (!fs.existsSync(submittedDir)) {
+    fs.mkdirSync(submittedDir, { recursive: true });
+  }
+  const localPath = path.join(submittedDir, `${applicationId}_submitted.png`);
+  fs.writeFileSync(localPath, imageBuffer);
+  return `file://${localPath}`;
+}
+
+/**
+ * Uploads a confirmation email screenshot proof to the proofs_mail bucket or local folder.
+ */
+export async function uploadEmailProof(
+  applicationId: string,
+  imageBuffer: Buffer
+): Promise<string> {
+  const storagePath = `${applicationId}_mail_proof.png`;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { error } = await supabase.storage
+        .from(PROOFS_MAIL_BUCKET)
+        .upload(storagePath, imageBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        });
+
+      if (!error) {
+        const { data } = supabase.storage.from(PROOFS_MAIL_BUCKET).getPublicUrl(storagePath);
+        return data.publicUrl;
+      }
+    } catch {}
+  }
+
+  // Local filesystem fallback
+  const mailProofDir = path.resolve(process.cwd(), 'output', 'proofs_mail');
+  if (!fs.existsSync(mailProofDir)) {
+    fs.mkdirSync(mailProofDir, { recursive: true });
+  }
+  const localPath = path.join(mailProofDir, `${applicationId}_mail_proof.png`);
+  fs.writeFileSync(localPath, imageBuffer);
+  return `file://${localPath}`;
+}
+
+/**
+ * Downloads candidate master resume from Supabase Storage, with local disk fallback.
+ * Never fetches from external URLs — resolution is Supabase/offline only.
  * Returns the absolute path of the temp file or local file on disk.
  */
 export async function downloadResumeTempFile(applywizzId: string): Promise<string> {
-  // 1. Check local resumes directory first
-  const localFile = path.resolve(process.cwd(), 'resumes', `${applywizzId}_resume.pdf`);
+  const fileName = `${applywizzId}_resume.pdf`;
+
+  // 1. Download from Supabase Storage if configured
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase.storage.from(RESUMES_BUCKET).download(fileName);
+
+      if (!error && data) {
+        const arrayBuffer = await data.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const tempFilePath = path.join(os.tmpdir(), `greenhouse_resume_${applywizzId}_${Date.now()}.pdf`);
+        await fs.promises.writeFile(tempFilePath, buffer);
+        return tempFilePath;
+      }
+    } catch {}
+  }
+
+  // 2. Local resumes directory fallback (dev / offline)
+  const localFile = path.resolve(process.cwd(), 'resumes', fileName);
   if (fs.existsSync(localFile)) {
     return localFile;
   }
 
-  // 2. Download from Supabase Storage if configured
-  if (isSupabaseConfigured()) {
-    const supabase = getDbClient();
-    const fileName = `${applywizzId}_resume.pdf`;
-
-    const { data, error } = await supabase.storage
-      .from(RESUMES_BUCKET)
-      .download(fileName);
-
-    if (!error && data) {
-      const arrayBuffer = await data.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const tempFilePath = path.join(os.tmpdir(), `greenhouse_resume_${applywizzId}_${Date.now()}.pdf`);
-      await fs.promises.writeFile(tempFilePath, buffer);
-      return tempFilePath;
-    }
-  }
-
-  throw new Error(`Resume PDF not found for ${applywizzId} locally or in cloud storage.`);
+  throw new Error(`Resume PDF not found for ${applywizzId} in Supabase Storage or local ./resumes/.`);
 }
 

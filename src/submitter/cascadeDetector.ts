@@ -30,14 +30,36 @@ export function generateFieldId(name: string, id: string, label: string): string
   const lowerLabel = (label || '').toLowerCase();
 
   // Standard field mappings
-  if (lowerName.includes('first_name') || lowerId === 'first_name' || lowerLabel === 'first name') return 'first_name';
-  if (lowerName.includes('last_name') || lowerId === 'last_name' || lowerLabel === 'last name') return 'last_name';
-  if (lowerName.includes('email') || lowerId === 'email' || lowerLabel === 'email') return 'email';
-  if (lowerName.includes('phone') || lowerId === 'phone' || lowerLabel === 'phone') return 'phone';
+  if (
+    lowerName.includes('first_name') ||
+    lowerName.includes('firstname') ||
+    lowerName.includes('given_name') ||
+    lowerId.includes('first_name') ||
+    lowerId.includes('firstname') ||
+    lowerLabel.includes('first name') ||
+    lowerLabel.includes('firstname') ||
+    lowerLabel.includes('given name')
+  ) return 'first_name';
+
+  if (
+    lowerName.includes('last_name') ||
+    lowerName.includes('lastname') ||
+    lowerName.includes('family_name') ||
+    lowerId.includes('last_name') ||
+    lowerId.includes('lastname') ||
+    lowerLabel.includes('last name') ||
+    lowerLabel.includes('lastname') ||
+    lowerLabel.includes('family name') ||
+    lowerLabel.includes('surname')
+  ) return 'last_name';
+
+  if (lowerName.includes('email') || lowerId.includes('email') || lowerLabel.includes('email')) return 'email';
+  if (lowerName.includes('phone') || lowerId.includes('phone') || lowerLabel.includes('phone') || lowerLabel.includes('mobile')) return 'phone';
   if (lowerName.includes('resume') || lowerId === 'resume' || lowerLabel.includes('resume')) return 'resume';
   if (lowerName.includes('cover_letter') || lowerId === 'cover_letter' || lowerLabel.includes('cover letter')) return 'cover_letter';
   if (lowerName.includes('linkedin') || lowerId.includes('linkedin') || lowerLabel.includes('linkedin')) return 'linkedin_url';
   if (lowerName.includes('website') || lowerId.includes('website') || lowerName.includes('portfolio') || lowerLabel.includes('website') || lowerLabel.includes('portfolio')) return 'website_url';
+  if (lowerName.includes('country') || lowerId.includes('country') || lowerLabel.includes('country')) return 'country';
   if (lowerName.includes('location') || lowerId.includes('location') || lowerLabel.includes('location')) return 'location';
   if (lowerName.includes('gender') || lowerId.includes('gender') || lowerLabel === 'gender') return 'gender';
   if (lowerName.includes('hispanic') || lowerId.includes('hispanic') || lowerLabel.includes('hispanic')) return 'hispanic_ethnicity';
@@ -207,7 +229,9 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
         }
 
         // 3. React-Select Combobox Inputs
-        var isReactSelect = el.closest('.select__control, [class*="select-control"], .select-shell') !== null;
+        var isReactSelect = el.getAttribute('role') === 'combobox' ||
+                            (typeof el.className === 'string' && el.className.indexOf('select__input') !== -1) ||
+                            el.closest('.select__control, [class*="select-control"], .select-shell, [class*="select__container"]') !== null;
         if (isReactSelect) {
           var labelFor = id ? document.querySelector('label[for="' + CSS.escape(id) + '"]') : null;
           var parentLabel = el.closest('label');

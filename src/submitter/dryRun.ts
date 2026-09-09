@@ -26,6 +26,8 @@ export interface DryRunOptions {
   minJitterMs?: number;
   /** Maximum jitter delay in milliseconds (default: 500) */
   maxJitterMs?: number;
+  /** Target job posting URL */
+  jobUrl?: string;
 }
 
 export interface DryRunResult {
@@ -53,7 +55,7 @@ export async function runDryRun(
   // 1. Resolve application record
   let application: ApplicationRow;
   if (typeof applicationOrId === 'string') {
-    const fetched = await getApplication(applicationOrId);
+    const fetched = await getApplication(applicationOrId, options.jobUrl);
     if (!fetched) {
       throw new Error(`Application record with ID '${applicationOrId}' not found.`);
     }

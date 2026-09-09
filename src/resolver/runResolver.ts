@@ -14,7 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config/env.js';
-import { AnswerResolver, exportResolvedApplications } from './answerResolver.js';
+import { AnswerResolver, exportResolvedApplications, resolutionSourceKey } from './answerResolver.js';
 import type { CandidateSegment, ScannedJobTemplate } from '../types/index.js';
 
 /**
@@ -56,7 +56,7 @@ export async function main(): Promise<void> {
   const { candidatesPath, scannedPath, outputDir, verbose } = parseResolverArgs(process.argv.slice(2));
 
   console.log('================================================================');
-  console.log('  Answer Resolution Engine (5-Tier Waterfall: V2)');
+  console.log('  Answer Resolution Engine (Supabase → Resume → LLM)');
   console.log('================================================================');
   console.log(`• Candidates File: ${candidatesPath}`);
   console.log(`• Scanned Jobs:    ${scannedPath}`);
@@ -93,11 +93,9 @@ export async function main(): Promise<void> {
     const outputPath = await exportResolvedApplications(resolvedApps, outputDir);
 
     let totalFields = 0;
-    let tier1Count = 0;
-    let tier2Count = 0;
-    let tier3Count = 0;
-    let tier4Count = 0;
-    let tier5Count = 0;
+    let supabaseCount = 0;
+    let resumeCount = 0;
+    let llmCount = 0;
     let manualCount = 0;
     let unresolvedCount = 0;
 
@@ -105,29 +103,28 @@ export async function main(): Promise<void> {
       for (const f of app.resolvedFields) {
         totalFields++;
         if (f.source === 'manual') manualCount++;
-        else if (f.source === 'supabase' || f.resolvedByTier === 1) tier1Count++;
-        else if (f.source === 'resume_parse' || f.resolvedByTier === 2) tier2Count++;
-        else if (f.source === 'fuzzy_match' || f.resolvedByTier === 3) tier3Count++;
-        else if (f.source === 'api' || f.resolvedByTier === 4) tier4Count++;
-        else if (f.source === 'ai' || f.resolvedByTier === 5) tier5Count++;
-        else if (f.source === 'unresolved') unresolvedCount++;
-        else tier1Count++;
+        else {
+          const key = resolutionSourceKey(f);
+          if (key === 'supabase') supabaseCount++;
+          else if (key === 'resume') resumeCount++;
+          else if (key === 'llm') llmCount++;
+          else if (key === 'unresolved') unresolvedCount++;
+          else supabaseCount++;
+        }
       }
     }
 
     const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
 
     console.log('\n================================================================');
-    console.log('  Answer Resolution Completed Successfully (5-Tier Telemetry)');
+    console.log('  Answer Resolution Completed (Supabase → Resume → LLM)');
     console.log('================================================================');
     console.log(`• Elapsed Time:           ${elapsedSec}s`);
     console.log(`• Applications Ready:     ${resolvedApps.length}`);
     console.log(`• Total Fields Populated: ${totalFields}`);
-    console.log(`  - 🟢 Tier 1 (Supabase/Exact): ${tier1Count} (${totalFields ? ((tier1Count / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🔵 Tier 2 (Resume Parse):   ${tier2Count} (${totalFields ? ((tier2Count / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🔷 Tier 3 (Fuzzy QA Match): ${tier3Count} (${totalFields ? ((tier3Count / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🟣 Tier 4 (API Live Refetch): ${tier4Count} (${totalFields ? ((tier4Count / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🟣 Tier 5 (LLM Synthesis):  ${tier5Count} (${totalFields ? ((tier5Count / totalFields) * 100).toFixed(1) : 0}%)`);
+    console.log(`  - 🟢 Supabase:  ${supabaseCount} (${totalFields ? ((supabaseCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    console.log(`  - 🔵 Resume:    ${resumeCount} (${totalFields ? ((resumeCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    console.log(`  - 🤖 LLM:       ${llmCount} (${totalFields ? ((llmCount / totalFields) * 100).toFixed(1) : 0}%)`);
     if (manualCount > 0) {
       console.log(`  - 🟡 Manual Overrides:        ${manualCount} (${totalFields ? ((manualCount / totalFields) * 100).toFixed(1) : 0}%)`);
     }

@@ -6,7 +6,7 @@
  * 2. Web proof screenshot capture & Supabase Storage upload (`captureWebProof`)
  * 3. Express REST API `GET /api/applications/:id` returning complete status and proof metadata
  * 4. Polling workflow simulation during `APPLYING` state transition to `APPLIED`
- * 5. Full lifecycle state machine integrity (`READY_FOR_REVIEW` -> `DRY_RUN_COMPLETE` -> `APPLYING` -> `APPLIED` / `FAILED` / `CAPTCHA_REQUIRED`)
+ * 5. Full lifecycle state machine integrity (`READY_FOR_REVIEW` -> `DRY_RUN_COMPLETE` -> `APPLYING` -> `APPLIED` / `FAILED` / `OTP_REQUIRED`)
  */
 
 import http from 'http';
@@ -141,10 +141,10 @@ async function runProofLifecycleTestSuite() {
     assert(updated?.status === 'FAILED', 'Application transitioned to FAILED status');
     assert(updated?.error_message === 'Form submission timed out', 'error_message persisted on FAILED');
 
-    // Test transition to CAPTCHA_REQUIRED
-    await updateStatus(recordId, 'CAPTCHA_REQUIRED');
+    // Test transition to OTP_REQUIRED
+    await updateStatus(recordId, 'OTP_REQUIRED');
     updated = await getApplication(recordId);
-    assert(updated?.status === 'CAPTCHA_REQUIRED', 'Application transitioned to CAPTCHA_REQUIRED status');
+    assert(updated?.status === 'OTP_REQUIRED', 'Application transitioned to OTP_REQUIRED status');
 
     // =========================================================================
     // Test Group 2: Web Proof Capture & Storage Upload

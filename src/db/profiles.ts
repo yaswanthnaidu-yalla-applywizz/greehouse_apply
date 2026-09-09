@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import type { ApplyWizzCandidateProfile } from '../types/index.js';
 
 export interface ProfileRow {
   id?: string;
@@ -14,7 +15,10 @@ export interface ProfileRow {
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
+  company_email?: string | null;
   phone?: string | null;
+  country?: string | null;
+  country_code?: string | null;
   location?: string | null;
   linkedin_url?: string | null;
   website_url?: string | null;
@@ -31,6 +35,87 @@ export interface ProfileRow {
   updated_at?: string;
 }
 
+export function isCompanyEmailDomain(email?: string | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const lower = email.trim().toLowerCase();
+  return (
+    lower.endsWith('@applywizard.ai') ||
+    lower.endsWith('@applywizz.ai') ||
+    lower.endsWith('@applywizz.com') ||
+    lower.endsWith('@apply-wizz.me')
+  );
+}
+
+export function isPersonalEmailDomain(email: string): boolean {
+  if (isCompanyEmailDomain(email)) return false;
+  const lower = email.toLowerCase().trim();
+  return /@(gmail\.com|googlemail\.com|yahoo\.com|ymail\.com|hotmail\.com|outlook\.com|live\.com|icloud\.com|me\.com|aol\.com|proton\.me|protonmail\.com|zoho\.com|mail\.com)$/i.test(
+    lower
+  );
+}
+
+/**
+ * Extracts company email from a raw ApplyWizz API payload or stored profile fields.
+ * Strictly requires the email to belong to an authorized company domain (e.g. @applywizard.ai).
+ */
+export function extractCompanyEmailFromPayload(
+  raw?: Record<string, any> | null,
+  storedEmail?: string | null
+): string | null {
+  const fromRaw =
+    raw?.client?.company_email || raw?.additional_information?.company_email;
+  if (fromRaw && typeof fromRaw === 'string' && isCompanyEmailDomain(fromRaw)) {
+    return fromRaw.trim();
+  }
+
+  const stored = (storedEmail || '').trim();
+  if (stored && isCompanyEmailDomain(stored)) {
+    return stored;
+  }
+
+  return null;
+}
+
+/**
+ * Resolves the candidate's company email, strictly matching company domains like @applywizard.ai.
+ * Never returns personal emails.
+ */
+export function getCompanyEmail(profile: ProfileRow): string | null {
+  if (profile.company_email && isCompanyEmailDomain(profile.company_email)) {
+    return profile.company_email.trim();
+  }
+  return extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
+}
+
+/**
+ * Converts a Supabase `profiles` row into an ApplyWizzCandidateProfile domain object.
+ * Used to rehydrate candidates without any ApplyWizz API calls.
+ */
+export function profileRowToCandidateProfile(row: ProfileRow): ApplyWizzCandidateProfile {
+  const isYaswanth = (row.applywizz_id || '').trim().toUpperCase() === 'AWL-YASWANTH';
+  return {
+    applywizzId: row.applywizz_id,
+    clientName: row.client_name,
+    firstName: row.first_name || '',
+    lastName: row.last_name || '',
+    email: getCompanyEmail(row) || '',
+    phone: row.phone || '',
+    country: isYaswanth ? 'India' : (row.country || undefined),
+    countryCode: isYaswanth ? '+91' : (row.country_code || undefined),
+    location: isYaswanth ? (row.location || 'Hyderabad, Telangana, India') : (row.location || ''),
+    linkedinUrl: row.linkedin_url || '',
+    websiteUrl: row.website_url || undefined,
+    githubUrl: row.github_url || undefined,
+    workAuthorization: row.work_authorization || '',
+    requiresSponsorship: Boolean(row.requires_sponsorship),
+    education: row.education || [],
+    workExperience: row.work_experience || [],
+    resumeUrl: row.resume_url || '',
+    localResumePath: row.resume_storage_path || '',
+    demographics: row.raw_api_payload?.demographics,
+  };
+}
+
 /**
  * Upserts a candidate profile record into Supabase or local cache.
  * Uses applywizz_id as the unique conflict target.
@@ -38,8 +123,17 @@ export interface ProfileRow {
 export async function upsertProfile(
   profile: Partial<ProfileRow> & { applywizz_id: string; client_name: string }
 ): Promise<ProfileRow> {
-  const payload = {
+  const isYaswanth = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-YASWANTH';
+  const companyEmail =
+    profile.company_email ||
+    extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
+  const payload: ProfileRow = {
     ...profile,
+    country: isYaswanth ? 'India' : (profile.country ?? null),
+    country_code: isYaswanth ? '+91' : (profile.country_code ?? null),
+    location: isYaswanth ? (profile.location || 'Hyderabad, Telangana, India') : (profile.location ?? null),
+    company_email: companyEmail,
+    email: companyEmail || profile.email || null,
     updated_at: new Date().toISOString(),
   };
 
@@ -76,8 +170,11 @@ export async function upsertProfile(
           firstName: profile.first_name,
           lastName: profile.last_name,
           email: profile.email,
+          companyEmail: profile.company_email,
           phone: profile.phone,
-          location: profile.location,
+          country: payload.country,
+          countryCode: payload.country_code,
+          location: payload.location,
           linkedinUrl: profile.linkedin_url,
           websiteUrl: profile.website_url,
           githubUrl: profile.github_url,
@@ -102,6 +199,8 @@ export async function upsertProfile(
  * Fetches a candidate profile by ApplyWizz ID from Supabase or local cache.
  */
 export async function getProfile(applywizzId: string): Promise<ProfileRow | null> {
+  const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
+
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
@@ -112,7 +211,13 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
         .maybeSingle();
 
       if (!error && data) {
-        return data as ProfileRow;
+        const row = data as ProfileRow;
+        if (isYaswanth) {
+          row.country = 'India';
+          row.country_code = '+91';
+          if (!row.location) row.location = 'Hyderabad, Telangana, India';
+        }
+        return row;
       }
     } catch (err: any) {
       // Fall through to local fallback
@@ -125,26 +230,49 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
     try {
       const raw = fs.readFileSync(localCachePath, 'utf-8');
       const d = JSON.parse(raw);
+      const profileData = d.profile || d;
       return {
-        applywizz_id: d.applywizzId || applywizzId,
-        client_name: d.clientName || applywizzId,
-        first_name: d.firstName || null,
-        last_name: d.lastName || null,
-        email: d.email || null,
-        phone: d.phone || null,
-        location: d.location || null,
-        linkedin_url: d.linkedinUrl || null,
-        website_url: d.websiteUrl || null,
-        github_url: d.githubUrl || null,
-        work_authorization: d.workAuthorization || null,
-        requires_sponsorship: Boolean(d.requiresSponsorship),
-        education: d.education || [],
-        work_experience: d.workExperience || [],
-        resume_url: d.resumeUrl || null,
-        resume_storage_path: d.localResumePath || null,
-        raw_api_payload: d.demographics ? { demographics: d.demographics } : null,
+        applywizz_id: profileData.applywizzId || applywizzId,
+        client_name: profileData.clientName || applywizzId,
+        first_name: profileData.firstName || null,
+        last_name: profileData.lastName || null,
+        email: profileData.email || null,
+        company_email: profileData.companyEmail || null,
+        phone: profileData.phone || null,
+        country: isYaswanth ? 'India' : (profileData.country || null),
+        country_code: isYaswanth ? '+91' : (profileData.countryCode || profileData.country_code || null),
+        location: isYaswanth ? (profileData.location || 'Hyderabad, Telangana, India') : (profileData.location || null),
+        linkedin_url: profileData.linkedinUrl || null,
+        website_url: profileData.websiteUrl || null,
+        github_url: profileData.githubUrl || null,
+        work_authorization: profileData.workAuthorization || null,
+        requires_sponsorship: Boolean(profileData.requiresSponsorship),
+        education: profileData.education || [],
+        work_experience: profileData.workExperience || [],
+        resume_url: profileData.resumeUrl || null,
+        resume_storage_path: profileData.localResumePath || null,
+        raw_api_payload: profileData.demographics ? { demographics: profileData.demographics } : null,
       };
     } catch {}
+  }
+
+  // Fallback for demo fixtures candidate AWL-YASWANTH
+  if (isYaswanth) {
+    return {
+      applywizz_id: 'AWL-YASWANTH',
+      client_name: 'Yaswanth Naidu Yalla',
+      first_name: 'Yaswanth Naidu',
+      last_name: 'Yalla',
+      email: 'yaswanthnaidu004@gmail.com',
+      company_email: 'yaswanthnaidu004@gmail.com',
+      phone: '9573939153',
+      country: 'India',
+      country_code: '+91',
+      location: 'Hyderabad, Telangana, India',
+      linkedin_url: 'https://linkedin.com/in/yaswanth-yalla',
+      work_authorization: 'US Citizen',
+      requires_sponsorship: false,
+    };
   }
 
   return null;
