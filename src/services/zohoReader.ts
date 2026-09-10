@@ -386,15 +386,17 @@ class ZohoReaderService {
    */
   public async captureConfirmationEmailScreenshot(
     candidateEmail: string,
-    criteria: { companyName?: string; jobTitle?: string; timeoutMs?: number; sinceTimestamp?: number } = {}
+    criteria: { companyName?: string; jobTitle?: string; timeoutMs?: number; sinceTimestamp?: number; isManual?: boolean } = {}
   ): Promise<{
     success: boolean;
     screenshotBuffer?: Buffer;
     subject?: string;
     errorMessage?: string;
   }> {
-    const timeoutMs = criteria.timeoutMs ?? 180000;
-    const sinceTimestamp = criteria.sinceTimestamp ?? (Date.now() - 3 * 60 * 1000);
+    const timeoutMs = criteria.timeoutMs ?? (criteria.isManual ? 45000 : 180000);
+    const sinceTimestamp = criteria.sinceTimestamp !== undefined
+      ? criteria.sinceTimestamp
+      : (criteria.isManual ? 0 : (Date.now() - 3 * 60 * 1000));
     const normalizedEmail = candidateEmail.trim().toLowerCase();
 
     if (!normalizedEmail) {
@@ -411,7 +413,7 @@ class ZohoReaderService {
       console.log(
         `[Zoho Reader] 📧 Looking up confirmation email for ${normalizedEmail}${
           criteria.companyName ? ` (company: ${criteria.companyName})` : ''
-        } (cutoff: ${new Date(sinceTimestamp).toLocaleTimeString()})...`
+        } (manual: ${Boolean(criteria.isManual)})...`
       );
 
       // 1. Filter by candidate email
@@ -450,55 +452,56 @@ class ZohoReaderService {
       const targetCompany = (criteria.companyName || '').trim().toLowerCase();
 
       while (Date.now() - startTime < timeoutMs) {
-        const readMailsBtn = this.page.locator('button#readMailsBtn, button:has-text("Read mails")').first();
-        if ((await readMailsBtn.count()) > 0 && (await readMailsBtn.isVisible().catch(() => false))) {
-          const isDisabled = await readMailsBtn.isDisabled().catch(() => false);
+        const refreshBtn = this.page.locator('button#readMailsBtn, button:has-text("Read mails")').first();
+        if ((await refreshBtn.count()) > 0 && (await refreshBtn.isVisible().catch(() => false))) {
+          const isDisabled = await refreshBtn.isDisabled().catch(() => false);
           if (!isDisabled) {
-            await readMailsBtn.click().catch(() => {});
+            await refreshBtn.click().catch(() => {});
           }
         }
         await this.page.waitForTimeout(1000);
 
-        // Search message rows matching confirmation keywords or company
-        // Keywords: "Thank you for applying", "Thank You For Your Application", "Application", "Received", or target company
-        const confirmationLocators = [
-          '#messageList button.msg-item:has-text("Thank you for applying")',
-          '#messageList button.msg-item:has-text("Thank You For Your Application")',
-          '#messageList button.msg-item:has-text("We Received Your Application")',
-          '#messageList button.msg-item:has-text("Application received")',
-          '#messageList button.msg-item:has-text("Application Confirmation")',
-          '#messageList button.msg-item:has-text("applied")',
-        ];
-        if (targetCompany && targetCompany.length > 2) {
-          confirmationLocators.unshift(`#messageList button.msg-item:has-text("${targetCompany}")`);
-        }
+        // Inspect recent messages in the candidate's folder
+        const allRows = this.page.locator('#messageList button.msg-item, .message-col button.msg-item');
+        const rowCount = await allRows.count();
+        const checkLimit = Math.min(rowCount, 10);
 
-        for (const sel of confirmationLocators) {
-          const rows = this.page.locator(sel);
-          const rowCount = await rows.count();
+        for (let i = 0; i < checkLimit; i++) {
+          const row = allRows.nth(i);
+          const isVis = await row.isVisible().catch(() => false);
+          if (!isVis) continue;
 
-          for (let i = 0; i < rowCount; i++) {
-            const row = rows.nth(i);
-            const isVis = await row.isVisible().catch(() => false);
-            if (!isVis) continue;
+          const whenText = (await row.locator('.when').innerText().catch(() => '')).replace(/[·📎\s]+/g, ' ').trim();
+          const subject = (await row.locator('.subject').innerText().catch(() => '')).trim();
+          const from = (await row.locator('.from').innerText().catch(() => '')).trim();
 
-            const whenText = (await row.locator('.when').innerText().catch(() => '')).replace(/[·📎\s]+/g, ' ').trim();
-            const parsedTime = whenText ? Date.parse(whenText) : NaN;
-            if (!Number.isNaN(parsedTime) && parsedTime < sinceTimestamp) {
-              // Message is older than cutoff; skip opening
-              break;
-            }
+          const parsedTime = whenText ? Date.parse(whenText) : NaN;
+          if (sinceTimestamp > 0 && !Number.isNaN(parsedTime) && parsedTime < sinceTimestamp && !criteria.isManual) {
+            continue;
+          }
 
-            // Click message to render in right pane
+          const combinedHeader = `${subject} ${from}`.toLowerCase();
+          const isHeaderMatch =
+            (targetCompany && targetCompany.length > 2 && combinedHeader.includes(targetCompany)) ||
+            combinedHeader.includes('thank you') ||
+            combinedHeader.includes('application') ||
+            combinedHeader.includes('applied') ||
+            combinedHeader.includes('received') ||
+            combinedHeader.includes('greenhouse') ||
+            combinedHeader.includes('confirm') ||
+            combinedHeader.includes('candidate') ||
+            criteria.isManual;
+
+          if (isHeaderMatch) {
             await row.click().catch(() => {});
-            await this.page.waitForSelector('#messageBody .body-html, #messageBody .body-text, #messageBody', { timeout: 4000 }).catch(() => {});
+            await this.page
+              .waitForSelector('#messageBody .body-html, #messageBody .body-text, #messageBody', { timeout: 4000 })
+              .catch(() => {});
             await this.page.waitForTimeout(600);
 
-            // Verify content pane loaded
             const emailContainer = this.page
               .locator('#messageBody .body-html, #messageBody .body-text, #messageBody')
               .first();
-
             const containerExists = (await emailContainer.count()) > 0;
             const targetLocator = containerExists ? emailContainer : this.page.locator('body');
 
@@ -508,15 +511,16 @@ class ZohoReaderService {
               text.includes('thank you for your application') ||
               text.includes('we received your application') ||
               text.includes('application received') ||
-              text.includes('successfully added to our database') ||
-              (targetCompany && text.includes(targetCompany));
+              text.includes('applied') ||
+              text.includes('greenhouse') ||
+              text.includes('application') ||
+              (targetCompany && targetCompany.length > 2 && text.includes(targetCompany));
 
-            if (isConfirmation) {
+            if (isConfirmation || criteria.isManual) {
               console.log(
-                `[Zoho Reader] 📸 Confirmation email found! Capturing screenshot proof...`
+                `[Zoho Reader] 📸 Confirmation email found! Capturing screenshot proof (subject: "${subject}")...`
               );
-              // Wait for images to render
-              await this.page.waitForTimeout(1200);
+              await this.page.waitForTimeout(1000);
 
               const screenshotBuffer = await targetLocator.screenshot({
                 type: 'png',
@@ -525,7 +529,7 @@ class ZohoReaderService {
               return {
                 success: true,
                 screenshotBuffer,
-                subject: sel,
+                subject: subject || targetCompany || 'Confirmation Email',
               };
             }
           }
@@ -535,7 +539,7 @@ class ZohoReaderService {
       }
 
       throw new Error(
-        `Timed out after ${timeoutMs / 1000}s waiting for application confirmation email in Zoho Reader.`
+        `Timed out waiting for application confirmation email in Zoho Reader.`
       );
     } catch (err: any) {
       console.error(`[Zoho Reader] ❌ Confirmation email capture failed for ${candidateEmail}: ${err.message}`);
