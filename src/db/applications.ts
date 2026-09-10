@@ -286,7 +286,7 @@ export async function updateResolvedFields(
 export async function updateStatus(
   id: string,
   status: ApplicationStatus,
-  extra?: string | { proof_web_url?: string; proof_captured_at?: string; error_message?: string }
+  extra?: string | { proof_web_url?: string; proof_captured_at?: string; error_message?: string; job_url?: string }
 ): Promise<void> {
   const updatePayload: Partial<ApplicationRow> = {
     status,
@@ -314,6 +314,8 @@ export async function updateStatus(
       let updateRes;
       if (isUuid) {
         updateRes = await query.eq('id', id);
+      } else if (extra && typeof extra === 'object' && extra.job_url) {
+        updateRes = await query.eq('applywizz_id', id).eq('job_url', extra.job_url);
       } else {
         updateRes = await query.eq('applywizz_id', id);
       }
@@ -330,7 +332,8 @@ export async function updateStatus(
     memoryApplications.set(id, { ...existing, ...updatePayload });
   }
   for (const [key, app] of memoryApplications.entries()) {
-    if (app.id === id || app.applywizz_id === id) {
+    const jobMatch = !(extra && typeof extra === 'object' && extra.job_url) || app.job_url === extra.job_url;
+    if (app.id === id || (app.applywizz_id === id && jobMatch)) {
       memoryApplications.set(key, { ...app, ...updatePayload });
     }
   }
@@ -535,5 +538,79 @@ export async function listApplications(filter?: {
   });
 
   return results;
+}
+
+export interface NotificationItem {
+  id: string;
+  applywizzId: string;
+  companyName: string;
+  jobTitle: string;
+  jobUrl: string;
+  status: 'APPLIED' | 'FAILED';
+  reason?: string | null;
+  proofWebUrl?: string | null;
+  timestamp: string;
+}
+
+/**
+ * Fetches recent succeeded and failed applications for notifications.
+ */
+export async function getRecentNotifications(limit = 40): Promise<NotificationItem[]> {
+  const notifications: NotificationItem[] = [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_applications')
+        .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, proof_web_url, updated_at, submitted_at')
+        .in('status', ['APPLIED', 'FAILED'])
+        .order('updated_at', { ascending: false })
+        .limit(limit);
+
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          notifications.push({
+            id: row.id || `notif-${row.applywizz_id}-${Buffer.from(row.job_url || '').toString('base64url').slice(0, 12)}`,
+            applywizzId: row.applywizz_id,
+            companyName: row.company_name || 'Greenhouse Company',
+            jobTitle: row.job_title || 'Job Opening',
+            jobUrl: row.job_url,
+            status: row.status as 'APPLIED' | 'FAILED',
+            reason: row.error_message || null,
+            proofWebUrl: row.proof_web_url || null,
+            timestamp: row.submitted_at || row.updated_at || new Date().toISOString(),
+          });
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[DB] getRecentNotifications Supabase warning: ${err.message}`);
+    }
+  }
+
+  // Incorporate in-memory applications
+  for (const app of memoryApplications.values()) {
+    if (app.status === 'APPLIED' || app.status === 'FAILED') {
+      const exists = notifications.some(
+        (n) => n.applywizzId === app.applywizz_id && (n.jobUrl === app.job_url || n.id === app.id)
+      );
+      if (!exists) {
+        notifications.push({
+          id: app.id || `notif-${app.applywizz_id}-${Buffer.from(app.job_url || '').toString('base64url').slice(0, 12)}`,
+          applywizzId: app.applywizz_id,
+          companyName: app.company_name || 'Greenhouse Company',
+          jobTitle: app.job_title || 'Job Opening',
+          jobUrl: app.job_url,
+          status: app.status as 'APPLIED' | 'FAILED',
+          reason: app.error_message || null,
+          proofWebUrl: app.proof_web_url || null,
+          timestamp: app.submitted_at || app.updated_at || new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return notifications.slice(0, limit);
 }
 

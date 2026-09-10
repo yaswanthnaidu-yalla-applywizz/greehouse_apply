@@ -7,7 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { getApplication, updateResolvedFields } from '../../db/applications.js';
+import { getApplication, updateResolvedFields, getRecentNotifications } from '../../db/applications.js';
 import { upsertAnswer } from '../../db/qaBank.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { generateFingerprint } from '../../resolver/fingerprint.js';
@@ -132,6 +132,20 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
   } catch (err: any) {
     console.error('[Applications Router] ❌ Unexpected error:', err);
     res.status(500).json({ error: `Server error: ${err.message}` });
+  }
+});
+
+/**
+ * GET /api/applications/notifications
+ * Retrieves recent succeeded (APPLIED) and failed (FAILED) applications with failure reasons.
+ */
+applicationsRouter.get('/notifications', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const notifications = await getRecentNotifications(40);
+    res.json(notifications);
+  } catch (err: any) {
+    console.error('[Applications Router] Failed to get notifications:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch notifications' });
   }
 });
 

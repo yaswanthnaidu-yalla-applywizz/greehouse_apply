@@ -36,7 +36,7 @@ export const App: React.FC = () => {
     }
   });
 
-  const [activeTab, setActiveTab] = useState<'find-jobs' | 'dashboard' | 'stats'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats'>('dashboard');
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
@@ -46,6 +46,64 @@ export const App: React.FC = () => {
 
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(true);
   const [isLoadingApplication, setIsLoadingApplication] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const [notifications, setNotifications] = useState<any[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = localStorage.getItem('greenhouse_notifications');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+        setIsNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const unreadNotifsCount = useMemo(() => {
+    return notifications.filter((n) => !n.isRead).length;
+  }, [notifications]);
+
+  const addNotification = useCallback((notif: any) => {
+    setNotifications((prev) => {
+      const exists = prev.some(
+        (n) => n.id === notif.id || (n.applywizzId === notif.applywizzId && n.jobUrl === notif.jobUrl && n.status === notif.status && Math.abs(new Date(n.timestamp).getTime() - new Date(notif.timestamp).getTime()) < 10000)
+      );
+      if (exists) return prev;
+      const updated = [notif, ...prev].slice(0, 50);
+      try {
+        localStorage.setItem('greenhouse_notifications', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, []);
+
+  const markAllNotifsAsRead = () => {
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, isRead: true }));
+      try {
+        localStorage.setItem('greenhouse_notifications', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const clearAllNotifs = () => {
+    setNotifications([]);
+    try {
+      localStorage.removeItem('greenhouse_notifications');
+    } catch {}
+  };
 
   const [workHistoryUnreachable, setWorkHistoryUnreachable] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -64,61 +122,81 @@ export const App: React.FC = () => {
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  // 1. Fetch Candidates and Stats on Mount
-  const fetchInitialData = useCallback(async () => {
-    setIsLoadingCandidates(true);
+  const fetchNotifications = useCallback(async () => {
     try {
-      const headers = getAuthHeaders();
-      const [candidatesRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/candidates`, { headers }),
-        fetch(`${API_BASE_URL}/api/stats`, { headers }),
-      ]);
-
-      if (candidatesRes.ok) {
-        const raw = await candidatesRes.json();
-        const candidateData: CandidateSummary[] = Array.isArray(raw) ? raw : (raw.candidates || []);
-        const unreachable: boolean = !Array.isArray(raw)
-          ? Boolean(raw.workHistoryUnreachable)
-          : candidatesRes.headers.get('x-work-history-unreachable') === 'true';
-        const emptyMsg: string | null = !Array.isArray(raw) ? (raw.message || null) : null;
-
-        setCandidates(candidateData);
-        if (unreachable) setWorkHistoryUnreachable(true);
-        setNoCandidatesMessage(emptyMsg);
-
-        if (candidateData.length > 0 && (!selectedCandidateId || selectedCandidateId === 'AWL-YASWANTH')) {
-          setSelectedCandidateId(candidateData[0].applywizzId);
+      const token = typeof window !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${API_BASE_URL}/api/applications/notifications`, { headers });
+      if (res.ok) {
+        const serverNotifs = await res.json();
+        if (Array.isArray(serverNotifs) && serverNotifs.length > 0) {
+          setNotifications((prev) => {
+            const readIds = new Set(prev.filter((p) => p.isRead).map((p) => p.id));
+            const combined = [...serverNotifs.map((sn: any) => ({
+              ...sn,
+              type: sn.status === 'APPLIED' ? 'SUCCESS' : 'FAILED',
+              isRead: readIds.has(sn.id),
+            }))];
+            for (const p of prev) {
+              if (!combined.some((c) => c.id === p.id || (c.applywizzId === p.applywizzId && c.jobUrl === p.jobUrl && c.status === p.status))) {
+                combined.push(p);
+              }
+            }
+            combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            const sliced = combined.slice(0, 50);
+            try {
+              localStorage.setItem('greenhouse_notifications', JSON.stringify(sliced));
+            } catch {}
+            return sliced;
+          });
         }
       }
+    } catch (err) {
+      console.warn('Failed to fetch notifications:', err);
+    }
+  }, []);
 
-      if (statsRes.ok) {
-        const statsData: DashboardStats = await statsRes.json();
-        setStats(statsData);
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      const userEmail = (currentUser?.email || '').trim().toLowerCase();
+      const isAdminUser = ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(userEmail);
+      if (isAdminUser) {
+        try {
+          await fetch(`${API_BASE_URL}/api/admin/refresh-artifacts`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+        } catch (e) {
+          console.warn('Artifacts reload error:', e);
+        }
       }
-    } catch (err: any) {
-      console.error('Failed to load initial data:', err);
+      await fetchInitialData();
+      if (selectedCandidateId) {
+        await fetchCandidateDetail(selectedCandidateId);
+      }
+      if (selectedCandidateId && selectedJobUrl) {
+        await fetchJobApplication(selectedCandidateId, selectedJobUrl);
+      }
+      await fetchNotifications();
+    } catch (err) {
+      console.error('Refresh error:', err);
     } finally {
-      setIsLoadingCandidates(false);
+      setIsRefreshing(false);
     }
-  }, [selectedCandidateId]);
-
-  const handleSignOut = () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('applywizz_auth_token');
-      localStorage.removeItem('applywizz_auth_user');
-      localStorage.removeItem('applywizz_wh_unreachable');
-    }
-    setWorkHistoryUnreachable(false);
-    setWorkHistoryBannerDismissed(false);
-    setNoCandidatesMessage(null);
-    setCurrentUser(null);
   };
 
   useEffect(() => {
-    if (currentUser) {
-      fetchInitialData();
-    }
-  }, [currentUser, fetchInitialData]);
+    if (!currentUser) return;
+    fetchInitialData();
+    fetchNotifications();
+    const pollInterval = setInterval(() => {
+      fetchInitialData(true);
+      fetchNotifications();
+    }, 3000);
+    return () => clearInterval(pollInterval);
+  }, [currentUser, fetchInitialData, fetchNotifications]);
 
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
@@ -223,6 +301,41 @@ export const App: React.FC = () => {
       });
       setCandidateDetail({ ...candidateDetail, jobs: updatedJobs });
     }
+
+    if (newStatus === 'APPLIED') {
+      addNotification({
+        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        type: 'SUCCESS',
+        status: 'APPLIED',
+        applywizzId: selectedCandidateId || application?.applywizzId || application?.applywizz_id || 'UNKNOWN',
+        candidateName: candidateDetail?.clientName || application?.candidateName || application?.clientName || selectedCandidateId,
+        companyName: application?.companyName || application?.company_name || 'Greenhouse Company',
+        jobTitle: application?.jobTitle || application?.job_title || 'Job Opening',
+        jobUrl: selectedJobUrl || application?.jobUrl || application?.job_url,
+        proofWebUrl: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || application?.proof_web_url,
+        timestamp: new Date().toISOString(),
+        isRead: false,
+      });
+    } else if (newStatus === 'FAILED') {
+      const reason =
+        updatedPayload?.error ||
+        updatedPayload?.errorMessage ||
+        updatedPayload?.message ||
+        'Application submission failed or was rejected by portal.';
+      addNotification({
+        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        type: 'FAILED',
+        status: 'FAILED',
+        applywizzId: selectedCandidateId || application?.applywizzId || application?.applywizz_id || 'UNKNOWN',
+        candidateName: candidateDetail?.clientName || application?.candidateName || application?.clientName || selectedCandidateId,
+        companyName: application?.companyName || application?.company_name || 'Greenhouse Company',
+        jobTitle: application?.jobTitle || application?.job_title || 'Job Opening',
+        jobUrl: selectedJobUrl || application?.jobUrl || application?.job_url,
+        reason,
+        timestamp: new Date().toISOString(),
+        isRead: false,
+      });
+    }
   };
 
   if (!currentUser) {
@@ -253,19 +366,8 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Navigation Tabs (Find Jobs / Dashboard / Stats) */}
+          {/* Navigation Tabs (Dashboard / Stats) */}
           <nav className="hidden md:flex items-center gap-2 bg-white border border-[#1A1A2E] rounded-md p-1 shadow-[2px_2px_0px_#1A1A2E]">
-            <button
-              type="button"
-              onClick={() => setActiveTab('find-jobs')}
-              className={`px-3 py-1 text-xs font-bold rounded transition-all ${
-                activeTab === 'find-jobs'
-                  ? 'bg-[#E88474] text-white'
-                  : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
-              }`}
-            >
-              Find Jobs
-            </button>
             <button
               type="button"
               onClick={() => setActiveTab('dashboard')}
@@ -317,17 +419,143 @@ export const App: React.FC = () => {
 
           <button
             type="button"
-            onClick={fetchInitialData}
+            onClick={handleRefresh}
+            disabled={isRefreshing}
             title="Refresh Data"
-            className="text-xs bg-white hover:bg-[#FAF4EB] text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
+            className="text-xs bg-white hover:bg-[#FAF4EB] text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all disabled:opacity-60"
           >
-            ↻
+            <span className={isRefreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
           </button>
 
-          {/* Notification Bell */}
-          <div className="relative p-1.5 bg-white border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E] cursor-pointer">
-            <span className="text-xs">🔔</span>
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#E88474] border border-[#1A1A2E] rounded-full"></span>
+          {/* Interactive Notification Bell & Dropdown */}
+          <div className="relative" ref={notifRef}>
+            <button
+              type="button"
+              onClick={() => setIsNotifOpen((prev) => !prev)}
+              title="Notifications"
+              className="relative p-1.5 bg-white border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E] cursor-pointer hover:bg-[#FAF4EB] transition-colors"
+            >
+              <span className="text-xs">🔔</span>
+              {unreadNotifsCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#EF4444] text-white text-[10px] font-black rounded-full flex items-center justify-center border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+                  {unreadNotifsCount > 9 ? '9+' : unreadNotifsCount}
+                </span>
+              )}
+            </button>
+
+            {isNotifOpen && (
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[6px_6px_0px_#1A1A2E] z-50 overflow-hidden animate-fadeIn">
+                <div className="flex items-center justify-between px-3.5 py-2.5 bg-[#FFF5EB] border-b-2 border-[#1A1A2E]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">🔔</span>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+                      Notifications {unreadNotifsCount > 0 && `(${unreadNotifsCount} new)`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {notifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={markAllNotifsAsRead}
+                        className="text-[10px] font-bold text-[#64748B] hover:text-[#1A1A2E] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearAllNotifs}
+                        className="text-[10px] font-bold text-[#EF4444] hover:text-[#B91C1C] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]"
+                      >
+                        Clear
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsNotifOpen(false)}
+                      className="text-[#64748B] hover:text-[#1A1A2E] text-xs font-bold px-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-80 overflow-y-auto p-2.5 space-y-2 custom-scrollbar">
+                  {notifications.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-[#64748B]">
+                      No notifications yet. Alerts for succeeded and failed applications will appear here.
+                    </div>
+                  ) : (
+                    notifications.map((notif: any) => {
+                      const isSuccess = notif.status === 'APPLIED' || notif.type === 'SUCCESS';
+                      return (
+                        <div
+                          key={notif.id}
+                          onClick={() => {
+                            if (notif.applywizzId) setSelectedCandidateId(notif.applywizzId);
+                            if (notif.jobUrl) setSelectedJobUrl(notif.jobUrl);
+                            setIsNotifOpen(false);
+                          }}
+                          className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
+                            isSuccess
+                              ? 'bg-[#F0FDF4] border-[#86EFAC] hover:border-[#10B981]'
+                              : 'bg-[#FEF2F2] border-[#FECACA] hover:border-[#EF4444]'
+                          } ${!notif.isRead ? 'shadow-[2px_2px_0px_#1A1A2E]' : 'opacity-85'}`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span
+                              className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                                isSuccess
+                                  ? 'bg-[#DCFCE7] text-[#166534] border border-[#86EFAC]'
+                                  : 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]'
+                              }`}
+                            >
+                              {isSuccess ? '✅ Succeeded' : '❌ Failed'}
+                            </span>
+                            <span className="text-[10px] text-[#64748B] font-mono">
+                              {notif.timestamp ? new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </span>
+                          </div>
+
+                          <div className="text-xs font-bold text-[#1A1A2E]">
+                            {notif.candidateName || notif.applywizzId}{' '}
+                            <span className="font-mono text-[10px] text-[#64748B] font-normal">
+                              ({notif.applywizzId})
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] text-[#475569] font-medium truncate mt-0.5">
+                            🏢 {notif.companyName} — {notif.jobTitle}
+                          </div>
+
+                          {!isSuccess && (
+                            <div className="mt-1.5 p-1.5 bg-white border border-[#EF4444]/40 rounded text-[11px] text-[#991B1B] font-mono break-words leading-tight">
+                              <span className="font-bold">Reason: </span>
+                              {notif.reason || 'Submission failed or was rejected.'}
+                            </div>
+                          )}
+
+                          {isSuccess && notif.proofWebUrl && (
+                            <div className="mt-1.5 flex justify-end">
+                              <a
+                                href={notif.proofWebUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[10px] font-bold text-[#166534] underline hover:text-[#14532D]"
+                              >
+                                View Proof Screenshot ↗
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* User Profile Avatar & Sign Out */}
