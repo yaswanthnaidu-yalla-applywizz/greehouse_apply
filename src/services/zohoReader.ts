@@ -29,10 +29,29 @@ class ZohoReaderService {
   private queue: Array<() => void> = [];
 
   /**
+   * Releases DOM memory by navigating to a blank page when idle.
+   */
+  public async idlePage(): Promise<void> {
+    try {
+      if (this.page && !this.page.isClosed()) {
+        await this.page.goto('about:blank', { timeout: 5000 }).catch(() => {});
+      }
+    } catch {}
+  }
+
+  /**
    * Initializes the persistent Zoho Reader browser session and performs login if needed.
    */
   public async init(): Promise<void> {
     if (this.page && !this.page.isClosed()) {
+      if (this.page.url() === 'about:blank') {
+        try {
+          await this.page.goto(config.ZOHO_CONNECTOR_URL, {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000,
+          });
+        } catch {}
+      }
       return;
     }
 
@@ -68,6 +87,7 @@ class ZohoReaderService {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
+          '--disable-gpu',
         ],
       });
 
@@ -80,7 +100,7 @@ class ZohoReaderService {
       this.page = await this.context.newPage();
 
       await this.page.goto(url, {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: 45000,
       });
 
@@ -302,6 +322,7 @@ class ZohoReaderService {
         errorMessage: err.message,
       };
     } finally {
+      await this.idlePage();
       release();
     }
   }
@@ -515,6 +536,7 @@ class ZohoReaderService {
         errorMessage: err.message,
       };
     } finally {
+      await this.idlePage();
       release();
     }
   }

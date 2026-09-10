@@ -202,12 +202,12 @@ export class LLMSynthesizer {
       this.modelName = options.modelName ?? config.OPENROUTER_MODEL;
       if (this.apiKey) {
         this.openaiClient = new OpenAI({
-          baseURL: 'https://openrouter.ai/api/v1',
+          baseURL: config.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
           apiKey: this.apiKey,
           timeout: 8000,
           maxRetries: 1,
           defaultHeaders: {
-            'HTTP-Referer': 'https://apply-wizz.me',
+            'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
             'X-Title': 'Greenhouse Automation Operator',
           },
         });
@@ -238,9 +238,10 @@ export class LLMSynthesizer {
     field: ScannedField,
     profile: ApplyWizzCandidateProfile,
     resumeText: string = '',
-    jobContext: JobContext = { title: 'Software Engineer', company: 'Company' }
+    jobContext: JobContext = { title: 'Software Engineer', company: 'Company' },
+    resumeFacts?: any
   ): Promise<ResolvedField> {
-    const prompt = this.constructPrompt(field, profile, resumeText, jobContext);
+    const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
     const isBinary = isBinaryYesNoQuestion(field);
     const systemMessage = isBinary
       ? 'You are an automated job application assistant. CRITICAL: This is a Yes/No question. You MUST reply with ONLY the word "Yes" or "No". Absolutely NO additional words, explanations, location names, or prose.'
@@ -255,12 +256,8 @@ export class LLMSynthesizer {
             this.provider === 'openrouter'
               ? [
                   this.modelName,
-                  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-                  'inclusionai/ling-3.0-flash-fin:free',
-                  'nvidia/nemotron-3.5-lightning:free',
-                  'poolside/laguna-s-2.1:free',
-                  'google/gemma-4-26b-a4b-it:free',
-                  'google/gemma-4-31b-it:free',
+                  'google/gemini-2.5-flash',
+                  'meta-llama/llama-3.3-70b-instruct',
                 ]
               : [this.modelName];
 
@@ -365,19 +362,57 @@ export class LLMSynthesizer {
   }
 
   /**
+   * Builds a compact, structured resume facts block (~2k tokens) rather than dumping unbounded raw text.
+   */
+  private buildResumeFactsBlock(resumeFacts?: any, resumeText: string = ''): string {
+    if (resumeFacts && typeof resumeFacts === 'object') {
+      const jobs = Array.isArray(resumeFacts.experience)
+        ? resumeFacts.experience
+            .slice(0, 4)
+            .map((j: any) => `• ${j.title || 'Role'} at ${j.company || 'Company'} (${j.duration || ''})`)
+            .join('\n')
+        : '';
+      const skills = Array.isArray(resumeFacts.skills)
+        ? resumeFacts.skills.slice(0, 25).join(', ')
+        : '';
+      const projects = Array.isArray(resumeFacts.projects)
+        ? resumeFacts.projects
+            .slice(0, 3)
+            .map((p: any) => (typeof p === 'string' ? p : p.name || p.title || ''))
+            .filter(Boolean)
+            .join(', ')
+        : '';
+
+      if (jobs || skills || projects) {
+        return `Candidate Verified Resume Facts:
+${jobs ? `Work History:\n${jobs}\n` : ''}${skills ? `Verified Skills: ${skills}\n` : ''}${projects ? `Projects: ${projects}\n` : ''}`;
+      }
+    }
+
+    if (resumeText && resumeText.trim().length > 0) {
+      return `Candidate Resume Excerpt:
+${resumeText.slice(0, 3000)}`;
+    }
+
+    return '';
+  }
+
+  /**
    * Constructs a structured prompt passing candidate background and question schema.
    *
    * @param field - Scanned question.
    * @param profile - Candidate profile.
    * @param resumeText - Resume text excerpt.
    * @param jobContext - Target position context.
+   * @param resumeFacts - Structured resume facts object.
    * @returns Structured prompt string for the LLM.
    */
   private constructPrompt(
     field: ScannedField,
     profile: ApplyWizzCandidateProfile,
     resumeText: string,
-    jobContext: JobContext
+    jobContext: JobContext,
+    resumeFacts?: any
   ): string {
     const optionsSection = field.options && field.options.length > 0
       ? `\nAvailable Options (Select EXACTLY ONE):\n${field.options.map((o, idx) => `  ${idx + 1}. "${o}"`).join('\n')}`
@@ -392,11 +427,16 @@ export class LLMSynthesizer {
 1. Reply with ONLY "Yes" or "No" — pick the single best option from Available Options if provided.
 2. Do NOT include the candidate's city, state, location, or any explanatory sentences.
 3. Output ONLY the raw final answer text.`
-      : `Instructions:
+      : `Strict Instructions:
 1. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
-2. If Available Options are provided above, your response MUST be EXACTLY ONE option string from that list (verbatim).
-3. If this is an open-ended/textarea question, provide a 2 to 4 sentence tailored answer highlighting the candidate's strengths for ${jobContext.company}.
-4. Output ONLY the raw final answer text. Absolutely NO thinking process, NO "Here is a thinking process", NO breakdown, and NO conversational filler.`;
+2. CRITICAL GROUNDING: You MUST base your answer strictly on the candidate's verified resume facts and experience.
+3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer". Always cite their ACTUAL past companies, verified project names, or specific tools (e.g., Jenkins, Docker, GitHub Actions, AWS, Python) found in their resume.
+4. If the candidate's resume does not mention the exact requested tool/technology, write honestly: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
+5. If Available Options are provided above, your response MUST be EXACTLY ONE option string from that list (verbatim).
+6. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
+7. Output ONLY the raw final answer text. Absolutely NO thinking process, NO "Here is a thinking process", NO markdown fences, and NO conversational filler.`;
+
+    const resumeFactsBlock = this.buildResumeFactsBlock(resumeFacts, resumeText);
 
     return `You are an automated assistant helping a job candidate apply for a position.
 
@@ -408,8 +448,7 @@ Candidate Information:
 - Location: ${profile.location}
 - Work Authorization: ${profile.workAuthorization} (Requires Sponsorship: ${profile.requiresSponsorship ? 'Yes' : 'No'})
 
-Resume Excerpt:
-${resumeText ? resumeText.slice(0, 2000) : 'Standard software engineering profile with strong background in backend and frontend systems.'}
+${resumeFactsBlock}
 
 Target Job:
 - Position: ${jobContext.title}

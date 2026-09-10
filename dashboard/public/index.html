@@ -61,6 +61,11 @@
     .animate-fadeIn {
       animation: fadeIn 0.15s ease-out forwards;
     }
+    .mfa-qr-container svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
   </style>
 </head>
 <body class="bg-[#FFF5EB] text-[#1A1A2E] antialiased overflow-hidden select-none font-sans">
@@ -992,7 +997,7 @@
     // -------------------------------------------------------------
     // Candidate Directory (Left Sidebar) Component
     // -------------------------------------------------------------
-    function CandidateList({ candidates, selectedId, onSelectCandidate, isLoading }) {
+    function CandidateList({ candidates, selectedId, onSelectCandidate, isLoading, emptyMessage }) {
       const [searchTerm, setSearchTerm] = useState('');
 
       const filteredCandidates = useMemo(() => {
@@ -1048,7 +1053,11 @@
               </div>
             ) : filteredCandidates.length === 0 ? (
               <div className="p-6 text-center text-xs text-[#64748B]">
-                No candidates matching <span className="font-bold text-[#1A1A2E]">"{searchTerm}"</span>
+                {searchTerm ? (
+                  <>No candidates matching <span className="font-bold text-[#1A1A2E]">"{searchTerm}"</span></>
+                ) : (
+                  emptyMessage || 'No candidates found.'
+                )}
               </div>
             ) : (
               filteredCandidates.map((c) => {
@@ -1489,28 +1498,78 @@
     }
 
     // -------------------------------------------------------------
-    // AuthView Component (Sign In & Sign Up)
+    // AuthView Component (Sign In & Sign Up with Authenticator TOTP)
     // -------------------------------------------------------------
+    function formatQrCodeSrc(qr) {
+      if (!qr) return '';
+      let trimmed = qr.trim();
+      if (trimmed.startsWith('data:image/')) return trimmed;
+      if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
+        if (!trimmed.includes('xmlns=')) {
+          trimmed = trimmed.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+        }
+        try {
+          return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(trimmed)))}`;
+        } catch (e) {
+          return `data:image/svg+xml;utf-8,${encodeURIComponent(trimmed)}`;
+        }
+      }
+      return trimmed;
+    }
+
     function AuthView({ onAuthSuccess }) {
       const [tab, setTab] = useState('signin'); // 'signin' | 'signup'
 
-      // Sign In state
+      // Sign In state (Passwordless - Email + Microsoft Authenticator TOTP)
       const [signInEmail, setSignInEmail] = useState('');
-      const [signInPassword, setSignInPassword] = useState('');
+      const [signInTotpCode, setSignInTotpCode] = useState('');
+      const [signInStep, setSignInStep] = useState('prompt');
       const [signInLoading, setSignInLoading] = useState(false);
       const [signInError, setSignInError] = useState('');
       const [signInSuccessMsg, setSignInSuccessMsg] = useState('');
 
-      // Sign Up state
+      // Sign Up state (Passwordless - Email -> Azure OTP -> Microsoft Authenticator Setup)
       const [signUpEmail, setSignUpEmail] = useState('');
-      const [isEmailVerified, setIsEmailVerified] = useState(false);
-      const [verifyLoading, setVerifyLoading] = useState(false);
+      const [signUpOtpCode, setSignUpOtpCode] = useState('');
+      const [signUpStep, setSignUpStep] = useState('email'); // 'email' | 'otp' | 'mfa_enroll'
+      const [signUpLoading, setSignUpLoading] = useState(false);
       const [signUpError, setSignUpError] = useState('');
-      const [signUpPassword, setSignUpPassword] = useState('');
-      const [signUpConfirmPassword, setSignUpConfirmPassword] = useState('');
-      const [registerLoading, setRegisterLoading] = useState(false);
+      const [resendCooldown, setResendCooldown] = useState(0);
 
-      const handleVerifyEmail = async (e) => {
+      // Microsoft Authenticator Enrollment State
+      const [mfaFactorId, setMfaFactorId] = useState('');
+      const [mfaTempToken, setMfaTempToken] = useState('');
+      const [mfaQrCode, setMfaQrCode] = useState('');
+      const [mfaSecret, setMfaSecret] = useState('');
+      const [mfaTotpCode, setMfaTotpCode] = useState('');
+      const [mfaLoading, setMfaLoading] = useState(false);
+      const [mfaError, setMfaError] = useState('');
+      const [pendingUser, setPendingUser] = useState(null);
+
+      useEffect(() => {
+        if (resendCooldown <= 0) return;
+        const interval = setInterval(() => {
+          setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+        }, 1000);
+        return () => clearInterval(interval);
+      }, [resendCooldown]);
+
+      const resetAll = () => {
+        setSignInError('');
+        setSignUpError('');
+        setMfaError('');
+        setSignUpStep('email');
+        setSignInStep('prompt');
+        setSignUpOtpCode('');
+        setMfaTotpCode('');
+        setMfaQrCode('');
+        setMfaSecret('');
+        setMfaFactorId('');
+        setMfaTempToken('');
+        setPendingUser(null);
+      };
+
+      const handleSendSignUpOtp = async (e) => {
         if (e) e.preventDefault();
         setSignUpError('');
         const trimmed = signUpEmail.trim();
@@ -1519,68 +1578,113 @@
           return;
         }
 
-        setVerifyLoading(true);
+        setSignUpLoading(true);
         try {
-          const res = await fetch('/api/auth/verify-email', {
+          const res = await fetch('/api/auth/send-signup-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: trimmed }),
           });
           const data = await res.json();
           if (!res.ok) {
-            setSignUpError(data.error || 'Email authorization check failed.');
+            setSignUpError(data.error || 'Failed to dispatch verification code.');
             return;
           }
-          setIsEmailVerified(true);
+
+          setSignUpStep('otp');
+          setResendCooldown(30);
         } catch (err) {
-          setSignUpError('Network error checking email. Please try again.');
+          setSignUpError('Network error dispatching verification email. Please check your connection.');
         } finally {
-          setVerifyLoading(false);
+          setSignUpLoading(false);
         }
       };
 
-      const handleRegister = async (e) => {
+      const handleVerifySignUpOtp = async (e) => {
         if (e) e.preventDefault();
         setSignUpError('');
-        if (!signUpPassword || signUpPassword.length < 6) {
-          setSignUpError('Password must be at least 6 characters long.');
-          return;
-        }
-        if (signUpPassword !== signUpConfirmPassword) {
-          setSignUpError('Passwords do not match.');
+        const cleanOtp = signUpOtpCode.trim().replace(/\D/g, '');
+        if (!cleanOtp || cleanOtp.length !== 6) {
+          setSignUpError('Please enter the 6-digit verification code sent to your email.');
           return;
         }
 
-        setRegisterLoading(true);
+        setSignUpLoading(true);
         try {
-          const res = await fetch('/api/auth/register', {
+          const res = await fetch('/api/auth/verify-signup-otp', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email: signUpEmail.trim(),
-              password: signUpPassword,
-              confirmPassword: signUpConfirmPassword,
+              otp: cleanOtp,
             }),
           });
           const data = await res.json();
           if (!res.ok) {
-            setSignUpError(data.error || 'Registration failed.');
+            setSignUpError(data.error || 'Verification failed. Please check the code and try again.');
             return;
           }
 
-          // Transition to Sign In tab
-          setSignInEmail(signUpEmail.trim());
-          setSignInPassword('');
-          setSignInError('');
-          setSignInSuccessMsg('Account created successfully! Please sign in with your password.');
-          setTab('signin');
-          setIsEmailVerified(false);
-          setSignUpPassword('');
-          setSignUpConfirmPassword('');
+          setMfaTempToken(data.tempToken);
+          setMfaFactorId(data.factorId);
+          setMfaQrCode(data.qrCode || '');
+          setMfaSecret(data.secret || '');
+          if (data.user) setPendingUser(data.user);
+
+          setSignUpStep('mfa_enroll');
         } catch (err) {
-          setSignUpError('Network error during registration.');
+          setSignUpError('Network error validating code. Please try again.');
         } finally {
-          setRegisterLoading(false);
+          setSignUpLoading(false);
+        }
+      };
+
+      const handleCompleteMfaSetup = async (e) => {
+        if (e) e.preventDefault();
+        setMfaError('');
+        const cleanCode = mfaTotpCode.trim().replace(/\D/g, '');
+        if (!cleanCode || cleanCode.length !== 6) {
+          setMfaError('Please enter the 6-digit code from Microsoft Authenticator.');
+          return;
+        }
+
+        setMfaLoading(true);
+        try {
+          const res = await fetch('/api/auth/mfa/verify', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${mfaTempToken}`,
+            },
+            body: JSON.stringify({
+              factorId: mfaFactorId,
+              code: cleanCode,
+            }),
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            setMfaError(data.error || 'Invalid authenticator code. Please check Microsoft Authenticator.');
+            return;
+          }
+
+          const verifiedUser = data.user || pendingUser || {
+            id: 'operator',
+            email: signUpEmail.trim(),
+          };
+
+          localStorage.setItem('applywizz_auth_token', data.token);
+          localStorage.setItem('applywizz_auth_user', JSON.stringify(verifiedUser));
+          if (data.workHistoryUnreachable) {
+            localStorage.setItem('applywizz_wh_unreachable', 'true');
+          } else {
+            localStorage.removeItem('applywizz_wh_unreachable');
+          }
+          onAuthSuccess(verifiedUser);
+        } catch (err) {
+          setMfaError('Network error activating Microsoft Authenticator.');
+        } finally {
+          setMfaLoading(false);
         }
       };
 
@@ -1589,8 +1693,41 @@
         setSignInError('');
         setSignInSuccessMsg('');
         const trimmedEmail = signInEmail.trim();
-        if (!trimmedEmail || !signInPassword) {
-          setSignInError('Please enter both email and password.');
+        if (!trimmedEmail || !trimmedEmail.includes('@')) {
+          setSignInError('Please enter your email address.');
+          return;
+        }
+
+        const cleanCode = signInTotpCode.trim().replace(/\D/g, '');
+
+        if (signInStep === 'prompt' && (!cleanCode || cleanCode.length < 6)) {
+          setSignInLoading(true);
+          try {
+            const res = await fetch('/api/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: trimmedEmail }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              setSignInError(data.error || 'Sign in failed.');
+              return;
+            }
+
+            if (data.mfaRequired) {
+              setSignInStep('verify');
+              return;
+            }
+          } catch (err) {
+            setSignInError('Network error. Please try again.');
+          } finally {
+            setSignInLoading(false);
+          }
+          return;
+        }
+
+        if (cleanCode.length !== 6) {
+          setSignInError('Please enter the 6-digit code from Microsoft Authenticator.');
           return;
         }
 
@@ -1601,17 +1738,22 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email: trimmedEmail,
-              password: signInPassword,
+              code: cleanCode,
             }),
           });
           const data = await res.json();
           if (!res.ok) {
-            setSignInError(data.error || 'Invalid email or password.');
+            setSignInError(data.error || 'Invalid authenticator code. Please check your app.');
             return;
           }
 
           localStorage.setItem('applywizz_auth_token', data.token);
           localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
+          if (data.workHistoryUnreachable) {
+            localStorage.setItem('applywizz_wh_unreachable', 'true');
+          } else {
+            localStorage.removeItem('applywizz_wh_unreachable');
+          }
           onAuthSuccess(data.user);
         } catch (err) {
           setSignInError('Network error during sign in.');
@@ -1619,6 +1761,103 @@
           setSignInLoading(false);
         }
       };
+
+      if (signUpStep === 'mfa_enroll') {
+        return (
+          <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl shadow-[6px_6px_0px_#1A1A2E] p-8">
+            <div className="flex items-center justify-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-base border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
+                AW
+              </div>
+              <div>
+                <h1 className="text-xl font-black text-[#1A1A2E] tracking-tight uppercase">ApplyWizz</h1>
+                <span className="text-[11px] block font-mono text-[#64748B] font-bold tracking-wider">
+                  Setup Microsoft Authenticator
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-4 shadow-[2px_2px_0px_#1A1A2E] text-center">
+                <p className="text-xs font-bold text-[#1A1A2E] mb-3">
+                  Scan this QR code with <strong>Microsoft Authenticator</strong> on your phone:
+                </p>
+                {mfaQrCode ? (
+                  <div className="flex justify-center my-3">
+                    {mfaQrCode.trim().startsWith('<svg') ? (
+                      <div
+                        className="mfa-qr-container w-44 h-44 border-2 border-[#1A1A2E] rounded-xl p-1.5 bg-white shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-center"
+                        dangerouslySetInnerHTML={{ __html: mfaQrCode }}
+                      />
+                    ) : (
+                      <img
+                        src={formatQrCodeSrc(mfaQrCode)}
+                        alt="MFA QR Code"
+                        className="w-44 h-44 border-2 border-[#1A1A2E] rounded-xl p-1 bg-white shadow-[2px_2px_0px_#1A1A2E] object-contain"
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-44 h-44 mx-auto border-2 border-[#1A1A2E] rounded-xl flex items-center justify-center bg-gray-100 text-xs font-mono text-gray-500">
+                    Loading QR Code...
+                  </div>
+                )}
+
+                {mfaSecret && (
+                  <div className="mt-2 text-left">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#64748B] block">
+                      Manual Entry Key:
+                    </span>
+                    <code className="text-xs font-mono font-bold text-[#1A1A2E] break-all bg-white px-2 py-1 rounded border border-[#1A1A2E] inline-block mt-0.5">
+                      {mfaSecret}
+                    </code>
+                  </div>
+                )}
+              </div>
+
+              {mfaError && (
+                <div className="bg-[#EF4444]/15 border-2 border-[#1A1A2E] text-[#991B1B] text-xs font-bold p-3 rounded-xl shadow-[2px_2px_0px_#1A1A2E] flex items-start gap-2">
+                  <span className="text-sm">⚠️</span>
+                  <span>{mfaError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
+                  Enter 6-Digit Code from App
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={mfaTotpCode}
+                  onChange={(e) => setMfaTotpCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000"
+                  className="w-full text-center tracking-[0.5em] text-lg font-mono font-black px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-[#1A1A2E] focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleCompleteMfaSetup()}
+                disabled={mfaLoading || mfaTotpCode.length < 6}
+                className="w-full py-3 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {mfaLoading ? 'Activating Authenticator...' : 'Link & Complete Setup →'}
+              </button>
+
+              <button
+                type="button"
+                onClick={resetAll}
+                className="w-full py-2 text-xs font-bold text-[#64748B] hover:text-[#1A1A2E] text-center"
+              >
+                Cancel & Back to Sign In
+              </button>
+            </div>
+          </div>
+        );
+      }
 
       return (
         <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl shadow-[6px_6px_0px_#1A1A2E] p-8">
@@ -1639,8 +1878,7 @@
               type="button"
               onClick={() => {
                 setTab('signin');
-                setSignInError('');
-                setSignUpError('');
+                resetAll();
               }}
               className={`flex-1 py-2 text-xs font-black rounded-lg transition-all ${
                 tab === 'signin'
@@ -1654,9 +1892,7 @@
               type="button"
               onClick={() => {
                 setTab('signup');
-                setSignInError('');
-                setSignUpError('');
-                setSignInSuccessMsg('');
+                resetAll();
               }}
               className={`flex-1 py-2 text-xs font-black rounded-lg transition-all ${
                 tab === 'signup'
@@ -1699,17 +1935,25 @@
               </div>
 
               <div>
-                <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
-                  Password
-                </label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E]">
+                    Microsoft Authenticator Code
+                  </label>
+                  <span className="text-[10px] font-mono font-bold text-[#E88474]">6 digits</span>
+                </div>
                 <input
-                  type="password"
-                  required
-                  value={signInPassword}
-                  onChange={(e) => setSignInPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  className="w-full px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-xs font-medium text-[#1A1A2E] focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={signInTotpCode}
+                  onChange={(e) => setSignInTotpCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000"
+                  className="w-full text-center tracking-[0.5em] text-lg font-mono font-black px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-[#1A1A2E] focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
                 />
+                <p className="text-[11px] font-mono text-[#64748B] mt-1.5">
+                  Enter the 6-digit code currently shown in your Microsoft Authenticator app.
+                </p>
               </div>
 
               <button
@@ -1717,7 +1961,7 @@
                 disabled={signInLoading}
                 className="w-full mt-2 py-3 bg-[#E88474] hover:bg-[#d67262] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {signInLoading ? 'Signing In...' : 'Sign In →'}
+                {signInLoading ? 'Authenticating...' : 'Sign In with Authenticator →'}
               </button>
             </form>
           ) : (
@@ -1729,11 +1973,11 @@
                 </div>
               )}
 
-              {!isEmailVerified ? (
-                <form onSubmit={handleVerifyEmail} className="space-y-4">
+              {signUpStep === 'email' ? (
+                <form onSubmit={handleSendSignUpOtp} className="space-y-4">
                   <div>
                     <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
-                      Verify Authorization Email
+                      Sign Up Email Address
                     </label>
                     <input
                       type="email"
@@ -1744,37 +1988,36 @@
                       className="w-full px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-xs font-medium text-[#1A1A2E] focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
                     />
                     <p className="text-[11px] font-mono text-[#64748B] mt-1.5">
-                      We check if your email is on the authorized team/client access list before signup.
+                      We'll send a 6-digit one-time verification code to this address via Azure Communication Services.
                     </p>
                   </div>
 
                   <button
                     type="submit"
-                    disabled={verifyLoading}
+                    disabled={signUpLoading}
                     className="w-full py-3 bg-[#1A1A2E] hover:bg-[#2A2A3E] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#E88474] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {verifyLoading ? 'Verifying Email...' : 'Confirm Email →'}
+                    {signUpLoading ? 'Sending Verification Code...' : 'Send Verification Code →'}
                   </button>
                 </form>
               ) : (
-                <form onSubmit={handleRegister} className="space-y-4">
-                  <div className="bg-[#9AC89A]/30 border-2 border-[#1A1A2E] text-[#1E4620] p-3 rounded-xl shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-between">
+                <form onSubmit={handleVerifySignUpOtp} className="space-y-4">
+                  <div className="bg-[#FAF4EB] border-2 border-[#1A1A2E] p-3 rounded-xl shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm">✓</span>
+                      <span className="text-sm">📧</span>
                       <div>
-                        <span className="text-[10px] uppercase font-bold tracking-wider block">Authorized Email</span>
-                        <span className="text-xs font-mono font-bold">{signUpEmail}</span>
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-[#64748B] block">Code sent to:</span>
+                        <span className="text-xs font-mono font-bold text-[#1A1A2E]">{signUpEmail}</span>
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => {
-                        setIsEmailVerified(false);
-                        setSignUpPassword('');
-                        setSignUpConfirmPassword('');
+                        setSignUpStep('email');
+                        setSignUpOtpCode('');
                         setSignUpError('');
                       }}
-                      className="text-[11px] font-bold underline hover:text-[#1A1A2E]"
+                      className="text-[11px] font-bold text-[#E88474] hover:underline"
                     >
                       Change
                     </button>
@@ -1782,38 +2025,42 @@
 
                   <div>
                     <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
-                      Create Password
+                      Enter 6-Digit Email Code
                     </label>
                     <input
-                      type="password"
-                      required
-                      value={signUpPassword}
-                      onChange={(e) => setSignUpPassword(e.target.value)}
-                      placeholder="At least 6 characters"
-                      className="w-full px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-xs font-medium text-[#1A1A2E] focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      autoFocus
+                      value={signUpOtpCode}
+                      onChange={(e) => setSignUpOtpCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="000000"
+                      className="w-full text-center tracking-[0.5em] text-lg font-mono font-black px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-[#1A1A2E] focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
                     />
+                    <div className="flex justify-between items-center mt-2">
+                      <span className="text-[11px] font-mono text-[#64748B]">Valid for 10 minutes</span>
+                      <button
+                        type="button"
+                        disabled={resendCooldown > 0 || signUpLoading}
+                        onClick={() => handleSendSignUpOtp()}
+                        className="text-[11px] font-bold text-[#1A1A2E] hover:text-[#E88474] underline disabled:text-gray-400 disabled:no-underline cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
+                      </button>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
-                      Confirm Password
-                    </label>
-                    <input
-                      type="password"
-                      required
-                      value={signUpConfirmPassword}
-                      onChange={(e) => setSignUpConfirmPassword(e.target.value)}
-                      placeholder="Re-enter password"
-                      className="w-full px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-xs font-medium text-[#1A1A2E] focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
-                    />
-                  </div>
+                  <p className="text-[11px] font-mono text-[#64748B]">
+                    Passwords have been replaced with Microsoft Authenticator for higher security.
+                  </p>
 
                   <button
                     type="submit"
-                    disabled={registerLoading}
+                    disabled={signUpLoading || signUpOtpCode.length !== 6}
                     className="w-full py-3 bg-[#E88474] hover:bg-[#d67262] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {registerLoading ? 'Creating Account...' : 'Complete Sign Up →'}
+                    {signUpLoading ? 'Verifying Code...' : 'Verify & Continue to Authenticator Setup →'}
                   </button>
                 </form>
               )}
@@ -1847,23 +2094,52 @@
       const [isLoadingCandidates, setIsLoadingCandidates] = useState(true);
       const [isLoadingApplication, setIsLoadingApplication] = useState(false);
 
+      const [workHistoryUnreachable, setWorkHistoryUnreachable] = useState(() => {
+        try {
+          return localStorage.getItem('applywizz_wh_unreachable') === 'true';
+        } catch {
+          return false;
+        }
+      });
+      const [workHistoryBannerDismissed, setWorkHistoryBannerDismissed] = useState(false);
+      const [noCandidatesMessage, setNoCandidatesMessage] = useState(null);
+
+      const getAuthHeaders = () => {
+        const token = localStorage.getItem('applywizz_auth_token');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+      };
+
       const handleSignOut = () => {
         localStorage.removeItem('applywizz_auth_token');
         localStorage.removeItem('applywizz_auth_user');
+        localStorage.removeItem('applywizz_wh_unreachable');
+        setWorkHistoryUnreachable(false);
+        setWorkHistoryBannerDismissed(false);
+        setNoCandidatesMessage(null);
         setCurrentUser(null);
       };
 
       const fetchInitialData = useCallback(async (isPolling = false) => {
         if (!isPolling) setIsLoadingCandidates(true);
         try {
+          const headers = getAuthHeaders();
           const [candidatesRes, statsRes] = await Promise.all([
-            fetch('/api/candidates'),
-            fetch('/api/stats'),
+            fetch('/api/candidates', { headers }),
+            fetch('/api/stats', { headers }),
           ]);
 
           if (candidatesRes.ok) {
-            const candidateData = await candidatesRes.json();
+            const raw = await candidatesRes.json();
+            const candidateData = Array.isArray(raw) ? raw : (raw.candidates || []);
+            const unreachable = !Array.isArray(raw)
+              ? Boolean(raw.workHistoryUnreachable)
+              : candidatesRes.headers.get('x-work-history-unreachable') === 'true';
+            const emptyMsg = !Array.isArray(raw) ? (raw.message || null) : null;
+
             setCandidates(candidateData);
+            if (unreachable) setWorkHistoryUnreachable(true);
+            setNoCandidatesMessage(emptyMsg);
+
             setSelectedCandidateId((prev) => {
               if (prev && prev !== 'AWL-YASWANTH' && candidateData.some((c) => c.applywizzId === prev)) return prev;
               return candidateData.length > 0 ? candidateData[0].applywizzId : null;
@@ -1892,7 +2168,9 @@
 
       const fetchCandidateDetail = useCallback(async (applywizzId) => {
         try {
-          const res = await fetch(`/api/candidates/${applywizzId}`);
+          const res = await fetch(`/api/candidates/${applywizzId}`, {
+            headers: getAuthHeaders(),
+          });
           if (res.ok) {
             const detail = await res.json();
             setCandidateDetail(detail);
@@ -1920,7 +2198,9 @@
         setIsLoadingApplication(true);
         try {
           const encodedUrl = encodeURIComponent(jobUrl);
-          const res = await fetch(`/api/candidates/${applywizzId}/jobs/${encodedUrl}`);
+          const res = await fetch(`/api/candidates/${applywizzId}/jobs/${encodedUrl}`, {
+            headers: getAuthHeaders(),
+          });
           if (res.ok) {
             const appData = await res.json();
             setApplication(appData);
@@ -2095,6 +2375,24 @@
             </div>
           </header>
 
+          {/* Work-History Unreachable Top Banner */}
+          {workHistoryUnreachable && !workHistoryBannerDismissed && (
+            <div className="bg-[#FEF3C7] border-b-2 border-[#1A1A2E] px-6 py-2 text-xs font-bold text-[#92400E] flex items-center justify-between shadow-sm flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <span>⚠️</span>
+                <span>Work-history API unreachable — showing last known assigned candidates.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWorkHistoryBannerDismissed(true)}
+                className="text-[#92400E] hover:text-[#1A1A2E] text-sm font-black transition-opacity"
+                title="Dismiss warning"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {activeTab === 'stats' ? (
             <div className="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar">
               <div className="mb-6">
@@ -2165,6 +2463,7 @@
                 selectedId={selectedCandidateId}
                 onSelectCandidate={(id) => setSelectedCandidateId(id)}
                 isLoading={isLoadingCandidates}
+                emptyMessage={noCandidatesMessage}
               />
 
               <main className="flex-1 flex flex-col bg-[#FFF5EB] overflow-hidden">

@@ -7,6 +7,12 @@ node_modules/
 .env.*.local
 .env.*
 
+# AI Agent Local Docs & Memory
+AGENTS.md
+agents.md
+CODEBASE_ANALYSIS.md
+codebase_analysis.md
+
 # Privacy, Sensitive Data & Project Specs
 project docs/
 *.csv
@@ -20,6 +26,12 @@ resumes/
 output/
 cache/
 *.pdf
+
+# Media & Temporary Artifacts
+*.mp4
+mailconnect/
+.cursor/
+scratch/
 
 # Logs
 npm-debug.log*

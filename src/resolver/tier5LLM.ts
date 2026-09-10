@@ -67,11 +67,18 @@ export async function resolveTier5(
   }
 
   try {
+    const resumeFacts =
+      (candidateProfile as any).resume_facts ||
+      (candidateProfile.work_experience || candidateProfile.education
+        ? { experience: candidateProfile.work_experience, education: candidateProfile.education }
+        : undefined);
+
     const rawResult = await synthesizer.synthesizeAnswer(
       field,
       adaptedProfile,
       resumeText,
-      context
+      context,
+      resumeFacts
     );
 
     if (rawResult && rawResult.value && rawResult.value.trim().length > 0) {

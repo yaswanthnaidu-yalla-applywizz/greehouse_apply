@@ -61,6 +61,13 @@ export interface SegregatorOptions {
   downloadResumes?: boolean;
 
   /**
+   * Whether outbound ApplyWizz API calls are permitted when profile is not in Supabase/cache.
+   * STRICT: defaults to false per Rule 1.
+   * @default false
+   */
+  allowOutboundApi?: boolean;
+
+  /**
    * Optional custom ApplyWizzClient instance.
    */
   client?: ApplyWizzClient;
@@ -92,6 +99,7 @@ export async function segregateCandidatesByApplyWizzId(
     concurrency = 10,
     syncProfiles = true,
     downloadResumes = true,
+    allowOutboundApi = false,
     client = new ApplyWizzClient(),
     candidateId,
     onProgress,
@@ -202,7 +210,15 @@ export async function segregateCandidatesByApplyWizzId(
             }
             fromSupabase++;
           } else {
-            // ONLY for new candidates not in Supabase
+            const isCached = client.isProfileCached(id);
+            if (!isCached && !allowOutboundApi) {
+              console.log(
+                `[Candidate Ingestion] ⚠️ Candidate ${id} not found in Supabase or local cache. Skipping unapproved outbound API request per Rule 1.`
+              );
+              continue;
+            }
+
+            // ONLY for candidates in local cache or allowed
             console.log(
               `[Candidate Ingestion] ℹ️ Candidate ${id} profile lookup (checking cache first)...`
             );

@@ -102,8 +102,11 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
       resolvedFields.push(updatedField);
     }
 
-    // 3. Persist updated resolved_fields to candidate_applications
-    await updateResolvedFields(application.id, resolvedFields);
+    // 3. Persist updated resolved_fields and flag manual edit for queue prioritization
+    await updateResolvedFields(application.id, resolvedFields, {
+      has_manual_edits: true,
+      reviewed_at: new Date().toISOString(),
+    });
 
     // 4. Save to candidate_qa_bank with source: 'manual' for persistent memory
     const fingerprint = generateFingerprint(updatedField.label, updatedField.type);

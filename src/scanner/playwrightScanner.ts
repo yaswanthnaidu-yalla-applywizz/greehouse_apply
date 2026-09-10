@@ -227,6 +227,7 @@ export class PlaywrightScanner {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
+          '--disable-gpu',
         ],
       });
 

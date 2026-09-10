@@ -33,7 +33,6 @@ export async function migrate(): Promise<MigrationResult> {
   const tables = [
     'profiles',
     'scanned_job_templates',
-    'candidate_resume_parsed',
     'candidate_qa_bank',
     'candidate_applications',
   ];

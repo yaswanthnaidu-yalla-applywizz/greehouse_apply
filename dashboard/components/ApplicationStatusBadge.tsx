@@ -120,6 +120,17 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         </span>
       );
 
+    case 'CAPTCHA_TIMEOUT':
+      return (
+        <span
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F97316] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          title="Manual CAPTCHA challenge timed out after 5 minutes"
+        >
+          <span className="w-2 h-2 rounded-full bg-white"></span>
+          <span>CAPTCHA Timeout</span>
+        </span>
+      );
+
     case 'READY_FOR_REVIEW':
     default:
       return (

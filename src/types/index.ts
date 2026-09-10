@@ -168,6 +168,10 @@ export interface ApplyWizzProfile {
   localResumePath: string;
   /** Optional demographic and survey metadata */
   demographics?: CandidateDemographics;
+  /** Raw extracted text from candidate resume */
+  resumeText?: string;
+  /** Structured facts (experience, skills, projects) extracted from resume */
+  resumeFacts?: any;
 }
 
 /**
@@ -271,8 +275,7 @@ export type ApplicationStatus =
   | 'FAILED'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
-  | 'CAPTCHA_TIMEOUT'
-  | 'PENDING';
+  | 'CAPTCHA_TIMEOUT';
 
 /**
  * Segregated candidate job queue item rendered in the operator dashboard.

@@ -17,6 +17,7 @@
 3. **Unify ApplicationStatus types**: Align `src/types/index.ts` with `src/db/applications.ts`.
 
 # ✅ Recently Completed (do not re-implement)
+- Live OTP E2E on PMG posting (`liveSubmit.ts`, `zohoReader.ts`, candidate AWL-YASWANTH)
 - Alphanumeric OTP modal & multi-box resolution (`SubmissionControls.tsx`, `index.html`, `liveSubmit.ts`)
 - Company email priority (`applywizzClient.ts`, `profiles.getCompanyEmail()`, `tier1Supabase.ts`)
 - Yes/No question enforcement (`tier1Supabase.ts`, `llmSynthesizer.ts`)
