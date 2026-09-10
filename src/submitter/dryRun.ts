@@ -49,7 +49,13 @@ export async function runDryRun(
   applicationOrId: string | ApplicationRow,
   options: DryRunOptions = {}
 ): Promise<DryRunResult> {
-  const headless = options.headless ?? false;
+  const isContainer = Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.PORT ||
+    process.env.NODE_ENV === 'production' ||
+    (!process.env.DISPLAY && process.platform !== 'win32' && process.platform !== 'darwin')
+  );
+  const headless = isContainer ? true : (options.headless ?? false);
   const timeoutMs = options.timeoutMs ?? 30000;
 
   // 1. Resolve application record
@@ -72,7 +78,7 @@ export async function runDryRun(
   }
 
   console.log(
-    `[Dry Run] 🚀 Starting headful dry-run for ${application.applywizz_id} [${targetUrl}] (headless: ${headless})...`
+    `[Dry Run] 🚀 Starting dry-run for ${application.applywizz_id} [${targetUrl}] (headless: ${headless}, isContainer: ${isContainer})...`
   );
 
   let browser: Browser | null = null;
@@ -87,10 +93,9 @@ export async function runDryRun(
       args: [
         '--disable-blink-features=AutomationControlled',
         '--no-sandbox',
-        // Docker/container-only flags — omit in headful mode so the window renders
-        ...(headless
-          ? ['--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-          : []),
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
       ],
     });
 

@@ -75,6 +75,11 @@
     const { useState, useEffect, useCallback, useMemo, useRef } = React;
     const API_BASE_URL = window.location.origin;
 
+    function getAuthHeaders() {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+
     // -------------------------------------------------------------
     // Difficulty Badge Component
     // -------------------------------------------------------------
@@ -194,7 +199,7 @@
         const pollInterval = setInterval(async () => {
           try {
             const url = `/api/applications/${encodeURIComponent(applicationId)}`;
-            const res = await fetch(url);
+            const res = await fetch(url, { headers: getAuthHeaders() });
             if (res.ok) {
               const appData = await res.json();
               if (appData.status && appData.status !== statusRef.current) {
@@ -352,7 +357,9 @@
 
       const pollStatusUpdate = async () => {
         try {
-          const res = await fetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`);
+          const res = await fetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`, {
+            headers: getAuthHeaders(),
+          });
           if (res.ok) {
             const appData = await res.json();
             if (appData.status && onStatusChange) {
@@ -371,7 +378,7 @@
             `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/open-captcha-session`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ jobUrl: jobUrl || undefined }),
             }
           );
@@ -406,7 +413,7 @@
             `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/submit-otp`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ otp: cleanOtp, jobUrl: jobUrl || undefined }),
             }
           );
@@ -463,7 +470,7 @@
             `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/resume-submission`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ jobUrl: jobUrl || undefined }),
             }
           );
@@ -853,7 +860,7 @@
             `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}`,
             {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               body: JSON.stringify({ value }),
             }
           );
@@ -1455,18 +1462,39 @@
       const [viewerOpen, setViewerOpen] = useState(false);
       const [viewerImageUrl, setViewerImageUrl] = useState(null);
       const [viewerTitle, setViewerTitle] = useState('Application Proof');
+      const appId = application?.applywizzId || application?.applywizz_id || application?.id || 'app-default';
+      const jobUrl = application?.jobUrl || application?.job_url || '';
+      const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
+
+      const getStoredApprovals = (key) => {
+        try {
+          const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) return new Set(parsed);
+          }
+        } catch {}
+        return new Set();
+      };
+
       const [carouselIndex, setCarouselIndex] = useState(0);
-      const [approvedFieldIds, setApprovedFieldIds] = useState(new Set());
+      const [approvedFieldIds, setApprovedFieldIds] = useState(() => getStoredApprovals(storageKey));
       const [viewMode, setViewMode] = useState('carousel');
       const [filterActionableOnly, setFilterActionableOnly] = useState(false);
 
-      const appId = application?.applywizzId || application?.applywizz_id || application?.id || 'app-default';
-      const jobUrl = application?.jobUrl || application?.job_url || '';
-
       useEffect(() => {
         setCarouselIndex(0);
-        setApprovedFieldIds(new Set());
-      }, [appId, jobUrl]);
+        setApprovedFieldIds(getStoredApprovals(storageKey));
+      }, [appId, jobUrl, storageKey]);
+
+      const saveApprovedFields = (nextSet) => {
+        setApprovedFieldIds(nextSet);
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(storageKey, JSON.stringify(Array.from(nextSet)));
+          }
+        } catch {}
+      };
 
       const fields = application?.resolvedFields || application?.resolved_fields || [];
       const manualCount = fields.filter((f) => f.isEdited || f.source === 'manual').length;
@@ -1501,7 +1529,8 @@
 
       const handleApproveAndNext = () => {
         if (currentField) {
-          setApprovedFieldIds((prev) => new Set([...prev, currentField.fieldId]));
+          const next = new Set([...approvedFieldIds, currentField.fieldId]);
+          saveApprovedFields(next);
         }
         if (boundedIndex < displayFields.length - 1) {
           setCarouselIndex((prev) => prev + 1);
@@ -1509,7 +1538,8 @@
       };
 
       const handleApproveAll = () => {
-        setApprovedFieldIds(new Set(displayFields.map((f) => f.fieldId)));
+        const next = new Set(displayFields.map((f) => f.fieldId));
+        saveApprovedFields(next);
         setCarouselIndex(Math.max(0, displayFields.length - 1));
       };
 
@@ -1551,7 +1581,7 @@
         try {
           const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/dry-run`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
             body: JSON.stringify({
               headless: false,
               jobUrl: application.jobUrl || application.job_url,
@@ -1578,7 +1608,7 @@
         try {
           const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
             body: JSON.stringify({
               headless: true,
               jobUrl: application.jobUrl || application.job_url,
@@ -1590,7 +1620,9 @@
 
           if (data.status === 'APPLIED' && !proofWebUrl) {
             try {
-              const proofRes = await fetch(`/api/applications/${encodeURIComponent(appId)}/proof`);
+              const proofRes = await fetch(`/api/applications/${encodeURIComponent(appId)}/proof`, {
+                headers: getAuthHeaders(),
+              });
               if (proofRes.ok) {
                 const proofData = await proofRes.json();
                 proofWebUrl = proofData.proofWebUrl;
@@ -3120,9 +3152,8 @@
             </div>
           )}
 
-          {activeTab === 'stats' ? (
-            <div className="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar">
-              <div className="mb-6">
+          <div className={`flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar ${activeTab === 'stats' ? '' : 'hidden'}`}>
+            <div className="mb-6">
                 <h2 className="text-2xl font-black text-[#1A1A2E]">Application Pipeline Stats</h2>
                 <p className="text-xs text-[#64748B] font-mono mt-0.5">
                   Real-time throughput metrics, resolution tier breakdowns, and submission telemetry.
@@ -3207,9 +3238,10 @@
                 <div className="p-8 text-center text-xs font-mono text-[#64748B]">Loading statistics...</div>
               )}
             </div>
-          ) : (
-            <div className="flex flex-1 overflow-hidden">
-              <CandidateList
+          </div>
+
+          <div className={`flex flex-1 overflow-hidden ${activeTab === 'dashboard' ? '' : 'hidden'}`}>
+            <CandidateList
                 candidates={candidates}
                 selectedId={selectedCandidateId}
                 onSelectCandidate={(id) => setSelectedCandidateId(id)}
@@ -3245,7 +3277,6 @@
                 )}
               </main>
             </div>
-          )}
         </div>
       );
     }

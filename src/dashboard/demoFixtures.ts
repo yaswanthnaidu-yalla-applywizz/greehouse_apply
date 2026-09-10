@@ -436,7 +436,9 @@ export const demoApplication: CandidateJobApplication = {
 };
 
 export function toApplicationRow(app: CandidateJobApplication): ApplicationRow {
+  const rowId = (app as any).id || `${app.applywizzId}_${Buffer.from(app.jobUrl).toString('base64url').slice(0, 16)}`;
   return {
+    id: rowId,
     applywizz_id: app.applywizzId,
     job_url: app.jobUrl,
     company_name: app.companyName,

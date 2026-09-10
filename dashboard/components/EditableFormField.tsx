@@ -62,13 +62,17 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     setError(null);
 
     try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
       const response = await fetch(
         `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}`,
         {
           method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers,
           body: JSON.stringify({ value }),
         }
       );

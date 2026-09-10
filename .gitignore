@@ -30,6 +30,7 @@ cache/
 
 # Media & Temporary Artifacts
 *.mp4
+*.png
 mailconnect/
 .cursor/
 scratch/

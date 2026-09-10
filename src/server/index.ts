@@ -36,7 +36,7 @@ import {
   getISTDateString,
   type WorkHistoryCandidateRecord,
 } from '../services/workHistoryClient.js';
-import { cacheApplicationLocally, getSubmissionOutcomeCounts } from '../db/applications.js';
+import { cacheApplicationLocally, getSubmissionOutcomeCounts, getApplication } from '../db/applications.js';
 import { getSignedResumeUrl, downloadResumeFromSupabase } from '../db/storage.js';
 import { isSupabaseConfigured } from '../db/client.js';
 import { SubmissionQueueDaemon } from '../submitter/queueWorker.js';
@@ -850,7 +850,48 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     if (appItem) {
-      res.json(appItem);
+      const rowId = (appItem as any).id || `${appItem.applywizzId}_${Buffer.from(appItem.jobUrl).toString('base64url').slice(0, 16)}`;
+      let resolvedFields = appItem.resolvedFields;
+      let status = appItem.status;
+      let proofWebUrl = (appItem as any).proofWebUrl || (appItem as any).proof_web_url;
+      let dryRunScreenshotUrl = (appItem as any).dryRunScreenshotUrl || (appItem as any).dry_run_screenshot_url;
+      let hasManualEdits = (appItem as any).hasManualEdits || (appItem as any).has_manual_edits;
+
+      try {
+        const memApp = (await getApplication(rowId, appItem.jobUrl)) || (await getApplication(appItem.applywizzId, appItem.jobUrl));
+        if (memApp) {
+          if (Array.isArray(memApp.resolved_fields) && memApp.resolved_fields.length > 0) {
+            resolvedFields = memApp.resolved_fields as any;
+          }
+          if (memApp.status) status = memApp.status as any;
+          if (memApp.proof_web_url) proofWebUrl = memApp.proof_web_url;
+          if (memApp.dry_run_screenshot_url) dryRunScreenshotUrl = memApp.dry_run_screenshot_url;
+          if (memApp.has_manual_edits !== undefined) hasManualEdits = memApp.has_manual_edits;
+        }
+      } catch {}
+
+      cacheApplicationLocally({
+        ...toApplicationRow(appItem),
+        id: rowId,
+        resolved_fields: resolvedFields,
+        status: status as any,
+        proof_web_url: proofWebUrl,
+        dry_run_screenshot_url: dryRunScreenshotUrl,
+        has_manual_edits: hasManualEdits,
+      });
+
+      res.json({
+        ...appItem,
+        id: rowId,
+        status,
+        resolvedFields,
+        proof_web_url: proofWebUrl,
+        proofWebUrl,
+        dry_run_screenshot_url: dryRunScreenshotUrl,
+        dryRunScreenshotUrl,
+        hasManualEdits,
+        has_manual_edits: hasManualEdits,
+      });
       return;
     }
 

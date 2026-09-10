@@ -660,95 +660,94 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Workspace (Split-screen Dashboard or Stats View) */}
-      {activeTab === 'stats' ? (
-        <div className="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar">
-          <div className="mb-6">
-            <h2 className="text-2xl font-black text-[#1A1A2E]">Application Pipeline Stats</h2>
-            <p className="text-xs text-[#64748B] font-mono mt-0.5">
-              Real-time throughput metrics, resolution tier breakdowns, and submission telemetry.
-            </p>
-          </div>
+      <div className={`flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar ${activeTab === 'stats' ? '' : 'hidden'}`}>
+        <div className="mb-6">
+          <h2 className="text-2xl font-black text-[#1A1A2E]">Application Pipeline Stats</h2>
+          <p className="text-xs text-[#64748B] font-mono mt-0.5">
+            Real-time throughput metrics, resolution tier breakdowns, and submission telemetry.
+          </p>
+        </div>
 
-          {stats ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-              <div className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#5C4A0A]">
-                  Total Candidates
-                </span>
-                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                  {stats.totalCandidates}
-                </div>
-                <div className="text-[11px] font-mono text-[#5C4A0A] mt-1">
-                  Ingested &amp; segregated
-                </div>
+        {stats ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+            <div className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#5C4A0A]">
+                Total Candidates
+              </span>
+              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                {stats.totalCandidates}
               </div>
-
-              <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#1E3A5F]">
-                  Total Applications
-                </span>
-                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                  {stats.totalApplications}
-                </div>
-                <div className="text-[11px] font-mono text-[#1E3A5F] mt-1">
-                  Active job assignments
-                </div>
-              </div>
-
-              <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
-                  Successful Applications
-                </span>
-                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                  {stats.successfulApplications}
-                </div>
-                <div className="text-[11px] font-mono text-[#065F46] mt-1">
-                  Submitted with APPLIED status
-                </div>
-              </div>
-
-              <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#991B1B]">
-                  Failed Applications
-                </span>
-                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                  {stats.failedApplications}
-                </div>
-                <div className="text-[11px] font-mono text-[#991B1B] mt-1">
-                  Terminal FAILED submissions
-                </div>
-              </div>
-
-              <div className="bg-[#E2F5E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#1E4620]">
-                  Supabase Cache
-                </span>
-                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                  {stats.supabasePercentage}%
-                </div>
-                <div className="text-[11px] font-mono text-[#1E4620] mt-1">
-                  {stats.supabaseTaggedCount} fields (0 API calls)
-                </div>
-              </div>
-
-              <div className="bg-[#FFEAE8] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#6B2C2C]">
-                  AI Synthesis
-                </span>
-                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                  {stats.aiPercentage}%
-                </div>
-                <div className="text-[11px] font-mono text-[#6B2C2C] mt-1">
-                  {stats.aiTaggedCount} fields synthesized
-                </div>
+              <div className="text-[11px] font-mono text-[#5C4A0A] mt-1">
+                Ingested &amp; segregated
               </div>
             </div>
-          ) : (
-            <div className="p-8 text-center text-xs font-mono text-[#64748B]">Loading statistics...</div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-1 overflow-hidden">
+
+            <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#1E3A5F]">
+                Total Applications
+              </span>
+              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                {stats.totalApplications}
+              </div>
+              <div className="text-[11px] font-mono text-[#1E3A5F] mt-1">
+                Active job assignments
+              </div>
+            </div>
+
+            <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
+                Successful Applications
+              </span>
+              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                {stats.successfulApplications}
+              </div>
+              <div className="text-[11px] font-mono text-[#065F46] mt-1">
+                Submitted with APPLIED status
+              </div>
+            </div>
+
+            <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#991B1B]">
+                Failed Applications
+              </span>
+              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                {stats.failedApplications}
+              </div>
+              <div className="text-[11px] font-mono text-[#991B1B] mt-1">
+                Terminal FAILED submissions
+              </div>
+            </div>
+
+            <div className="bg-[#E2F5E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#1E4620]">
+                Supabase Cache
+              </span>
+              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                {stats.supabasePercentage}%
+              </div>
+              <div className="text-[11px] font-mono text-[#1E4620] mt-1">
+                {stats.supabaseTaggedCount} fields (0 API calls)
+              </div>
+            </div>
+
+            <div className="bg-[#FFEAE8] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#6B2C2C]">
+                AI Synthesis
+              </span>
+              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                {stats.aiPercentage}%
+              </div>
+              <div className="text-[11px] font-mono text-[#6B2C2C] mt-1">
+                {stats.aiTaggedCount} fields synthesized
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 text-center text-xs font-mono text-[#64748B]">Loading statistics...</div>
+        )}
+      </div>
+
+      <div className={`flex flex-1 overflow-hidden ${activeTab === 'dashboard' ? '' : 'hidden'}`}>
           {/* Left Pane: Candidates Directory */}
           <CandidateList
             candidates={candidates}
@@ -791,7 +790,6 @@ export const App: React.FC = () => {
             )}
           </main>
         </div>
-      )}
     </div>
   );
 };
