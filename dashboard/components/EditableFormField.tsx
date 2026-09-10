@@ -25,26 +25,39 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [value, setValue] = useState(field.value || '');
+  const [isConfirming, setIsConfirming] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     setValue(field.value || '');
   }, [field.value]);
 
   useEffect(() => {
-    if (isEditing && inputRef.current) {
+    if (isEditing && !isConfirming && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [isEditing]);
+  }, [isEditing, isConfirming]);
 
-  const handleSave = async () => {
-    if (value === field.value && !error) {
+  useEffect(() => {
+    if (isConfirming && confirmBtnRef.current) {
+      confirmBtnRef.current.focus();
+    }
+  }, [isConfirming]);
+
+  const handleRequestSave = () => {
+    if (value === (field.value || '')) {
       setIsEditing(false);
+      setIsConfirming(false);
+      setError(null);
       return;
     }
+    setIsConfirming(true);
+  };
 
+  const executeSave = async () => {
     setIsSaving(true);
     setError(null);
 
@@ -66,6 +79,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       }
 
       const updatedField: ResolvedField = await response.json();
+      setIsConfirming(false);
       setIsEditing(false);
       if (onFieldUpdate) {
         onFieldUpdate(updatedField);
@@ -78,14 +92,23 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     }
   };
 
+  const handleCancelEdit = () => {
+    setValue(field.value || '');
+    setError(null);
+    setIsConfirming(false);
+    setIsEditing(false);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
-      setValue(field.value || '');
-      setError(null);
-      setIsEditing(false);
+      handleCancelEdit();
     } else if (e.key === 'Enter' && field.type !== 'textarea') {
       e.preventDefault();
-      handleSave();
+      if (isConfirming) {
+        executeSave();
+      } else {
+        handleRequestSave();
+      }
     }
   };
 
@@ -138,11 +161,10 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               ref={inputRef as React.RefObject<HTMLTextAreaElement>}
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              onBlur={handleSave}
               onKeyDown={handleKeyDown}
-              disabled={isSaving}
+              disabled={isSaving || isConfirming}
               rows={3}
-              className="w-full text-xs font-mono p-2.5 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E]"
+              className="w-full text-xs font-mono p-2.5 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
             />
           ) : (
             <input
@@ -150,18 +172,99 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               type="text"
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              onBlur={handleSave}
               onKeyDown={handleKeyDown}
-              disabled={isSaving}
-              className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E]"
+              disabled={isSaving || isConfirming}
+              className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
             />
           )}
 
-          <div className="flex items-center justify-between mt-1 text-[10px] text-[#64748B] font-mono">
-            <span>Press Enter to save, Esc to cancel</span>
-            {isSaving && <span className="text-[#D97706] font-bold animate-pulse">Saving...</span>}
-            {error && <span className="text-[#EF4444] font-bold">{error}</span>}
-          </div>
+          {!isConfirming ? (
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRequestSave}
+                  disabled={isSaving}
+                  className="px-3 py-1 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1"
+                >
+                  <span>💾</span>
+                  <span>Save Changes</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  disabled={isSaving}
+                  className="px-2.5 py-1 bg-white hover:bg-gray-100 text-[#1A1A2E] font-medium text-xs rounded border border-gray-300 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+              <span className="text-[10px] text-[#64748B] font-mono">
+                Press Enter to save, Esc to cancel
+              </span>
+            </div>
+          ) : (
+            <div className="mt-2.5 p-3 rounded-lg bg-[#FEF3C7] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] animate-fadeIn">
+              <div className="flex items-start gap-2">
+                <span className="text-base leading-none">⚠️</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-[#1A1A2E]">
+                    Are you sure you want to update this answer?
+                  </p>
+                  <div className="mt-2 text-[11px] font-mono space-y-1">
+                    <div className="text-[#64748B] flex items-baseline gap-1.5">
+                      <span className="font-semibold text-gray-500 shrink-0">Current:</span>
+                      <span className="line-through text-[#EF4444] bg-white/80 px-1.5 py-0.5 rounded border border-gray-300 break-all">
+                        {field.value || '(empty)'}
+                      </span>
+                    </div>
+                    <div className="text-[#1A1A2E] flex items-baseline gap-1.5">
+                      <span className="font-semibold text-gray-700 shrink-0">New:</span>
+                      <span className="font-bold text-[#065F46] bg-white px-1.5 py-0.5 rounded border border-[#1A1A2E] break-all">
+                        {value || '(empty)'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      ref={confirmBtnRef}
+                      type="button"
+                      onClick={executeSave}
+                      disabled={isSaving}
+                      className="px-3 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {isSaving ? (
+                        <span>Saving...</span>
+                      ) : (
+                        <>
+                          <span>✅</span>
+                          <span>Yes, Update Answer</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirming(false)}
+                      disabled={isSaving}
+                      className="px-3 py-1.5 bg-white hover:bg-gray-100 text-[#1A1A2E] font-bold text-xs rounded border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                    >
+                      Keep Editing
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelEdit}
+                      disabled={isSaving}
+                      className="px-2 py-1.5 text-xs text-[#64748B] hover:text-[#EF4444] font-medium"
+                    >
+                      Discard & Cancel
+                    </button>
+                  </div>
+                  {error && <p className="mt-2 text-xs font-bold text-[#EF4444]">{error}</p>}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div
