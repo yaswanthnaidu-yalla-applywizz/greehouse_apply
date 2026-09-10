@@ -12,7 +12,7 @@ A production-grade, cloud-native automated platform for high-throughput Greenhou
 - **Alphanumeric OTP & Multi-Box Resolution**: Handles complex verification codes up to 16 characters (e.g. `Aebf0aDc`) across multi-box form inputs.
 - **Strict Data Grounding**: Company email strictly prioritized (`client.company_email`), binary questions forced strictly to `"Yes"` or `"No"`, and zero cover letters.
 - **Dual-Channel Proof Lifecycle**: Cryptographic full-page web submission screenshot capture + automatic Zoho Mail reader polling for confirmation emails.
-- **Railway Cloud Ready**: Containerized with multi-stage `Dockerfile` (Node 20 + Playwright Chromium dependencies) and `railway.json` health checks.
+- **Railway Cloud Ready**: Containerized with multi-stage `Dockerfile` (Node 22 + Playwright Chromium dependencies) and `railway.json` health checks.
 
 ---
 
