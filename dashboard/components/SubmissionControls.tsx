@@ -22,6 +22,7 @@ export interface SubmissionControlsProps {
   unresolvedFieldsCount: number;
   proofWebUrl?: string | null;
   proofEmailUrl?: string | null;
+  emailProofStatus?: 'pending' | 'captured' | 'timed_out' | null;
   dryRunScreenshotUrl?: string | null;
   isSubmitting?: boolean;
   isDryRunning?: boolean;
@@ -42,6 +43,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   unresolvedFieldsCount,
   proofWebUrl,
   proofEmailUrl,
+  emailProofStatus,
   dryRunScreenshotUrl,
   isSubmitting = false,
   isDryRunning = false,
@@ -65,6 +67,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
 
   const [isOpeningCaptcha, setIsOpeningCaptcha] = useState(false);
   const [isResumingCaptcha, setIsResumingCaptcha] = useState(false);
+  const [isCapturingEmailProof, setIsCapturingEmailProof] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -227,6 +230,49 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       alert(`Resume submission failed: ${err.message}`);
     } finally {
       setIsResumingCaptcha(false);
+    }
+  };
+
+  const handleCaptureEmailProof = async () => {
+    setIsCapturingEmailProof(true);
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+      const res = await fetch(
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/capture-email-proof`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ jobUrl: jobUrl || undefined }),
+        }
+      );
+      const data = await res.json();
+      if (res.ok && data.success && data.proofEmailUrl) {
+        setEmailProof(data.proofEmailUrl);
+        setToastMessage('🎉 Confirmation email proof screenshot captured!');
+        setTimeout(() => setToastMessage(null), 6000);
+        if (onStatusChange) {
+          onStatusChange('APPLIED', {
+            ...data,
+            proof_email_url: data.proofEmailUrl,
+            proofEmailUrl: data.proofEmailUrl,
+            proof_email_captured_at: data.proofEmailCapturedAt,
+            proofEmailCapturedAt: data.proofEmailCapturedAt,
+            email_proof_status: 'captured',
+            emailProofStatus: 'captured',
+          });
+        }
+      } else {
+        alert(data.error || 'Confirmation email not found. Please try again later.');
+        await pollStatusUpdate();
+      }
+    } catch (err: any) {
+      console.error('Capture email proof failed:', err);
+      alert(`Capture email proof failed: ${err.message}`);
+    } finally {
+      setIsCapturingEmailProof(false);
     }
   };
 
@@ -399,7 +445,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
             ? 'Running dry-run form fill...'
             : 'Launch headful browser preview without submitting'
         }
-        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold font-mono transition-all ${
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold font-mono transition-all ${
           canDryRun
             ? 'bg-[#B8D4E8] hover:bg-[#A3C7DF] text-[#1A1A2E] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
             : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
@@ -432,7 +478,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
             ? 'Application already submitted and verified'
             : 'Submit verified application via headless Playwright engine'
         }
-        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold font-mono transition-all ${
+        className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-bold font-mono transition-all ${
           canSubmit
             ? 'bg-[#E88474] hover:bg-[#D67161] text-white border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
             : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
@@ -483,6 +529,29 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         >
           <span>📸</span>
           <span>View Web Proof</span>
+        </button>
+      )}
+
+      {/* Get Email SS Button (Manual retry when web proof is present but email proof is missing) */}
+      {(proofUrl || proofWebUrl) && !(emailProof || proofEmailUrl) && (
+        <button
+          type="button"
+          onClick={handleCaptureEmailProof}
+          disabled={isCapturingEmailProof}
+          title="Capture confirmation email screenshot proof from candidate inbox"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#DBEAFE] hover:bg-[#BFDBFE] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isCapturingEmailProof ? (
+            <>
+              <span className="w-2.5 h-2.5 border-2 border-[#1E3A8A] border-t-transparent rounded-full animate-spin"></span>
+              <span>Fetching Email SS...</span>
+            </>
+          ) : (
+            <>
+              <span>📥</span>
+              <span>Get email SS</span>
+            </>
+          )}
         </button>
       )}
 

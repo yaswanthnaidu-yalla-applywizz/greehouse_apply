@@ -7,6 +7,8 @@ import type { WorkHistoryCandidateRecord } from '../services/workHistoryClient.j
 
 const TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+const _cache = new Map<string, CachedWorkHistory>();
+
 export interface CachedWorkHistory {
   records: WorkHistoryCandidateRecord[];
   candidateIds: string[];
@@ -15,14 +17,18 @@ export interface CachedWorkHistory {
   resolvedDate: string | null;
 }
 
-const _cache = new Map<string, CachedWorkHistory>();
+const buildKey = (email: string, dateStr?: string | null): string => {
+  const normEmail = email.trim().toLowerCase();
+  const normDate = dateStr ? dateStr.trim() : 'default';
+  return `${normEmail}::${normDate}`;
+};
 
-export function getCachedWorkHistory(email: string): CachedWorkHistory | null {
-  const normalized = email.trim().toLowerCase();
-  const entry = _cache.get(normalized);
+export function getCachedWorkHistory(email: string, dateStr?: string | null): CachedWorkHistory | null {
+  const key = buildKey(email, dateStr);
+  const entry = _cache.get(key);
   if (!entry) return null;
   if (Date.now() > entry.expiresAt) {
-    _cache.delete(normalized);
+    _cache.delete(key);
     return null;
   }
   return entry;
@@ -33,10 +39,11 @@ export function setCachedWorkHistory(
   records: WorkHistoryCandidateRecord[],
   candidateIds: string[],
   unreachable: boolean,
-  resolvedDate: string | null = null
+  resolvedDate: string | null = null,
+  dateStr?: string | null
 ): void {
-  const normalized = email.trim().toLowerCase();
-  _cache.set(normalized, {
+  const key = buildKey(email, dateStr || resolvedDate);
+  _cache.set(key, {
     records,
     candidateIds: candidateIds.map((id) => id.toUpperCase()),
     expiresAt: Date.now() + TTL_MS,
@@ -45,7 +52,19 @@ export function setCachedWorkHistory(
   });
 }
 
-export function clearCachedWorkHistory(email?: string): void {
-  if (email) _cache.delete(email.trim().toLowerCase());
-  else _cache.clear();
+export function clearCachedWorkHistory(email?: string, dateStr?: string | null): void {
+  if (email) {
+    if (dateStr) {
+      _cache.delete(buildKey(email, dateStr));
+    } else {
+      const prefix = `${email.trim().toLowerCase()}::`;
+      for (const k of Array.from(_cache.keys())) {
+        if (k.startsWith(prefix)) {
+          _cache.delete(k);
+        }
+      }
+    }
+  } else {
+    _cache.clear();
+  }
 }

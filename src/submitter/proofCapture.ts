@@ -17,6 +17,7 @@ import {
 import {
   attachProofToApplication,
   attachEmailProofToApplication,
+  updateEmailProofStatus,
   getApplication,
   type ApplicationRow,
 } from '../db/applications.js';
@@ -247,6 +248,15 @@ export async function captureAndSaveEmailProof(
     return null;
   }
 
+  const appRef = resolveApplicationRef(appRow);
+
+  // Set email proof status to pending
+  try {
+    await updateEmailProofStatus(appRef, 'pending');
+  } catch (err: any) {
+    console.warn(`[Email Proof] ⚠️ Could not set email_proof_status to pending: ${err.message}`);
+  }
+
   // Resolve candidate's company email
   let companyEmail: string | null = null;
   try {
@@ -260,6 +270,7 @@ export async function captureAndSaveEmailProof(
 
   if (!companyEmail) {
     console.warn(`[Email Proof] ⚠️ No company email found for candidate ${appRow.applywizz_id}`);
+    await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
     return null;
   }
 
@@ -271,10 +282,17 @@ export async function captureAndSaveEmailProof(
     // Give external email service a 6-10 second delivery head start
     await new Promise((resolve) => setTimeout(resolve, 8000));
 
+    const sinceTimestamp = appRow.submitted_at
+      ? new Date(appRow.submitted_at).getTime() - 60000
+      : (appRow.proof_captured_at
+        ? new Date(appRow.proof_captured_at).getTime() - 60000
+        : Date.now() - 3 * 60 * 1000);
+
     const result = await zohoReader.captureConfirmationEmailScreenshot(companyEmail, {
       companyName: appRow.company_name || undefined,
       jobTitle: appRow.job_title || undefined,
-      timeoutMs: options.timeoutMs ?? 50000,
+      timeoutMs: options.timeoutMs ?? 180000, // 3 minutes default auto capture
+      sinceTimestamp,
     });
 
     if (result.success && result.screenshotBuffer) {
@@ -282,7 +300,7 @@ export async function captureAndSaveEmailProof(
       const emailProofUrl = await uploadEmailProof(storageKey, result.screenshotBuffer);
 
       await attachEmailProofToApplication(
-        resolveApplicationRef(appRow),
+        appRef,
         emailProofUrl,
         capturedAt
       );
@@ -295,10 +313,12 @@ export async function captureAndSaveEmailProof(
       console.warn(
         `[Email Proof] ⚠️ Confirmation email not found within timeout for ${storageKey}: ${result.errorMessage}`
       );
+      await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
       return null;
     }
   } catch (err: any) {
     console.error(`[Email Proof] ❌ Background email proof capture error: ${err.message}`);
+    await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
     return null;
   }
 }

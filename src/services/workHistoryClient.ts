@@ -73,6 +73,26 @@ async function fetchRecordsForDate(
 }
 
 /**
+ * Fetches assigned candidates for a CA on a specific IST calendar date (YYYY-MM-DD).
+ * No multi-day lookback is performed.
+ */
+export async function fetchWorkHistoryForDate(
+  caEmail: string,
+  dateStr: string
+): Promise<WorkHistoryResult> {
+  const records = await fetchRecordsForDate(caEmail, dateStr);
+  if (records === null) {
+    return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
+  }
+  return {
+    records,
+    candidateIds: records.map((r) => r.applywizzId),
+    unreachable: false,
+    resolvedDate: dateStr,
+  };
+}
+
+/**
  * Fetches yesterday's assigned candidates for a CA.
  * If yesterday had 0 records (weekend/holiday), looks back up to 7 days for the latest active day.
  */

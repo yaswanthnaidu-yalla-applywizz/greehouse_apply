@@ -11,6 +11,8 @@ import type { ApplicationStatus } from '../../src/db/applications.js';
 
 export interface ApplicationStatusBadgeProps {
   status: ApplicationStatus | string;
+  proofWebUrl?: string | null;
+  proofEmailUrl?: string | null;
   applicationId?: string;
   onStatusChange?: (newStatus: ApplicationStatus, updatedApp: any) => void;
   className?: string;
@@ -23,6 +25,8 @@ export interface ApplicationStatusBadgeProps {
  */
 export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
   status,
+  proofWebUrl,
+  proofEmailUrl,
   applicationId,
   onStatusChange,
   className = '',
@@ -32,7 +36,7 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
   statusRef.current = status;
 
   useEffect(() => {
-    if (status !== 'APPLYING' || !applicationId) {
+    if ((status !== 'APPLYING' && status !== 'QUEUED') || !applicationId) {
       return;
     }
 
@@ -60,10 +64,33 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
   }, [status, applicationId, onStatusChange, apiBaseUrl]);
 
   switch (status) {
+    case 'QUEUED':
+      return (
+        <span
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
+          title="Queued for automated submission daemon"
+        >
+          <span className="w-2 h-2 rounded-full bg-[#EA580C]"></span>
+          <span>Queued for Submit</span>
+        </span>
+      );
+
     case 'APPLIED':
+      if (proofWebUrl && !proofEmailUrl) {
+        return (
+          <span
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+            title="A-Applied: Web confirmation proof captured, email proof pending or timed out"
+          >
+            <span className="w-2 h-2 rounded-full bg-[#0284C7]"></span>
+            <span>A-Applied</span>
+          </span>
+        );
+      }
       return (
         <span
           className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          title="Applied & Verified: Both web and confirmation email proofs captured"
         >
           <span className="w-2 h-2 rounded-full bg-[#1E4620]"></span>
           <span>Applied &amp; Verified</span>

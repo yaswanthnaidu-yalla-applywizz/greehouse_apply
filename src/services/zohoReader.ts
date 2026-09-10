@@ -386,14 +386,15 @@ class ZohoReaderService {
    */
   public async captureConfirmationEmailScreenshot(
     candidateEmail: string,
-    criteria: { companyName?: string; jobTitle?: string; timeoutMs?: number } = {}
+    criteria: { companyName?: string; jobTitle?: string; timeoutMs?: number; sinceTimestamp?: number } = {}
   ): Promise<{
     success: boolean;
     screenshotBuffer?: Buffer;
     subject?: string;
     errorMessage?: string;
   }> {
-    const timeoutMs = criteria.timeoutMs ?? 45000;
+    const timeoutMs = criteria.timeoutMs ?? 180000;
+    const sinceTimestamp = criteria.sinceTimestamp ?? (Date.now() - 3 * 60 * 1000);
     const normalizedEmail = candidateEmail.trim().toLowerCase();
 
     if (!normalizedEmail) {
@@ -410,7 +411,7 @@ class ZohoReaderService {
       console.log(
         `[Zoho Reader] 📧 Looking up confirmation email for ${normalizedEmail}${
           criteria.companyName ? ` (company: ${criteria.companyName})` : ''
-        }...`
+        } (cutoff: ${new Date(sinceTimestamp).toLocaleTimeString()})...`
       );
 
       // 1. Filter by candidate email
@@ -480,6 +481,13 @@ class ZohoReaderService {
             const row = rows.nth(i);
             const isVis = await row.isVisible().catch(() => false);
             if (!isVis) continue;
+
+            const whenText = (await row.locator('.when').innerText().catch(() => '')).replace(/[·📎\s]+/g, ' ').trim();
+            const parsedTime = whenText ? Date.parse(whenText) : NaN;
+            if (!Number.isNaN(parsedTime) && parsedTime < sinceTimestamp) {
+              // Message is older than cutoff; skip opening
+              break;
+            }
 
             // Click message to render in right pane
             await row.click().catch(() => {});

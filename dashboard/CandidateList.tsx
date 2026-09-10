@@ -20,6 +20,7 @@ export interface CandidateListProps {
   onSelectCandidate: (applywizzId: string) => void;
   isLoading?: boolean;
   emptyMessage?: string | null;
+  selectedDate?: string | null;
 }
 
 export const CandidateList: React.FC<CandidateListProps> = ({
@@ -27,6 +28,8 @@ export const CandidateList: React.FC<CandidateListProps> = ({
   selectedId,
   onSelectCandidate,
   isLoading = false,
+  emptyMessage,
+  selectedDate,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -47,7 +50,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
     <aside className="w-80 flex-shrink-0 bg-[#FAF4EB] border-r-2 border-[#1A1A2E] flex flex-col h-full overflow-hidden text-[#1A1A2E]">
       {/* Search Header */}
       <div className="p-4 border-b-2 border-[#1A1A2E] bg-[#FFF5EB] sticky top-0 z-10">
-        <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
             <span className="text-sm">👥</span>
             <h2 className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
@@ -58,6 +61,12 @@ export const CandidateList: React.FC<CandidateListProps> = ({
             {filteredCandidates.length} / {candidates.length}
           </span>
         </div>
+
+        {selectedDate && (
+          <div className="mb-2 px-2 py-0.5 bg-[#E2F0FB] border border-[#1A1A2E] rounded text-[10px] font-mono font-bold text-[#1E3A5F] flex items-center justify-between shadow-[1px_1px_0px_#1A1A2E]">
+            <span>📅 Assigned: {selectedDate} (IST)</span>
+          </div>
+        )}
 
         {/* Real-time search filter input */}
         <div className="relative">

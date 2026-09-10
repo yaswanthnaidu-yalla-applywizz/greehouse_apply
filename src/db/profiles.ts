@@ -276,6 +276,8 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
       linkedin_url: 'https://linkedin.com/in/yaswanth-yalla',
       work_authorization: 'US Citizen',
       requires_sponsorship: false,
+      resume_url: 'resumes/AWL-YASHANTH_resume.pdf',
+      resume_storage_path: 'resumes/AWL-YASHANTH_resume.pdf',
     };
   }
 
