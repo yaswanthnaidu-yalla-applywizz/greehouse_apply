@@ -10,7 +10,7 @@
  * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { CandidateList } from './CandidateList.js';
 import { JobQueueView } from './JobQueueView.js';
 import { FormRenderer } from './FormRenderer.js';
