@@ -48,48 +48,27 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
   const [viewerTitle, setViewerTitle] = useState<string>('Application Proof');
-
-  if (isLoading) {
-    return (
-      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
-        <div className="w-8 h-8 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-xs font-mono font-bold text-[#1A1A2E]">Loading application form...</p>
-      </div>
-    );
-  }
-
-  if (!application) {
-    return (
-      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
-        <div className="text-4xl mb-3">📋</div>
-        <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
-        <p className="text-xs text-[#64748B] mt-1 font-medium">
-          Select a candidate from the left directory and click a job tab above to review and submit.
-        </p>
-      </div>
-    );
-  }
-
-  const fields: ResolvedField[] = application.resolvedFields || application.resolved_fields || [];
-  const manualCount = fields.filter((f) => f.isEdited || f.source === 'manual').length;
-  const supabaseCount = fields.filter((f) => f.source === 'supabase' && !f.isEdited).length;
-  const aiCount = fields.filter((f) => f.source === 'ai' && !f.isEdited).length;
-  const unresCount = fields.filter((f) => f.source === 'unresolved').length;
-
-  const currentStatus: ApplicationStatus = application.status || 'READY_FOR_REVIEW';
-  const appId = application.applywizzId || application.applywizz_id || application.id || 'app-default';
-  const jobUrl = application.jobUrl || application.job_url || '';
-
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
   const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'carousel' | 'list'>('carousel');
   const [filterActionableOnly, setFilterActionableOnly] = useState<boolean>(false);
+
+  const appId = application?.applywizzId || application?.applywizz_id || application?.id || 'app-default';
+  const jobUrl = application?.jobUrl || application?.job_url || '';
 
   // Reset carousel index when application changes
   useEffect(() => {
     setCarouselIndex(0);
     setApprovedFieldIds(new Set());
   }, [appId, jobUrl]);
+
+  const fields: ResolvedField[] = application?.resolvedFields || application?.resolved_fields || [];
+  const manualCount = fields.filter((f) => f.isEdited || f.source === 'manual').length;
+  const supabaseCount = fields.filter((f) => f.source === 'supabase' && !f.isEdited).length;
+  const aiCount = fields.filter((f) => f.source === 'ai' && !f.isEdited).length;
+  const unresCount = fields.filter((f) => f.source === 'unresolved').length;
+
+  const currentStatus: ApplicationStatus = application?.status || 'READY_FOR_REVIEW';
 
   const isDemographic = (label: string) => {
     const l = (label || '').toLowerCase();
@@ -129,6 +108,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   // Keyboard shortcut: Ctrl+Enter / Cmd+Enter approves current card and advances
   useEffect(() => {
+    if (!application || isLoading) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -137,7 +117,28 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [boundedIndex, displayFields, currentField]);
+  }, [boundedIndex, displayFields, currentField, application, isLoading]);
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+        <div className="w-8 h-8 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-xs font-mono font-bold text-[#1A1A2E]">Loading application form...</p>
+      </div>
+    );
+  }
+
+  if (!application) {
+    return (
+      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+        <div className="text-4xl mb-3">📋</div>
+        <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
+        <p className="text-xs text-[#64748B] mt-1 font-medium">
+          Select a candidate from the left directory and click a job tab above to review and submit.
+        </p>
+      </div>
+    );
+  }
 
   const resolveProofFromSubmitResponse = async (data: any) => {
     let proofWebUrl = data.proofWebUrl;
