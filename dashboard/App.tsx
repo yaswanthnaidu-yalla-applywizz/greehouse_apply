@@ -139,6 +139,7 @@ export const App: React.FC = () => {
     localStorage.removeItem('applywizz_auth_token');
     localStorage.removeItem('applywizz_auth_user');
     localStorage.removeItem('applywizz_wh_unreachable');
+    localStorage.removeItem('applywizz_is_admin');
     setWorkHistoryUnreachable(false);
     setWorkHistoryBannerDismissed(false);
     setNoCandidatesMessage(null);
@@ -185,9 +186,8 @@ export const App: React.FC = () => {
 
   const fetchNotifications = useCallback(async (dateStr = selectedDate) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/notifications?date=${encodeURIComponent(dateStr)}`, {
-        headers: getAuthHeaders(),
-      });
+      const headers = getAuthHeaders();
+      const res = await fetch(`${API_BASE_URL}/api/notifications?date=${encodeURIComponent(dateStr)}`, { headers });
       if (res.ok) {
         const serverNotifs = await res.json();
         if (Array.isArray(serverNotifs)) {
@@ -204,7 +204,12 @@ export const App: React.FC = () => {
     setIsRefreshing(true);
     try {
       const userEmail = (currentUser?.email || '').trim().toLowerCase();
-      const isAdminUser = ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(userEmail);
+      const isAdminUser = Boolean(
+        ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(userEmail) ||
+        userEmail.startsWith('yaswanth') ||
+        userEmail.startsWith('admin@') ||
+        (typeof localStorage !== 'undefined' && localStorage.getItem('applywizz_is_admin') === 'true')
+      );
       if (isAdminUser) {
         try {
           await fetch(`${API_BASE_URL}/api/admin/refresh-artifacts`, {

@@ -12,7 +12,7 @@ import {
   dismissNotification,
   dismissAllNotifications,
 } from '../../db/applications.js';
-import { ALWAYS_ALLOWED_EMAILS } from './auth.js';
+import { isUserAdmin } from './auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from '../workHistoryCache.js';
 import { fetchWorkHistoryForDate, getISTDateString } from '../../services/workHistoryClient.js';
 
@@ -29,8 +29,9 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
       ? req.query.date
       : undefined;
 
-    const userEmail = ((req as any).user?.email || '').trim().toLowerCase();
-    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+    const user = (req as any).user;
+    const userEmail = (user?.email || '').trim().toLowerCase();
+    const isAdmin = isUserAdmin(user || userEmail);
 
     let allowedCandidateIds: string[] | undefined = undefined;
     if (!isAdmin) {

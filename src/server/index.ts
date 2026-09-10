@@ -26,7 +26,7 @@ import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
-import { authRouter, ALWAYS_ALLOWED_EMAILS } from './routes/auth.js';
+import { authRouter, isUserAdmin } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
@@ -304,8 +304,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ? req.query.date
       : undefined;
 
-    const userEmail = ((req as any).user?.email || '').trim().toLowerCase();
-    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+    const user = (req as any).user;
+    const userEmail = (user?.email || '').trim().toLowerCase();
+    const isAdmin = isUserAdmin(user || userEmail);
 
     let allowedCandidateIds: string[] | undefined = undefined;
     if (!isAdmin) {
@@ -379,8 +380,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * Returns summary list of all segregated candidates with job counts and status for the selected IST date.
    */
   app.get('/api/candidates', async (req: AuthenticatedRequest, res: Response) => {
-    const userEmail = (req.user?.email || '').trim().toLowerCase();
-    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+    const user = req.user;
+    const userEmail = (user?.email || '').trim().toLowerCase();
+    const isAdmin = isUserAdmin(user || userEmail);
 
     const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
       ? req.query.date
@@ -416,7 +418,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       (seg) => !allowedIds || allowedIds.has(seg.applywizzId.toUpperCase())
     );
 
-    const candidateSummaries: CandidateSummary[] = matchedSegments.map((seg) => {
+    let candidateSummaries: CandidateSummary[] = matchedSegments.map((seg) => {
       const candidateApps = artifactCache.resolvedApplications.filter(
         (a) => a.applywizzId === seg.applywizzId
       );
@@ -425,7 +427,12 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
       // Filter to only jobs eligible under current question threshold (< MAX_JOB_QUESTIONS)
       const eligibleJobs = seg.jobs.filter((job) => {
-        if (seg.applywizzId === DEMO_APPLYWIZZ_ID || job.canonicalUrl === DEMO_JOB_URL || job.rawUrl === DEMO_JOB_URL) {
+        if (
+          seg.applywizzId === DEMO_APPLYWIZZ_ID ||
+          seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
+          job.canonicalUrl === DEMO_JOB_URL ||
+          job.rawUrl === DEMO_JOB_URL
+        ) {
           return true;
         }
         const canonical = job.canonicalUrl || job.rawUrl;
@@ -489,40 +496,38 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     if (isAdmin) {
-      if (!candidateSummaries.some((c) => c.applywizzId === DEMO_APPLYWIZZ_ID)) {
-        candidateSummaries.unshift({
-          applywizzId: demoSegment.applywizzId,
-          clientName: demoSegment.clientName,
-          email: demoSegment.profile?.email || '',
-          location: demoSegment.profile?.location || '',
-          totalJobs: demoSegment.jobs.length,
-          readyCount: demoSegment.jobs.length,
-          expiredCount: 0,
-          status: 'READY',
-          syncedAt: demoSegment.syncedAt,
-          resumeAvailable: true,
-        });
-      }
-      if (!candidateSummaries.some((c) => c.applywizzId === AKSHITHA_APPLYWIZZ_ID)) {
-        const demoIdx = candidateSummaries.findIndex((c) => c.applywizzId === DEMO_APPLYWIZZ_ID);
-        const akshithaSummary: CandidateSummary = {
-          applywizzId: akshithaSegment.applywizzId,
-          clientName: akshithaSegment.clientName,
-          email: akshithaSegment.profile?.email || '',
-          location: akshithaSegment.profile?.location || '',
-          totalJobs: akshithaSegment.jobs.length,
-          readyCount: akshithaSegment.jobs.length,
-          expiredCount: 0,
-          status: 'READY',
-          syncedAt: akshithaSegment.syncedAt,
-          resumeAvailable: true,
-        };
-        if (demoIdx >= 0) {
-          candidateSummaries.splice(demoIdx + 1, 0, akshithaSummary);
-        } else {
-          candidateSummaries.unshift(akshithaSummary);
-        }
-      }
+      // Remove any prior or default-mapped instances of demo candidates to guarantee clean top placement
+      const nonDemoSummaries = candidateSummaries.filter(
+        (c) => c.applywizzId !== DEMO_APPLYWIZZ_ID && c.applywizzId !== AKSHITHA_APPLYWIZZ_ID
+      );
+
+      const demoSummary: CandidateSummary = {
+        applywizzId: demoSegment.applywizzId,
+        clientName: demoSegment.clientName,
+        email: demoSegment.profile?.email || 'portgasdiscord@gmail.com',
+        location: demoSegment.profile?.location || 'Hyderabad, Telangana, India',
+        totalJobs: demoSegment.jobs.length,
+        readyCount: demoSegment.jobs.length,
+        expiredCount: 0,
+        status: 'READY',
+        syncedAt: demoSegment.syncedAt,
+        resumeAvailable: true,
+      };
+
+      const akshithaSummary: CandidateSummary = {
+        applywizzId: akshithaSegment.applywizzId,
+        clientName: akshithaSegment.clientName,
+        email: akshithaSegment.profile?.email || 'akshitha.reddy@applywizard.ai',
+        location: akshithaSegment.profile?.location || 'Dallas, Texas, United States',
+        totalJobs: akshithaSegment.jobs.length,
+        readyCount: akshithaSegment.jobs.length,
+        expiredCount: 0,
+        status: 'READY',
+        syncedAt: akshithaSegment.syncedAt,
+        resumeAvailable: true,
+      };
+
+      candidateSummaries = [demoSummary, akshithaSummary, ...nonDemoSummaries];
     }
 
     // For unauthenticated / testing environments without headers, return flat array for backward-compatibility
@@ -556,8 +561,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
-    const userEmail = (req.user?.email || '').trim().toLowerCase();
-    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+    const user = req.user;
+    const userEmail = (user?.email || '').trim().toLowerCase();
+    const isAdmin = isUserAdmin(user || userEmail);
 
     if (!isAdmin) {
       let cached = getCachedWorkHistory(userEmail);
@@ -758,8 +764,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
-    const userEmail = (req.user?.email || '').trim().toLowerCase();
-    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+    const user = req.user;
+    const userEmail = (user?.email || '').trim().toLowerCase();
+    const isAdmin = isUserAdmin(user || userEmail);
 
     if (!isAdmin) {
       let cached = getCachedWorkHistory(userEmail);
