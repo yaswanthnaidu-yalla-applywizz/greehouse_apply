@@ -4,14 +4,45 @@
  */
 
 import fs from 'fs';
-import os from 'os';
 import _pdfParse from 'pdf-parse/lib/pdf-parse.js';
-import { getParsedResume, upsertParsedResume, type ResumeParsedRow, type ParsedResumeStructured } from '../db/resumeParsed.js';
+import { getProfile, updateParsedResume } from '../db/profiles.js';
 import { downloadResumeTempFile } from '../db/storage.js';
 import { normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 
-export type { ResumeParsedRow, ParsedResumeStructured };
+export interface ParsedResumeStructured {
+  name?: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  linkedinUrl?: string;
+  skills: string[];
+  experience: Array<{
+    company: string;
+    title: string;
+    duration: string;
+    description: string;
+  }>;
+  education: Array<{
+    institution: string;
+    degree: string;
+    year: string;
+  }>;
+  rawSections: Record<string, string>;
+}
+
+export interface ResumeParsedRow {
+  id?: string;
+  applywizz_id: string;
+  raw_text: string;
+  structured: ParsedResumeStructured | Record<string, any>;
+  parse_library?: string;
+  parse_version?: string;
+  parsed_at?: string;
+  parse_failed?: boolean;
+  parse_error?: string | null;
+}
+
 const pdfParse: (dataBuffer: Buffer, options?: any) => Promise<{ text: string }> =
   (_pdfParse as any).default || _pdfParse;
 
@@ -128,20 +159,28 @@ function extractStructuredSections(rawText: string): ParsedResumeStructured {
  * Never fetches from external URLs during resolution.
  */
 export async function getOrParseResume(applywizzId: string): Promise<ResumeParsedRow | null> {
-  // 1. Check DB cache
+  // 1. Check candidate profile in DB
   try {
-    const cached = await getParsedResume(applywizzId);
-    if (cached && cached.raw_text && !cached.parse_failed) {
-      return cached;
+    const profile = await getProfile(applywizzId);
+    if (profile?.resume_text && profile.resume_text.trim().length > 0) {
+      return {
+        applywizz_id: applywizzId,
+        raw_text: profile.resume_text,
+        structured: profile.resume_facts || { skills: [], experience: [], education: [], rawSections: {} },
+        parse_failed: false,
+      };
     }
   } catch (err: any) {
-    console.warn(`[Tier 2] Cache lookup failed for ${applywizzId}: ${err.message}`);
+    console.warn(`[Tier 2] Profile resume lookup failed for ${applywizzId}: ${err.message}`);
   }
 
-  // 2. Download from Supabase Storage (or local fallback) and parse
+  // 2. Download from local cache / on-demand remote URL and parse
   let tempPath: string | null = null;
   try {
     tempPath = await downloadResumeTempFile(applywizzId);
+    if (!tempPath || !fs.existsSync(tempPath)) {
+      return null;
+    }
     const dataBuffer = fs.readFileSync(tempPath);
     const parsed = await pdfParse(dataBuffer);
 
@@ -178,29 +217,12 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
       parse_failed: false,
     };
 
-    // Cache in DB
-    await upsertParsedResume(record);
+    // Cache directly on candidate profile
+    await updateParsedResume(applywizzId, rawText, structured);
     return record;
   } catch (err: any) {
     console.warn(`[Tier 2] PDF parse failed for ${applywizzId}: ${err.message}`);
-    const failedRecord: ResumeParsedRow = {
-      applywizz_id: applywizzId,
-      raw_text: '',
-      structured: { skills: [], experience: [], education: [], rawSections: {} },
-      parse_library: 'pdf-parse',
-      parse_failed: true,
-      parse_error: err.message,
-    };
-    try {
-      await upsertParsedResume(failedRecord);
-    } catch {}
     return null;
-  } finally {
-    if (tempPath && tempPath.includes(os.tmpdir()) && fs.existsSync(tempPath)) {
-      try {
-        fs.unlinkSync(tempPath);
-      } catch {}
-    }
   }
 }
 

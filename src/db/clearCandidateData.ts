@@ -54,13 +54,16 @@ export async function clearCandidateData(candidateIds?: string[]) {
       if (errApp) console.warn(`  ⚠️ Error clearing candidate_applications: ${errApp.message}`);
       else console.log(`  ✅ Cleared ${countApp ?? 0} applications from candidate_applications`);
 
-      // Delete from candidate_resume_parsed
+      // Delete from candidate_resume_parsed if table still exists
       const { error: errResume, count: countResume } = await client
         .from('candidate_resume_parsed')
         .delete({ count: 'exact' })
         .in('applywizz_id', candidateIds);
-      if (errResume) console.warn(`  ⚠️ Error clearing candidate_resume_parsed: ${errResume.message}`);
-      else console.log(`  ✅ Cleared ${countResume ?? 0} parsed resumes from candidate_resume_parsed`);
+      if (errResume && !errResume.message.includes('does not exist')) {
+        console.warn(`  ⚠️ Error clearing candidate_resume_parsed: ${errResume.message}`);
+      } else if (!errResume) {
+        console.log(`  ✅ Cleared ${countResume ?? 0} parsed resumes from candidate_resume_parsed`);
+      }
 
       // Delete profiles so they refetch fresh from ApplyWizz API
       const { error: errProf, count: countProf } = await client
@@ -87,13 +90,16 @@ export async function clearCandidateData(candidateIds?: string[]) {
       if (errApp) console.warn(`  ⚠️ Error clearing all candidate_applications: ${errApp.message}`);
       console.log(`  ✅ Cleared ${countApp ?? 0} total applications from candidate_applications`);
 
-      // Clear all parsed resumes
+      // Clear all parsed resumes if table still exists
       const { error: errResume, count: countResume } = await client
         .from('candidate_resume_parsed')
         .delete({ count: 'exact' })
         .neq('applywizz_id', 'NON_EXISTENT');
-      if (errResume) console.warn(`  ⚠️ Error clearing all candidate_resume_parsed: ${errResume.message}`);
-      console.log(`  ✅ Cleared ${countResume ?? 0} total parsed resumes from candidate_resume_parsed`);
+      if (errResume && !errResume.message.includes('does not exist')) {
+        console.warn(`  ⚠️ Error clearing all candidate_resume_parsed: ${errResume.message}`);
+      } else if (!errResume) {
+        console.log(`  ✅ Cleared ${countResume ?? 0} total parsed resumes from candidate_resume_parsed`);
+      }
     }
   }
 

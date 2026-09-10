@@ -32,6 +32,8 @@ export interface ApplicationRow {
   proof_email_captured_at?: string | null;
   error_message?: string | null;
   dry_run_screenshot_url?: string | null;
+  has_manual_edits?: boolean;
+  reviewed_at?: string | null;
   submitted_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -117,6 +119,15 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
           .maybeSingle();
 
         if (!error && data) {
+          const mem = memoryApplications.get(cleanId);
+          if (
+            mem &&
+            mem.updated_at &&
+            data.updated_at &&
+            new Date(mem.updated_at).getTime() > new Date(data.updated_at).getTime()
+          ) {
+            return { ...(data as ApplicationRow), ...mem };
+          }
           return data as ApplicationRow;
         }
       }
@@ -137,6 +148,15 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
         .maybeSingle();
 
       if (!error && data) {
+        const mem = memoryApplications.get(data.id) || memoryApplications.get(cleanId);
+        if (
+          mem &&
+          mem.updated_at &&
+          data.updated_at &&
+          new Date(mem.updated_at).getTime() > new Date(data.updated_at).getTime()
+        ) {
+          return { ...(data as ApplicationRow), ...mem };
+        }
         return data as ApplicationRow;
       }
     } catch (err: any) {
@@ -226,12 +246,20 @@ export async function getApplicationByCandidateAndJob(
  */
 export async function updateResolvedFields(
   id: string,
-  resolvedFields: any[]
+  resolvedFields: any[],
+  extra?: { has_manual_edits?: boolean; reviewed_at?: string | null }
 ): Promise<void> {
-  const updatePayload = {
+  const updatePayload: Record<string, any> = {
     resolved_fields: resolvedFields,
     updated_at: new Date().toISOString(),
   };
+
+  if (extra?.has_manual_edits !== undefined) {
+    updatePayload.has_manual_edits = extra.has_manual_edits;
+  }
+  if (extra?.reviewed_at !== undefined) {
+    updatePayload.reviewed_at = extra.reviewed_at;
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -283,10 +311,14 @@ export async function updateStatus(
     try {
       const supabase = getDbClient();
       const query = supabase.from('candidate_applications').update(updatePayload);
+      let updateRes;
       if (isUuid) {
-        await query.eq('id', id);
+        updateRes = await query.eq('id', id);
       } else {
-        await query.eq('applywizz_id', id);
+        updateRes = await query.eq('applywizz_id', id);
+      }
+      if (updateRes?.error) {
+        console.error(`[DB] updateStatus Supabase error (${id}, ${status}):`, updateRes.error.message);
       }
     } catch (err: any) {
       // Fall through to memory
@@ -455,16 +487,30 @@ export async function listApplications(filter?: {
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      let query = supabase.from('candidate_applications').select('*').order('created_at', { ascending: false });
+      const buildQuery = () => {
+        let q = supabase.from('candidate_applications').select('*');
+        if (filter?.status) {
+          q = q.eq('status', filter.status);
+        }
+        if (filter?.applywizzId) {
+          q = q.eq('applywizz_id', filter.applywizzId);
+        }
+        return q;
+      };
 
-      if (filter?.status) {
-        query = query.eq('status', filter.status);
-      }
-      if (filter?.applywizzId) {
-        query = query.eq('applywizz_id', filter.applywizzId);
+      // Try ordering by has_manual_edits and reviewed_at first
+      let { data, error } = await buildQuery()
+        .order('has_manual_edits', { ascending: true })
+        .order('reviewed_at', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: false });
+
+      // If columns don't exist yet on remote schema, fall back to created_at
+      if (error && (error.message?.includes('has_manual_edits') || error.code === '42703')) {
+        const fallback = await buildQuery().order('created_at', { ascending: false });
+        data = fallback.data;
+        error = fallback.error;
       }
 
-      const { data, error } = await query;
       if (!error && data) {
         return data as ApplicationRow[];
       }
@@ -480,6 +526,13 @@ export async function listApplications(filter?: {
   if (filter?.applywizzId) {
     results = results.filter((a) => a.applywizz_id === filter.applywizzId);
   }
+
+  results.sort((a, b) => {
+    const aEdited = a.has_manual_edits ? 1 : 0;
+    const bEdited = b.has_manual_edits ? 1 : 0;
+    if (aEdited !== bEdited) return aEdited - bEdited;
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
 
   return results;
 }

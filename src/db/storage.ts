@@ -4,16 +4,14 @@ import os from 'os';
 import { getDbClient, isSupabaseConfigured } from './client.js';
 import config from '../config/env.js';
 
-export const RESUMES_BUCKET = config.SUPABASE_STORAGE_BUCKET_RESUMES || 'resumes';
 export const PROOFS_BUCKET = config.SUPABASE_STORAGE_BUCKET_PROOFS || 'proofs_web';
 export const PROOFS_FAILED_BUCKET = 'proofs_failed';
-export const PROOFS_JOB_OPEN_BUCKET = 'proofs_job_open';
-export const PROOFS_JOB_SUBMITTED_BUCKET = 'proofs_job_submitted';
 export const PROOFS_MAIL_BUCKET = 'proofs_mail';
+export const CSV_UPLOADS_BUCKET = 'csv_uploads';
 
 /**
  * Ensures required storage buckets exist in Supabase.
- * Safe to call idempotently.
+ * Optimized: Only maintains 3 proof buckets + 1 private csv_uploads dropzone.
  */
 export async function ensureBucketsExist(): Promise<void> {
   if (!isSupabaseConfigured()) {
@@ -23,13 +21,10 @@ export async function ensureBucketsExist(): Promise<void> {
   try {
     const supabase = getDbClient();
     const bucketsToEnsure = [
-      { name: RESUMES_BUCKET, public: false },
-      { name: PROOFS_BUCKET, public: true },
-      { name: 'proofs_dry_run', public: true },
-      { name: PROOFS_FAILED_BUCKET, public: true },
-      { name: PROOFS_JOB_OPEN_BUCKET, public: true },
-      { name: PROOFS_JOB_SUBMITTED_BUCKET, public: true },
-      { name: PROOFS_MAIL_BUCKET, public: true },
+      { name: PROOFS_BUCKET, public: false },
+      { name: PROOFS_FAILED_BUCKET, public: false },
+      { name: PROOFS_MAIL_BUCKET, public: false },
+      { name: CSV_UPLOADS_BUCKET, public: false },
     ];
 
     const { data: existingBuckets, error: listError } = await supabase.storage.listBuckets();
@@ -48,7 +43,7 @@ export async function ensureBucketsExist(): Promise<void> {
         if (createError && !createError.message.includes('already exists')) {
           console.warn(`⚠️ Could not create bucket ${bucket.name}: ${createError.message}`);
         } else {
-          console.log(`✅ Ensured storage bucket '${bucket.name}' exists (public: ${bucket.public})`);
+          console.log(`✅ Ensured private storage bucket '${bucket.name}' exists`);
         }
       }
     }
@@ -63,27 +58,9 @@ export async function ensureBucketsExist(): Promise<void> {
 export async function uploadResume(
   applywizzId: string,
   fileBuffer: Buffer,
-  mimeType: string = 'application/pdf'
+  _mimeType: string = 'application/pdf'
 ): Promise<string> {
   const storagePath = `${applywizzId}_resume.pdf`;
-
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      const { error } = await supabase.storage
-        .from(RESUMES_BUCKET)
-        .upload(storagePath, fileBuffer, {
-          contentType: mimeType,
-          upsert: true,
-        });
-
-      if (!error) {
-        return `${RESUMES_BUCKET}/${storagePath}`;
-      }
-    } catch {}
-  }
-
-  // Local filesystem fallback
   const resumesDir = path.resolve(process.cwd(), 'resumes');
   if (!fs.existsSync(resumesDir)) {
     fs.mkdirSync(resumesDir, { recursive: true });
@@ -91,6 +68,28 @@ export async function uploadResume(
   const localFile = path.join(resumesDir, storagePath);
   fs.writeFileSync(localFile, fileBuffer);
   return localFile;
+}
+
+/**
+ * Generates a signed URL valid for 24 hours (86400 seconds) for a private proof screenshot.
+ */
+export async function getSignedProofUrl(
+  bucket: string,
+  storagePath: string,
+  expiresIn: number = 86400
+): Promise<string> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(storagePath, expiresIn);
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
+      }
+    } catch {}
+  }
+  return '';
 }
 
 /**
@@ -113,6 +112,8 @@ export async function uploadProof(
         });
 
       if (!error) {
+        const signedUrl = await getSignedProofUrl(PROOFS_BUCKET, storagePath);
+        if (signedUrl) return signedUrl;
         const { data } = supabase.storage.from(PROOFS_BUCKET).getPublicUrl(storagePath);
         return data.publicUrl;
       }
@@ -185,6 +186,8 @@ export async function uploadFailedScreenshot(
         });
 
       if (!error) {
+        const signedUrl = await getSignedProofUrl(PROOFS_FAILED_BUCKET, storagePath);
+        if (signedUrl) return signedUrl;
         const { data } = supabase.storage.from(PROOFS_FAILED_BUCKET).getPublicUrl(storagePath);
         return data.publicUrl;
       }
@@ -208,27 +211,7 @@ export async function uploadJobOpenScreenshot(
   applicationId: string,
   imageBuffer: Buffer
 ): Promise<string> {
-  const storagePath = `${applicationId}_open.png`;
-
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      const { error } = await supabase.storage
-        .from(PROOFS_JOB_OPEN_BUCKET)
-        .upload(storagePath, imageBuffer, {
-          contentType: 'image/png',
-          upsert: true,
-        });
-
-      if (!error) {
-        const { data } = supabase.storage.from(PROOFS_JOB_OPEN_BUCKET).getPublicUrl(storagePath);
-        return data.publicUrl;
-      }
-    } catch {}
-  }
-
-  // Local filesystem fallback
-  const openDir = path.resolve(process.cwd(), 'output', 'proofs_job_open');
+  const openDir = path.resolve(process.cwd(), 'output', 'proofs');
   if (!fs.existsSync(openDir)) {
     fs.mkdirSync(openDir, { recursive: true });
   }
@@ -238,33 +221,13 @@ export async function uploadJobOpenScreenshot(
 }
 
 /**
- * Uploads a post-submit click screenshot to the proofs_job_submitted bucket or local folder.
+ * Uploads a post-submit click screenshot to local output folder.
  */
 export async function uploadJobSubmittedScreenshot(
   applicationId: string,
   imageBuffer: Buffer
 ): Promise<string> {
-  const storagePath = `${applicationId}_submitted.png`;
-
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      const { error } = await supabase.storage
-        .from(PROOFS_JOB_SUBMITTED_BUCKET)
-        .upload(storagePath, imageBuffer, {
-          contentType: 'image/png',
-          upsert: true,
-        });
-
-      if (!error) {
-        const { data } = supabase.storage.from(PROOFS_JOB_SUBMITTED_BUCKET).getPublicUrl(storagePath);
-        return data.publicUrl;
-      }
-    } catch {}
-  }
-
-  // Local filesystem fallback
-  const submittedDir = path.resolve(process.cwd(), 'output', 'proofs_job_submitted');
+  const submittedDir = path.resolve(process.cwd(), 'output', 'proofs');
   if (!fs.existsSync(submittedDir)) {
     fs.mkdirSync(submittedDir, { recursive: true });
   }
@@ -293,6 +256,8 @@ export async function uploadEmailProof(
         });
 
       if (!error) {
+        const signedUrl = await getSignedProofUrl(PROOFS_MAIL_BUCKET, storagePath);
+        if (signedUrl) return signedUrl;
         const { data } = supabase.storage.from(PROOFS_MAIL_BUCKET).getPublicUrl(storagePath);
         return data.publicUrl;
       }
@@ -310,24 +275,18 @@ export async function uploadEmailProof(
 }
 
 /**
- * Downloads candidate master resume from Supabase Storage, with local disk fallback.
- * Never fetches from external URLs — resolution is Supabase/offline only.
- * Returns the absolute path of the temp file or local file on disk.
+ * Downloads candidate master resume on-demand to os.tmpdir() using resume_url or local cache.
+ * Uses a short-lived cache in os.tmpdir() keyed by applywizz_id.
  */
 export async function downloadResumeTempFile(applywizzId: string): Promise<string> {
   const fileName = `${applywizzId}_resume.pdf`;
+  const tempFilePath = path.join(os.tmpdir(), fileName);
 
-  // 1. Download from Supabase Storage if configured
-  if (isSupabaseConfigured()) {
+  // 1. Check if valid resume already exists in temp
+  if (fs.existsSync(tempFilePath)) {
     try {
-      const supabase = getDbClient();
-      const { data, error } = await supabase.storage.from(RESUMES_BUCKET).download(fileName);
-
-      if (!error && data) {
-        const arrayBuffer = await data.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const tempFilePath = path.join(os.tmpdir(), `greenhouse_resume_${applywizzId}_${Date.now()}.pdf`);
-        await fs.promises.writeFile(tempFilePath, buffer);
+      const stats = fs.statSync(tempFilePath);
+      if (stats.size > 100) {
         return tempFilePath;
       }
     } catch {}
@@ -336,9 +295,47 @@ export async function downloadResumeTempFile(applywizzId: string): Promise<strin
   // 2. Local resumes directory fallback (dev / offline)
   const localFile = path.resolve(process.cwd(), 'resumes', fileName);
   if (fs.existsSync(localFile)) {
-    return localFile;
+    try {
+      const stats = fs.statSync(localFile);
+      if (stats.size > 100) {
+        return localFile;
+      }
+    } catch {}
   }
 
-  throw new Error(`Resume PDF not found for ${applywizzId} in Supabase Storage or local ./resumes/.`);
+  // 3. On-demand fetch directly from candidate's remote resume_url
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('resume_url')
+        .eq('applywizz_id', applywizzId)
+        .maybeSingle();
+
+      if (profile?.resume_url) {
+        const axios = (await import('axios')).default;
+        let targetUrl = profile.resume_url.trim();
+        if (!targetUrl.startsWith('http')) {
+          const s3Base = (config.APPLYWIZZ_S3_BASE_URL || 'https://applywizz-prod.s3.us-east-2.amazonaws.com').replace(/\/+$/, '');
+          targetUrl = `${s3Base}/${encodeURI(targetUrl.replace(/^\/+/, ''))}`;
+        }
+        const resp = await axios.get(targetUrl, {
+          responseType: 'arraybuffer',
+          timeout: 20000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        });
+        const buffer = Buffer.from(resp.data);
+        await fs.promises.writeFile(tempFilePath, buffer);
+        return tempFilePath;
+      }
+    } catch (err: any) {
+      console.warn(`[Storage] ⚠️ On-demand resume download failed for ${applywizzId}: ${err.message}`);
+    }
+  }
+
+  return tempFilePath;
 }
 

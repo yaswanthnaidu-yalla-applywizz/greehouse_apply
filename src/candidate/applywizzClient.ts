@@ -109,6 +109,16 @@ export class ApplyWizzClient {
   }
 
   /**
+   * Checks if candidate profile is already cached locally on disk without hitting the API.
+   */
+  public isProfileCached(applywizzId: string): boolean {
+    const cleanId = applywizzId.trim();
+    if (cleanId.toUpperCase() === 'AWL-YASWANTH') return true;
+    const cachePath = path.join(this.cacheDir, `${cleanId}.json`);
+    return fs.existsSync(cachePath);
+  }
+
+  /**
    * Constructs the full API URL for fetching candidate details.
    * Handles formats such as:
    * - https://www.apply-wizz.me/api/get-client-details?applywizz_id=
@@ -275,7 +285,8 @@ export class ApplyWizzClient {
 
     let targetUrl = resumeUrl.trim();
     if (!targetUrl.startsWith('http')) {
-      targetUrl = `https://applywizz-prod.s3.us-east-2.amazonaws.com/${encodeURI(targetUrl.replace(/^\/+/, ''))}`;
+      const s3Base = (config.APPLYWIZZ_S3_BASE_URL || 'https://applywizz-prod.s3.us-east-2.amazonaws.com').replace(/\/+$/, '');
+      targetUrl = `${s3Base}/${encodeURI(targetUrl.replace(/^\/+/, ''))}`;
     }
 
     let lastError: Error | null = null;
@@ -382,7 +393,8 @@ export class ApplyWizzClient {
 
     let resumeUrl = (addInfo.resume_url || client.resume_url || '').trim();
     if (resumeUrl && !resumeUrl.startsWith('http')) {
-      resumeUrl = `https://applywizz-prod.s3.us-east-2.amazonaws.com/${encodeURI(resumeUrl.replace(/^\/+/, ''))}`;
+      const s3Base = (config.APPLYWIZZ_S3_BASE_URL || 'https://applywizz-prod.s3.us-east-2.amazonaws.com').replace(/\/+$/, '');
+      resumeUrl = `${s3Base}/${encodeURI(resumeUrl.replace(/^\/+/, ''))}`;
     }
     const localResumePath = path.join(this.resumesDir, `${applywizzId}_resume.pdf`);
 

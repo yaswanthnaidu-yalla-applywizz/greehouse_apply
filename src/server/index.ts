@@ -19,7 +19,10 @@ import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
-import { authRouter } from './routes/auth.js';
+import { authRouter, ALWAYS_ALLOWED_EMAILS } from './routes/auth.js';
+import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
+import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
+import { fetchAllowedCandidates, type WorkHistoryCandidateRecord } from '../services/workHistoryClient.js';
 import { cacheApplicationLocally } from '../db/applications.js';
 import {
   demoApplication,
@@ -191,12 +194,16 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     app.use(express.static(publicDir));
   }
 
-  // Auth routes
+  // Auth routes (public)
   app.use('/api/auth', authRouter);
 
-  // Applications, field patch, dry-run, and submission routes
-  app.use('/api/applications', submissionsRouter);
-  app.use('/api/applications', applicationsRouter);
+  // Applications, field patch, dry-run, and submission routes (protected)
+  app.use('/api/applications', requireAuth, submissionsRouter);
+  app.use('/api/applications', requireAuth, applicationsRouter);
+
+  // Protect candidates and admin namespaces
+  app.use('/api/candidates', requireAuth);
+  app.use('/api/admin', requireAuth);
 
   /**
    * GET /api/health
@@ -258,11 +265,61 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   });
 
   /**
+   * POST /api/admin/trigger-ingest-from-storage
+   * Ingests newly uploaded CSV files from the Supabase Storage dropzone.
+   */
+  app.post('/api/admin/trigger-ingest-from-storage', async (_req: Request, res: Response) => {
+    try {
+      const { ingestCsvFromStorage } = await import('../scanner/storageCsvIngestion.js');
+      const result = await ingestCsvFromStorage();
+      if (result.processedCount > 0) {
+        loadArtifacts(outputDir);
+      }
+      res.json(result);
+    } catch (err: any) {
+      console.error('[Admin] Storage CSV ingestion failed:', err);
+      res.status(500).json({ error: err.message || 'Storage ingestion failed' });
+    }
+  });
+
+  /**
    * GET /api/candidates
    * Returns summary list of all segregated candidates with job counts and status.
    */
-  app.get('/api/candidates', (_req: Request, res: Response) => {
-    const candidateSummaries: CandidateSummary[] = artifactCache.candidateSegments.map((seg) => {
+  app.get('/api/candidates', async (req: AuthenticatedRequest, res: Response) => {
+    const userEmail = (req.user?.email || '').trim().toLowerCase();
+    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+
+    let allowedIds: Set<string> | null = null;
+    let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
+    let workHistoryUnreachable = false;
+
+    if (!isAdmin) {
+      let cached = getCachedWorkHistory(userEmail);
+      if (!cached) {
+        const whResult = await fetchAllowedCandidates(userEmail);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      workHistoryUnreachable = cached.unreachable;
+      workHistoryRecords = cached.records;
+      allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+    }
+
+    res.setHeader('X-Work-History-Unreachable', String(workHistoryUnreachable));
+
+    // 1. Process candidateSegments
+    const matchedSegments = artifactCache.candidateSegments.filter(
+      (seg) => !allowedIds || allowedIds.has(seg.applywizzId.toUpperCase())
+    );
+
+    const candidateSummaries: CandidateSummary[] = matchedSegments.map((seg) => {
       const candidateApps = artifactCache.resolvedApplications.filter(
         (a) => a.applywizzId === seg.applywizzId
       );
@@ -308,20 +365,104 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       };
     });
 
-    res.json(candidateSummaries);
+    // 2. Synthesize candidates from workHistoryRecords that are not yet in candidateSegments
+    if (!isAdmin && workHistoryRecords.length > 0) {
+      const existingIds = new Set(candidateSummaries.map((c) => c.applywizzId.toUpperCase()));
+      for (const rec of workHistoryRecords) {
+        const idUpper = rec.applywizzId.toUpperCase();
+        if (!existingIds.has(idUpper)) {
+          const resumePath = path.join(config.RESUMES_DIR, `${rec.applywizzId}_resume.pdf`);
+          candidateSummaries.push({
+            applywizzId: rec.applywizzId,
+            clientName: rec.clientName,
+            email: rec.clientEmail,
+            location: '',
+            totalJobs: 0,
+            readyCount: 0,
+            expiredCount: 0,
+            status: 'PENDING',
+            resumeAvailable: fs.existsSync(resumePath),
+          });
+          existingIds.add(idUpper);
+        }
+      }
+    }
+
+    // For unauthenticated / testing environments without headers, return flat array for backward-compatibility
+    if (!userEmail && (process.env.NODE_ENV === 'test' || !req.headers.authorization)) {
+      res.json(candidateSummaries);
+      return;
+    }
+
+    if (!isAdmin && candidateSummaries.length === 0) {
+      res.json({
+        candidates: [],
+        message: 'No candidates were assigned to you on your most recent working day.',
+        workHistoryUnreachable,
+      });
+      return;
+    }
+
+    res.json({
+      candidates: candidateSummaries,
+      workHistoryUnreachable,
+    });
   });
 
   /**
    * GET /api/candidates/:applywizzId
    * Returns candidate full profile, resume details, and assigned job queue (< MAX_JOB_QUESTIONS).
    */
-  app.get('/api/candidates/:applywizzId', (req: Request, res: Response) => {
+  app.get('/api/candidates/:applywizzId', async (req: AuthenticatedRequest, res: Response) => {
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
+    const userEmail = (req.user?.email || '').trim().toLowerCase();
+    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+
+    if (!isAdmin) {
+      let cached = getCachedWorkHistory(userEmail);
+      if (!cached) {
+        const whResult = await fetchAllowedCandidates(userEmail);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+      if (!allowedIds.has(applywizzId.toUpperCase())) {
+        res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
+        return;
+      }
+    }
+
     const seg = candidatesMap.get(applywizzId);
 
     if (!seg) {
+      // Check if it's a synthesized candidate from work-history
+      let whRecord: WorkHistoryCandidateRecord | undefined;
+      if (!isAdmin) {
+        const cached = getCachedWorkHistory(userEmail);
+        whRecord = cached?.records.find((r) => r.applywizzId.toUpperCase() === applywizzId.toUpperCase());
+      }
+      if (whRecord) {
+        const resumeFilename = `${applywizzId}_resume.pdf`;
+        const resumeExists = fs.existsSync(path.join(config.RESUMES_DIR, resumeFilename));
+        res.json({
+          applywizzId: whRecord.applywizzId,
+          clientName: whRecord.clientName,
+          profile: { email: whRecord.clientEmail },
+          resumeUrl: resumeExists ? `/resumes/${resumeFilename}` : null,
+          resumeFilename: resumeExists ? resumeFilename : null,
+          jobs: [],
+        });
+        return;
+      }
+
       res.status(404).json({ error: `Candidate with Applywizz ID '${applywizzId}' not found.` });
       return;
     }
@@ -355,6 +496,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           );
 
         const fieldsCount = appItem?.resolvedFields.length || template?.fields.length || 0;
+        const hasManualEdits = Boolean(
+          (appItem as any)?.has_manual_edits ||
+          (appItem as any)?.hasManualEdits ||
+          appItem?.resolvedFields?.some((f: any) => f.isEdited || f.source === 'manual')
+        );
 
         return {
           ...job,
@@ -363,6 +509,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           jobTitle: appItem?.jobTitle || template?.jobTitle || 'Job Opening',
           status: appItem?.status || (template?.isExpired ? 'EXPIRED' : 'PENDING'),
           fieldsCount,
+          hasManualEdits,
         };
       })
       .filter((job) => job.fieldsCount < config.MAX_JOB_QUESTIONS);
@@ -381,10 +528,33 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * GET /api/candidates/:applywizzId/jobs/*
    * Returns resolved CandidateJobApplication record for the specified candidate and job URL.
    */
-  app.get('/api/candidates/:applywizzId/jobs/*', async (req: Request, res: Response) => {
+  app.get('/api/candidates/:applywizzId/jobs/*', async (req: AuthenticatedRequest, res: Response) => {
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
+    const userEmail = (req.user?.email || '').trim().toLowerCase();
+    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+
+    if (!isAdmin) {
+      let cached = getCachedWorkHistory(userEmail);
+      if (!cached) {
+        const whResult = await fetchAllowedCandidates(userEmail);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+      if (!allowedIds.has(applywizzId.toUpperCase())) {
+        res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
+        return;
+      }
+    }
+
     // Extract everything after /jobs/ as raw URL
     const rawParam = req.params[0];
     const rawJobUrl =
@@ -493,17 +663,19 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
  * @param port - Port to listen on (defaults to `config.PORT` or `3001`).
  * @returns Running HTTP server instance.
  */
-export function startServer(port: number = config.PORT || 3001): ReturnType<express.Application['listen']> {
+export function startServer(
+  port: number = process.env.PORT ? parseInt(process.env.PORT, 10) : (config.PORT || 3000)
+): ReturnType<express.Application['listen']> {
   const app = createServer();
 
-  const server = app.listen(port, () => {
+  const server = app.listen(port, '0.0.0.0', () => {
     console.log('================================================================');
-    console.log(`  🟢 Greenhouse Operator REST API & Dashboard Live`);
+    console.log(`  🟢 Greenhouse Operator REST API & Dashboard Live on 0.0.0.0:${port}`);
     console.log('================================================================');
-    console.log(`• Local URL:          http://localhost:${port}`);
-    console.log(`• Candidate Stats:    http://localhost:${port}/api/stats`);
-    console.log(`• Candidate List:     http://localhost:${port}/api/candidates`);
-    console.log(`• Master Resumes:     http://localhost:${port}/resumes/`);
+    console.log(`• URL:                http://0.0.0.0:${port}`);
+    console.log(`• Candidate Stats:    /api/stats`);
+    console.log(`• Candidate List:     /api/candidates`);
+    console.log(`• Master Resumes:     /resumes/`);
     console.log('================================================================\n');
 
     if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
@@ -524,5 +696,5 @@ export function startServer(port: number = config.PORT || 3001): ReturnType<expr
 
 // Auto-start when executed directly
 if (process.argv[1] && process.argv[1].includes('server')) {
-  startServer(config.PORT || 3001);
+  startServer();
 }

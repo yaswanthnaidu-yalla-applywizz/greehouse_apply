@@ -9,7 +9,7 @@
  * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { EditableFormField } from './components/EditableFormField.js';
 import { SourceBadge } from './components/SourceBadge.js';
 import { ApplicationStatusBadge } from './components/ApplicationStatusBadge.js';
@@ -79,6 +79,65 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const currentStatus: ApplicationStatus = application.status || 'READY_FOR_REVIEW';
   const appId = application.applywizzId || application.applywizz_id || application.id || 'app-default';
   const jobUrl = application.jobUrl || application.job_url || '';
+
+  const [carouselIndex, setCarouselIndex] = useState<number>(0);
+  const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useState<'carousel' | 'list'>('carousel');
+  const [filterActionableOnly, setFilterActionableOnly] = useState<boolean>(true);
+
+  // Reset carousel index when application changes
+  useEffect(() => {
+    setCarouselIndex(0);
+    setApprovedFieldIds(new Set());
+  }, [appId, jobUrl]);
+
+  const isDemographic = (label: string) => {
+    const l = (label || '').toLowerCase();
+    return (
+      l.includes('gender') ||
+      l.includes('race') ||
+      l.includes('ethnicity') ||
+      l.includes('veteran') ||
+      l.includes('disability')
+    );
+  };
+
+  const actionableFields = fields.filter(
+    (f) => !isDemographic(f.label) || f.source === 'ai' || f.source === 'unresolved'
+  );
+
+  const displayFields = filterActionableOnly && actionableFields.length > 0
+    ? actionableFields
+    : fields;
+
+  const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
+  const currentField = displayFields[boundedIndex];
+
+  const handleApproveAndNext = () => {
+    if (currentField) {
+      setApprovedFieldIds((prev) => new Set([...prev, currentField.fieldId]));
+    }
+    if (boundedIndex < displayFields.length - 1) {
+      setCarouselIndex((prev) => prev + 1);
+    }
+  };
+
+  const handleApproveAll = () => {
+    setApprovedFieldIds(new Set(displayFields.map((f) => f.fieldId)));
+    setCarouselIndex(Math.max(0, displayFields.length - 1));
+  };
+
+  // Keyboard shortcut: Ctrl+Enter / Cmd+Enter approves current card and advances
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleApproveAndNext();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [boundedIndex, displayFields, currentField]);
 
   const resolveProofFromSubmitResponse = async (data: any) => {
     let proofWebUrl = data.proofWebUrl;
@@ -301,8 +360,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         </div>
       </div>
 
-      {/* Form Fields Section */}
-      <div className="space-y-3.5">
+      {/* Form Fields Section (Card Carousel or Full List) */}
+      <div className="space-y-4">
         {fields.length === 0 ? (
           <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-8 text-center text-[#64748B] shadow-[3px_3px_0px_#1A1A2E]">
             <p className="text-sm font-bold text-[#1A1A2E]">
@@ -314,17 +373,168 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               </p>
             )}
           </div>
-        ) : (
-          fields.map((field: ResolvedField, index: number) => {
-            return (
-              <EditableFormField
-                key={`${field.fieldId}-${index}`}
-                field={field}
-                applicationId={appId}
-                onFieldUpdate={onFieldUpdate}
+        ) : viewMode === 'carousel' ? (
+          <div className="space-y-4">
+            {/* Carousel Control & Filter Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E]">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-bold text-[#1A1A2E]">
+                  Field {boundedIndex + 1} of {displayFields.length}
+                </span>
+                <span className="text-xs font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
+                  {approvedFieldIds.size}/{displayFields.length} Approved
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFilterActionableOnly((prev) => !prev)}
+                  className="text-xs font-bold text-[#1A1A2E] hover:text-[#2563EB] bg-[#FAF4EB] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                >
+                  {filterActionableOnly
+                    ? `Showing Priority (${displayFields.length}) — Show All`
+                    : `Showing All (${displayFields.length}) — Filter Priority`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className="text-xs font-bold text-[#1A1A2E] hover:text-[#2563EB] bg-[#FAF4EB] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                >
+                  📋 Switch to Full List
+                </button>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-[#E2E8F0] h-2 rounded-full overflow-hidden border border-[#1A1A2E]/20">
+              <div
+                className="bg-[#10B981] h-full transition-all duration-300"
+                style={{
+                  width: `${((boundedIndex + 1) / Math.max(1, displayFields.length)) * 100}%`,
+                }}
               />
-            );
-          })
+            </div>
+
+            {/* Active Card in Carousel */}
+            {currentField && (
+              <div className="relative bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#64748B]">
+                      Question Card #{boundedIndex + 1}
+                    </span>
+                    {approvedFieldIds.has(currentField.fieldId) && (
+                      <span className="text-[10px] font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]">
+                        ✅ Approved
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] font-mono text-[#64748B]">
+                    Shortcut: <kbd className="bg-white px-1.5 py-0.5 rounded border border-gray-300 text-[10px] font-bold">Ctrl+Enter</kbd> to Approve & Next
+                  </span>
+                </div>
+
+                <EditableFormField
+                  field={currentField}
+                  applicationId={appId}
+                  onFieldUpdate={(updated) => {
+                    if (onFieldUpdate) onFieldUpdate(updated);
+                  }}
+                />
+
+                {/* Card Action Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-[#1A1A2E]/15">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={boundedIndex === 0}
+                      onClick={() => setCarouselIndex((i) => Math.max(0, i - 1))}
+                      className="px-4 py-2 bg-white hover:bg-gray-50 text-[#1A1A2E] font-bold text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      ← Previous
+                    </button>
+                    <button
+                      type="button"
+                      disabled={boundedIndex >= displayFields.length - 1}
+                      onClick={() => setCarouselIndex((i) => Math.min(displayFields.length - 1, i + 1))}
+                      className="px-4 py-2 bg-white hover:bg-gray-50 text-[#1A1A2E] font-bold text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Skip →
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleApproveAll}
+                      className="px-4 py-2 bg-[#FAF4EB] hover:bg-[#F3ECE1] text-[#1A1A2E] font-bold text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                    >
+                      Approve All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleApproveAndNext}
+                      className="px-5 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-2"
+                    >
+                      <span>Approve & Next →</span>
+                      <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Completion Banner */}
+            {approvedFieldIds.size >= displayFields.length && (
+              <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-4 shadow-[3px_3px_0px_#1A1A2E] flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🎉</span>
+                  <div>
+                    <p className="text-xs font-bold text-[#065F46]">
+                      All {displayFields.length} review fields approved!
+                    </p>
+                    <p className="text-[11px] font-medium text-[#047857]">
+                      Application verified and ready for live submission.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTriggerSubmit}
+                  disabled={isSubmitting}
+                  className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                >
+                  {isSubmitting ? 'Submitting...' : 'Approve & Submit Now →'}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3.5">
+            <div className="flex justify-between items-center bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E]">
+              <span className="text-xs font-mono font-bold text-[#1A1A2E]">
+                Full Form View ({fields.length} fields)
+              </span>
+              <button
+                type="button"
+                onClick={() => setViewMode('carousel')}
+                className="text-xs font-bold text-[#1A1A2E] hover:text-[#2563EB] bg-[#FAF4EB] border border-[#1A1A2E] px-3 py-1 rounded shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+              >
+                🎴 Switch to Card Carousel
+              </button>
+            </div>
+            {fields.map((field: ResolvedField, index: number) => {
+              return (
+                <EditableFormField
+                  key={`${field.fieldId}-${index}`}
+                  field={field}
+                  applicationId={appId}
+                  onFieldUpdate={onFieldUpdate}
+                />
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

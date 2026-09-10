@@ -66,7 +66,13 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
 
       {/* Horizontal Scrollable Tabs */}
       <div className="flex gap-2.5 overflow-x-auto pb-3 custom-scrollbar">
-        {candidate.jobs.map((job, idx) => {
+        {[...candidate.jobs]
+          .sort((a, b) => {
+            const aEdited = a.hasManualEdits ? 1 : 0;
+            const bEdited = b.hasManualEdits ? 1 : 0;
+            return aEdited - bEdited;
+          })
+          .map((job, idx) => {
           const jobKey = job.canonicalUrl || job.rawUrl;
           const isSelected =
             selectedJobUrl === jobKey ||
@@ -100,9 +106,19 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                 <DifficultyBadge fieldsCount={job.fieldsCount} />
               </div>
 
-              {/* Job Title */}
-              <div className="text-xs text-[#1A1A2E] font-medium truncate mb-1">
-                {job.jobTitle || 'Job Application'}
+              {/* Job Title & Queue Priority Badge */}
+              <div className="flex items-center justify-between gap-1.5 mb-1">
+                <div className="text-xs text-[#1A1A2E] font-medium truncate">
+                  {job.jobTitle || 'Job Application'}
+                </div>
+                {Boolean((job as any).has_manual_edits || job.hasManualEdits) && (
+                  <span
+                    className="text-[9px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-1.5 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] shrink-0"
+                    title="Application has manual operator edits and is queued last"
+                  >
+                    ⚠️ Edited (Queued Last)
+                  </span>
+                )}
               </div>
 
               {/* Bottom Row: Status Pill & Question Count */}

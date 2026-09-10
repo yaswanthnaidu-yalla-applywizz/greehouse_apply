@@ -27,10 +27,10 @@ CREATE TABLE IF NOT EXISTS profiles (
     requires_sponsorship BOOLEAN DEFAULT false,
     education JSONB DEFAULT '[]'::jsonb,                -- Array<{ institution, degree, fieldOfStudy, graduationYear }>
     work_experience JSONB DEFAULT '[]'::jsonb,          -- Array<{ company, title, startDate, endDate, description }>
-    resume_storage_path TEXT,                            -- Supabase Storage path: resumes/{applywizzId}_resume.pdf
     resume_url TEXT,                                     -- Original ApplyWizz remote resume download URL
+    resume_text TEXT,                                    -- Full parsed text from resume
+    resume_facts JSONB DEFAULT '{}'::jsonb,             -- Structured facts (skills, experience, projects)
     raw_api_payload JSONB,                               -- Full API response stored for debugging & demographics
-    last_api_fetch_at TIMESTAMPTZ,                       -- Timestamp of last Tier 4 API fetch
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -59,25 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_templates_job_url ON scanned_job_templates(job_ur
 CREATE INDEX IF NOT EXISTS idx_templates_field_count ON scanned_job_templates(field_count);
 
 -- ============================================================================
--- 3. candidate_resume_parsed — Parsed Resume Cache
--- Populated by pdf-parse exactly once per candidate; checked at Tier 2
--- ============================================================================
-CREATE TABLE IF NOT EXISTS candidate_resume_parsed (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    applywizz_id TEXT UNIQUE NOT NULL REFERENCES profiles(applywizz_id) ON DELETE CASCADE,
-    raw_text TEXT NOT NULL,                              -- Full extracted text from pdf-parse
-    structured JSONB NOT NULL,                           -- ParsedResumeStructured (skills, experience, education, rawSections)
-    parse_library TEXT DEFAULT 'pdf-parse',
-    parse_version TEXT,
-    parsed_at TIMESTAMPTZ DEFAULT now(),
-    parse_failed BOOLEAN DEFAULT false,                  -- True if parsing encountered errors
-    parse_error TEXT                                     -- Error message if parse_failed = true
-);
-
-CREATE INDEX IF NOT EXISTS idx_resume_parsed_applywizz ON candidate_resume_parsed(applywizz_id);
-
--- ============================================================================
--- 4. candidate_qa_bank — Historical Answer Bank
+-- 3. candidate_qa_bank — Historical Answer Bank
 -- Persistent Q&A memory populated by LLM (Tier 5) and manual operator edits
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS candidate_qa_bank (
@@ -104,7 +86,6 @@ CREATE INDEX IF NOT EXISTS idx_qa_bank_fingerprint ON candidate_qa_bank(question
 CREATE TABLE IF NOT EXISTS candidate_applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     applywizz_id TEXT NOT NULL REFERENCES profiles(applywizz_id) ON DELETE CASCADE,
-    template_id UUID REFERENCES scanned_job_templates(id),
     job_url TEXT NOT NULL,
     company_name TEXT,
     job_title TEXT,
@@ -116,10 +97,13 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
             'APPLIED',
             'FAILED',
             'EXPIRED',
-            'OTP_REQUIRED'
+            'OTP_REQUIRED',
+            'CAPTCHA_TIMEOUT'
         )),
+    has_manual_edits BOOLEAN DEFAULT false,              -- True if operator edited any field; prioritized to end of queue
+    reviewed_at TIMESTAMPTZ,                             -- Timestamp when operator reviewed/edited
     resolved_fields JSONB NOT NULL,                     -- Array<ResolvedField> snapshot
-    proof_web_url TEXT,                                  -- Supabase Storage public/signed URL of confirmation screenshot
+    proof_web_url TEXT,                                  -- Supabase Storage signed/public URL of confirmation screenshot
     proof_captured_at TIMESTAMPTZ,
     proof_email_url TEXT,                                -- Supabase Storage URL of confirmation email proof screenshot
     proof_email_captured_at TIMESTAMPTZ,
@@ -133,7 +117,7 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
 
 CREATE INDEX IF NOT EXISTS idx_applications_applywizz ON candidate_applications(applywizz_id);
 CREATE INDEX IF NOT EXISTS idx_applications_status ON candidate_applications(status);
-CREATE INDEX IF NOT EXISTS idx_applications_template_id ON candidate_applications(template_id);
+CREATE INDEX IF NOT EXISTS idx_applications_queue_order ON candidate_applications(has_manual_edits ASC, reviewed_at ASC);
 
 -- ============================================================================
 -- 6. Row Level Security (RLS) Policies for Tables
@@ -141,7 +125,6 @@ CREATE INDEX IF NOT EXISTS idx_applications_template_id ON candidate_application
 -- ============================================================================
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scanned_job_templates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE candidate_resume_parsed ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidate_qa_bank ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidate_applications ENABLE ROW LEVEL SECURITY;
 
@@ -153,12 +136,6 @@ CREATE POLICY "Allow full access to profiles" ON profiles
 
 DROP POLICY IF EXISTS "Allow full access to scanned_job_templates" ON scanned_job_templates;
 CREATE POLICY "Allow full access to scanned_job_templates" ON scanned_job_templates
-    FOR ALL
-    USING (true)
-    WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Allow full access to candidate_resume_parsed" ON candidate_resume_parsed;
-CREATE POLICY "Allow full access to candidate_resume_parsed" ON candidate_resume_parsed
     FOR ALL
     USING (true)
     WITH CHECK (true);

@@ -22,7 +22,9 @@
     "db:clear": "tsx src/db/clearAnswers.ts",
     "test": "tsx tests/e2eIntegration.test.ts",
     "test:e2e": "tsx tests/e2eIntegration.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start:prod": "node dist/server/index.js",
+    "ingest:storage": "tsx src/scanner/storageCsvIngestion.ts"
   },
   "keywords": [
     "greenhouse",

@@ -19,6 +19,7 @@ export interface CandidateListProps {
   selectedId: string | null;
   onSelectCandidate: (applywizzId: string) => void;
   isLoading?: boolean;
+  emptyMessage?: string | null;
 }
 
 export const CandidateList: React.FC<CandidateListProps> = ({
@@ -87,7 +88,11 @@ export const CandidateList: React.FC<CandidateListProps> = ({
           </div>
         ) : filteredCandidates.length === 0 ? (
           <div className="p-6 text-center text-xs text-[#64748B]">
-            No candidates matching <span className="font-bold text-[#1A1A2E]">"{searchTerm}"</span>
+            {searchTerm ? (
+              <>No candidates matching <span className="font-bold text-[#1A1A2E]">"{searchTerm}"</span></>
+            ) : (
+              emptyMessage || 'No candidates found.'
+            )}
           </div>
         ) : (
           filteredCandidates.map((c) => {

@@ -52,7 +52,13 @@ const envSchema = z.object({
   PLAYWRIGHT_TIMEOUT: z.coerce.number().int().positive().default(30000),
 
   /** Maximum parallel Playwright browser instances / pages */
-  WORKER_POOL_SIZE: z.coerce.number().int().min(1).max(10).default(4),
+  WORKER_POOL_SIZE: z.coerce.number().int().min(1).max(10).default(3),
+
+  /** Flag indicating deployment on Railway free-tier (caps memory, disables headful) */
+  RAILWAY_ENV: z.coerce.boolean().default(false),
+
+  /** JWT Secret for backend session verification */
+  JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
 
   /** Minimum jitter delay in milliseconds between consecutive browser requests */
   SCANNER_JITTER_MIN_MS: z.coerce.number().int().nonnegative().default(3000),
@@ -98,6 +104,48 @@ const envSchema = z.object({
 
   /** Zoho Mail Reader polling interval in milliseconds (default: 3000) */
   ZOHO_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
+
+  /** Azure Communication / Microsoft 365 Client ID */
+  AZURE_CLIENT_ID: z.string().optional(),
+
+  /** Azure Communication / Microsoft 365 Client Secret */
+  AZURE_CLIENT_SECRET: z.string().optional(),
+
+  /** Azure Communication / Microsoft 365 Tenant ID */
+  AZURE_TENANT_ID: z.string().optional(),
+
+  /** Microsoft 365 Tenant ID alias */
+  MS365_TENANT_ID: z.string().optional(),
+
+  /** Azure / M365 Verified Sender Email */
+  AZURE_SENDER_EMAIL: z.string().optional(),
+
+  /** Azure Communication Services Endpoint (Optional) */
+  AZURE_COMMUNICATION_ENDPOINT: z.string().optional(),
+
+  /** ApplyWizz CA Management authorized emails API endpoint */
+  AUTHORIZED_EMAILS_API: z.string().default('https://applywizz-ca-management.vercel.app/api/ca/emails'),
+
+  /** ApplyWizz CA Management work-history API endpoint */
+  WORK_HISTORY_API_URL: z.string().default('https://applywizz-ca-management.vercel.app/api/ca/work-history'),
+
+  /** Additional comma-separated list of emails permitted to sign up */
+  ALLOWED_SIGNUP_EMAILS: z.string().default('yaswanthnaiduyalla@applywizz.ai'),
+
+  /** ApplyWizz S3 Bucket Base URL for master resumes */
+  APPLYWIZZ_S3_BASE_URL: z.string().default('https://applywizz-prod.s3.us-east-2.amazonaws.com'),
+
+  /** OpenRouter API Base URL */
+  OPENROUTER_BASE_URL: z.string().default('https://openrouter.ai/api/v1'),
+
+  /** OpenRouter HTTP-Referer header for app attribution */
+  OPENROUTER_HTTP_REFERER: z.string().default('https://apply-wizz.me'),
+
+  /** Microsoft Entra ID Login Base URL */
+  MS_LOGIN_BASE_URL: z.string().default('https://login.microsoftonline.com'),
+
+  /** Microsoft Graph API Base URL */
+  MS_GRAPH_BASE_URL: z.string().default('https://graph.microsoft.com'),
 });
 
 /**
@@ -149,6 +197,8 @@ export const config = {
   ...rawEnv,
   /** Active LLM API key resolved from LLM_API_KEY or provider-specific keys */
   ACTIVE_LLM_API_KEY: resolveLlmApiKey(rawEnv),
+  /** Active Azure / Microsoft 365 Tenant ID */
+  ACTIVE_AZURE_TENANT_ID: (rawEnv.AZURE_TENANT_ID || rawEnv.MS365_TENANT_ID || '').trim(),
 } as const;
 
 /**

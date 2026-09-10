@@ -29,6 +29,8 @@ export interface ProfileRow {
   work_experience?: any[];
   resume_storage_path?: string | null;
   resume_url?: string | null;
+  resume_text?: string | null;
+  resume_facts?: Record<string, any> | null;
   raw_api_payload?: Record<string, any> | null;
   last_api_fetch_at?: string | null;
   created_at?: string;
@@ -113,6 +115,8 @@ export function profileRowToCandidateProfile(row: ProfileRow): ApplyWizzCandidat
     resumeUrl: row.resume_url || '',
     localResumePath: row.resume_storage_path || '',
     demographics: row.raw_api_payload?.demographics,
+    resumeText: row.resume_text || undefined,
+    resumeFacts: row.resume_facts || undefined,
   };
 }
 
@@ -323,3 +327,25 @@ export async function updateResumeStoragePath(
   }
 }
 
+/**
+ * Updates the candidate profile with parsed resume text and structured facts.
+ */
+export async function updateParsedResume(
+  applywizzId: string,
+  resumeText: string,
+  resumeFacts: any
+): Promise<void> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      await supabase
+        .from('profiles')
+        .update({
+          resume_text: resumeText,
+          resume_facts: resumeFacts,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('applywizz_id', applywizzId);
+    } catch {}
+  }
+}

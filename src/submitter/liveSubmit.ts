@@ -626,6 +626,7 @@ export async function switchToHeadfulMode(
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-gpu',
     ],
   });
 
@@ -1148,6 +1149,7 @@ export async function runLiveSubmit(
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
+        '--disable-gpu',
       ],
     });
 

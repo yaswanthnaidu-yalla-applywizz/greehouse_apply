@@ -47,18 +47,45 @@ export const App: React.FC = () => {
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(true);
   const [isLoadingApplication, setIsLoadingApplication] = useState<boolean>(false);
 
+  const [workHistoryUnreachable, setWorkHistoryUnreachable] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return localStorage.getItem('applywizz_wh_unreachable') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [workHistoryBannerDismissed, setWorkHistoryBannerDismissed] = useState<boolean>(false);
+  const [noCandidatesMessage, setNoCandidatesMessage] = useState<string | null>(null);
+
+  const getAuthHeaders = (): HeadersInit => {
+    if (typeof window === 'undefined') return {};
+    const token = localStorage.getItem('applywizz_auth_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   // 1. Fetch Candidates and Stats on Mount
   const fetchInitialData = useCallback(async () => {
     setIsLoadingCandidates(true);
     try {
+      const headers = getAuthHeaders();
       const [candidatesRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/candidates`),
-        fetch(`${API_BASE_URL}/api/stats`),
+        fetch(`${API_BASE_URL}/api/candidates`, { headers }),
+        fetch(`${API_BASE_URL}/api/stats`, { headers }),
       ]);
 
       if (candidatesRes.ok) {
-        const candidateData: CandidateSummary[] = await candidatesRes.json();
+        const raw = await candidatesRes.json();
+        const candidateData: CandidateSummary[] = Array.isArray(raw) ? raw : (raw.candidates || []);
+        const unreachable: boolean = !Array.isArray(raw)
+          ? Boolean(raw.workHistoryUnreachable)
+          : candidatesRes.headers.get('x-work-history-unreachable') === 'true';
+        const emptyMsg: string | null = !Array.isArray(raw) ? (raw.message || null) : null;
+
         setCandidates(candidateData);
+        if (unreachable) setWorkHistoryUnreachable(true);
+        setNoCandidatesMessage(emptyMsg);
+
         if (candidateData.length > 0 && (!selectedCandidateId || selectedCandidateId === 'AWL-YASWANTH')) {
           setSelectedCandidateId(candidateData[0].applywizzId);
         }
@@ -79,7 +106,11 @@ export const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('applywizz_auth_token');
       localStorage.removeItem('applywizz_auth_user');
+      localStorage.removeItem('applywizz_wh_unreachable');
     }
+    setWorkHistoryUnreachable(false);
+    setWorkHistoryBannerDismissed(false);
+    setNoCandidatesMessage(null);
     setCurrentUser(null);
   };
 
@@ -92,7 +123,9 @@ export const App: React.FC = () => {
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}`);
+      const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const detail: CandidateDetail = await res.json();
         setCandidateDetail(detail);
@@ -122,7 +155,9 @@ export const App: React.FC = () => {
     setIsLoadingApplication(true);
     try {
       const encodedUrl = encodeURIComponent(jobUrl);
-      const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}/jobs/${encodedUrl}`);
+      const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}/jobs/${encodedUrl}`, {
+        headers: getAuthHeaders(),
+      });
 
       if (res.ok) {
         const appData = await res.json();
@@ -316,6 +351,24 @@ export const App: React.FC = () => {
         </div>
       </header>
 
+      {/* Work-History Unreachable Top Banner */}
+      {workHistoryUnreachable && !workHistoryBannerDismissed && (
+        <div className="bg-[#FEF3C7] border-b-2 border-[#1A1A2E] px-6 py-2 text-xs font-bold text-[#92400E] flex items-center justify-between shadow-sm flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>Work-history API unreachable — showing last known assigned candidates.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWorkHistoryBannerDismissed(true)}
+            className="text-[#92400E] hover:text-[#1A1A2E] text-sm font-black transition-opacity"
+            title="Dismiss warning"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Main Workspace (Split-screen Dashboard or Stats View) */}
       {activeTab === 'stats' ? (
         <div className="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar">
@@ -388,6 +441,7 @@ export const App: React.FC = () => {
             selectedId={selectedCandidateId}
             onSelectCandidate={(id) => setSelectedCandidateId(id)}
             isLoading={isLoadingCandidates}
+            emptyMessage={noCandidatesMessage}
           />
 
           {/* Right Pane: Candidate Jobs Queue & Form Renderer */}

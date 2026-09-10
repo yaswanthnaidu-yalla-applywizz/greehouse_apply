@@ -47,6 +47,7 @@ export interface CandidateDetail {
     jobTitle: string;
     status: string;
     fieldsCount: number;
+    hasManualEdits?: boolean;
   }>;
 }
 
@@ -72,7 +73,8 @@ export type ApplicationStatus =
   | 'APPLIED'
   | 'FAILED'
   | 'EXPIRED'
-  | 'OTP_REQUIRED';
+  | 'OTP_REQUIRED'
+  | 'CAPTCHA_TIMEOUT';
 
 export interface ApplicationDetail {
   id?: string;
