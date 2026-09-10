@@ -11,6 +11,13 @@
  * - 06-implementation.md (Phase V1-5)
  */
 
+import WebSocket from 'ws';
+
+// Polyfill global WebSocket for Supabase Realtime in Node.js environments
+if (typeof globalThis.WebSocket === 'undefined') {
+  (globalThis as any).WebSocket = WebSocket;
+}
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import fs from 'fs';

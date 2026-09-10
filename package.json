@@ -35,6 +35,9 @@
   ],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.116.0",
@@ -50,6 +53,7 @@
     "playwright": "^1.50.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "ws": "^8.18.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -59,6 +63,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "@types/ws": "^8.5.14",
     "ts-node": "^10.9.2",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3"
