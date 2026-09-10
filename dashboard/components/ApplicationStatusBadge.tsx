@@ -42,8 +42,10 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
 
     const pollInterval = setInterval(async () => {
       try {
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
         const url = `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`;
-        const res = await fetch(url);
+        const res = await fetch(url, { headers });
         if (res.ok) {
           const appData = await res.json();
           if (appData.status && appData.status !== statusRef.current) {

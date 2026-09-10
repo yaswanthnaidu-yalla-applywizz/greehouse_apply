@@ -49,15 +49,18 @@ async function closePausedSession(applicationId: string): Promise<void> {
 submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Promise<void> => {
   const rawId = req.params.id;
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+  const userEmail = (req as any).user?.email || req.body?.assignedCaEmail || 'anonymous';
+  console.log(`[Submissions Router] 🎬 POST /api/applications/${appId}/dry-run requested by ${userEmail}`);
 
   try {
     const result = await runDryRun(appId, {
-      headless: req.body?.headless !== undefined ? req.body.headless : false,
+      headless: req.body?.headless !== undefined ? req.body.headless : undefined,
       timeoutMs: req.body?.timeoutMs ?? 30000,
       jobUrl: req.body?.jobUrl,
     });
 
     if (result.success) {
+      console.log(`[Submissions Router] ✅ Dry-run succeeded for ${appId} (screenshot: ${result.screenshotUrl})`);
       res.status(200).json({
         success: true,
         applicationId: result.applicationId,
@@ -65,6 +68,7 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
         summary: result.summary,
       });
     } else {
+      console.error(`[Submissions Router] ❌ Dry-run failed for ${appId}: ${result.error}`);
       res.status(500).json({
         success: false,
         applicationId: result.applicationId,
@@ -90,6 +94,9 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
   const isSync = req.query.sync === 'true' || req.body?.sync === true;
   const userEmail = (req as any).user?.email || req.body?.assignedCaEmail || undefined;
+  console.log(
+    `[Submissions Router] 🚀 POST /api/applications/${appId}/submit requested by ${userEmail || 'anonymous'} (isSync: ${isSync}, jobUrl: ${req.body?.jobUrl || 'auto'})`
+  );
 
   // Asynchronous queue insertion (default production flow - Phase V2-4c)
   if (!isSync) {

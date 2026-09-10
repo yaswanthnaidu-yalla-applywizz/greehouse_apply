@@ -48,19 +48,39 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
   const [viewerTitle, setViewerTitle] = useState<string>('Application Proof');
+  const appId = application?.applywizzId || application?.applywizz_id || application?.id || 'app-default';
+  const jobUrl = application?.jobUrl || application?.job_url || '';
+  const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
+
+  const getStoredApprovals = (key: string): Set<string> => {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return new Set(parsed);
+      }
+    } catch {}
+    return new Set<string>();
+  };
+
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
-  const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(new Set());
+  const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(() => getStoredApprovals(storageKey));
   const [viewMode, setViewMode] = useState<'carousel' | 'list'>('carousel');
   const [filterActionableOnly, setFilterActionableOnly] = useState<boolean>(false);
 
-  const appId = application?.applywizzId || application?.applywizz_id || application?.id || 'app-default';
-  const jobUrl = application?.jobUrl || application?.job_url || '';
-
-  // Reset carousel index when application changes
   useEffect(() => {
     setCarouselIndex(0);
-    setApprovedFieldIds(new Set());
-  }, [appId, jobUrl]);
+    setApprovedFieldIds(getStoredApprovals(storageKey));
+  }, [appId, jobUrl, storageKey]);
+
+  const saveApprovedFields = (nextSet: Set<string>) => {
+    setApprovedFieldIds(nextSet);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(storageKey, JSON.stringify(Array.from(nextSet)));
+      }
+    } catch {}
+  };
 
   const fields: ResolvedField[] = application?.resolvedFields || application?.resolved_fields || [];
   const manualCount = fields.filter((f) => f.isEdited || f.source === 'manual').length;
@@ -94,7 +114,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   const handleApproveAndNext = () => {
     if (currentField) {
-      setApprovedFieldIds((prev) => new Set([...prev, currentField.fieldId]));
+      const next = new Set([...approvedFieldIds, currentField.fieldId]);
+      saveApprovedFields(next);
     }
     if (boundedIndex < displayFields.length - 1) {
       setCarouselIndex((prev) => prev + 1);
@@ -102,7 +123,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   };
 
   const handleApproveAll = () => {
-    setApprovedFieldIds(new Set(displayFields.map((f) => f.fieldId)));
+    const next = new Set(displayFields.map((f) => f.fieldId));
+    saveApprovedFields(next);
     setCarouselIndex(Math.max(0, displayFields.length - 1));
   };
 
@@ -140,6 +162,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     );
   }
 
+  const getAuthHeaders = (): Record<string, string> => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const resolveProofFromSubmitResponse = async (data: any) => {
     let proofWebUrl = data.proofWebUrl;
     let proofCapturedAt = data.proofCapturedAt;
@@ -147,7 +174,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     if (data.status === 'APPLIED' && !proofWebUrl) {
       try {
         const proofRes = await fetch(
-          `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/proof`
+          `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/proof`,
+          { headers: getAuthHeaders() }
         );
         if (proofRes.ok) {
           const proofData = await proofRes.json();
@@ -167,7 +195,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/dry-run`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ headless: false, jobUrl: jobUrl || undefined }),
         }
       );
@@ -198,8 +226,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/submit`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ headless: true }),
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ headless: true, jobUrl: jobUrl || undefined }),
         }
       );
       const data = await res.json();

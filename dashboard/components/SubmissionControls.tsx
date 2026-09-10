@@ -36,6 +36,11 @@ export interface SubmissionControlsProps {
   onViewDryRun?: () => void;
 }
 
+const getAuthHeaders = (): Record<string, string> => {
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   applicationId,
   jobUrl = '',
@@ -92,7 +97,8 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const pollStatusUpdate = async () => {
     try {
       const res = await fetch(
-        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`
+        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`,
+        { headers: getAuthHeaders() }
       );
       if (res.ok) {
         const appData = await res.json();
@@ -112,7 +118,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/open-captcha-session`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ jobUrl: jobUrl || undefined }),
         }
       );
@@ -149,7 +155,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/submit-otp`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ otp: cleanOtp, jobUrl: jobUrl || undefined }),
         }
       );
@@ -208,7 +214,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/resume-submission`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({ jobUrl: jobUrl || undefined }),
         }
       );

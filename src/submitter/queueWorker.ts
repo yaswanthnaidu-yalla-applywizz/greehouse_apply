@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @fileoverview Round-Robin Background Submission Daemon (Phase V2-4c).
  *
  * Runs up to 3 concurrent Playwright workers (default 2) polling the global
@@ -93,8 +93,8 @@ export class SubmissionQueueDaemon {
         }
 
         const appId = app.id || app.applywizz_id;
-        process.stderr.write(
-          `[Worker ${workerId}] 📥 Acquired application ${appId} (submission_order: ${app.submission_order ?? 'none'}, candidate: ${app.applywizz_id})\n`
+        console.log(
+          `[Worker ${workerId}] 📥 Acquired application ${appId} (submission_order: ${app.submission_order ?? 'none'}, candidate: ${app.applywizz_id}, job: ${app.job_url})`
         );
 
         try {
@@ -103,12 +103,12 @@ export class SubmissionQueueDaemon {
             jobUrl: app.job_url,
           });
 
-          process.stderr.write(
-            `[Worker ${workerId}] ✅ Application ${appId} completed with status: ${result.status} (proof: ${result.proofWebUrl || 'none'})\n`
+          console.log(
+            `[Worker ${workerId}] ✅ Application ${appId} completed with status: ${result.status} (proof: ${result.proofWebUrl || 'none'})`
           );
         } catch (submitErr: any) {
-          process.stderr.write(
-            `[Worker ${workerId}] ❌ Submission failed for application ${appId}: ${submitErr.message}\n`
+          console.error(
+            `[Worker ${workerId}] ❌ Submission failed for application ${appId}: ${submitErr.message}`
           );
           try {
             await updateStatus(appId, 'FAILED', {
