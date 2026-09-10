@@ -69,9 +69,6 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const [proofUrl, setProofUrl] = useState<string | null>(proofWebUrl || null);
   const [emailProof, setEmailProof] = useState<string | null>(proofEmailUrl || null);
   const [showProofViewer, setShowProofViewer] = useState(false);
-
-  const [isOpeningCaptcha, setIsOpeningCaptcha] = useState(false);
-  const [isResumingCaptcha, setIsResumingCaptcha] = useState(false);
   const [isCapturingEmailProof, setIsCapturingEmailProof] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -107,31 +104,6 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       }
     } catch (err) {
       console.warn(`[SubmissionControls] Status poll error for ${applicationId}:`, err);
-    }
-  };
-
-  const handleOpenCaptchaBrowser = async () => {
-    setIsOpeningCaptcha(true);
-    try {
-      const res = await fetch(
-        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/open-captcha-session`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ jobUrl: jobUrl || undefined }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Failed to open CAPTCHA browser');
-        return;
-      }
-      await pollStatusUpdate();
-    } catch (err: any) {
-      console.error('Open CAPTCHA browser failed:', err);
-      alert(`Open CAPTCHA browser failed: ${err.message}`);
-    } finally {
-      setIsOpeningCaptcha(false);
     }
   };
 
@@ -199,42 +171,6 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       await pollStatusUpdate();
     } finally {
       setOtpLoading(false);
-    }
-  };
-
-  const handleResumeSubmission = async () => {
-    setIsResumingCaptcha(true);
-    setApplicationStatus('APPLYING');
-    if (onStatusChange) {
-      onStatusChange('APPLYING');
-    }
-    try {
-      const res = await fetch(
-        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/resume-submission`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ jobUrl: jobUrl || undefined }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Failed to resume submission');
-        await pollStatusUpdate();
-        return;
-      }
-      if (data.status) {
-        setApplicationStatus(data.status as ApplicationStatus);
-        if (onStatusChange) {
-          onStatusChange(data.status as ApplicationStatus, data);
-        }
-      }
-      await pollStatusUpdate();
-    } catch (err: any) {
-      console.error('Resume submission failed:', err);
-      alert(`Resume submission failed: ${err.message}`);
-    } finally {
-      setIsResumingCaptcha(false);
     }
   };
 
@@ -348,40 +284,23 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
               }}
               className="w-full px-3 py-2.5 mb-4 rounded-md border-2 border-[#1A1A2E] text-sm font-mono text-[#1A1A2E] placeholder:text-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#F59E0B] disabled:opacity-60"
             />
-            <button
-              type="button"
-              onClick={handleVerifyOtp}
-              disabled={otpLoading || !otpValue.trim()}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {otpLoading ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  <span>Submitting &amp; Resuming...</span>
-                </>
-              ) : (
-                <span>Submit OTP &amp; Resume</span>
-              )}
-            </button>
-
-            <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-gray-200">
+            {otpValue.trim() && (
               <button
                 type="button"
-                onClick={handleOpenCaptchaBrowser}
-                disabled={isOpeningCaptcha || isResumingCaptcha}
-                className="text-xs font-bold text-[#2563EB] hover:underline disabled:opacity-50"
+                onClick={handleVerifyOtp}
+                disabled={otpLoading}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isOpeningCaptcha ? 'Opening...' : 'Open Browser (Manual Solve)'}
+                {otpLoading ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <span>Submitting &amp; Resuming...</span>
+                  </>
+                ) : (
+                  <span>Submit OTP &amp; Resume Application</span>
+                )}
               </button>
-              <button
-                type="button"
-                onClick={handleResumeSubmission}
-                disabled={isOpeningCaptcha || isResumingCaptcha}
-                className="text-xs font-bold text-[#D97706] hover:underline disabled:opacity-50"
-              >
-                {isResumingCaptcha ? 'Resuming...' : 'Resume Without OTP'}
-              </button>
-            </div>
+            )}
           </div>
         </div>
       )}
