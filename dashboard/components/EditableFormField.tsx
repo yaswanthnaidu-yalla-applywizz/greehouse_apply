@@ -145,9 +145,10 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               type="button"
               onClick={() => setIsEditing(true)}
               title="Click to edit field value"
-              className="opacity-60 group-hover:opacity-100 p-1 text-[#1A1A2E] hover:bg-[#FAF4EB] border border-transparent hover:border-[#1A1A2E] rounded transition text-xs"
+              className="opacity-60 group-hover:opacity-100 px-2 py-1 text-[#1A1A2E] hover:bg-[#FAF4EB] border border-transparent hover:border-[#1A1A2E] rounded transition text-xs flex items-center gap-1 font-medium"
             >
-              ✏️
+              <span>edit</span>
+              <span aria-hidden>✏️</span>
             </button>
           )}
         </div>

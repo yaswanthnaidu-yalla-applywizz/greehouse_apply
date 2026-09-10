@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
         CHECK (status IN (
             'READY_FOR_REVIEW',
             'DRY_RUN_COMPLETE',
+            'QUEUED',
             'APPLYING',
             'APPLIED',
             'FAILED',
@@ -100,6 +101,8 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
             'OTP_REQUIRED',
             'CAPTCHA_TIMEOUT'
         )),
+    submission_order INTEGER,                            -- Global FIFO sequence number for daemon queue
+    assigned_ca_email TEXT,                              -- Assigned Campus Ambassador email for user isolation
     has_manual_edits BOOLEAN DEFAULT false,              -- True if operator edited any field; prioritized to end of queue
     reviewed_at TIMESTAMPTZ,                             -- Timestamp when operator reviewed/edited
     resolved_fields JSONB NOT NULL,                     -- Array<ResolvedField> snapshot
@@ -107,6 +110,8 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
     proof_captured_at TIMESTAMPTZ,
     proof_email_url TEXT,                                -- Supabase Storage URL of confirmation email proof screenshot
     proof_email_captured_at TIMESTAMPTZ,
+    email_proof_status TEXT CHECK (email_proof_status IN ('pending', 'captured', 'timed_out')),
+    email_proof_attempted_at TIMESTAMPTZ,
     error_message TEXT,                                 -- Populated on FAILED status
     dry_run_screenshot_url TEXT,                        -- Supabase Storage URL of dry-run form screenshot
     submitted_at TIMESTAMPTZ,
@@ -118,6 +123,7 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
 CREATE INDEX IF NOT EXISTS idx_applications_applywizz ON candidate_applications(applywizz_id);
 CREATE INDEX IF NOT EXISTS idx_applications_status ON candidate_applications(status);
 CREATE INDEX IF NOT EXISTS idx_applications_queue_order ON candidate_applications(has_manual_edits ASC, reviewed_at ASC);
+CREATE INDEX IF NOT EXISTS idx_applications_submission_order ON candidate_applications(submission_order ASC) WHERE status = 'QUEUED';
 
 -- ============================================================================
 -- 6. Row Level Security (RLS) Policies for Tables

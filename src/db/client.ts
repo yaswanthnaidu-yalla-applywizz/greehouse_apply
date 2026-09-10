@@ -14,6 +14,9 @@ let supabaseClientInstance: SupabaseClient | null = null;
  * Checks whether Supabase URL and Service Key are properly configured.
  */
 export function isSupabaseConfigured(): boolean {
+  if (process.env.FORCE_MEMORY_DB === 'true') {
+    return false;
+  }
   const supabaseUrl = config.SUPABASE_URL || process.env.SUPABASE_URL;
   const supabaseServiceKey = config.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY;
   return Boolean(

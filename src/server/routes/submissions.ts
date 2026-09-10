@@ -21,9 +21,9 @@ import {
   submitOtpToPausedSession,
 } from '../../submitter/liveSubmit.js';
 import { verifySubmissionSignals, registerSubmissionSession } from '../../submitter/captchaResume.js';
-import { captureWebProof, captureFailedScreenshot } from '../../submitter/proofCapture.js';
+import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } from '../../submitter/proofCapture.js';
 import { fillForm } from '../../submitter/formFiller.js';
-import { getApplication, updateStatus } from '../../db/applications.js';
+import { getApplication, updateStatus, enqueueApplication } from '../../db/applications.js';
 
 export const submissionsRouter = Router();
 
@@ -88,7 +88,41 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
 submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promise<void> => {
   const rawId = req.params.id;
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+  const isSync = req.query.sync === 'true' || req.body?.sync === true;
+  const userEmail = (req as any).user?.email || req.body?.assignedCaEmail || undefined;
 
+  // Asynchronous queue insertion (default production flow - Phase V2-4c)
+  if (!isSync) {
+    try {
+      const { submissionOrder, application } = await enqueueApplication(appId, {
+        assignedCaEmail: userEmail,
+        jobUrl: req.body?.jobUrl,
+      });
+
+      console.log(
+        `[Submissions Router] 📥 Application ${application.id || appId} queued (submission_order: ${submissionOrder}, ca: ${userEmail || 'none'})`
+      );
+
+      res.status(200).json({
+        success: true,
+        status: 'QUEUED',
+        applicationId: application.id || appId,
+        submissionOrder,
+        message: `Application queued for submission (Order: ${submissionOrder}).`,
+      });
+      return;
+    } catch (err: any) {
+      console.error(`[Submissions Router] ❌ Enqueue error for ${appId}:`, err);
+      res.status(500).json({
+        success: false,
+        status: 'FAILED',
+        error: err.message || 'Failed to queue application.',
+      });
+      return;
+    }
+  }
+
+  // Synchronous execution fallback (when ?sync=true)
   try {
     const result = await runLiveSubmit(appId, {
       headless: req.body?.headless !== undefined ? req.body.headless : true,
@@ -478,6 +512,78 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
 });
 
 /**
+ * POST /api/applications/:id/capture-email-proof
+ * Manually retries capturing confirmation email proof screenshot from Zoho Reader.
+ */
+submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Response): Promise<void> => {
+  const rawId = req.params.id;
+  const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+  const jobUrl = req.body?.jobUrl;
+
+  try {
+    const app = await getApplication(appId, jobUrl);
+    if (!app) {
+      res.status(404).json({ success: false, error: `Application '${appId}' not found.` });
+      return;
+    }
+
+    if (!app.proof_web_url) {
+      res.status(400).json({
+        success: false,
+        error: 'Cannot capture email proof: web confirmation proof is missing.',
+      });
+      return;
+    }
+
+    if (app.proof_email_url) {
+      res.status(200).json({
+        success: true,
+        alreadyCaptured: true,
+        proofEmailUrl: app.proof_email_url,
+        proofEmailCapturedAt: app.proof_email_captured_at,
+        emailProofStatus: 'captured',
+      });
+      return;
+    }
+
+    if (app.email_proof_status === 'pending') {
+      res.status(409).json({
+        success: false,
+        error: 'Automatic email proof capture is currently in progress. Please wait.',
+      });
+      return;
+    }
+
+    console.log(`[Submissions Router] 📧 Manual email proof capture triggered for ${appId}`);
+    const emailUrl = await captureAndSaveEmailProof(app, {
+      timeoutMs: req.body?.timeoutMs ?? 300000, // 5 min timeout for manual retry
+    });
+
+    if (emailUrl) {
+      const updated = await getApplication(appId, jobUrl);
+      res.status(200).json({
+        success: true,
+        proofEmailUrl: emailUrl,
+        proofEmailCapturedAt: updated?.proof_email_captured_at || new Date().toISOString(),
+        emailProofStatus: 'captured',
+      });
+    } else {
+      res.status(408).json({
+        success: false,
+        error: 'Confirmation email not found in inbox within timeout. You may retry later.',
+        emailProofStatus: 'timed_out',
+      });
+    }
+  } catch (err: any) {
+    console.error(`[Submissions Router] ❌ Capture email proof error for ${appId}:`, err);
+    res.status(500).json({
+      success: false,
+      error: err.message || 'Failed to capture email proof.',
+    });
+  }
+});
+
+/**
  * GET /api/applications/:id/proof
  * Retrieves proof screenshot URL and capture metadata for an application.
  */
@@ -509,6 +615,8 @@ submissionsRouter.get('/:id/proof', async (req: Request, res: Response): Promise
       proofCapturedAt: app.proof_captured_at,
       proofEmailUrl: app.proof_email_url,
       proofEmailCapturedAt: app.proof_email_captured_at,
+      emailProofStatus: app.email_proof_status || (app.proof_email_url ? 'captured' : (app.proof_web_url ? 'timed_out' : null)),
+      emailProofAttemptedAt: app.email_proof_attempted_at,
     });
   } catch (err: any) {
     console.error(`[Submissions Router] ❌ Proof route error for ${appId}:`, err);

@@ -24,6 +24,8 @@
     "test:e2e": "tsx tests/e2eIntegration.test.ts",
     "typecheck": "tsc --noEmit",
     "start:prod": "node dist/server/index.js",
+    "daemon": "tsx src/submitter/queueWorker.ts",
+    "daemon:prod": "node dist/submitter/queueWorker.js",
     "ingest:storage": "tsx src/scanner/storageCsvIngestion.ts"
   },
   "keywords": [

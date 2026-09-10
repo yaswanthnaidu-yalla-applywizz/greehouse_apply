@@ -57,6 +57,8 @@ export interface CandidateDetail {
 export interface DashboardStats {
   totalCandidates: number;
   totalApplications: number;
+  successfulApplications: number;
+  failedApplications: number;
   uniqueScannedJobs: number;
   totalFieldsPopulated: number;
   supabaseTaggedCount: number;
@@ -69,6 +71,7 @@ export interface DashboardStats {
 export type ApplicationStatus =
   | 'READY_FOR_REVIEW'
   | 'DRY_RUN_COMPLETE'
+  | 'QUEUED'
   | 'APPLYING'
   | 'APPLIED'
   | 'FAILED'
@@ -76,21 +79,39 @@ export type ApplicationStatus =
   | 'OTP_REQUIRED'
   | 'CAPTCHA_TIMEOUT';
 
+export type EmailProofStatus = 'pending' | 'captured' | 'timed_out';
+
 export interface ApplicationDetail {
   id?: string;
   applywizz_id: string;
+  applywizzId?: string;
   job_url: string;
+  jobUrl?: string;
   company_name?: string | null;
+  companyName?: string | null;
   job_title?: string | null;
+  jobTitle?: string | null;
   status: ApplicationStatus;
   resolved_fields: ResolvedField[];
+  resolvedFields?: ResolvedField[];
   proof_web_url?: string | null;
+  proofWebUrl?: string | null;
   proof_captured_at?: string | null;
+  proofCapturedAt?: string | null;
   proof_email_url?: string | null;
+  proofEmailUrl?: string | null;
   proof_email_captured_at?: string | null;
+  proofEmailCapturedAt?: string | null;
+  email_proof_status?: EmailProofStatus | null;
+  emailProofStatus?: EmailProofStatus | null;
+  email_proof_attempted_at?: string | null;
+  emailProofAttemptedAt?: string | null;
   dry_run_screenshot_url?: string | null;
+  dryRunScreenshotUrl?: string | null;
   error_message?: string | null;
+  errorMessage?: string | null;
   submitted_at?: string | null;
+  submittedAt?: string | null;
   created_at?: string;
   updated_at?: string;
 }

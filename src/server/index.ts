@@ -27,18 +27,31 @@ import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
 import { authRouter, ALWAYS_ALLOWED_EMAILS } from './routes/auth.js';
+import { notificationsRouter } from './routes/notifications.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
-import { fetchAllowedCandidates, type WorkHistoryCandidateRecord } from '../services/workHistoryClient.js';
-import { cacheApplicationLocally } from '../db/applications.js';
+import {
+  fetchAllowedCandidates,
+  fetchWorkHistoryForDate,
+  getISTDateString,
+  type WorkHistoryCandidateRecord,
+} from '../services/workHistoryClient.js';
+import { cacheApplicationLocally, getSubmissionOutcomeCounts } from '../db/applications.js';
+import { getSignedResumeUrl, downloadResumeFromSupabase } from '../db/storage.js';
+import { isSupabaseConfigured } from '../db/client.js';
+import { SubmissionQueueDaemon } from '../submitter/queueWorker.js';
 import {
   demoApplication,
   demoSegment,
   demoTemplate,
+  akshithaSegment,
+  akshithaApplications,
+  akshithaTemplates,
   toApplicationRow,
   mergeDemoFixtures,
   DEMO_APPLYWIZZ_ID,
   DEMO_JOB_URL,
+  AKSHITHA_APPLYWIZZ_ID,
 } from '../dashboard/demoFixtures.js';
 import { zohoReader } from '../services/zohoReader.js';
 import type {
@@ -69,6 +82,8 @@ export interface CandidateSummary {
 export interface DashboardStats {
   totalCandidates: number;
   totalApplications: number;
+  successfulApplications: number;
+  failedApplications: number;
   uniqueScannedJobs: number;
   totalFieldsPopulated: number;
   supabaseTaggedCount: number;
@@ -166,23 +181,38 @@ export function loadArtifacts(
   }
 
   artifactCache.candidateSegments = mergeDemoFixtures(
-    [demoSegment, ...segments.filter((s) => s.applywizzId !== demoSegment.applywizzId)],
-    [demoSegment],
+    [
+      demoSegment,
+      akshithaSegment,
+      ...segments.filter(
+        (s) => s.applywizzId !== demoSegment.applywizzId && s.applywizzId !== akshithaSegment.applywizzId
+      ),
+    ],
+    [demoSegment, akshithaSegment],
     (s) => s.applywizzId
   );
   artifactCache.scannedJobs = mergeDemoFixtures(
-    [demoTemplate, ...templates.filter((t) => t.jobUrl !== demoTemplate.jobUrl)],
-    [demoTemplate],
+    [
+      demoTemplate,
+      ...akshithaTemplates,
+      ...templates.filter(
+        (t) => t.jobUrl !== demoTemplate.jobUrl && !akshithaTemplates.some((at) => at.jobUrl === t.jobUrl)
+      ),
+    ],
+    [demoTemplate, ...akshithaTemplates],
     (t) => t.jobUrl
   );
   artifactCache.resolvedApplications = mergeDemoFixtures(
     [
       demoApplication,
+      ...akshithaApplications,
       ...applications.filter(
-        (a) => `${a.applywizzId}::${a.jobUrl}` !== `${demoApplication.applywizzId}::${demoApplication.jobUrl}`
+        (a) =>
+          `${a.applywizzId}::${a.jobUrl}` !== `${demoApplication.applywizzId}::${demoApplication.jobUrl}` &&
+          !akshithaApplications.some((aa) => `${a.applywizzId}::${a.jobUrl}` === `${aa.applywizzId}::${aa.jobUrl}`)
       ),
     ],
-    [demoApplication],
+    [demoApplication, ...akshithaApplications],
     (a) => `${a.applywizzId}::${a.jobUrl}`
   );
   artifactCache.lastLoadedAt = new Date().toISOString();
@@ -228,6 +258,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   app.use('/api/applications', requireAuth, submissionsRouter);
   app.use('/api/applications', requireAuth, applicationsRouter);
 
+  // Real events notifications routes (protected)
+  app.use('/api/notifications', requireAuth, notificationsRouter);
+
   // Protect candidates and admin namespaces
   app.use('/api/candidates', requireAuth);
   app.use('/api/admin', requireAuth);
@@ -254,7 +287,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * GET /api/stats
    * Returns aggregated dashboard metrics.
    */
-  app.get('/api/stats', (_req: Request, res: Response) => {
+  app.get('/api/stats', async (req: Request, res: Response) => {
     let totalFields = 0;
     let supabaseCount = 0;
     let aiCount = 0;
@@ -267,9 +300,41 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
+    const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+      ? req.query.date
+      : undefined;
+
+    const userEmail = ((req as any).user?.email || '').trim().toLowerCase();
+    const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+
+    let allowedCandidateIds: string[] | undefined = undefined;
+    if (!isAdmin) {
+      const targetDate = dateParam || getISTDateString(0);
+      let cached = getCachedWorkHistory(userEmail, targetDate);
+      if (!cached) {
+        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      allowedCandidateIds = cached.candidateIds;
+    }
+
+    const outcomes = await getSubmissionOutcomeCounts({
+      date: dateParam,
+      allowedCandidateIds,
+    });
+
     const stats: DashboardStats = {
       totalCandidates: artifactCache.candidateSegments.length,
       totalApplications: artifactCache.resolvedApplications.length,
+      successfulApplications: outcomes.successfulApplications,
+      failedApplications: outcomes.failedApplications,
       uniqueScannedJobs: artifactCache.scannedJobs.length,
       totalFieldsPopulated: totalFields,
       supabaseTaggedCount: supabaseCount,
@@ -311,21 +376,25 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   /**
    * GET /api/candidates
-   * Returns summary list of all segregated candidates with job counts and status.
+   * Returns summary list of all segregated candidates with job counts and status for the selected IST date.
    */
   app.get('/api/candidates', async (req: AuthenticatedRequest, res: Response) => {
     const userEmail = (req.user?.email || '').trim().toLowerCase();
     const isAdmin = !userEmail || ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+
+    const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+      ? req.query.date
+      : getISTDateString(0);
 
     let allowedIds: Set<string> | null = null;
     let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
     let workHistoryUnreachable = false;
 
     if (!isAdmin) {
-      let cached = getCachedWorkHistory(userEmail);
+      let cached = getCachedWorkHistory(userEmail, dateParam);
       if (!cached) {
-        const whResult = await fetchAllowedCandidates(userEmail);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+        const whResult = await fetchWorkHistoryForDate(userEmail, dateParam);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, dateParam);
         cached = {
           records: whResult.records,
           candidateIds: whResult.candidateIds,
@@ -340,6 +409,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     res.setHeader('X-Work-History-Unreachable', String(workHistoryUnreachable));
+    res.setHeader('X-Work-History-Date', dateParam);
 
     // 1. Process candidateSegments
     const matchedSegments = artifactCache.candidateSegments.filter(
@@ -418,19 +488,41 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    if (isAdmin && !candidateSummaries.some((c) => c.applywizzId === DEMO_APPLYWIZZ_ID)) {
-      candidateSummaries.unshift({
-        applywizzId: demoSegment.applywizzId,
-        clientName: demoSegment.clientName,
-        email: demoSegment.profile?.email || '',
-        location: demoSegment.profile?.location || '',
-        totalJobs: 1,
-        readyCount: 1,
-        expiredCount: 0,
-        status: 'READY',
-        syncedAt: demoSegment.syncedAt,
-        resumeAvailable: true,
-      });
+    if (isAdmin) {
+      if (!candidateSummaries.some((c) => c.applywizzId === DEMO_APPLYWIZZ_ID)) {
+        candidateSummaries.unshift({
+          applywizzId: demoSegment.applywizzId,
+          clientName: demoSegment.clientName,
+          email: demoSegment.profile?.email || '',
+          location: demoSegment.profile?.location || '',
+          totalJobs: demoSegment.jobs.length,
+          readyCount: demoSegment.jobs.length,
+          expiredCount: 0,
+          status: 'READY',
+          syncedAt: demoSegment.syncedAt,
+          resumeAvailable: true,
+        });
+      }
+      if (!candidateSummaries.some((c) => c.applywizzId === AKSHITHA_APPLYWIZZ_ID)) {
+        const demoIdx = candidateSummaries.findIndex((c) => c.applywizzId === DEMO_APPLYWIZZ_ID);
+        const akshithaSummary: CandidateSummary = {
+          applywizzId: akshithaSegment.applywizzId,
+          clientName: akshithaSegment.clientName,
+          email: akshithaSegment.profile?.email || '',
+          location: akshithaSegment.profile?.location || '',
+          totalJobs: akshithaSegment.jobs.length,
+          readyCount: akshithaSegment.jobs.length,
+          expiredCount: 0,
+          status: 'READY',
+          syncedAt: akshithaSegment.syncedAt,
+          resumeAvailable: true,
+        };
+        if (demoIdx >= 0) {
+          candidateSummaries.splice(demoIdx + 1, 0, akshithaSummary);
+        } else {
+          candidateSummaries.unshift(akshithaSummary);
+        }
+      }
     }
 
     // For unauthenticated / testing environments without headers, return flat array for backward-compatibility
@@ -442,8 +534,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     if (!isAdmin && candidateSummaries.length === 0) {
       res.json({
         candidates: [],
-        message: 'No candidates were assigned to you on your most recent working day.',
+        message: `No candidates were assigned to you on ${dateParam}.`,
         workHistoryUnreachable,
+        selectedDate: dateParam,
       });
       return;
     }
@@ -451,6 +544,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     res.json({
       candidates: candidateSummaries,
       workHistoryUnreachable,
+      selectedDate: dateParam,
     });
   });
 
@@ -485,7 +579,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    const seg = candidatesMap.get(applywizzId) || (applywizzId === DEMO_APPLYWIZZ_ID ? demoSegment : undefined);
+    const seg =
+      candidatesMap.get(applywizzId) ||
+      (applywizzId === DEMO_APPLYWIZZ_ID
+        ? demoSegment
+        : applywizzId === AKSHITHA_APPLYWIZZ_ID
+        ? akshithaSegment
+        : undefined);
 
     if (!seg) {
       // Check if it's a synthesized candidate from work-history
@@ -495,14 +595,32 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         whRecord = cached?.records.find((r) => r.applywizzId.toUpperCase() === applywizzId.toUpperCase());
       }
       if (whRecord) {
-        const resumeFilename = `${applywizzId}_resume.pdf`;
-        const resumeExists = fs.existsSync(path.join(config.RESUMES_DIR, resumeFilename));
+        const resumeFilenameLocal = `${applywizzId}_resume.pdf`;
+        const resumeExistsLocal = fs.existsSync(path.join(config.RESUMES_DIR, resumeFilenameLocal));
+        let resumeUrl: string | null = null;
+        let resumeFilename: string | null = null;
+
+        if (isSupabaseConfigured()) {
+          try {
+            const signed = await getSignedResumeUrl(`${applywizzId}_resume.pdf`);
+            if (signed) {
+              resumeUrl = signed;
+              resumeFilename = `${applywizzId}_resume.pdf`;
+            }
+          } catch {}
+        }
+
+        if (!resumeUrl && resumeExistsLocal) {
+          resumeUrl = `/resumes/${resumeFilenameLocal}`;
+          resumeFilename = resumeFilenameLocal;
+        }
+
         res.json({
           applywizzId: whRecord.applywizzId,
           clientName: whRecord.clientName,
           profile: { email: whRecord.clientEmail },
-          resumeUrl: resumeExists ? `/resumes/${resumeFilename}` : null,
-          resumeFilename: resumeExists ? resumeFilename : null,
+          resumeUrl,
+          resumeFilename,
           jobs: [],
         });
         return;
@@ -512,8 +630,32 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    const resumeFilename = `${applywizzId}_resume.pdf`;
-    const resumeExists = fs.existsSync(path.join(config.RESUMES_DIR, resumeFilename));
+    const resumeFilenameLocal = `${applywizzId}_resume.pdf`;
+    const resumeExistsLocal = fs.existsSync(path.join(config.RESUMES_DIR, resumeFilenameLocal));
+    let resumeUrl: string | null = null;
+    let resumeFilename: string | null = null;
+
+    const candidateStoragePath =
+      seg.profile?.resumeUrl ||
+      seg.profile?.localResumePath ||
+      (applywizzId === DEMO_APPLYWIZZ_ID || applywizzId === 'AWL-YASHANTH'
+        ? 'resumes/AWL-YASHANTH_resume.pdf'
+        : `${applywizzId}_resume.pdf`);
+
+    if (isSupabaseConfigured()) {
+      try {
+        const signed = await getSignedResumeUrl(candidateStoragePath);
+        if (signed) {
+          resumeUrl = signed;
+          resumeFilename = path.basename(candidateStoragePath);
+        }
+      } catch {}
+    }
+
+    if (!resumeUrl && resumeExistsLocal) {
+      resumeUrl = `/resumes/${resumeFilenameLocal}`;
+      resumeFilename = resumeFilenameLocal;
+    }
 
     const candidateApps = artifactCache.resolvedApplications.filter(
       (a) => a.applywizzId === applywizzId
@@ -563,10 +705,49 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       applywizzId: seg.applywizzId,
       clientName: seg.clientName,
       profile: seg.profile,
-      resumeUrl: resumeExists ? `/resumes/${resumeFilename}` : null,
-      resumeFilename: resumeExists ? resumeFilename : null,
+      resumeUrl,
+      resumeFilename,
       jobs: eligibleJobsWithStatus,
     });
+  });
+
+  /**
+   * GET /api/candidates/:applywizzId/resume
+   * Streams or serves candidate master resume PDF directly from Supabase Storage or local cache.
+   */
+  app.get('/api/candidates/:applywizzId/resume', async (req: AuthenticatedRequest, res: Response) => {
+    const applywizzId = Array.isArray(req.params.applywizzId)
+      ? req.params.applywizzId[0]
+      : String(req.params.applywizzId || '');
+
+    const targetPath = (applywizzId === DEMO_APPLYWIZZ_ID || applywizzId === 'AWL-YASHANTH')
+      ? 'resumes/AWL-YASHANTH_resume.pdf'
+      : `${applywizzId}_resume.pdf`;
+
+    const buffer = await downloadResumeFromSupabase(targetPath);
+    if (buffer) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${applywizzId}_resume.pdf"`);
+      res.send(buffer);
+      return;
+    }
+
+    const localCandidates = [
+      path.resolve(process.cwd(), config.RESUMES_DIR, `${applywizzId}_resume.pdf`),
+      path.resolve(process.cwd(), config.RESUMES_DIR, 'AWL-YASHANTH_resume.pdf'),
+      path.resolve(process.cwd(), config.RESUMES_DIR, 'my-resume.pdf'),
+      path.resolve(process.cwd(), config.RESUMES_DIR, 'my-resume.pdf.pdf'),
+    ];
+    for (const f of localCandidates) {
+      if (fs.existsSync(f)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${applywizzId}_resume.pdf"`);
+        res.sendFile(f);
+        return;
+      }
+    }
+
+    res.status(404).json({ error: `Resume not found for candidate ${applywizzId}` });
   });
 
   /**
@@ -612,10 +793,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    let decodedUrl = decodeURIComponent(rawJobUrl);
-    if (decodedUrl.includes('grnh.se')) {
-      decodedUrl = await resolveShortlink(decodedUrl);
-    }
+    const decodedUrl = decodeURIComponent(rawJobUrl);
 
     // 1. Check exact key match in applicationsMap
     let appItem =
@@ -628,6 +806,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         (a) =>
           a.applywizzId === applywizzId &&
           (a.jobUrl === decodedUrl ||
+            a.jobUrl === rawJobUrl ||
             decodedUrl.includes(a.jobUrl) ||
             a.jobUrl.includes(decodedUrl))
       );
@@ -635,6 +814,32 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!appItem && (applywizzId === DEMO_APPLYWIZZ_ID || decodedUrl === DEMO_JOB_URL || rawJobUrl === DEMO_JOB_URL)) {
       appItem = demoApplication;
+    }
+
+    if (!appItem && applywizzId === AKSHITHA_APPLYWIZZ_ID) {
+      appItem = akshithaApplications.find(
+        (a) =>
+          a.jobUrl === decodedUrl ||
+          a.jobUrl === rawJobUrl ||
+          decodedUrl.includes(a.jobUrl) ||
+          a.jobUrl.includes(decodedUrl)
+      );
+    }
+
+    let lookupUrl = decodedUrl;
+    if (!appItem && decodedUrl.includes('grnh.se')) {
+      try {
+        lookupUrl = await resolveShortlink(decodedUrl);
+        appItem =
+          applicationsMap.get(`${applywizzId}::${lookupUrl}`) ||
+          artifactCache.resolvedApplications.find(
+            (a) =>
+              a.applywizzId === applywizzId &&
+              (a.jobUrl === lookupUrl ||
+                lookupUrl.includes(a.jobUrl) ||
+                a.jobUrl.includes(lookupUrl))
+          );
+      } catch {}
     }
 
     if (appItem) {
@@ -645,6 +850,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     // 3. Fallback: construct application payload from template if available
     const template =
       templatesMap.get(decodedUrl) ||
+      templatesMap.get(lookupUrl) ||
       Array.from(templatesMap.values()).find(
         (t) => t.jobUrl.includes(decodedUrl) || decodedUrl.includes(t.jobUrl)
       );
@@ -732,10 +938,22 @@ export function startServer(
         console.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
       });
     }
+
+    // Launch background round-robin submission worker daemon if enabled (Phase V2-4c)
+    let queueDaemon: SubmissionQueueDaemon | null = null;
+    if (process.env.ENABLE_QUEUE_WORKER === 'true') {
+      const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 2;
+      queueDaemon = new SubmissionQueueDaemon({ concurrency });
+      queueDaemon.start();
+    }
   });
 
   const cleanup = async () => {
     await zohoReader.cleanup().catch(() => {});
+    if (process.env.ENABLE_QUEUE_WORKER === 'true') {
+      // Allow in-flight Playwright workers to finish
+      console.log('[Server] 🧹 Shutting down background queue daemon...');
+    }
   };
   process.once('SIGINT', cleanup);
   process.once('SIGTERM', cleanup);

@@ -36,6 +36,17 @@ export const App: React.FC = () => {
     }
   });
 
+  const getTodayIST = (): string => {
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istDate = new Date(now.getTime() + istOffset);
+    const yyyy = istDate.getUTCFullYear();
+    const mm = String(istDate.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(istDate.getUTCDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayIST);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stats'>('dashboard');
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -48,13 +59,14 @@ export const App: React.FC = () => {
   const [isLoadingApplication, setIsLoadingApplication] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const [notifications, setNotifications] = useState<any[]>(() => {
-    if (typeof window === 'undefined') return [];
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [readNotifIds, setReadNotifIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
     try {
-      const saved = localStorage.getItem('greenhouse_notifications');
-      return saved ? JSON.parse(saved) : [];
+      const saved = localStorage.getItem('greenhouse_read_notif_ids');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch {
-      return [];
+      return new Set();
     }
   });
   const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
@@ -71,38 +83,39 @@ export const App: React.FC = () => {
   }, []);
 
   const unreadNotifsCount = useMemo(() => {
-    return notifications.filter((n) => !n.isRead).length;
-  }, [notifications]);
-
-  const addNotification = useCallback((notif: any) => {
-    setNotifications((prev) => {
-      const exists = prev.some(
-        (n) => n.id === notif.id || (n.applywizzId === notif.applywizzId && n.jobUrl === notif.jobUrl && n.status === notif.status && Math.abs(new Date(n.timestamp).getTime() - new Date(notif.timestamp).getTime()) < 10000)
-      );
-      if (exists) return prev;
-      const updated = [notif, ...prev].slice(0, 50);
-      try {
-        localStorage.setItem('greenhouse_notifications', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
-  }, []);
+    return notifications.filter((n) => !readNotifIds.has(n.id)).length;
+  }, [notifications, readNotifIds]);
 
   const markAllNotifsAsRead = () => {
-    setNotifications((prev) => {
-      const updated = prev.map((n) => ({ ...n, isRead: true }));
-      try {
-        localStorage.setItem('greenhouse_notifications', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
+    const allIds = new Set(notifications.map((n) => n.id));
+    setReadNotifIds(allIds);
+    try {
+      localStorage.setItem('greenhouse_read_notif_ids', JSON.stringify(Array.from(allIds)));
+    } catch {}
   };
 
-  const clearAllNotifs = () => {
+  const clearNotification = async (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    try {
+      await fetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+    } catch (err) {
+      console.error(`Failed to delete notification ${id}:`, err);
+    }
+  };
+
+  const clearAllNotifs = async () => {
     setNotifications([]);
     try {
-      localStorage.removeItem('greenhouse_notifications');
-    } catch {}
+      await fetch(`${API_BASE_URL}/api/notifications/all`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+    } catch (err) {
+      console.error('Failed to clear notifications:', err);
+    }
   };
 
   const [workHistoryUnreachable, setWorkHistoryUnreachable] = useState<boolean>(() => {
@@ -122,39 +135,69 @@ export const App: React.FC = () => {
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  const fetchNotifications = useCallback(async () => {
+  const handleSignOut = () => {
+    localStorage.removeItem('applywizz_auth_token');
+    localStorage.removeItem('applywizz_auth_user');
+    localStorage.removeItem('applywizz_wh_unreachable');
+    setWorkHistoryUnreachable(false);
+    setWorkHistoryBannerDismissed(false);
+    setNoCandidatesMessage(null);
+    setCurrentUser(null);
+  };
+
+  const fetchInitialData = useCallback(async (isPolling = false, dateStr = selectedDate) => {
+    if (!isPolling) setIsLoadingCandidates(true);
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
-      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch(`${API_BASE_URL}/api/applications/notifications`, { headers });
+      const headers = getAuthHeaders();
+      const [candidatesRes, statsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/candidates?date=${encodeURIComponent(dateStr)}`, { headers }),
+        fetch(`${API_BASE_URL}/api/stats?date=${encodeURIComponent(dateStr)}`, { headers }),
+      ]);
+
+      if (candidatesRes.ok) {
+        const raw = await candidatesRes.json();
+        const candidateData = Array.isArray(raw) ? raw : (raw.candidates || []);
+        const unreachable = !Array.isArray(raw)
+          ? Boolean(raw.workHistoryUnreachable)
+          : candidatesRes.headers.get('x-work-history-unreachable') === 'true';
+        const emptyMsg = !Array.isArray(raw) ? (raw.message || null) : null;
+
+        setCandidates(candidateData);
+        if (unreachable) setWorkHistoryUnreachable(true);
+        setNoCandidatesMessage(emptyMsg);
+
+        setSelectedCandidateId((prev) => {
+          if (prev && candidateData.some((c: CandidateSummary) => c.applywizzId === prev)) return prev;
+          return candidateData.length > 0 ? candidateData[0].applywizzId : null;
+        });
+      }
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
+    } catch (err) {
+      console.error('Failed to load initial data:', err);
+    } finally {
+      if (!isPolling) setIsLoadingCandidates(false);
+    }
+  }, [selectedDate]);
+
+  const fetchNotifications = useCallback(async (dateStr = selectedDate) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/notifications?date=${encodeURIComponent(dateStr)}`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const serverNotifs = await res.json();
-        if (Array.isArray(serverNotifs) && serverNotifs.length > 0) {
-          setNotifications((prev) => {
-            const readIds = new Set(prev.filter((p) => p.isRead).map((p) => p.id));
-            const combined = [...serverNotifs.map((sn: any) => ({
-              ...sn,
-              type: sn.status === 'APPLIED' ? 'SUCCESS' : 'FAILED',
-              isRead: readIds.has(sn.id),
-            }))];
-            for (const p of prev) {
-              if (!combined.some((c) => c.id === p.id || (c.applywizzId === p.applywizzId && c.jobUrl === p.jobUrl && c.status === p.status))) {
-                combined.push(p);
-              }
-            }
-            combined.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-            const sliced = combined.slice(0, 50);
-            try {
-              localStorage.setItem('greenhouse_notifications', JSON.stringify(sliced));
-            } catch {}
-            return sliced;
-          });
+        if (Array.isArray(serverNotifs)) {
+          setNotifications(serverNotifs);
         }
       }
     } catch (err) {
       console.warn('Failed to fetch notifications:', err);
     }
-  }, []);
+  }, [selectedDate]);
 
   const handleRefresh = async () => {
     if (isRefreshing) return;
@@ -172,14 +215,14 @@ export const App: React.FC = () => {
           console.warn('Artifacts reload error:', e);
         }
       }
-      await fetchInitialData();
+      await fetchInitialData(false, selectedDate);
       if (selectedCandidateId) {
         await fetchCandidateDetail(selectedCandidateId);
       }
       if (selectedCandidateId && selectedJobUrl) {
         await fetchJobApplication(selectedCandidateId, selectedJobUrl);
       }
-      await fetchNotifications();
+      await fetchNotifications(selectedDate);
     } catch (err) {
       console.error('Refresh error:', err);
     } finally {
@@ -189,14 +232,18 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    fetchInitialData();
-    fetchNotifications();
+    fetchInitialData(false, selectedDate);
+    fetchNotifications(selectedDate);
+  }, [currentUser, selectedDate]);
+
+  useEffect(() => {
+    if (!currentUser) return;
     const pollInterval = setInterval(() => {
-      fetchInitialData(true);
-      fetchNotifications();
+      fetchInitialData(true, selectedDate);
+      fetchNotifications(selectedDate);
     }, 3000);
     return () => clearInterval(pollInterval);
-  }, [currentUser, fetchInitialData, fetchNotifications]);
+  }, [currentUser, selectedDate, fetchInitialData, fetchNotifications]);
 
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
@@ -302,39 +349,8 @@ export const App: React.FC = () => {
       setCandidateDetail({ ...candidateDetail, jobs: updatedJobs });
     }
 
-    if (newStatus === 'APPLIED') {
-      addNotification({
-        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        type: 'SUCCESS',
-        status: 'APPLIED',
-        applywizzId: selectedCandidateId || application?.applywizzId || application?.applywizz_id || 'UNKNOWN',
-        candidateName: candidateDetail?.clientName || application?.candidateName || application?.clientName || selectedCandidateId,
-        companyName: application?.companyName || application?.company_name || 'Greenhouse Company',
-        jobTitle: application?.jobTitle || application?.job_title || 'Job Opening',
-        jobUrl: selectedJobUrl || application?.jobUrl || application?.job_url,
-        proofWebUrl: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || application?.proof_web_url,
-        timestamp: new Date().toISOString(),
-        isRead: false,
-      });
-    } else if (newStatus === 'FAILED') {
-      const reason =
-        updatedPayload?.error ||
-        updatedPayload?.errorMessage ||
-        updatedPayload?.message ||
-        'Application submission failed or was rejected by portal.';
-      addNotification({
-        id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        type: 'FAILED',
-        status: 'FAILED',
-        applywizzId: selectedCandidateId || application?.applywizzId || application?.applywizz_id || 'UNKNOWN',
-        candidateName: candidateDetail?.clientName || application?.candidateName || application?.clientName || selectedCandidateId,
-        companyName: application?.companyName || application?.company_name || 'Greenhouse Company',
-        jobTitle: application?.jobTitle || application?.job_title || 'Job Opening',
-        jobUrl: selectedJobUrl || application?.jobUrl || application?.job_url,
-        reason,
-        timestamp: new Date().toISOString(),
-        isRead: false,
-      });
+    if (newStatus === 'APPLIED' || newStatus === 'FAILED' || newStatus === 'APPLYING') {
+      fetchNotifications();
     }
   };
 
@@ -395,6 +411,22 @@ export const App: React.FC = () => {
 
         {/* Right: Metrics Pills, Notifications & User Avatar */}
         <div className="flex items-center gap-3">
+          {/* Date Scope Filter (IST) */}
+          <div className="flex items-center gap-1.5 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
+            <span className="text-xs font-mono font-bold text-[#64748B]">📅 IST:</span>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setSelectedDate(e.target.value);
+                }
+              }}
+              title="Filter dashboard by assignments on this IST date"
+              className="text-xs font-mono font-bold text-[#1A1A2E] bg-transparent border-none outline-none cursor-pointer"
+            />
+          </div>
+
           {stats && (
             <div className="hidden lg:flex items-center gap-2">
               <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5C4A0A] shadow-[1px_1px_0px_#1A1A2E]">
@@ -488,7 +520,9 @@ export const App: React.FC = () => {
                     </div>
                   ) : (
                     notifications.map((notif: any) => {
+                      const isApplying = notif.status === 'APPLYING';
                       const isSuccess = notif.status === 'APPLIED' || notif.type === 'SUCCESS';
+                      const isUnread = !readNotifIds.has(notif.id);
                       return (
                         <div
                           key={notif.id}
@@ -498,24 +532,41 @@ export const App: React.FC = () => {
                             setIsNotifOpen(false);
                           }}
                           className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
-                            isSuccess
+                            isApplying
+                              ? 'bg-[#EFF6FF] border-[#BFDBFE] hover:border-[#3B82F6]'
+                              : isSuccess
                               ? 'bg-[#F0FDF4] border-[#86EFAC] hover:border-[#10B981]'
                               : 'bg-[#FEF2F2] border-[#FECACA] hover:border-[#EF4444]'
-                          } ${!notif.isRead ? 'shadow-[2px_2px_0px_#1A1A2E]' : 'opacity-85'}`}
+                          } ${isUnread ? 'shadow-[2px_2px_0px_#1A1A2E]' : 'opacity-85'}`}
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span
                               className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                                isSuccess
+                                isApplying
+                                  ? 'bg-[#DBEAFE] text-[#1D4ED8] border border-[#93C5FD]'
+                                  : isSuccess
                                   ? 'bg-[#DCFCE7] text-[#166534] border border-[#86EFAC]'
                                   : 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]'
                               }`}
                             >
-                              {isSuccess ? '✅ Succeeded' : '❌ Failed'}
+                              {isApplying ? '⏳ Applying' : isSuccess ? '✅ Succeeded' : '❌ Failed'}
                             </span>
-                            <span className="text-[10px] text-[#64748B] font-mono">
-                              {notif.timestamp ? new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-[#64748B] font-mono">
+                                {notif.timestamp ? new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  clearNotification(notif.id);
+                                }}
+                                title="Dismiss notification"
+                                className="text-[10px] text-[#94A3B8] hover:text-[#EF4444] px-1 py-0.5 rounded hover:bg-white/80 font-bold transition-colors"
+                              >
+                                ✕
+                              </button>
+                            </div>
                           </div>
 
                           <div className="text-xs font-bold text-[#1A1A2E]">
@@ -529,7 +580,13 @@ export const App: React.FC = () => {
                             🏢 {notif.companyName} — {notif.jobTitle}
                           </div>
 
-                          {!isSuccess && (
+                          {isApplying && (
+                            <div className="mt-1 text-[10px] text-[#1D4ED8] font-mono flex items-center gap-1">
+                              <span className="inline-block animate-spin">⏳</span> Application submission in progress...
+                            </div>
+                          )}
+
+                          {!isSuccess && !isApplying && (
                             <div className="mt-1.5 p-1.5 bg-white border border-[#EF4444]/40 rounded text-[11px] text-[#991B1B] font-mono break-words leading-tight">
                               <span className="font-bold">Reason: </span>
                               {notif.reason || 'Submission failed or was rejected.'}
@@ -608,7 +665,7 @@ export const App: React.FC = () => {
           </div>
 
           {stats ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
               <div className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
                 <span className="text-xs font-bold uppercase tracking-wider text-[#5C4A0A]">
                   Total Candidates
@@ -630,6 +687,30 @@ export const App: React.FC = () => {
                 </div>
                 <div className="text-[11px] font-mono text-[#1E3A5F] mt-1">
                   Active job assignments
+                </div>
+              </div>
+
+              <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
+                  Successful Applications
+                </span>
+                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                  {stats.successfulApplications}
+                </div>
+                <div className="text-[11px] font-mono text-[#065F46] mt-1">
+                  Submitted with APPLIED status
+                </div>
+              </div>
+
+              <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#991B1B]">
+                  Failed Applications
+                </span>
+                <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                  {stats.failedApplications}
+                </div>
+                <div className="text-[11px] font-mono text-[#991B1B] mt-1">
+                  Terminal FAILED submissions
                 </div>
               </div>
 
@@ -670,6 +751,7 @@ export const App: React.FC = () => {
             onSelectCandidate={(id) => setSelectedCandidateId(id)}
             isLoading={isLoadingCandidates}
             emptyMessage={noCandidatesMessage}
+            selectedDate={selectedDate}
           />
 
           {/* Right Pane: Candidate Jobs Queue & Form Renderer */}

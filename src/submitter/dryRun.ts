@@ -83,11 +83,14 @@ export async function runDryRun(
     // 2. Launch Chromium browser
     browser = await chromium.launch({
       headless,
+      slowMo: headless ? 0 : 80, // slow down interactions in headful so they're visible
       args: [
         '--disable-blink-features=AutomationControlled',
         '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
+        // Docker/container-only flags — omit in headful mode so the window renders
+        ...(headless
+          ? ['--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+          : []),
       ],
     });
 
@@ -122,6 +125,12 @@ export async function runDryRun(
       fullPage: true,
       type: 'png',
     });
+
+    // In headful mode: pause so the operator can see the filled form before the window closes
+    if (!headless) {
+      console.log(`[Dry Run] 👁 Headful mode — pausing 3s for visual inspection...`);
+      await page.waitForTimeout(3000);
+    }
 
     // 6. Upload screenshot to Supabase Storage (proofs_dry_run bucket)
     let screenshotUrl = '';

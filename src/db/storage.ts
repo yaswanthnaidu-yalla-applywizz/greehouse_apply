@@ -275,7 +275,56 @@ export async function uploadEmailProof(
 }
 
 /**
- * Downloads candidate master resume on-demand to os.tmpdir() using resume_url or local cache.
+ * Reads or downloads a resume file from Supabase Storage resumes bucket.
+ */
+export async function downloadResumeFromSupabase(storagePath: string): Promise<Buffer | null> {
+  if (!isSupabaseConfigured() || !storagePath) return null;
+  try {
+    const supabase = getDbClient();
+    const cleanPath = storagePath.replace(/^\/+/, '');
+    const pathsToTry = [
+      cleanPath,
+      cleanPath.replace(/^resumes\//, ''),
+      cleanPath.startsWith('resumes/') ? cleanPath : `resumes/${cleanPath}`,
+    ];
+    for (const p of pathsToTry) {
+      const { data, error } = await supabase.storage.from('resumes').download(p);
+      if (!error && data) {
+        const arrayBuf = await data.arrayBuffer();
+        return Buffer.from(arrayBuf);
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[Storage] ⚠️ Failed to download resume from Supabase Storage (${storagePath}): ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * Gets a signed read URL (valid 24h) for a resume in Supabase Storage.
+ */
+export async function getSignedResumeUrl(storagePath: string, expiresIn: number = 86400): Promise<string> {
+  if (!isSupabaseConfigured() || !storagePath) return '';
+  try {
+    const supabase = getDbClient();
+    const cleanPath = storagePath.replace(/^\/+/, '');
+    const pathsToTry = [
+      cleanPath,
+      cleanPath.replace(/^resumes\//, ''),
+      cleanPath.startsWith('resumes/') ? cleanPath : `resumes/${cleanPath}`,
+    ];
+    for (const p of pathsToTry) {
+      const { data, error } = await supabase.storage.from('resumes').createSignedUrl(p, expiresIn);
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
+      }
+    }
+  } catch {}
+  return '';
+}
+
+/**
+ * Downloads candidate master resume on-demand to os.tmpdir() using Supabase Storage, resume_url or local cache.
  * Uses a short-lived cache in os.tmpdir() keyed by applywizz_id.
  */
 export async function downloadResumeTempFile(applywizzId: string): Promise<string> {
@@ -292,7 +341,34 @@ export async function downloadResumeTempFile(applywizzId: string): Promise<strin
     } catch {}
   }
 
-  // 2. Local resumes directory fallback (dev / offline)
+  // 2. Fetch directly from Supabase Storage (resumes bucket)
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('resume_url, resume_storage_path')
+        .or(`applywizz_id.eq.${applywizzId},applywizz_id.ilike.${applywizzId}`)
+        .maybeSingle();
+
+      const candidatePath =
+        profile?.resume_storage_path ||
+        profile?.resume_url ||
+        (applywizzId === 'AWL-YASWANTH' || applywizzId === 'AWL-YASHANTH'
+          ? 'resumes/AWL-YASHANTH_resume.pdf'
+          : `${applywizzId}_resume.pdf`);
+
+      const resumeBuffer = await downloadResumeFromSupabase(candidatePath);
+      if (resumeBuffer && resumeBuffer.length > 100) {
+        await fs.promises.writeFile(tempFilePath, resumeBuffer);
+        return tempFilePath;
+      }
+    } catch (err: any) {
+      console.warn(`[Storage] ⚠️ Supabase Storage resume fetch failed for ${applywizzId}: ${err.message}`);
+    }
+  }
+
+  // 3. Local resumes directory fallback (dev / offline)
   const localFile = path.resolve(process.cwd(), 'resumes', fileName);
   if (fs.existsSync(localFile)) {
     try {
@@ -303,36 +379,20 @@ export async function downloadResumeTempFile(applywizzId: string): Promise<strin
     } catch {}
   }
 
-  // 3. On-demand fetch directly from candidate's remote resume_url
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('resume_url')
-        .eq('applywizz_id', applywizzId)
-        .maybeSingle();
-
-      if (profile?.resume_url) {
-        const axios = (await import('axios')).default;
-        let targetUrl = profile.resume_url.trim();
-        if (!targetUrl.startsWith('http')) {
-          const s3Base = (config.APPLYWIZZ_S3_BASE_URL || 'https://applywizz-prod.s3.us-east-2.amazonaws.com').replace(/\/+$/, '');
-          targetUrl = `${s3Base}/${encodeURI(targetUrl.replace(/^\/+/, ''))}`;
-        }
-        const resp = await axios.get(targetUrl, {
-          responseType: 'arraybuffer',
-          timeout: 20000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-        });
-        const buffer = Buffer.from(resp.data);
-        await fs.promises.writeFile(tempFilePath, buffer);
-        return tempFilePath;
+  // Also check local my-resume.pdf or AWL-YASHANTH_resume.pdf fallback for demo candidate
+  if (applywizzId === 'AWL-YASWANTH' || applywizzId === 'AWL-YASHANTH') {
+    const demoCandidates = [
+      path.resolve(process.cwd(), 'resumes', 'AWL-YASHANTH_resume.pdf'),
+      path.resolve(process.cwd(), 'resumes', 'my-resume.pdf'),
+      path.resolve(process.cwd(), 'resumes', 'my-resume.pdf.pdf'),
+    ];
+    for (const d of demoCandidates) {
+      if (fs.existsSync(d)) {
+        try {
+          const stats = fs.statSync(d);
+          if (stats.size > 100) return d;
+        } catch {}
       }
-    } catch (err: any) {
-      console.warn(`[Storage] ⚠️ On-demand resume download failed for ${applywizzId}: ${err.message}`);
     }
   }
 
