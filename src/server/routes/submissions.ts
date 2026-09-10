@@ -563,7 +563,8 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
 
     console.log(`[Submissions Router] 📧 Manual email proof capture triggered for ${appId}`);
     const emailUrl = await captureAndSaveEmailProof(app, {
-      timeoutMs: req.body?.timeoutMs ?? 300000, // 5 min timeout for manual retry
+      timeoutMs: req.body?.timeoutMs ?? 45000,
+      isManual: true,
     });
 
     if (emailUrl) {
@@ -575,9 +576,9 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
         emailProofStatus: 'captured',
       });
     } else {
-      res.status(408).json({
+      res.status(422).json({
         success: false,
-        error: 'Confirmation email not found in inbox within timeout. You may retry later.',
+        error: 'Confirmation email not found in Zoho Mail inbox yet. If you recently submitted, please allow 1-2 minutes for email delivery and try again.',
         emailProofStatus: 'timed_out',
       });
     }
