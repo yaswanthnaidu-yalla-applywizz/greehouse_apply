@@ -83,7 +83,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
   const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'carousel' | 'list'>('carousel');
-  const [filterActionableOnly, setFilterActionableOnly] = useState<boolean>(true);
+  const [filterActionableOnly, setFilterActionableOnly] = useState<boolean>(false);
 
   // Reset carousel index when application changes
   useEffect(() => {
