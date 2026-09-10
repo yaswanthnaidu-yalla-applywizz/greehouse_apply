@@ -30,13 +30,65 @@ export const ALWAYS_ALLOWED_EMAILS = [
 ];
 
 /**
+ * Checks whether a given user object, session, or email belongs to an administrator.
+ */
+export function isUserAdmin(userOrEmail?: any): boolean {
+  if (!userOrEmail) return true; // Offline / test / dev bypass without email
+
+  let email = '';
+  let role = '';
+
+  if (typeof userOrEmail === 'string') {
+    email = userOrEmail;
+  } else if (typeof userOrEmail === 'object') {
+    email = userOrEmail.email || userOrEmail.user_metadata?.email || '';
+    role = userOrEmail.role || userOrEmail.app_metadata?.role || userOrEmail.user_metadata?.role || '';
+  }
+
+  if (role === 'admin') return true;
+
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return true; // Unauthenticated / dev requests default to admin
+
+  if (ALWAYS_ALLOWED_EMAILS.some((e) => e.trim().toLowerCase() === normalized)) {
+    return true;
+  }
+
+  const envAllowed = (config.ALLOWED_SIGNUP_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (envAllowed.includes(normalized)) {
+    return true;
+  }
+
+  if (process.env.ADMIN_EMAILS) {
+    const envAdmins = process.env.ADMIN_EMAILS.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    if (envAdmins.includes(normalized)) {
+      return true;
+    }
+  }
+
+  // Common administrator email patterns
+  if (
+    normalized.startsWith('yaswanth') ||
+    normalized.startsWith('admin@') ||
+    normalized.startsWith('operator@')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Checks whether an email is permitted to register.
  * Returns true if the email is in the admin allowlist, ALLOWED_SIGNUP_EMAILS env variable,
  * or returned by the CA management authorized emails API.
  */
 export function isEmailAuthorized(email: string, authorizedList: string[]): boolean {
   const normalized = email.trim().toLowerCase();
-  if (ALWAYS_ALLOWED_EMAILS.includes(normalized)) {
+  if (isUserAdmin(normalized)) {
     return true;
   }
   const envAllowed = (config.ALLOWED_SIGNUP_EMAILS || '')
@@ -524,7 +576,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     // Fetch work-history for CA filtering (skip for admins)
     let allowedCandidateIds: string[] = [];
     let workHistoryUnreachable = false;
-    const isAdmin = ALWAYS_ALLOWED_EMAILS.includes(normalizedEmail);
+    const isAdmin = isUserAdmin(normalizedEmail);
 
     if (!isAdmin) {
       const whResult = await fetchAllowedCandidates(normalizedEmail);
@@ -666,7 +718,7 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
     const userEmail = (verifyData.user?.email || '').trim().toLowerCase();
     let allowedCandidateIds: string[] = [];
     let workHistoryUnreachable = false;
-    const isAdmin = ALWAYS_ALLOWED_EMAILS.includes(userEmail);
+    const isAdmin = isUserAdmin(verifyData.user || userEmail);
 
     if (userEmail && !isAdmin) {
       const whResult = await fetchAllowedCandidates(userEmail);

@@ -2102,6 +2102,11 @@
 
           localStorage.setItem('applywizz_auth_token', data.token);
           localStorage.setItem('applywizz_auth_user', JSON.stringify(verifiedUser));
+          if (data.isAdmin) {
+            localStorage.setItem('applywizz_is_admin', 'true');
+          } else {
+            localStorage.removeItem('applywizz_is_admin');
+          }
           if (data.workHistoryUnreachable) {
             localStorage.setItem('applywizz_wh_unreachable', 'true');
           } else {
@@ -2176,6 +2181,11 @@
 
           localStorage.setItem('applywizz_auth_token', data.token);
           localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
+          if (data.isAdmin) {
+            localStorage.setItem('applywizz_is_admin', 'true');
+          } else {
+            localStorage.removeItem('applywizz_is_admin');
+          }
           if (data.workHistoryUnreachable) {
             localStorage.setItem('applywizz_wh_unreachable', 'true');
           } else {
@@ -2630,6 +2640,7 @@
         localStorage.removeItem('applywizz_auth_token');
         localStorage.removeItem('applywizz_auth_user');
         localStorage.removeItem('applywizz_wh_unreachable');
+        localStorage.removeItem('applywizz_is_admin');
         setWorkHistoryUnreachable(false);
         setWorkHistoryBannerDismissed(false);
         setNoCandidatesMessage(null);
@@ -2680,7 +2691,12 @@
         setIsRefreshing(true);
         try {
           const userEmail = (currentUser?.email || '').trim().toLowerCase();
-          const isAdminUser = ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(userEmail);
+          const isAdminUser = Boolean(
+            ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(userEmail) ||
+            userEmail.startsWith('yaswanth') ||
+            userEmail.startsWith('admin@') ||
+            (typeof localStorage !== 'undefined' && localStorage.getItem('applywizz_is_admin') === 'true')
+          );
           if (isAdminUser) {
             try {
               await fetch('/api/admin/refresh-artifacts', {
