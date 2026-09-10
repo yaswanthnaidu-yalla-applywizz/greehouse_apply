@@ -97,6 +97,12 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
     });
 
     if (result.status === 'APPLIED') {
+      await updateStatus(appId, 'APPLIED', {
+        proof_web_url: result.proofWebUrl,
+        proof_captured_at: result.proofCapturedAt,
+        job_url: req.body?.jobUrl,
+      }).catch(() => {});
+
       res.status(200).json({
         success: true,
         status: result.status,
@@ -116,16 +122,27 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         summary: result.summary,
       });
     } else {
+      const failReason = result.errorMessage || 'Submission failed.';
+      await updateStatus(appId, (result.status as any) || 'FAILED', {
+        error_message: failReason,
+        job_url: req.body?.jobUrl,
+      }).catch(() => {});
+
       res.status(500).json({
         success: false,
         status: result.status,
         applicationId: result.applicationId,
-        error: result.errorMessage || 'Submission failed.',
+        error: failReason,
         summary: result.summary,
       });
     }
   } catch (err: any) {
     console.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
+    await updateStatus(appId, 'FAILED', {
+      error_message: err.message || 'Unexpected submit route error',
+      job_url: req.body?.jobUrl,
+    }).catch(() => {});
+
     res.status(500).json({
       success: false,
       status: 'FAILED',
@@ -272,6 +289,12 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
     });
 
     if (result.status === 'APPLIED') {
+      await updateStatus(appId, 'APPLIED', {
+        proof_web_url: result.proofUrl || result.proofWebUrl,
+        proof_captured_at: result.proofCapturedAt,
+        job_url: req.body?.jobUrl,
+      }).catch(() => {});
+
       res.status(200).json({
         status: 'APPLIED',
         proofUrl: result.proofUrl,
@@ -283,10 +306,16 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
       return;
     }
 
+    const otpFailReason = result.errorMessage || 'OTP submission failed.';
+    await updateStatus(appId, 'FAILED', {
+      error_message: otpFailReason,
+      job_url: req.body?.jobUrl,
+    }).catch(() => {});
+
     res.status(200).json({
       status: 'FAILED',
       applicationId: result.applicationId,
-      error: result.errorMessage || 'OTP submission failed.',
+      error: otpFailReason,
     });
   } catch (err: any) {
     console.error(`[Submissions Router] ❌ Submit OTP route error for ${appId}:`, err);
@@ -299,6 +328,11 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
       });
       return;
     }
+
+    await updateStatus(appId, 'FAILED', {
+      error_message: err.message || 'OTP submission failed.',
+      job_url: req.body?.jobUrl,
+    }).catch(() => {});
 
     res.status(200).json({
       status: 'FAILED',

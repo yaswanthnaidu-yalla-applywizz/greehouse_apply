@@ -36,6 +36,9 @@ import {
   demoSegment,
   demoTemplate,
   toApplicationRow,
+  mergeDemoFixtures,
+  DEMO_APPLYWIZZ_ID,
+  DEMO_JOB_URL,
 } from '../dashboard/demoFixtures.js';
 import { zohoReader } from '../services/zohoReader.js';
 import type {
@@ -162,9 +165,26 @@ export function loadArtifacts(
     }
   }
 
-  artifactCache.candidateSegments = segments.length > 0 ? segments : [demoSegment];
-  artifactCache.scannedJobs = templates.length > 0 ? templates : [demoTemplate];
-  artifactCache.resolvedApplications = applications.length > 0 ? applications : [demoApplication];
+  artifactCache.candidateSegments = mergeDemoFixtures(
+    [demoSegment, ...segments.filter((s) => s.applywizzId !== demoSegment.applywizzId)],
+    [demoSegment],
+    (s) => s.applywizzId
+  );
+  artifactCache.scannedJobs = mergeDemoFixtures(
+    [demoTemplate, ...templates.filter((t) => t.jobUrl !== demoTemplate.jobUrl)],
+    [demoTemplate],
+    (t) => t.jobUrl
+  );
+  artifactCache.resolvedApplications = mergeDemoFixtures(
+    [
+      demoApplication,
+      ...applications.filter(
+        (a) => `${a.applywizzId}::${a.jobUrl}` !== `${demoApplication.applywizzId}::${demoApplication.jobUrl}`
+      ),
+    ],
+    [demoApplication],
+    (a) => `${a.applywizzId}::${a.jobUrl}`
+  );
   artifactCache.lastLoadedAt = new Date().toISOString();
 
   rebuildLookupMaps();
@@ -335,6 +355,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
       // Filter to only jobs eligible under current question threshold (< MAX_JOB_QUESTIONS)
       const eligibleJobs = seg.jobs.filter((job) => {
+        if (seg.applywizzId === DEMO_APPLYWIZZ_ID || job.canonicalUrl === DEMO_JOB_URL || job.rawUrl === DEMO_JOB_URL) {
+          return true;
+        }
         const canonical = job.canonicalUrl || job.rawUrl;
         const template =
           templatesMap.get(canonical) ||
@@ -395,6 +418,21 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
+    if (isAdmin && !candidateSummaries.some((c) => c.applywizzId === DEMO_APPLYWIZZ_ID)) {
+      candidateSummaries.unshift({
+        applywizzId: demoSegment.applywizzId,
+        clientName: demoSegment.clientName,
+        email: demoSegment.profile?.email || '',
+        location: demoSegment.profile?.location || '',
+        totalJobs: 1,
+        readyCount: 1,
+        expiredCount: 0,
+        status: 'READY',
+        syncedAt: demoSegment.syncedAt,
+        resumeAvailable: true,
+      });
+    }
+
     // For unauthenticated / testing environments without headers, return flat array for backward-compatibility
     if (!userEmail && (process.env.NODE_ENV === 'test' || !req.headers.authorization)) {
       res.json(candidateSummaries);
@@ -447,7 +485,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    const seg = candidatesMap.get(applywizzId);
+    const seg = candidatesMap.get(applywizzId) || (applywizzId === DEMO_APPLYWIZZ_ID ? demoSegment : undefined);
 
     if (!seg) {
       // Check if it's a synthesized candidate from work-history
@@ -519,7 +557,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           hasManualEdits,
         };
       })
-      .filter((job) => job.fieldsCount < config.MAX_JOB_QUESTIONS);
+      .filter((job) => seg.applywizzId === DEMO_APPLYWIZZ_ID || job.canonicalUrl === DEMO_JOB_URL || job.fieldsCount < config.MAX_JOB_QUESTIONS);
 
     res.json({
       applywizzId: seg.applywizzId,
@@ -593,6 +631,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
             decodedUrl.includes(a.jobUrl) ||
             a.jobUrl.includes(decodedUrl))
       );
+    }
+
+    if (!appItem && (applywizzId === DEMO_APPLYWIZZ_ID || decodedUrl === DEMO_JOB_URL || rawJobUrl === DEMO_JOB_URL)) {
+      appItem = demoApplication;
     }
 
     if (appItem) {

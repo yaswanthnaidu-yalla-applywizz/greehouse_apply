@@ -26,6 +26,7 @@ const AUTHORIZED_EMAILS_API = config.AUTHORIZED_EMAILS_API || 'https://applywizz
  */
 export const ALWAYS_ALLOWED_EMAILS = [
   'yaswanthnaiduyalla@applywizz.ai',
+  'yaswanhnaiduyalla@applywizz.ai',
 ];
 
 /**
