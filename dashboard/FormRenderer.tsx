@@ -16,6 +16,8 @@ import { ApplicationStatusBadge } from './components/ApplicationStatusBadge.js';
 import { DifficultyBadge } from './components/DifficultyBadge.js';
 import { SubmissionControls } from './components/SubmissionControls.js';
 import { ProofViewer } from './components/ProofViewer.js';
+import { EmailProofModal } from './components/EmailProofModal.js';
+import type { EmailProofJson } from './components/EmailProofRenderer.js';
 import type { ResolvedField, ApplicationStatus } from './types.js';
 
 export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
@@ -48,6 +50,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
   const [viewerTitle, setViewerTitle] = useState<string>('Application Proof');
+  const [emailProofOpen, setEmailProofOpen] = useState(false);
   const appId = application?.id || application?.applywizzId || application?.applywizz_id || 'app-default';
   const jobUrl = application?.jobUrl || application?.job_url || '';
   const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
@@ -282,6 +285,18 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   return (
     <div className="flex-1 overflow-y-auto px-5 py-3.5 md:px-7 md:py-4 max-w-5xl mx-auto w-full custom-scrollbar">
       {/* Proof Viewer Modal */}
+      <EmailProofModal
+        isOpen={emailProofOpen}
+        onClose={() => setEmailProofOpen(false)}
+        proof={(application.proof_email_json || application.proofEmailJson) as EmailProofJson | null}
+        companyName={application.companyName || application.company_name}
+        metadata={{
+          candidateName: candidateName || application.clientName,
+          applywizzId: application.applywizzId || application.applywizz_id,
+          jobTitle: application.jobTitle || application.job_title,
+        }}
+      />
+
       <ProofViewer
         isOpen={viewerOpen}
         onClose={() => setViewerOpen(false)}
@@ -318,6 +333,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 status={currentStatus}
                 proofWebUrl={application.proof_web_url || application.proofWebUrl}
                 proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
+                proofEmailJson={application.proof_email_json || application.proofEmailJson}
                 emailProofStatus={application.email_proof_status || application.emailProofStatus}
                 applicationId={appId}
                 jobUrl={jobUrl}
@@ -336,6 +352,15 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             >
               {application.jobUrl || application.job_url}
             </a>
+            {currentStatus === 'FAILED' &&
+              (application.error_message || application.errorMessage) && (
+                <p
+                  className="mt-2 text-[11px] font-mono text-[#991B1B] bg-[#FEE2E2] border border-[#1A1A2E] rounded-lg px-2.5 py-1.5 max-w-2xl"
+                  title="Failure reason from submission worker"
+                >
+                  {application.error_message || application.errorMessage}
+                </p>
+              )}
           </div>
 
           {/* Submission Action Controls */}
@@ -347,6 +372,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               unresolvedFieldsCount={unresCount}
               proofWebUrl={application.proof_web_url || application.proofWebUrl}
               proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
+              proofEmailJson={application.proof_email_json || application.proofEmailJson}
               emailProofStatus={application.email_proof_status || application.emailProofStatus}
               dryRunScreenshotUrl={
                 application.dry_run_screenshot_url || application.dryRunScreenshotUrl
@@ -376,11 +402,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 }
               }}
               onViewEmailProof={() => {
-                const url = application.proof_email_url || application.proofEmailUrl;
-                if (url) {
-                  setViewerImageUrl(url);
-                  setViewerTitle('Zoho Confirmation Email Proof');
-                  setViewerOpen(true);
+                const json = application.proof_email_json || application.proofEmailJson;
+                if (json) {
+                  setEmailProofOpen(true);
                 }
               }}
               onViewDryRun={() => {

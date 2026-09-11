@@ -14,6 +14,7 @@
 import React, { useState, useEffect } from 'react';
 import type { ApplicationStatus } from '../../src/db/applications.js';
 import { ProofViewer } from './ProofViewer.js';
+import type { EmailProofJson } from './EmailProofRenderer.js';
 
 export interface SubmissionControlsProps {
   applicationId: string;
@@ -22,6 +23,7 @@ export interface SubmissionControlsProps {
   unresolvedFieldsCount: number;
   proofWebUrl?: string | null;
   proofEmailUrl?: string | null;
+  proofEmailJson?: EmailProofJson | null;
   emailProofStatus?: 'pending' | 'captured' | 'timed_out' | null;
   dryRunScreenshotUrl?: string | null;
   proofFailedUrl?: string | null;
@@ -50,6 +52,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   unresolvedFieldsCount,
   proofWebUrl,
   proofEmailUrl,
+  proofEmailJson,
   emailProofStatus,
   dryRunScreenshotUrl,
   proofFailedUrl,
@@ -72,6 +75,9 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [proofUrl, setProofUrl] = useState<string | null>(proofWebUrl || null);
   const [emailProof, setEmailProof] = useState<string | null>(proofEmailUrl || null);
+  const [emailProofJsonState, setEmailProofJsonState] = useState<EmailProofJson | null>(
+    proofEmailJson || null
+  );
   const [showProofViewer, setShowProofViewer] = useState(false);
   const [isCapturingEmailProof, setIsCapturingEmailProof] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -95,6 +101,12 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
     }
   }, [proofEmailUrl]);
 
+  useEffect(() => {
+    if (proofEmailJson) {
+      setEmailProofJsonState(proofEmailJson);
+    }
+  }, [proofEmailJson]);
+
   const hasUnresolved = unresolvedFieldsCount > 0;
   const isApplying = applicationStatus === 'APPLYING' || isSubmitting;
   const isApplied = applicationStatus === 'APPLIED';
@@ -103,8 +115,9 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const hasProofActions =
     Boolean(dryRunScreenshotUrl) ||
     Boolean(proofUrl || proofWebUrl || isApplied) ||
+    Boolean(emailProofJsonState || proofEmailJson) ||
     Boolean(emailProof || proofEmailUrl) ||
-    Boolean((proofUrl || proofWebUrl) && !(emailProof || proofEmailUrl)) ||
+    Boolean((proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl)) ||
     Boolean(isFailed && proofFailedUrl);
 
   const pollStatusUpdate = async () => {
@@ -116,8 +129,11 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       );
       if (res.ok) {
         const appData = await res.json();
-        const resolvedEmail =
-          appData.proofEmailUrl || appData.proof_email_url || null;
+        const resolvedJson = appData.proofEmailJson || appData.proof_email_json || null;
+        if (resolvedJson) {
+          setEmailProofJsonState(resolvedJson);
+        }
+        const resolvedEmail = appData.proofEmailUrl || appData.proof_email_url || null;
         if (resolvedEmail) {
           setEmailProof(resolvedEmail);
         }
@@ -223,20 +239,24 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         }
       );
       const data = await res.json();
-      if (res.ok && data.success && data.proofEmailUrl) {
-        setEmailProof(data.proofEmailUrl);
-        setToastMessage('🎉 Confirmation email proof screenshot captured!');
+      const capturedJson = data.proofEmailJson || data.proof_email_json;
+      if (res.ok && data.success && capturedJson) {
+        setEmailProofJsonState(capturedJson);
+        setToastMessage('🎉 Confirmation email proof captured!');
         setTimeout(() => setToastMessage(null), 6000);
         if (onStatusChange) {
           onStatusChange('APPLIED', {
             ...data,
-            proof_email_url: data.proofEmailUrl,
-            proofEmailUrl: data.proofEmailUrl,
+            proof_email_json: capturedJson,
+            proofEmailJson: capturedJson,
             proof_email_captured_at: data.proofEmailCapturedAt,
             proofEmailCapturedAt: data.proofEmailCapturedAt,
             email_proof_status: 'captured',
             emailProofStatus: 'captured',
           });
+        }
+        if (onViewEmailProof) {
+          onViewEmailProof();
         }
       } else {
         setToastMessage(data.error || 'Confirmation email not found in inbox yet. Please try again in a moment.');
@@ -476,7 +496,8 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       )}
 
       {/* Get Email SS Button (Manual retry when web proof is present but email proof is missing) */}
-      {(proofUrl || proofWebUrl) && !(emailProof || proofEmailUrl) && (
+      {(proofUrl || proofWebUrl) &&
+        !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl) && (
         <button
           type="button"
           onClick={handleCaptureEmailProof}
@@ -492,22 +513,19 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
           ) : (
             <>
               <span>📥</span>
-              <span>Get email SS</span>
+              <span>Fetch email proof</span>
             </>
           )}
         </button>
       )}
 
       {/* View Email Proof Button */}
-      {(emailProof || proofEmailUrl) && (
+      {(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl) && (
         <button
           type="button"
           onClick={() => {
             if (onViewEmailProof) {
               onViewEmailProof();
-            } else if (emailProof || proofEmailUrl) {
-              setProofUrl(emailProof || proofEmailUrl);
-              setShowProofViewer(true);
             }
           }}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#BFDBFE] hover:bg-[#93C5FD] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"

@@ -275,7 +275,8 @@ export type ApplicationStatus =
   | 'FAILED'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
-  | 'CAPTCHA_TIMEOUT';
+  | 'CAPTCHA_TIMEOUT'
+  | 'EMAIL_PROOF_PENDING';
 
 /**
  * Segregated candidate job queue item rendered in the operator dashboard.

@@ -84,6 +84,9 @@ const envSchema = z.object({
   /** Supabase Service Role Secret Key */
   SUPABASE_SERVICE_KEY: z.string().optional(),
 
+  /** Supabase anon key (browser Realtime only; safe to expose to authenticated dashboard clients) */
+  SUPABASE_ANON_KEY: z.string().optional(),
+
   /** Supabase Storage bucket for candidate resumes */
   SUPABASE_STORAGE_BUCKET_RESUMES: z.string().default('resumes'),
 

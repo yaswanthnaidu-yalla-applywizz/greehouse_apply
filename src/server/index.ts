@@ -28,6 +28,8 @@ import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
 import { authRouter, isUserAdmin } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { configRouter } from './routes/config.js';
+import { wsManager } from './ws.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
 import {
@@ -263,6 +265,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   // Real events notifications routes (protected)
   app.use('/api/notifications', requireAuth, notificationsRouter);
+
+  // Dashboard client config (protected)
+  app.use('/api/config', requireAuth, configRouter);
 
   // Protect candidates and admin namespaces
   app.use('/api/candidates', requireAuth);
@@ -1079,6 +1084,7 @@ export function startServer(
   const app = createServer();
 
   const server = app.listen(port, '0.0.0.0', () => {
+    wsManager.init(server);
     console.log('================================================================');
     console.log(`  🟢 Greenhouse Operator REST API & Dashboard Live on 0.0.0.0:${port}`);
     console.log('================================================================');
