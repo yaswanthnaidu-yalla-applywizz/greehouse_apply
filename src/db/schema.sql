@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     resume_text TEXT,                                    -- Full parsed text from resume
     resume_facts JSONB DEFAULT '{}'::jsonb,             -- Structured facts (skills, experience, projects)
     raw_api_payload JSONB,                               -- Full API response stored for debugging & demographics
+    zoho_connected BOOLEAN NOT NULL DEFAULT false,       -- Zoho Mail Reader connector mailbox status
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );

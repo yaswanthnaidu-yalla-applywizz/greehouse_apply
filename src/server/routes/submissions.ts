@@ -25,6 +25,11 @@ import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } fr
 import { emailProofPoller } from '../../submitter/emailProofPoller.js';
 import { fillForm } from '../../submitter/formFiller.js';
 import { getApplication, updateStatus, enqueueApplication, hydrateApplicationProofUrls } from '../../db/applications.js';
+import { isUserAdmin } from './auth.js';
+import {
+  assertApplywizzZohoConnected,
+  resolveApplywizzIdFromApplicationRef,
+} from '../../db/zohoConnected.js';
 import {
   getSignedProofUrl,
   PROOFS_BUCKET,
@@ -37,6 +42,34 @@ import {
 } from '../../db/storage.js';
 
 export const submissionsRouter = Router();
+
+async function ensureZohoConnectedForApplication(
+  req: Request,
+  res: Response,
+  appId: string
+): Promise<boolean> {
+  const user = (req as any).user;
+  const userEmail = (user?.email || '').trim().toLowerCase();
+  const isAdmin = isUserAdmin(user || userEmail);
+  const jobUrl = req.body?.jobUrl;
+
+  const applywizzId = await resolveApplywizzIdFromApplicationRef(appId, jobUrl);
+  if (!applywizzId) {
+    res.status(404).json({
+      success: false,
+      error: `Could not resolve candidate for application '${appId}'.`,
+    });
+    return false;
+  }
+
+  const gate = await assertApplywizzZohoConnected(applywizzId, { isAdmin, allowAdminDemo: true });
+  if (!gate.allowed) {
+    res.status(403).json({ success: false, error: gate.error });
+    return false;
+  }
+
+  return true;
+}
 
 const SUBMIT_SELECTORS = [
   'button[type="submit"]',
@@ -62,6 +95,10 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
   const userEmail = (req as any).user?.email || req.body?.assignedCaEmail || 'anonymous';
   console.log(`[Submissions Router] 🎬 POST /api/applications/${appId}/dry-run requested by ${userEmail}`);
+
+  if (!(await ensureZohoConnectedForApplication(req, res, appId))) {
+    return;
+  }
 
   try {
     const result = await runDryRun(appId, {
@@ -108,6 +145,10 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
   console.log(
     `[Submissions Router] 🚀 POST /api/applications/${appId}/submit requested by ${userEmail || 'anonymous'} (isSync: ${isSync}, jobUrl: ${req.body?.jobUrl || 'auto'})`
   );
+
+  if (!(await ensureZohoConnectedForApplication(req, res, appId))) {
+    return;
+  }
 
   // Asynchronous queue insertion (default production flow - Phase V2-4c)
   if (!isSync) {

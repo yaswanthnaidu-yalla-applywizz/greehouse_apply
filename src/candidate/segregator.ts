@@ -19,7 +19,6 @@ import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
 import { profileRowToCandidateProfile, upsertProfile, getProfile, updateResumeStoragePath } from '../db/profiles.js';
 import { uploadResume } from '../db/storage.js';
-import { isZohoConnected } from '../services/zohoConnectedAllowlist.js';
 import type { CandidateSegment } from '../types/index.js';
 
 /**
@@ -140,9 +139,7 @@ export async function segregateCandidatesByApplyWizzId(
 
         // Score filter: Discard rows with score < 20 || score > 60
         if (score < 20 || score > 60) {
-          console.log(
-            `[Candidate Segregator] ⏭️ Discarding row for candidate ${applywizzId} (job: ${rawUrl}) — score ${score} out of range [20, 60].`
-          );
+          console.log(`[Segregator] ❌ Dropped job score=${score} | candidate=${applywizzId} | job=${rawUrl}`);
           return;
         }
 
@@ -215,12 +212,21 @@ export async function segregateCandidatesByApplyWizzId(
           // Check Supabase first — zero network requests for existing candidates
           const existingProfile = await getProfile(id);
           if (existingProfile) {
+            if (!existingProfile.zoho_connected) {
+              segmentsMap.delete(id);
+              console.log(`[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)`);
+              continue;
+            }
+
             segment.profile = profileRowToCandidateProfile(existingProfile);
             if (existingProfile.client_name && existingProfile.client_name !== id) {
               segment.clientName = existingProfile.client_name;
             }
             fromSupabase++;
           } else {
+            segmentsMap.delete(id);
+            console.log(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
+
             const isCached = client.isProfileCached(id);
             if (!isCached && !allowOutboundApi) {
               console.log(
@@ -318,12 +324,11 @@ export async function segregateCandidatesByApplyWizzId(
     );
   }
 
-  // Zoho gate: Verify candidate's company email is in Zoho allowlist
+  // Remove candidates that could not be loaded from Supabase/cache or were not Zoho-connected.
   for (const [id, segment] of Array.from(segmentsMap.entries())) {
-    const companyEmail = segment.profile?.email || null;
-    if (!isZohoConnected(companyEmail)) {
+    if (!segment.profile) {
       segmentsMap.delete(id);
-      console.log(`[Candidate Segregator] ⛔ Skipping ${id} — not in Zoho allowlist.`);
+      console.log(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
     }
   }
 

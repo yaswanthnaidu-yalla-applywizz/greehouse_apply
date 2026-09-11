@@ -1548,16 +1548,10 @@ export async function runLiveSubmit(
               throw new Error(zohoResult.errorMessage || 'Timeout: OTP was not filled in time.');
             }
           } catch (autoOtpErr: any) {
-            const isTimeout = /time.*out|not filled in time/i.test(autoOtpErr.message || '');
-            const otpErrMsg = isTimeout
-              ? 'Timeout: OTP was not filled in time.'
-              : `OTP error: ${autoOtpErr.message}`;
-
-            if (isTimeout) {
-              console.warn(`[Live Submit] ⏱️ Timeout: OTP was not filled in time for application ${applicationId}`);
-            } else {
-              console.error(`[Live Submit] ❌ ${otpErrMsg} for application ${applicationId}`);
-            }
+            const otpErrMsg = 'OTP solve failed';
+            console.error(
+              `[Live Submit] ❌ ${otpErrMsg} for application ${applicationId}: ${autoOtpErr.message}`
+            );
             // User requested error out on failure
             keepSessionOpen = false;
             screenshotCaptured = true;
@@ -1585,17 +1579,7 @@ export async function runLiveSubmit(
           }
         }
 
-        // Fallback: manual OTP entry via dashboard if Zoho credentials not configured
-        return {
-          success: false,
-          status: 'OTP_REQUIRED',
-          applicationId,
-          message: 'OTP required. Enter code in dashboard.',
-          requiresOtp: true,
-          requiresCaptcha: true,
-          challengeType: 'otp',
-          summary: fillSummary,
-        };
+        throw new Error('OTP solve failed');
       }
 
       // Check for form filling / validation errors on page before assuming CAPTCHA block
@@ -1661,65 +1645,27 @@ export async function runLiveSubmit(
         (hasBlockErrorMessage || (postSubmitCaptcha.detected && isSubmitButtonReset));
 
       if (isActuallyBlocked) {
-        console.warn(
-          `[Live Submit] 🛑 Actual submission block detected post-submit (errorMsg=${hasBlockErrorMessage}, buttonReset=${isSubmitButtonReset}, captcha=${postSubmitCaptcha.detected ? postSubmitCaptcha.type : 'none'}). Switching to headful browser...`
-        );
-        keepSessionOpen = true;
-        const headful = await switchToHeadfulMode(browser, targetUrl, {
-          headless: options.headless,
-        });
-        browser = headful.browser;
-        context = headful.context;
-        page = headful.page;
-
-        try {
-          fillSummary = await fillForm(page, application, {
-            minJitterMs: options.minJitterMs ?? 300,
-            maxJitterMs: options.maxJitterMs ?? 800,
-            timeoutMs: 5000,
-          });
-        } catch {}
-
-        storePausedSession(application, {
-          browser,
-          page,
-          applicationId,
-          jobUrl: targetUrl,
-          appliedHeadfulAt: headful.appliedHeadfulAt,
-          pausedAt: headful.appliedHeadfulAt,
-          requiresOtp: false,
-          challengeType: 'captcha',
-        });
-
-        registerSubmissionSession({
-          applicationId,
-          browser,
-          context,
-          page,
-          application,
-          startedAt: headful.appliedHeadfulAt,
-        });
-
+        const captchaErrorMessage = 'CAPTCHA encountered';
+        console.warn('[Submitter] 🚫 CAPTCHA detected → marked FAILED.');
+        keepSessionOpen = false;
+        const failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+        screenshotCaptured = true;
         if (application.id) {
-          await updateStatus(application.id, 'OTP_REQUIRED');
-        }
-
-        if (options.autoPollCaptcha !== false) {
-          return await pollCaptchaSolved(applicationId, page, application, {
-            timeoutMs: options.captchaTimeoutMs ?? 300000,
-            browser,
+          await updateStatus(application.id, 'FAILED', {
+            error_message: captchaErrorMessage,
+            proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+            proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+            job_url: application.job_url,
           });
         }
-
         return {
           success: false,
-          status: 'OTP_REQUIRED',
+          status: 'FAILED',
           applicationId,
-          message: 'CAPTCHA detected. Solve in headful browser.',
-          requiresOtp: false,
-          requiresCaptcha: true,
-          challengeType: 'captcha',
+          errorMessage: captchaErrorMessage,
           summary: fillSummary,
+          proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+          proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
         };
       } else {
         console.log(

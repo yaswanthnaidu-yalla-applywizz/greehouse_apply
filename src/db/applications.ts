@@ -19,6 +19,7 @@ import {
 
 export type ApplicationStatus =
   | 'READY_FOR_REVIEW'
+  | 'APPROVED'
   | 'DRY_RUN_COMPLETE'
   | 'QUEUED'
   | 'APPLYING'
@@ -1338,4 +1339,3 @@ export async function getRecentNotifications(
   notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   return notifications.slice(0, limit);
 }
-

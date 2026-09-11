@@ -7,3 +7,4 @@ export * from './proofCapture.js';
 export * from './dryRun.js';
 export * from './liveSubmit.js';
 export * from './captchaResume.js';
+export * from './submitterPool.js';

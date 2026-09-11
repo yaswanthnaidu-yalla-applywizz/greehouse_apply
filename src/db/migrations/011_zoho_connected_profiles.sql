@@ -1,0 +1,2 @@
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS zoho_connected BOOLEAN NOT NULL DEFAULT false;

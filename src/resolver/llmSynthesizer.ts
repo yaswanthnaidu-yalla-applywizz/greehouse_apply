@@ -29,6 +29,12 @@ export interface JobContext {
   company: string;
 }
 
+export interface BatchQuestion {
+  label: string;
+  type: string;
+  value?: string;
+}
+
 /**
  * Options configuring the LLMSynthesizer.
  */
@@ -284,6 +290,7 @@ export class LLMSynthesizer {
                 rawAnswer = cleaned;
                 break;
               }
+
             } catch (modelErr: any) {
               console.warn(`[LLM Synthesizer] ⚠️ Model "${modelId}" error (${modelErr.status || modelErr.message}). Trying fallback...`);
             }
@@ -359,6 +366,58 @@ export class LLMSynthesizer {
       resolvedByTier: 5,
       confidence: 0.8,
     };
+  }
+
+  /**
+   * Resolves multiple questions in one provider request for a candidate/job pair.
+   */
+  public async synthesizeBatchAnswers(
+    questions: BatchQuestion[],
+    resumeText: string,
+    jobDescription: string
+  ): Promise<string[]> {
+    if (questions.length === 0) return [];
+
+    const prompt = `Resolve every numbered job application question using only the candidate resume and job description.
+Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
+
+Candidate resume:
+${resumeText.slice(0, 12000)}
+
+Job description:
+${jobDescription.slice(0, 12000)}
+
+Questions:
+${questions.map((question, index) => `${index}. [${question.type}] ${question.label}${question.value ? ` (existing value: ${question.value})` : ''}`).join('\n')}`;
+    const systemMessage =
+      'You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order.';
+
+    if (!(this.apiKey || this.provider === 'ollama')) {
+      throw new Error('No LLM provider credentials configured.');
+    }
+
+    let raw = '';
+    if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
+      const completion = await this.openaiClient.chat.completions.create({
+        model: this.modelName,
+        messages: [{ role: 'system', content: systemMessage }, { role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: Math.max(300, questions.length * 100),
+      });
+      raw = completion?.choices?.[0]?.message?.content || '';
+    } else if (this.provider === 'gemini' && this.geminiClient) {
+      const model = this.geminiClient.getGenerativeModel({ model: this.modelName });
+      const result = await model.generateContent(`${systemMessage}\n\n${prompt}`);
+      raw = result.response.text();
+    } else {
+      throw new Error(`LLM provider ${this.provider} is unavailable.`);
+    }
+
+    const parsed: unknown = JSON.parse(cleanLLMOutput(raw));
+    if (!Array.isArray(parsed) || parsed.length !== questions.length || parsed.some((answer) => typeof answer !== 'string')) {
+      throw new Error('Batch LLM response did not contain one string answer per question.');
+    }
+    return parsed.map((answer) => cleanLLMOutput(answer));
   }
 
   /**

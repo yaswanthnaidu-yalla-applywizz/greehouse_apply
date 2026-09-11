@@ -14,9 +14,8 @@
  */
 
 import { chromium, type Page } from 'playwright';
-import fs from 'fs';
-import path from 'path';
 import dotenv from 'dotenv';
+import { getDbClient, isSupabaseConfigured } from '../src/db/client.js';
 
 dotenv.config();
 
@@ -29,11 +28,28 @@ export interface ZohoConnectedScanResult {
 const BASE_URL = process.env.ZOHO_CONNECTOR_URL || 'https://zoho-mail-reader.onrender.com/';
 const EMAIL = process.env.ZOHO_READER_EMAIL || process.env.ZOHO_CONNECTOR_USER;
 const PASSWORD = process.env.ZOHO_READER_PASSWORD || process.env.ZOHO_CONNECTOR_PASS;
+const MAX_RETRIES = 3;
+
+async function withRetries<T>(operation: () => Promise<T>, operationName: string): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt < MAX_RETRIES) {
+        console.warn(`[Zoho Scanner] ⚠️ ${operationName} failed (attempt ${attempt}/${MAX_RETRIES}); retrying...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`${operationName} failed after ${MAX_RETRIES} attempts`);
+}
 
 export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
   const scannedAt = new Date().toISOString();
-  const outDir = path.resolve(process.cwd(), 'cache');
-  const outPath = path.join(outDir, 'zoho_connected_emails.json');
 
   if (!EMAIL || !PASSWORD) {
     console.warn(
@@ -44,16 +60,6 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
       count: 0,
       emails: [],
     };
-    try {
-      if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
-      }
-      if (!fs.existsSync(outPath)) {
-        fs.writeFileSync(outPath, JSON.stringify(fallbackResult, null, 2), 'utf-8');
-      }
-    } catch (writeErr: any) {
-      console.warn(`[Zoho Scanner] ⚠️ Could not write fallback cache file: ${writeErr.message}`);
-    }
     return fallbackResult;
   }
 
@@ -79,19 +85,26 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
     const page = await context.newPage();
 
     console.log(`[Zoho Scanner] 🌐 Navigating to ${BASE_URL}...`);
-    await page.goto(BASE_URL, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
+    await withRetries(
+      () =>
+        page.goto(BASE_URL, {
+          waitUntil: 'domcontentloaded',
+          timeout: 45000,
+        }),
+      'connector navigation'
+    );
 
     // ── Step 1: Sign in if login form is visible ──────────────────────────────
     await performLoginIfNeeded(page, EMAIL, PASSWORD);
 
     // ── Step 2: Ensure Users list is loaded ──────────────────────────────────
     console.log('[Zoho Scanner] ⏳ Waiting for Users list to render...');
-    await page.waitForSelector('text=Users, input[placeholder*="Filter by email" i], #search', {
+    await page.waitForSelector(
+      'text=Users, input[placeholder*="Filter by email" i], #search, table, tbody tr, [role="row"], [data-testid*="user" i]',
+      {
       timeout: 20000,
-    }).catch(() => {
+      }
+    ).catch(() => {
       console.log('[Zoho Scanner] ℹ️ Users list selector timed out, attempting scrape on current DOM state.');
     });
 
@@ -101,7 +114,6 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
       'a:has-text("Connected")',
       '[role="tab"]:has-text("Connected")',
       'label:has-text("Connected")',
-      'span:has-text("Connected")',
       'input[type="radio"][value*="connected" i]',
       'input[type="checkbox"][value*="connected" i]',
     ];
@@ -130,6 +142,7 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
     const collectedEmails: string[] = [];
     let pageNum = 1;
     const maxPages = 50;
+    const visitedPageSignatures = new Set<string>();
 
     while (pageNum <= maxPages) {
       console.log(`[Zoho Scanner] 📄 Scraping page ${pageNum}...`);
@@ -141,7 +154,7 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
 
         // Container-level extraction: checks row/item text for email AND "Connected" status
         const containers = document.querySelectorAll(
-          'li, tr, [role="row"], .user-row, .user-item, .list-item, .candidate-row, button.user-item, div.user'
+          'li, tr, [role="row"], .user-row, .user-item, .list-item, .candidate-row, button.user-item, div.user, [data-testid*="user" i], [class*="user-row" i], [class*="user-item" i]'
         );
 
         containers.forEach((el) => {
@@ -187,6 +200,12 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
         return [...new Set(results)];
       }, filterClicked);
 
+      const pageSignature = emailsOnPage.slice().sort().join('|');
+      if (visitedPageSignatures.has(pageSignature)) {
+        console.log('[Zoho Scanner] ℹ️ Pagination repeated the same page; stopping.');
+        break;
+      }
+      visitedPageSignatures.add(pageSignature);
       collectedEmails.push(...emailsOnPage);
       console.log(`[Zoho Scanner]   → Page ${pageNum}: found ${emailsOnPage.length} email(s)`);
 
@@ -206,7 +225,7 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
         try {
           const btn = page.locator(sel).first();
           if ((await btn.count()) > 0 && (await btn.isVisible()) && (await btn.isEnabled())) {
-            await btn.click();
+            await withRetries(() => btn.click({ timeout: 10000 }), `pagination click (${sel})`);
             pageNum++;
             advanced = true;
             await page.waitForTimeout(800);
@@ -235,37 +254,52 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
       emails: deduplicated,
     };
 
-    if (!fs.existsSync(outDir)) {
-      fs.mkdirSync(outDir, { recursive: true });
+    if (result.count === 0) {
+      console.warn('[Zoho Scanner] ⚠️ No connected emails found; skipping Supabase reset to protect the existing allowlist.');
+      return result;
     }
-    fs.writeFileSync(outPath, JSON.stringify(result, null, 2), 'utf-8');
 
-    console.log(`[Zoho Scanner] ✅ Saved ${result.count} connected email(s) to ${outPath}`);
+    await syncConnectedProfiles(result.emails);
     return result;
   } catch (err: any) {
-    console.error(`[Zoho Scanner] ❌ Error during scan: ${err.message}`);
-
-    // Graceful error handling: ensure output file exists so downstream consumers don't crash
-    const fallbackResult: ZohoConnectedScanResult = {
-      scannedAt,
-      count: 0,
-      emails: [],
-    };
-    try {
-      if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
-      }
-      if (!fs.existsSync(outPath)) {
-        fs.writeFileSync(outPath, JSON.stringify(fallbackResult, null, 2), 'utf-8');
-      }
-    } catch {}
-
-    return fallbackResult;
+    console.error(`[Zoho Scanner] ❌ Scan failed after retries: ${err.message}`);
+    return { scannedAt, count: 0, emails: [] };
   } finally {
     if (browser) {
       await browser.close().catch(() => {});
     }
   }
+
+}
+
+async function syncConnectedProfiles(connectedEmails: string[]): Promise<void> {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Supabase is not configured; refusing to update the connected-user allowlist.');
+  }
+
+  const supabase = getDbClient();
+  const allRowsFilter = '00000000-0000-0000-0000-000000000000';
+  const { error: resetError } = await supabase
+    .from('profiles')
+    .update({ zoho_connected: false })
+    .neq('id', allRowsFilter);
+  if (resetError) {
+    throw new Error(`Could not reset profiles.zoho_connected: ${resetError.message}`);
+  }
+
+  let connectedCount = 0;
+  for (const email of connectedEmails) {
+    const { count, error } = await supabase
+      .from('profiles')
+      .update({ zoho_connected: true }, { count: 'exact' })
+      .eq('company_email', email);
+    if (error) {
+      throw new Error(`Could not mark ${email} Zoho-connected: ${error.message}`);
+    }
+    connectedCount += count ?? 0;
+  }
+
+  console.log(`[Zoho Scanner] ✅ Supabase upsert success: marked ${connectedCount} profiles Zoho-connected.`);
 }
 
 async function performLoginIfNeeded(page: Page, user: string, pass: string): Promise<void> {
@@ -334,10 +368,10 @@ if (process.argv[1] && process.argv[1].includes('scanZohoConnected')) {
   runZohoConnectedScan()
     .then((res) => {
       console.log(`[Zoho Scanner] Finished scan with ${res.count} connected user(s).`);
-      process.exit(0);
+      process.exitCode = 0;
     })
     .catch((err) => {
       console.error('[Zoho Scanner] ❌ Fatal error:', err.message);
-      process.exit(0); // Exit 0 to avoid crashing calling process or pipelines
+      process.exitCode = 1;
     });
 }

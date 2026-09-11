@@ -117,6 +117,24 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const unresCount = fields.filter((f) => f.source === 'unresolved').length;
 
   const currentStatus: ApplicationStatus = application?.status || 'READY_FOR_REVIEW';
+  const submitFlowActive =
+    isSubmitting ||
+    currentStatus === 'APPLYING' ||
+    currentStatus === 'QUEUED' ||
+    currentStatus === 'OTP_REQUIRED' ||
+    currentStatus === 'CAPTCHA_REQUIRED';
+  const badgeStatus: ApplicationStatus | string =
+    currentStatus === 'QUEUED' ||
+    currentStatus === 'OTP_REQUIRED' ||
+    currentStatus === 'CAPTCHA_REQUIRED'
+      ? 'APPLYING'
+      : currentStatus;
+
+  useEffect(() => {
+    if (currentStatus === 'APPLIED' || currentStatus === 'FAILED') {
+      setIsSubmitting(false);
+    }
+  }, [currentStatus]);
 
   const isDemographic = (label: string) => {
     const l = (label || '').toLowerCase();
@@ -247,6 +265,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   };
 
   const handleTriggerSubmit = async () => {
+    if (isSubmitting || submitFlowActive) return;
+
+    console.log(`[Dashboard] Operator submitted ${appId} → auto-flow started`);
     setIsSubmitting(true);
     if (onStatusChange) {
       onStatusChange('APPLYING');
@@ -261,23 +282,40 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         }
       );
       const data = await res.json();
-      const { proofWebUrl, proofCapturedAt } = await resolveProofFromSubmitResponse(data);
 
-      if (data.status && onStatusChange) {
-        onStatusChange(data.status, { ...data, proofWebUrl, proofCapturedAt });
+      if (!res.ok || data.status === 'FAILED') {
+        if (onStatusChange) {
+          onStatusChange('FAILED', {
+            ...data,
+            error: data.error || data.error_message || 'Submit request failed',
+          });
+        }
+        setIsSubmitting(false);
+        return;
       }
-      if (proofWebUrl) {
-        setViewerImageUrl(proofWebUrl);
-        setViewerTitle('Live Application Confirmation Proof');
-        setViewerOpen(true);
+
+      if (data.status === 'APPLIED') {
+        const { proofWebUrl, proofCapturedAt } = await resolveProofFromSubmitResponse(data);
+        if (onStatusChange) {
+          onStatusChange('APPLIED', { ...data, proofWebUrl, proofCapturedAt });
+        }
+        if (proofWebUrl) {
+          setViewerImageUrl(proofWebUrl);
+          setViewerTitle('Live Application Confirmation Proof');
+          setViewerOpen(true);
+        }
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (onStatusChange) {
+        onStatusChange('APPLYING', data);
       }
     } catch (err: any) {
       console.error('Submission failed:', err);
       if (onStatusChange) {
         onStatusChange('FAILED', { error: err.message });
       }
-      alert(`Submission error: ${err.message}`);
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -330,7 +368,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               </span>
               <DifficultyBadge fieldsCount={fields.length} />
               <ApplicationStatusBadge
-                status={currentStatus}
+                status={badgeStatus}
                 proofWebUrl={application.proof_web_url || application.proofWebUrl}
                 proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
                 proofEmailJson={application.proof_email_json || application.proofEmailJson}
@@ -386,13 +424,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               onTriggerDryRun={handleTriggerDryRun}
               onTriggerSubmit={handleTriggerSubmit}
               onStatusChange={onStatusChange}
-              onOtpVerified={({ proofWebUrl, proofCapturedAt }) => {
-                if (proofWebUrl) {
-                  setViewerImageUrl(proofWebUrl);
-                  setViewerTitle('Live Application Confirmation Proof');
-                  setViewerOpen(true);
-                }
-              }}
               onViewProof={() => {
                 const url = application.proof_web_url || application.proofWebUrl;
                 if (url) {
@@ -599,10 +630,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 <button
                   type="button"
                   onClick={handleTriggerSubmit}
-                  disabled={isSubmitting}
-                  className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                  disabled={submitFlowActive}
+                  className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {isSubmitting ? 'Submitting...' : 'Approve & Submit Now →'}
+                  {submitFlowActive ? 'Submitting...' : 'Approve & Submit Now →'}
                 </button>
               </div>
             )}

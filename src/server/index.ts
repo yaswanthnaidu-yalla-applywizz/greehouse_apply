@@ -37,13 +37,17 @@ import {
   fetchWorkHistoryForDate,
   fetchAdminWorkHistoryForDate,
   ADMIN_WORK_HISTORY_CACHE_KEY,
-  getISTDateString,
+  getYesterdayIST,
   type WorkHistoryCandidateRecord,
 } from '../services/workHistoryClient.js';
 import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHydrate.js';
 import { cacheApplicationLocally, getSubmissionOutcomeCounts, getApplication, upsertApplication, serializeApplicationDto } from '../db/applications.js';
 import { getSignedResumeUrl, downloadResumeFromSupabase } from '../db/storage.js';
 import { isSupabaseConfigured, getDbClient } from '../db/client.js';
+import {
+  assertApplywizzZohoConnected,
+  fetchZohoConnectedApplywizzIdSet,
+} from '../db/zohoConnected.js';
 import { SubmissionQueueDaemon } from '../submitter/queueWorker.js';
 import {
   demoApplication,
@@ -106,6 +110,42 @@ export interface ArtifactCache {
   scannedJobs: ScannedJobTemplate[];
   resolvedApplications: CandidateJobApplication[];
   lastLoadedAt: string | null;
+}
+
+/** Parse CSV/job score for dashboard eligibility (20–60). */
+function parseDashboardJobScore(score: string | number | undefined): number {
+  if (score === undefined || score === null) return 0;
+  if (typeof score === 'number') return Number.isFinite(score) ? score : 0;
+  const parsed = parseFloat(String(score).trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isDashboardJobScoreInRange(job: { score?: string | number }): boolean {
+  const score = parseDashboardJobScore(job.score);
+  return score >= 20 && score <= 60;
+}
+
+function isDashboardDemoFixtureJob(
+  applywizzId: string,
+  job: { canonicalUrl?: string; rawUrl?: string }
+): boolean {
+  return (
+    applywizzId === DEMO_APPLYWIZZ_ID ||
+    applywizzId === AKSHITHA_APPLYWIZZ_ID ||
+    job.canonicalUrl === DEMO_JOB_URL ||
+    job.rawUrl === DEMO_JOB_URL
+  );
+}
+
+function isDashboardJobScoreEligible(
+  applywizzId: string,
+  job: { score?: string | number; canonicalUrl?: string; rawUrl?: string },
+  isAdmin: boolean
+): boolean {
+  if (isAdmin && isDashboardDemoFixtureJob(applywizzId, job)) {
+    return true;
+  }
+  return isDashboardJobScoreInRange(job);
 }
 
 export const artifactCache: ArtifactCache = {
@@ -318,7 +358,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     let allowedCandidateIds: string[] | undefined = undefined;
     if (!isAdmin) {
-      const targetDate = dateParam || getISTDateString(0);
+      const targetDate = dateParam || getYesterdayIST();
       let cached = getCachedWorkHistory(userEmail, targetDate);
       if (!cached) {
         const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
@@ -394,7 +434,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
       ? req.query.date
-      : getISTDateString(0);
+      : getYesterdayIST();
 
     let allowedIds: Set<string> | null = null;
     let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
@@ -462,6 +502,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
       // Filter to only jobs eligible under current question threshold (< MAX_JOB_QUESTIONS)
       const eligibleJobs = seg.jobs.filter((job) => {
+        if (!isDashboardJobScoreEligible(seg.applywizzId, job, isAdmin)) {
+          return false;
+        }
         if (
           seg.applywizzId === DEMO_APPLYWIZZ_ID ||
           seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
@@ -528,6 +571,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           existingIds.add(idUpper);
         }
       }
+    }
+
+    if (isSupabaseConfigured()) {
+      const connectedIds = await fetchZohoConnectedApplywizzIdSet(
+        candidateSummaries.map((c) => c.applywizzId)
+      );
+      candidateSummaries = candidateSummaries.filter((c) =>
+        connectedIds.has(c.applywizzId.trim().toUpperCase())
+      );
     }
 
     if (isAdmin) {
@@ -618,6 +670,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
         return;
       }
+    }
+
+    const zohoGate = await assertApplywizzZohoConnected(applywizzId, {
+      isAdmin,
+      allowAdminDemo: true,
+    });
+    if (!zohoGate.allowed) {
+      res.status(403).json({ error: zohoGate.error });
+      return;
     }
 
     const seg =
@@ -742,13 +803,21 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       })
       .filter((job) => seg.applywizzId === DEMO_APPLYWIZZ_ID || job.canonicalUrl === DEMO_JOB_URL || job.fieldsCount < config.MAX_JOB_QUESTIONS);
 
+    const totalBeforeScoreFilter = eligibleJobsWithStatus.length;
+    const dashboardJobs = eligibleJobsWithStatus.filter((job) =>
+      isDashboardJobScoreEligible(seg.applywizzId, job, isAdmin)
+    );
+    console.log(
+      `[Dashboard] Filtered jobs: showed ${dashboardJobs.length}/${totalBeforeScoreFilter} (score 20–60 only).`
+    );
+
     res.json({
       applywizzId: seg.applywizzId,
       clientName: seg.clientName,
       profile: seg.profile,
       resumeUrl,
       resumeFilename,
-      jobs: eligibleJobsWithStatus,
+      jobs: dashboardJobs,
     });
   });
 
@@ -821,6 +890,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
         return;
       }
+    }
+
+    const zohoJobGate = await assertApplywizzZohoConnected(applywizzId, {
+      isAdmin,
+      allowAdminDemo: true,
+    });
+    if (!zohoJobGate.allowed) {
+      res.status(403).json({ error: zohoJobGate.error });
+      return;
     }
 
     // Extract everything after /jobs/ as raw URL
