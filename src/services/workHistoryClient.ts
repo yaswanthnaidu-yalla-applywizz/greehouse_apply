@@ -150,6 +150,7 @@ async function fetchRecordsForDate(
     return null;
   }
 
+  console.log(`[WorkHistory] Fetching for ca_email=${normalizedEmail}`);
   const fullUrl = buildCaWorkHistoryUrl(normalizedEmail, dateStr);
   const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
   if (!outcome.ok) {

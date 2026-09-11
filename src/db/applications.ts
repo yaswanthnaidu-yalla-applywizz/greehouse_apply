@@ -1033,6 +1033,22 @@ export async function countApplicationsByStatus(status: ApplicationStatus): Prom
 }
 
 /**
+ * Event-based queue status logger:
+ * [Queue] Status change: <FROM> → <TO> (app-<id>) | <queued> total queued, <applying> applying
+ */
+export async function logQueueStatusChange(
+  appRef: string,
+  fromStatus: string,
+  toStatus: string
+): Promise<void> {
+  const queuedCount = await countApplicationsByStatus('QUEUED');
+  const applyingCount = await countApplicationsByStatus('APPLYING');
+  console.log(
+    `[Queue] Status change: ${fromStatus} → ${toStatus} (app-${appRef}) | ${queuedCount} total queued, ${applyingCount} applying`
+  );
+}
+
+/**
  * Inserts or transitions an application into the global submission queue (Phase V2-4c).
  * Calculates submission_order = MAX(submission_order) + 1 across all active/submitted applications.
  */
@@ -1044,6 +1060,8 @@ export async function enqueueApplication(
   if (!app) {
     throw new Error(`Application '${applicationIdOrApplywizzId}' not found to queue.`);
   }
+
+  const previousStatus = app.status || 'READY_FOR_REVIEW';
 
   // 1. Calculate next global submission_order
   let maxOrder = 0;
@@ -1120,6 +1138,7 @@ export async function enqueueApplication(
   const resolvedId = updatedApp.id || applicationIdOrApplywizzId;
   console.log(`[API] Submit clicked → status = QUEUED (ready for queue daemon)`);
   console.log(`[API] Status → QUEUED (application ${resolvedId}, submission_order=${nextOrder})`);
+  await logQueueStatusChange(resolvedId, previousStatus, 'QUEUED');
   if (process.env.ENABLE_QUEUE_WORKER !== 'true') {
     console.warn(
       `[Queue] ENABLE_QUEUE_WORKER is not "true" — app ${resolvedId} will remain QUEUED until a submission worker runs`

@@ -29,6 +29,7 @@ import { submissionsRouter } from './routes/submissions.js';
 import { authRouter, isUserAdmin } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { configRouter } from './routes/config.js';
+import { managerRouter } from './routes/manager.js';
 import { wsManager } from './ws.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
@@ -309,6 +310,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   // Dashboard client config (protected)
   app.use('/api/config', requireAuth, configRouter);
+
+  // Manager dashboard routes (admin-only within the router)
+  app.use('/api/manager', requireAuth, managerRouter);
 
   // Protect candidates and admin namespaces
   app.use('/api/candidates', requireAuth);
@@ -835,12 +839,78 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   /**
    * GET /api/candidates/:applywizzId/jobs
-   * Returns only jobs belonging to the requested candidate.
+   * Returns only jobs belonging to the requested candidate, isolated to authenticated CA.
    */
   app.get('/api/candidates/:applywizzId/jobs', async (req: AuthenticatedRequest, res: Response) => {
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
+    const userEmail = getAuthenticatedCaEmail(req);
+    const isAdmin = isUserAdmin(req.user || userEmail);
+    const targetDate =
+      typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+        ? req.query.date
+        : getYesterdayIST();
+
+    if (!isAdmin) {
+      if (!userEmail) {
+        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        return;
+      }
+
+      let cached = getCachedWorkHistory(userEmail, targetDate) || getCachedWorkHistory(userEmail);
+      if (!cached) {
+        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+
+      if (cached.candidateIds.length === 0 && !req.query.date) {
+        const allowedResult = await fetchAllowedCandidates(userEmail);
+        if (allowedResult.candidateIds.length > 0) {
+          setCachedWorkHistory(userEmail, allowedResult.records, allowedResult.candidateIds, allowedResult.unreachable, allowedResult.resolvedDate);
+          cached = {
+            records: allowedResult.records,
+            candidateIds: allowedResult.candidateIds,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+            unreachable: allowedResult.unreachable,
+            resolvedDate: allowedResult.resolvedDate,
+          };
+        }
+      }
+
+      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+      if (!allowedIds.has(applywizzId.toUpperCase())) {
+        console.warn(
+          `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail}) → filtered to 0 jobs (candidate not assigned to CA on ${targetDate})`
+        );
+        res.status(403).json({
+          error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
+          applywizzId,
+          jobs: [],
+        });
+        return;
+      }
+    }
+
+    const zohoGate = await assertApplywizzZohoConnected(applywizzId, {
+      isAdmin,
+      allowAdminDemo: true,
+    });
+    if (!zohoGate.allowed) {
+      console.warn(
+        `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) → Zoho gate blocked: ${zohoGate.error}`
+      );
+      res.status(403).json({ error: zohoGate.error, applywizzId, jobs: [] });
+      return;
+    }
+
     const jobs: Array<Record<string, unknown>> = [];
 
     if (isSupabaseConfigured()) {
@@ -854,6 +924,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         return;
       }
       for (const application of data || []) {
+        if (!isAdmin && userEmail && application.assigned_ca_email &&
+            application.assigned_ca_email.trim().toLowerCase() !== userEmail.trim().toLowerCase()) {
+          continue;
+        }
         jobs.push({
           rawUrl: application.job_url,
           canonicalUrl: application.job_url,
@@ -904,7 +978,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    console.log(`[API] GET /api/candidates/${applywizzId}/jobs → filtering by applywizz_id=${applywizzId}`);
+    console.log(
+      `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) → filtered to ${jobs.length} jobs`
+    );
     res.json({ applywizzId, jobs });
   });
 
@@ -916,6 +992,32 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
+    const userEmail = getAuthenticatedCaEmail(req);
+    const isAdmin = isUserAdmin(req.user || userEmail);
+
+    if (!isAdmin) {
+      if (!userEmail) {
+        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        return;
+      }
+      let cached = getCachedWorkHistory(userEmail) || getCachedWorkHistory(userEmail, getYesterdayIST());
+      if (!cached) {
+        const whResult = await fetchAllowedCandidates(userEmail);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+      if (!allowedIds.has(applywizzId.toUpperCase())) {
+        res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
+        return;
+      }
+    }
 
     const targetPath = (applywizzId === DEMO_APPLYWIZZ_ID || applywizzId === 'AWL-YASHANTH')
       ? 'resumes/AWL-YASHANTH_resume.pdf'

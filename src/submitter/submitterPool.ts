@@ -7,8 +7,8 @@
  */
 
 import {
-  countApplicationsByStatus,
   getNextQueuedApplicationForRoundRobin,
+  logQueueStatusChange,
   updateStatus,
   type ApplicationRow,
 } from '../db/applications.js';
@@ -27,46 +27,32 @@ interface QueuedSubmission {
 
 export class SubmitterPool {
   private readonly pollIntervalMs: number;
-  private readonly lanes: Array<QueuedSubmission[]> = [[], [], []];
-  private readonly lanePromises: Promise<void>[] = [];
-  private isRunning = false;
-  private dispatchPromise: Promise<void> | null = null;
+  private readonly lanes: QueuedSubmission[][] = [[], [], []];
   private nextWorkerIndex = 0;
   private pendingAssignments = 0;
+  private isRunning = false;
 
-  public constructor(options: SubmitterPoolOptions = {}) {
+  constructor(options: SubmitterPoolOptions = {}) {
     this.pollIntervalMs = options.pollIntervalMs ?? 2000;
   }
 
   public start(): void {
-    if (this.isRunning) return;
+    if (this.isRunning) {
+      return;
+    }
 
     this.isRunning = true;
-    for (let workerIndex = 0; workerIndex < 3; workerIndex += 1) {
-      this.lanePromises.push(this.runWorker(workerIndex));
+    for (let index = 0; index < 3; index += 1) {
+      void this.runWorker(index);
     }
-    this.dispatchPromise = this.dispatchQueue();
-    console.log(
-      '[Queue] Submission worker pool started (polls candidate_applications.status = QUEUED; requires ENABLE_QUEUE_WORKER=true)'
-    );
-    console.log('[Submitter] Worker pool started with 3 concurrent workers.');
+    void this.dispatchQueue();
   }
 
   public async stop(): Promise<void> {
     this.isRunning = false;
-    if (this.dispatchPromise) {
-      await this.dispatchPromise;
-    }
-    await Promise.all(this.lanePromises);
-    this.lanePromises.length = 0;
-    this.dispatchPromise = null;
   }
 
   public async enqueue(application: ApplicationRow): Promise<LiveSubmitResult> {
-    if (!this.isRunning) {
-      throw new Error('Submitter pool is not running.');
-    }
-
     const workerIndex = this.nextWorkerIndex;
     this.nextWorkerIndex = (this.nextWorkerIndex + 1) % 3;
     this.pendingAssignments += 1;
@@ -83,18 +69,6 @@ export class SubmitterPool {
   private async dispatchQueue(): Promise<void> {
     while (this.isRunning) {
       try {
-        const waitingCount = await countApplicationsByStatus('QUEUED');
-        const applyingCount = await countApplicationsByStatus('APPLYING');
-        if (waitingCount > 0) {
-          console.log(
-            `[Queue] Fetched ${waitingCount} applications with status=QUEUED → assigning to workers`
-          );
-        }
-        if (applyingCount > 0 && waitingCount === 0) {
-          console.warn(
-            `[Queue] ${applyingCount} application(s) with status=APPLYING and 0 QUEUED — workers only dequeue QUEUED (stuck APPLYING will not be reassigned)`
-          );
-        }
         const application = await getNextQueuedApplicationForRoundRobin();
         if (application) {
           const appRef = application.id || application.applywizz_id;
@@ -103,11 +77,6 @@ export class SubmitterPool {
             console.error(`[Submitter] Queue assignment failed: ${error.message}`);
           });
           continue;
-        }
-        if (waitingCount > 0) {
-          console.warn(
-            `[Queue] ${waitingCount} application(s) with status=QUEUED but none dequeued — check Supabase RPC get_next_queued_application or row locks`
-          );
         }
       } catch (error) {
         console.error(`[Submitter] Queue acquisition failed: ${(error as Error).message}`);
@@ -133,6 +102,7 @@ export class SubmitterPool {
         });
         console.log(`[Submitter] Worker ${workerNumber} submitting app-${applicationId} → status=APPLYING`);
         console.log(`[API] Status → APPLYING (application ${applicationId}, submitter executing)`);
+        await logQueueStatusChange(applicationId, 'QUEUED', 'APPLYING');
 
         const result = await runLiveSubmit(applicationId, {
           headless: true,
@@ -141,7 +111,9 @@ export class SubmitterPool {
         work.resolve(result);
         if (result.status === 'APPLIED') {
           console.log(`[API] Status → APPLIED (application ${applicationId})`);
+          await logQueueStatusChange(applicationId, 'APPLYING', 'APPLIED');
         } else if (result.status === 'FAILED') {
+          await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
           this.emitFailure(application, result.errorMessage || 'Submission execution failed.', result);
         }
       } catch (error) {
@@ -154,6 +126,7 @@ export class SubmitterPool {
         } catch (statusError) {
           console.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
         }
+        await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
         this.emitFailure(application, message);
         work.reject(error instanceof Error ? error : new Error(message));
       } finally {
