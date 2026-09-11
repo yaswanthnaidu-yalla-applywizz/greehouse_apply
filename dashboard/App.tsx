@@ -383,6 +383,7 @@ export const App: React.FC = () => {
 
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
+    console.log(`[Dashboard] Selected ${applywizzId} → fetching jobs assigned to this candidate only`);
     try {
       const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}`, {
         headers: getAuthHeaders(),
@@ -392,30 +393,48 @@ export const App: React.FC = () => {
         const jobsRes = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs`, {
           headers: getAuthHeaders(),
         });
+
+        if (jobsRes.status === 403) {
+          console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} is not assigned to current CA`);
+          setCandidateDetail({
+            ...detail,
+            jobs: [],
+          });
+          setSelectedJobUrl(null);
+          setApplication(null);
+          return;
+        }
+
         const jobsPayload = jobsRes.ok ? await jobsRes.json() : null;
         const returnedApplywizzId = jobsPayload?.applywizzId || jobsPayload?.applywizz_id;
         console.log(
-          `[API] GET /api/candidates/${applywizzId}/jobs \u2192 filtering by applywizz_id=${applywizzId}`
+          `[API] GET /api/candidates/${applywizzId}/jobs → filtering by applywizz_id=${applywizzId}`
         );
         if (returnedApplywizzId && returnedApplywizzId !== applywizzId) {
           console.error(
             `[Dashboard] Candidate mismatch: viewing ${applywizzId}, jobs returned for ${returnedApplywizzId}`
           );
         }
+
+        const candidateJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
         setCandidateDetail({
           ...detail,
-          jobs: Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : detail.jobs,
+          jobs: candidateJobs,
         });
 
         // Auto-select first job if available
-        const jobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : detail.jobs;
-        if (jobs && jobs.length > 0) {
-          const firstJobUrl = jobs[0].canonicalUrl || jobs[0].rawUrl;
+        if (candidateJobs.length > 0) {
+          const firstJobUrl = candidateJobs[0].canonicalUrl || candidateJobs[0].rawUrl;
           setSelectedJobUrl(firstJobUrl);
         } else {
           setSelectedJobUrl(null);
           setApplication(null);
         }
+      } else if (res.status === 403) {
+        console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} not accessible`);
+        setCandidateDetail(null);
+        setSelectedJobUrl(null);
+        setApplication(null);
       }
     } catch (err: any) {
       console.error(`Failed to fetch candidate ${applywizzId}:`, err);

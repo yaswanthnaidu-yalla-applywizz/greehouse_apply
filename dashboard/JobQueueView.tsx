@@ -27,9 +27,13 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   selectedJobUrl,
   onSelectJob,
 }) => {
-  const handleJobSelect = (jobUrl: string) => {
-    console.log(`[Dashboard] Job card clicked → detail view only (jobUrl: ${jobUrl})`);
-    onSelectJob(jobUrl);
+  const handleJobSelect = (job: CandidateJob) => {
+    const jobKey = job.canonicalUrl || job.rawUrl;
+    const currentStatus = job.status || 'READY_FOR_REVIEW';
+    console.log(
+      `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → action taken: navigate`
+    );
+    onSelectJob(jobKey);
   };
 
   if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
@@ -90,7 +94,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             <button
               key={`${jobKey}-${idx}`}
               type="button"
-              onClick={() => handleJobSelect(jobKey)}
+              onClick={() => handleJobSelect(job)}
               className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
                 isSelected
                   ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'

@@ -51,7 +51,12 @@ export function isUserAdmin(userOrEmail?: any): boolean {
   const normalized = email.trim().toLowerCase();
   if (!normalized) return true; // Unauthenticated / dev requests default to admin
 
-  if (ALWAYS_ALLOWED_EMAILS.some((e) => e.trim().toLowerCase() === normalized)) {
+  const isAlwaysAllowedEmail = ALWAYS_ALLOWED_EMAILS.some(
+    (allowedEmail) => allowedEmail.trim().toLowerCase() === normalized
+  );
+  console.log(`[Auth] Email check: ${normalized} → found in admin list: ${isAlwaysAllowedEmail}`);
+
+  if (isAlwaysAllowedEmail) {
     console.log(`[Auth] ${normalized} → admin access granted`);
     return true;
   }
