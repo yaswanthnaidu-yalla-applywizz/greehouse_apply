@@ -218,7 +218,11 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       )}
 
       <div className="flex flex-col items-end gap-2.5 w-full min-w-[200px]">
-        {isApplying && <SubmittingSpinner text="Submitting..." className="w-full" />}
+        {applicationStatus === 'QUEUED' ? (
+          <SubmittingSpinner text="Queued for worker..." className="w-full" />
+        ) : isApplying ? (
+          <SubmittingSpinner text="Submitting..." className="w-full" />
+        ) : null}
 
         <div className="flex items-center gap-2.5 flex-wrap justify-end">
           <button
@@ -256,6 +260,8 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
             title={
               hasUnresolved
                 ? `Cannot submit: ${unresolvedFieldsCount} unresolved field(s) require review`
+                : applicationStatus === 'QUEUED'
+                ? 'Application queued for worker...'
                 : isApplying
                 ? 'Submission in progress...'
                 : isApplied
@@ -268,7 +274,12 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                 : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
             }`}
           >
-            {isApplying ? (
+            {applicationStatus === 'QUEUED' ? (
+              <>
+                <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Queued...</span>
+              </>
+            ) : isApplying ? (
               <>
                 <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                 <span>Submitting...</span>

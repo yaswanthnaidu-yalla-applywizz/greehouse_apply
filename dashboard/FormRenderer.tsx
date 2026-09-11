@@ -124,7 +124,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     currentStatus === 'OTP_REQUIRED' ||
     currentStatus === 'CAPTCHA_REQUIRED';
   const badgeStatus: ApplicationStatus | string =
-    currentStatus === 'QUEUED' ||
     currentStatus === 'OTP_REQUIRED' ||
     currentStatus === 'CAPTCHA_REQUIRED'
       ? 'APPLYING'
@@ -267,10 +266,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const handleTriggerSubmit = async () => {
     if (isSubmitting || submitFlowActive) return;
 
-    console.log(`[Dashboard] Operator submitted ${appId} → auto-flow started`);
+    console.log(`[Dashboard] Submit clicked → status = QUEUED (appId: ${appId})`);
     setIsSubmitting(true);
     if (onStatusChange) {
-      onStatusChange('APPLYING');
+      onStatusChange('QUEUED');
     }
     try {
       const res = await fetch(
@@ -309,7 +308,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       }
 
       if (onStatusChange) {
-        onStatusChange('APPLYING', data);
+        onStatusChange((data.status || 'QUEUED') as ApplicationStatus, data);
       }
     } catch (err: any) {
       console.error('Submission failed:', err);
@@ -388,7 +387,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               rel="noopener noreferrer"
               onClick={() => {
                 console.log(
-                  `[Dashboard] Job link clicked: navigating to ${jobUrl}; submit handler not invoked`
+                  `[Dashboard] Job link clicked → navigation only (url: ${jobUrl})`
                 );
               }}
               className="text-[11px] md:text-xs text-[#2563EB] hover:underline font-mono truncate max-w-md block mt-0.5 font-medium"

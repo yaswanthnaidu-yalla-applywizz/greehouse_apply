@@ -245,6 +245,12 @@
 
       switch (status) {
         case 'QUEUED':
+          return (
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Application queued for submission daemon">
+              <span className="w-2 h-2 rounded-full border-2 border-[#9A3412] border-t-transparent animate-spin"></span>
+              <span>Queued</span>
+            </span>
+          );
         case 'CAPTCHA_REQUIRED':
         case 'OTP_REQUIRED':
         case 'APPLYING':
@@ -493,7 +499,11 @@
           )}
 
           <div className="flex flex-col items-end gap-2.5 w-full min-w-[200px]">
-          {isApplying && <SubmittingSpinner text="Submitting..." className="w-full" />}
+          {applicationStatus === 'QUEUED' ? (
+            <SubmittingSpinner text="Queued for worker..." className="w-full" />
+          ) : isApplying ? (
+            <SubmittingSpinner text="Submitting..." className="w-full" />
+          ) : null}
 
           <div className="flex items-center gap-2.5 flex-wrap justify-end">
           <button
@@ -529,7 +539,12 @@
                 : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
             }`}
           >
-            {isApplying ? (
+            {applicationStatus === 'QUEUED' ? (
+              <>
+                <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Queued...</span>
+              </>
+            ) : isApplying ? (
               <>
                 <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                 <span>Submitting...</span>
@@ -1412,7 +1427,6 @@
         currentStatus === 'OTP_REQUIRED' ||
         currentStatus === 'CAPTCHA_REQUIRED';
       const badgeStatus =
-        currentStatus === 'QUEUED' ||
         currentStatus === 'OTP_REQUIRED' ||
         currentStatus === 'CAPTCHA_REQUIRED'
           ? 'APPLYING'
@@ -1526,9 +1540,9 @@
       const handleTriggerSubmit = async () => {
         if (isSubmitting || submitFlowActive) return;
 
-        console.log(`[Dashboard] Operator submitted ${appId} → auto-flow started`);
+        console.log(`[Dashboard] Submit clicked → status = QUEUED (appId: ${appId})`);
         setIsSubmitting(true);
-        if (onStatusChange) onStatusChange('APPLYING');
+        if (onStatusChange) onStatusChange('QUEUED');
         try {
           const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit`, {
             method: 'POST',
@@ -1579,7 +1593,7 @@
           }
 
           if (onStatusChange) {
-            onStatusChange('APPLYING', data);
+            onStatusChange(data.status || 'QUEUED', data);
           }
         } catch (err) {
           console.error('Submission failed:', err);
@@ -1643,6 +1657,11 @@
                   href={application.jobUrl || application.job_url}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => {
+                    console.log(
+                      `[Dashboard] Job link clicked → navigation only (url: ${jobUrl})`
+                    );
+                  }}
                   className="text-[11px] md:text-xs text-[#2563EB] hover:underline font-mono truncate max-w-md block mt-0.5 font-medium"
                 >
                   {application.jobUrl || application.job_url}

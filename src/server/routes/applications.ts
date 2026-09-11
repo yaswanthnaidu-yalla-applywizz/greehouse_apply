@@ -278,6 +278,8 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
         applywizz_id: finalApplywizz,
         job_url: finalJobUrl,
         status: effectiveStatus,
+        submission_order: application?.submission_order,
+        assigned_ca_email: application?.assigned_ca_email,
         resolved_fields: application?.resolved_fields || application?.resolvedFields || [],
         proof_web_url: resolvedProofWebUrl || application?.proof_web_url || application?.proofWebUrl,
         proof_captured_at: resolvedProofCapturedAt || application?.proof_captured_at || application?.proofCapturedAt,
