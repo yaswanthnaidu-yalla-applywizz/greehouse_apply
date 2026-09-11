@@ -834,6 +834,81 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   });
 
   /**
+   * GET /api/candidates/:applywizzId/jobs
+   * Returns only jobs belonging to the requested candidate.
+   */
+  app.get('/api/candidates/:applywizzId/jobs', async (req: AuthenticatedRequest, res: Response) => {
+    const applywizzId = Array.isArray(req.params.applywizzId)
+      ? req.params.applywizzId[0]
+      : String(req.params.applywizzId || '');
+    const jobs: Array<Record<string, unknown>> = [];
+
+    if (isSupabaseConfigured()) {
+      const { data, error } = await getDbClient()
+        .from('candidate_applications')
+        .select('*')
+        .eq('applywizz_id', applywizzId);
+      if (error) {
+        console.error(`[API] Failed to fetch jobs for ${applywizzId}:`, error.message);
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      for (const application of data || []) {
+        jobs.push({
+          rawUrl: application.job_url,
+          canonicalUrl: application.job_url,
+          companyName: application.company_name || 'Greenhouse Company',
+          jobTitle: application.job_title || 'Job Opening',
+          status: application.status || 'PENDING',
+          fieldsCount: Array.isArray(application.resolved_fields) ? application.resolved_fields.length : 0,
+          hasManualEdits: Boolean(application.has_manual_edits),
+        });
+      }
+    }
+
+    if (jobs.length === 0) {
+      for (const application of artifactCache.resolvedApplications) {
+        if (application.applywizzId !== applywizzId) continue;
+        jobs.push({
+          rawUrl: application.jobUrl,
+          canonicalUrl: application.jobUrl,
+          companyName: application.companyName || 'Greenhouse Company',
+          jobTitle: application.jobTitle || 'Job Opening',
+          status: application.status || 'PENDING',
+          fieldsCount: application.resolvedFields?.length || 0,
+          hasManualEdits: Boolean((application as any).hasManualEdits || (application as any).has_manual_edits),
+        });
+      }
+    }
+
+    if (jobs.length === 0) {
+      const segment =
+        candidatesMap.get(applywizzId) ||
+        (applywizzId === DEMO_APPLYWIZZ_ID
+          ? demoSegment
+          : applywizzId === AKSHITHA_APPLYWIZZ_ID
+          ? akshithaSegment
+          : undefined);
+      for (const job of segment?.jobs || []) {
+        const jobUrl = job.canonicalUrl || job.rawUrl;
+        const template = templatesMap.get(jobUrl) || templatesMap.get(job.rawUrl);
+        jobs.push({
+          rawUrl: job.rawUrl,
+          canonicalUrl: jobUrl,
+          companyName: template?.companyName || 'Greenhouse Company',
+          jobTitle: template?.jobTitle || 'Job Opening',
+          status: template?.isExpired ? 'EXPIRED' : 'PENDING',
+          fieldsCount: template?.fields?.length || 0,
+          hasManualEdits: false,
+        });
+      }
+    }
+
+    console.log(`[API] GET /api/candidates/${applywizzId}/jobs → filtering by applywizz_id=${applywizzId}`);
+    res.json({ applywizzId, jobs });
+  });
+
+  /**
    * GET /api/candidates/:applywizzId/resume
    * Streams or serves candidate master resume PDF directly from Supabase Storage or local cache.
    */

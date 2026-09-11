@@ -1118,7 +1118,7 @@ export async function enqueueApplication(
 
   cacheApplicationLocally(updatedApp);
   const resolvedId = updatedApp.id || applicationIdOrApplywizzId;
-  console.log(`[API] POST /applications/${resolvedId}/submit: status = QUEUED (submission_order=${nextOrder})`);
+  console.log(`[API] Status → QUEUED (application ${resolvedId}, submission_order=${nextOrder})`);
   if (process.env.ENABLE_QUEUE_WORKER !== 'true') {
     console.warn(
       `[Queue] ENABLE_QUEUE_WORKER is not "true" — app ${resolvedId} will remain QUEUED until a submission worker runs`
@@ -1142,6 +1142,8 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
       if (!error && data && Array.isArray(data) && data.length > 0) {
         const selected = data[0] as ApplicationRow;
         cacheApplicationLocally(selected);
+        const appRef = selected.id || selected.applywizz_id;
+        console.log(`[API] Status → APPLYING (application ${appRef}, dequeued via RPC from QUEUED)`);
         return selected;
       }
     } catch (rpcErr: any) {
@@ -1175,6 +1177,8 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
             updated_at: new Date().toISOString(),
           };
           cacheApplicationLocally(applyingApp);
+          const appRef = applyingApp.id || applyingApp.applywizz_id;
+          console.log(`[API] Status → APPLYING (application ${appRef}, dequeued from QUEUED)`);
           return applyingApp;
         }
       }
@@ -1192,6 +1196,8 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
     const next = queued[0];
     next.status = 'APPLYING';
     next.updated_at = new Date().toISOString();
+    const appRef = next.id || next.applywizz_id;
+    console.log(`[API] Status → APPLYING (application ${appRef}, dequeued from in-memory QUEUED)`);
     return next;
   }
 

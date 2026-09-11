@@ -4,9 +4,9 @@
  */
 
 import { config } from '../config/env.js';
+import { WORK_HISTORY_API_BASE_URL } from '../server/workHistoryAuth.js';
 
-export const DEFAULT_WORK_HISTORY_API_URL =
-  'https://applywizz-ca-management.vercel.app/api/ca/work-history';
+export const DEFAULT_WORK_HISTORY_API_URL = WORK_HISTORY_API_BASE_URL;
 
 export interface WorkHistoryCandidateRecord {
   applywizzId: string;
@@ -25,8 +25,14 @@ export interface WorkHistoryResult {
 export const ADMIN_WORK_HISTORY_CACHE_KEY = '__admin__';
 
 function getWorkHistoryBaseUrl(): string {
-  const raw = config.WORK_HISTORY_API_URL || DEFAULT_WORK_HISTORY_API_URL;
-  return raw.replace(/\/$/, '');
+  let raw = (config.WORK_HISTORY_API_URL || DEFAULT_WORK_HISTORY_API_URL).trim().replace(/\/$/, '');
+  if (/^https:\/\/applywizz-ca-management\.vercel$/i.test(raw)) {
+    raw = 'https://applywizz-ca-management.vercel.app';
+  }
+  if (!/\/api\/ca\/work-history$/i.test(raw)) {
+    raw = raw.endsWith('/api/ca') ? `${raw}/work-history` : `${raw}/api/ca/work-history`;
+  }
+  return raw;
 }
 
 /**

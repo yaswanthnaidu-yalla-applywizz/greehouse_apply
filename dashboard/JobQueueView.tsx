@@ -27,6 +27,11 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   selectedJobUrl,
   onSelectJob,
 }) => {
+  const handleJobSelect = (jobUrl: string) => {
+    console.log(`[Dashboard] Job row clicked: selecting ${jobUrl}; submit handler not invoked`);
+    onSelectJob(jobUrl);
+  };
+
   if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
     return (
       <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
@@ -85,7 +90,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             <button
               key={`${jobKey}-${idx}`}
               type="button"
-              onClick={() => onSelectJob(jobKey)}
+              onClick={() => handleJobSelect(jobKey)}
               className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
                 isSelected
                   ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'

@@ -389,11 +389,28 @@ export const App: React.FC = () => {
       });
       if (res.ok) {
         const detail: CandidateDetail = await res.json();
-        setCandidateDetail(detail);
+        const jobsRes = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs`, {
+          headers: getAuthHeaders(),
+        });
+        const jobsPayload = jobsRes.ok ? await jobsRes.json() : null;
+        const returnedApplywizzId = jobsPayload?.applywizzId || jobsPayload?.applywizz_id;
+        console.log(
+          `[API] GET /api/candidates/${applywizzId}/jobs \u2192 filtering by applywizz_id=${applywizzId}`
+        );
+        if (returnedApplywizzId && returnedApplywizzId !== applywizzId) {
+          console.error(
+            `[Dashboard] Candidate mismatch: viewing ${applywizzId}, jobs returned for ${returnedApplywizzId}`
+          );
+        }
+        setCandidateDetail({
+          ...detail,
+          jobs: Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : detail.jobs,
+        });
 
         // Auto-select first job if available
-        if (detail.jobs && detail.jobs.length > 0) {
-          const firstJobUrl = detail.jobs[0].canonicalUrl || detail.jobs[0].rawUrl;
+        const jobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : detail.jobs;
+        if (jobs && jobs.length > 0) {
+          const firstJobUrl = jobs[0].canonicalUrl || jobs[0].rawUrl;
           setSelectedJobUrl(firstJobUrl);
         } else {
           setSelectedJobUrl(null);

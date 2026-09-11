@@ -161,7 +161,9 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       console.log(
         `[Submissions Router] 📥 Application ${application.id || appId} queued (submission_order: ${submissionOrder}, ca: ${userEmail || 'none'})`
       );
-      console.log(`[API] POST /applications/${application.id || appId}/submit: status = QUEUED`);
+      console.log(
+        `[API] Status → QUEUED (application ${application.id || appId}, submission_order=${submissionOrder})`
+      );
 
       res.status(200).json({
         success: true,

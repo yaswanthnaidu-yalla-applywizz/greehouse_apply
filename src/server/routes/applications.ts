@@ -213,8 +213,6 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     return;
   }
 
-  console.log(`[API] PATCH /applications/${appId}: status = ${status}`);
-
   try {
     const targetJobUrl = jobUrl || (req.query.jobUrl as string) || (req.query.job_url as string);
     let application: any = await getApplication(appId, targetJobUrl);
@@ -249,7 +247,17 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     const resolvedEmailProofStatus = email_proof_status !== undefined ? email_proof_status : emailProofStatus;
     const resolvedEmailProofAttemptedAt = email_proof_attempted_at !== undefined ? email_proof_attempted_at : emailProofAttemptedAt;
 
-    const statusChanged = await updateStatus(targetAppId, status as ApplicationStatus, {
+    const currentStatus = (application?.status || '') as ApplicationStatus;
+    let effectiveStatus = status as ApplicationStatus;
+    if (status === 'APPLYING' && currentStatus === 'QUEUED') {
+      console.warn(
+        `[API] Status → APPLYING blocked for ${targetAppId} (still QUEUED — worker sets APPLYING on dequeue)`
+      );
+      effectiveStatus = 'QUEUED';
+    }
+    console.log(`[API] Status → ${effectiveStatus} (PATCH /applications/${appId})`);
+
+    const statusChanged = await updateStatus(targetAppId, effectiveStatus, {
       proof_web_url: resolvedProofWebUrl,
       proof_captured_at: resolvedProofCapturedAt,
       proof_failed_url: resolvedProofFailedUrl,
@@ -269,7 +277,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
         id: application?.id,
         applywizz_id: finalApplywizz,
         job_url: finalJobUrl,
-        status: status as ApplicationStatus,
+        status: effectiveStatus,
         resolved_fields: application?.resolved_fields || application?.resolvedFields || [],
         proof_web_url: resolvedProofWebUrl || application?.proof_web_url || application?.proofWebUrl,
         proof_captured_at: resolvedProofCapturedAt || application?.proof_captured_at || application?.proofCapturedAt,
@@ -305,7 +313,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     if (!updatedApp && application) {
       updatedApp = {
         ...application,
-        status,
+        status: effectiveStatus,
         error_message: resolvedErrorMessage !== undefined ? resolvedErrorMessage : application.error_message,
         proof_failed_url: resolvedProofFailedUrl || application.proof_failed_url,
         proof_failed_captured_at: resolvedProofFailedCapturedAt || application.proof_failed_captured_at,
