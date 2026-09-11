@@ -5,6 +5,9 @@
 
 import { config } from '../config/env.js';
 
+export const DEFAULT_WORK_HISTORY_API_URL =
+  'https://applywizz-ca-management.vercel.app/api/ca/work-history';
+
 export interface WorkHistoryCandidateRecord {
   applywizzId: string;
   clientName: string;
@@ -20,6 +23,25 @@ export interface WorkHistoryResult {
 
 /** Cache key for org-wide admin work-history (no CA email filter). */
 export const ADMIN_WORK_HISTORY_CACHE_KEY = '__admin__';
+
+function getWorkHistoryBaseUrl(): string {
+  const raw = config.WORK_HISTORY_API_URL || DEFAULT_WORK_HISTORY_API_URL;
+  return raw.replace(/\/$/, '');
+}
+
+/**
+ * Builds CA-scoped work-history URL: from=date, to=date, ca_email=signed-in email.
+ */
+export function buildCaWorkHistoryUrl(caEmail: string, dateStr: string): string {
+  const normalizedEmail = caEmail.trim().toLowerCase();
+  const base = getWorkHistoryBaseUrl();
+  const params = new URLSearchParams({
+    from: dateStr,
+    to: dateStr,
+    ca_email: normalizedEmail,
+  });
+  return `${base}?${params.toString()}`;
+}
 
 /**
  * Generates YYYY-MM-DD string for IST (Asia/Kolkata, UTC+5:30) offset by `daysAgo`.
@@ -60,85 +82,100 @@ function isFetchTimeoutError(err: unknown): boolean {
   return msg.includes('timeout') || msg.includes('aborted');
 }
 
-async function fetchWorkHistoryResponse(
-  url: string,
-  dateStr: string,
-  timeoutMs: number,
-  context: string
-): Promise<Response | null> {
+type FetchWorkHistoryOutcome =
+  | { ok: true; response: Response }
+  | { ok: false; reason: string };
+
+async function fetchWorkHistoryWithRetry(
+  fullUrl: string,
+  timeoutMs: number
+): Promise<FetchWorkHistoryOutcome> {
+  let lastReason = 'unknown error';
+
   for (let attempt = 1; attempt <= WORK_HISTORY_MAX_ATTEMPTS; attempt++) {
-    console.log(
-      `[WorkHistory] Fetching from ${url} with params from=${dateStr}&to=${dateStr}` +
-        (attempt > 1 ? ` (attempt ${attempt}/${WORK_HISTORY_MAX_ATTEMPTS})` : '')
-    );
+    console.log(`[WorkHistory] Fetching ${fullUrl}`);
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-      return res;
+      const response = await fetch(fullUrl, { signal: AbortSignal.timeout(timeoutMs) });
+      return { ok: true, response };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      lastReason = err instanceof Error ? err.message : String(err);
       const timedOut = isFetchTimeoutError(err);
       if (timedOut && attempt < WORK_HISTORY_MAX_ATTEMPTS) {
         console.warn(
-          `[WorkHistory] Timeout on ${context} (${message}); retrying in ${WORK_HISTORY_RETRY_BACKOFF_MS}ms`
+          `[WorkHistory] Failed ${fullUrl}: ${lastReason} (timeout, retry ${attempt + 1}/${WORK_HISTORY_MAX_ATTEMPTS} in ${WORK_HISTORY_RETRY_BACKOFF_MS}ms)`
         );
         await sleep(WORK_HISTORY_RETRY_BACKOFF_MS);
         continue;
       }
-      console.warn(`[WorkHistory] Network failure on ${context}: ${message}`);
-      return null;
+      console.warn(`[WorkHistory] Failed ${fullUrl}: ${lastReason}`);
+      return { ok: false, reason: lastReason };
     }
   }
-  return null;
+
+  console.warn(`[WorkHistory] Failed ${fullUrl}: ${lastReason}`);
+  return { ok: false, reason: lastReason };
+}
+
+function parseWorkHistoryRecords(data: any): WorkHistoryCandidateRecord[] | null {
+  if (!data || !Array.isArray(data.records)) {
+    return null;
+  }
+
+  const uniqueMap = new Map<string, WorkHistoryCandidateRecord>();
+  for (const r of data.records) {
+    const rawId = (r.applywizz_id || '').trim().toUpperCase();
+    if (rawId && !uniqueMap.has(rawId)) {
+      uniqueMap.set(rawId, {
+        applywizzId: rawId,
+        clientName: (r.client_name || rawId).trim(),
+        clientEmail: (r.client_email || '').trim().toLowerCase(),
+      });
+    }
+  }
+  return Array.from(uniqueMap.values());
 }
 
 /**
- * Queries work-history API for a specific date (IST).
+ * Queries work-history API for a specific date (IST) and signed-in CA email.
  * Returns null if network error, HTTP error, or timeout occurs.
  */
 async function fetchRecordsForDate(
   caEmail: string,
   dateStr: string
 ): Promise<WorkHistoryCandidateRecord[] | null> {
-  const baseUrl =
-    config.WORK_HISTORY_API_URL ||
-    'https://applywizz-ca-management.vercel.app/api/ca/work-history';
-  const url = `${baseUrl}?from=${dateStr}&to=${dateStr}&ca_email=${encodeURIComponent(caEmail.trim().toLowerCase())}`;
-
-  const res = await fetchWorkHistoryResponse(
-    url,
-    dateStr,
-    WORK_HISTORY_FETCH_TIMEOUT_MS,
-    `date ${dateStr} for ${caEmail}`
-  );
-  if (!res) {
+  const normalizedEmail = caEmail.trim().toLowerCase();
+  if (!normalizedEmail) {
+    console.warn('[WorkHistory] Failed: missing ca_email (authenticated user email required)');
     return null;
   }
+
+  const fullUrl = buildCaWorkHistoryUrl(normalizedEmail, dateStr);
+  const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
+  if (!outcome.ok) {
+    return null;
+  }
+
+  const res = outcome.response;
   if (!res.ok) {
-    console.warn(`[WorkHistory] HTTP ${res.status} when querying date ${dateStr} for ${caEmail}`);
+    const reason = `HTTP ${res.status}`;
+    console.warn(`[WorkHistory] Failed ${fullUrl}: ${reason}`);
     return null;
   }
 
   try {
     const data: any = await res.json();
-    if (!data || !Array.isArray(data.records)) {
+    const records = parseWorkHistoryRecords(data);
+    if (records === null) {
+      console.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
       return null;
     }
-
-    const uniqueMap = new Map<string, WorkHistoryCandidateRecord>();
-    for (const r of data.records) {
-      const rawId = (r.applywizz_id || '').trim().toUpperCase();
-      if (rawId && !uniqueMap.has(rawId)) {
-        uniqueMap.set(rawId, {
-          applywizzId: rawId,
-          clientName: (r.client_name || rawId).trim(),
-          clientEmail: (r.client_email || '').trim().toLowerCase(),
-        });
-      }
-    }
-    return Array.from(uniqueMap.values());
+    console.log(
+      `[WorkHistory] Success date=${dateStr} ca_email=${normalizedEmail} records=${records.length}`
+    );
+    return records;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[WorkHistory] Failed to parse response for ${dateStr}: ${message}`);
+    console.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
     return null;
   }
 }
@@ -164,46 +201,43 @@ export async function fetchWorkHistoryForDate(
 }
 
 /**
+ * Primary CA work-history fetch: yesterday IST for both from and to.
+ */
+export async function fetchWorkHistoryForAuthenticatedCa(
+  caEmail: string,
+  dateStr?: string
+): Promise<WorkHistoryResult> {
+  const targetDate = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : getYesterdayIST();
+  return fetchWorkHistoryForDate(caEmail, targetDate);
+}
+
+/**
  * Fetches all assigned candidates for a date (admin view — no ca_email filter).
  */
 export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<WorkHistoryResult> {
-  const baseUrl =
-    config.WORK_HISTORY_API_URL ||
-    'https://applywizz-ca-management.vercel.app/api/ca/work-history';
-  const url = `${baseUrl}?from=${dateStr}&to=${dateStr}`;
+  const base = getWorkHistoryBaseUrl();
+  const params = new URLSearchParams({ from: dateStr, to: dateStr });
+  const fullUrl = `${base}?${params.toString()}`;
 
-  const res = await fetchWorkHistoryResponse(
-    url,
-    dateStr,
-    WORK_HISTORY_ADMIN_FETCH_TIMEOUT_MS,
-    `admin date ${dateStr}`
-  );
-  if (!res) {
+  const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_ADMIN_FETCH_TIMEOUT_MS);
+  if (!outcome.ok) {
     return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
   }
+
+  const res = outcome.response;
   if (!res.ok) {
-    console.warn(`[WorkHistory] Admin HTTP ${res.status} for date ${dateStr}`);
+    console.warn(`[WorkHistory] Failed ${fullUrl}: HTTP ${res.status}`);
     return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
   }
 
   try {
     const data: any = await res.json();
-    if (!data || !Array.isArray(data.records)) {
+    const records = parseWorkHistoryRecords(data);
+    if (records === null) {
+      console.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
       return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
     }
-
-    const uniqueMap = new Map<string, WorkHistoryCandidateRecord>();
-    for (const r of data.records) {
-      const rawId = (r.applywizz_id || '').trim().toUpperCase();
-      if (rawId && !uniqueMap.has(rawId)) {
-        uniqueMap.set(rawId, {
-          applywizzId: rawId,
-          clientName: (r.client_name || rawId).trim(),
-          clientEmail: (r.client_email || '').trim().toLowerCase(),
-        });
-      }
-    }
-    const records = Array.from(uniqueMap.values());
+    console.log(`[WorkHistory] Success date=${dateStr} ca_email=(admin) records=${records.length}`);
     return {
       records,
       candidateIds: records.map((r) => r.applywizzId),
@@ -212,7 +246,7 @@ export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<Wor
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[WorkHistory] Admin parse failed on ${dateStr}: ${message}`);
+    console.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
     return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
   }
 }
@@ -231,7 +265,6 @@ export async function fetchAllowedCandidates(caEmail: string): Promise<WorkHisto
     if (records === null) {
       unreachableCount++;
       if (daysBack === 1) {
-        // If primary attempt fails, mark unreachable
         return { records: [], candidateIds: [], unreachable: true, resolvedDate: null };
       }
       continue;

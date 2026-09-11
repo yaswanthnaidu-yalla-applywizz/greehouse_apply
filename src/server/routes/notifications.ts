@@ -15,6 +15,7 @@ import {
 import { isUserAdmin } from './auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from '../workHistoryCache.js';
 import { fetchWorkHistoryForDate, getYesterdayIST } from '../../services/workHistoryClient.js';
+import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 
 export const notificationsRouter = Router();
 
@@ -29,12 +30,11 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
       ? req.query.date
       : undefined;
 
-    const user = (req as any).user;
-    const userEmail = (user?.email || '').trim().toLowerCase();
-    const isAdmin = isUserAdmin(user || userEmail);
+    const userEmail = getAuthenticatedCaEmail(req);
+    const isAdmin = isUserAdmin((req as any).user || userEmail);
 
     let allowedCandidateIds: string[] | undefined = undefined;
-    if (!isAdmin) {
+    if (!isAdmin && userEmail) {
       const targetDate = dateParam || getYesterdayIST();
       let cached = getCachedWorkHistory(userEmail, targetDate);
       if (!cached) {

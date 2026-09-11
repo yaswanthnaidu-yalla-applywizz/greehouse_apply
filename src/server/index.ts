@@ -32,6 +32,7 @@ import { configRouter } from './routes/config.js';
 import { wsManager } from './ws.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
+import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
 import {
   fetchAllowedCandidates,
   fetchWorkHistoryForDate,
@@ -352,26 +353,30 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ? req.query.date
       : undefined;
 
-    const user = (req as any).user;
-    const userEmail = (user?.email || '').trim().toLowerCase();
-    const isAdmin = isUserAdmin(user || userEmail);
+    const userEmail = getAuthenticatedCaEmail(req);
+    const isAdmin = isUserAdmin((req as any).user || userEmail);
 
     let allowedCandidateIds: string[] | undefined = undefined;
     if (!isAdmin) {
       const targetDate = dateParam || getYesterdayIST();
-      let cached = getCachedWorkHistory(userEmail, targetDate);
-      if (!cached) {
-        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
+      if (!userEmail) {
+        console.warn('[WorkHistory] /api/stats: no ca_email on JWT session — skipping work-history fetch');
+        allowedCandidateIds = [];
+      } else {
+        let cached = getCachedWorkHistory(userEmail, targetDate);
+        if (!cached) {
+          const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
+          setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
+          cached = {
+            records: whResult.records,
+            candidateIds: whResult.candidateIds,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+            unreachable: whResult.unreachable,
+            resolvedDate: whResult.resolvedDate,
+          };
+        }
+        allowedCandidateIds = cached.candidateIds;
       }
-      allowedCandidateIds = cached.candidateIds;
     }
 
     const outcomes = await getSubmissionOutcomeCounts({
@@ -428,9 +433,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * Returns summary list of all segregated candidates with job counts and status for the selected IST date.
    */
   app.get('/api/candidates', async (req: AuthenticatedRequest, res: Response) => {
-    const user = req.user;
-    const userEmail = (user?.email || '').trim().toLowerCase();
-    const isAdmin = isUserAdmin(user || userEmail);
+    const userEmail = getAuthenticatedCaEmail(req);
+    const isAdmin = isUserAdmin(req.user || userEmail);
 
     const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
       ? req.query.date
@@ -467,7 +471,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
       workHistoryUnreachable = cached.unreachable;
       workHistoryRecords = cached.records;
-    } else {
+    } else if (userEmail) {
       let cached = getCachedWorkHistory(userEmail, dateParam);
       if (!cached) {
         const whResult = await fetchWorkHistoryForDate(userEmail, dateParam);
@@ -483,6 +487,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       workHistoryUnreachable = cached.unreachable;
       workHistoryRecords = cached.records;
       allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+    } else {
+      console.warn('[WorkHistory] /api/candidates: no ca_email on JWT session — skipping work-history fetch');
+      workHistoryUnreachable = true;
     }
 
     res.setHeader('X-Work-History-Unreachable', String(workHistoryUnreachable));
@@ -648,15 +655,20 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
-    const user = req.user;
-    const userEmail = (user?.email || '').trim().toLowerCase();
-    const isAdmin = isUserAdmin(user || userEmail);
+    const userEmail = getAuthenticatedCaEmail(req);
+    const isAdmin = isUserAdmin(req.user || userEmail);
+    let caWorkHistoryEmail: string | undefined;
 
     if (!isAdmin) {
-      let cached = getCachedWorkHistory(userEmail);
+      if (!userEmail) {
+        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        return;
+      }
+      caWorkHistoryEmail = userEmail;
+      let cached = getCachedWorkHistory(caWorkHistoryEmail);
       if (!cached) {
-        const whResult = await fetchAllowedCandidates(userEmail);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+        const whResult = await fetchAllowedCandidates(caWorkHistoryEmail);
+        setCachedWorkHistory(caWorkHistoryEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
         cached = {
           records: whResult.records,
           candidateIds: whResult.candidateIds,
@@ -692,8 +704,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     if (!seg) {
       // Check if it's a synthesized candidate from work-history
       let whRecord: WorkHistoryCandidateRecord | undefined;
-      if (!isAdmin) {
-        const cached = getCachedWorkHistory(userEmail);
+      if (caWorkHistoryEmail) {
+        const cached = getCachedWorkHistory(caWorkHistoryEmail);
         whRecord = cached?.records.find((r) => r.applywizzId.toUpperCase() === applywizzId.toUpperCase());
       }
       if (whRecord) {
@@ -868,11 +880,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const applywizzId = Array.isArray(req.params.applywizzId)
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
-    const user = req.user;
-    const userEmail = (user?.email || '').trim().toLowerCase();
-    const isAdmin = isUserAdmin(user || userEmail);
+    const userEmail = getAuthenticatedCaEmail(req);
+    const isAdmin = isUserAdmin(req.user || userEmail);
 
     if (!isAdmin) {
+      if (!userEmail) {
+        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        return;
+      }
       let cached = getCachedWorkHistory(userEmail);
       if (!cached) {
         const whResult = await fetchAllowedCandidates(userEmail);

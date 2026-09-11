@@ -18,8 +18,164 @@ import { config } from '../config/env.js';
 import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
 import { profileRowToCandidateProfile, upsertProfile, getProfile, updateResumeStoragePath } from '../db/profiles.js';
+import { upsertApplication } from '../db/applications.js';
 import { uploadResume } from '../db/storage.js';
 import type { CandidateSegment } from '../types/index.js';
+
+export type CsvIngestFormat = 'OLD' | 'NEW' | 'UNKNOWN';
+
+export interface ParsedCsvJobRow {
+  applywizzId: string;
+  clientName: string;
+  rawUrl: string;
+  date: string;
+  score: number;
+  scoredJobId: string;
+  status: string;
+}
+
+function normalizeHeaderKey(key: string): string {
+  return key.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+/**
+ * Detect CSV layout from header column names (first parsed row keys).
+ */
+export function detectCsvFormat(headerKeys: string[]): CsvIngestFormat {
+  const normalized = new Set(headerKeys.map(normalizeHeaderKey));
+
+  const hasNew =
+    normalized.has('company_job_url') &&
+    normalized.has('applywizz_id') &&
+    normalized.has('score') &&
+    normalized.has('lead_name');
+  if (hasNew) {
+    return 'NEW';
+  }
+
+  const hasOldApplywizz =
+    normalized.has('applywizz_id') ||
+    headerKeys.some((k) => normalizeHeaderKey(k) === 'applywizz_id');
+  const hasOldClient =
+    normalized.has('client_name') ||
+    headerKeys.some((k) => normalizeHeaderKey(k) === 'client_name');
+  const hasOldUrl = normalized.has('url');
+  const hasOldScore = normalized.has('score');
+
+  if (hasOldApplywizz && hasOldClient && hasOldUrl && hasOldScore) {
+    return 'OLD';
+  }
+
+  return 'UNKNOWN';
+}
+
+function getColumnValue(row: Record<string, string>, ...aliases: string[]): string {
+  for (const alias of aliases) {
+    if (row[alias] !== undefined && row[alias] !== null) {
+      return String(row[alias]).trim();
+    }
+    const matchKey = Object.keys(row).find((k) => normalizeHeaderKey(k) === normalizeHeaderKey(alias));
+    if (matchKey && row[matchKey] !== undefined && row[matchKey] !== null) {
+      return String(row[matchKey]).trim();
+    }
+  }
+  return '';
+}
+
+function extractUrlFromCompanyJobUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/https?:\/\/[^\s"'<>]+/i);
+  return match ? match[0].replace(/[),.;]+$/, '') : trimmed;
+}
+
+function parseScore(rawScore: string | number | undefined): number {
+  if (rawScore === undefined || rawScore === null || rawScore === '') {
+    return 0;
+  }
+  const numScore = typeof rawScore === 'number' ? rawScore : parseFloat(String(rawScore).trim());
+  return Number.isNaN(numScore) ? 0 : numScore;
+}
+
+/**
+ * Maps a CSV data row to unified job fields for OLD or NEW format.
+ */
+export function parseCsvJobRow(
+  row: Record<string, string>,
+  format: CsvIngestFormat
+): ParsedCsvJobRow | null {
+  if (format === 'UNKNOWN') {
+    return null;
+  }
+
+  if (format === 'NEW') {
+    const companyJobUrl = getColumnValue(row, 'company_job_url');
+    const rawUrl = extractUrlFromCompanyJobUrl(companyJobUrl);
+    const applywizzId = getColumnValue(row, 'applywizz_id', 'Applywizz ID').toUpperCase();
+    const clientName = getColumnValue(row, 'lead_name', 'client_name', 'Client Name');
+    const score = parseScore(getColumnValue(row, 'score', 'Score') || undefined);
+    const date = getColumnValue(row, 'date', 'Date');
+    const scoredJobId = getColumnValue(row, 'scored_jobId', 'scored_job_id');
+    const status = getColumnValue(row, 'status', 'Status') || 'PENDING';
+
+    if (!applywizzId || !rawUrl) {
+      return null;
+    }
+
+    return {
+      applywizzId,
+      clientName: clientName || applywizzId,
+      rawUrl,
+      date,
+      score,
+      scoredJobId,
+      status,
+    };
+  }
+
+  const applywizzId = getColumnValue(row, 'Applywizz ID', 'applywizz_id', 'ApplywizzID').toUpperCase();
+  const clientName = getColumnValue(row, 'Client Name', 'client_name', 'ClientName');
+  const rawUrl = getColumnValue(row, 'url', 'URL', 'job_url');
+  const date = getColumnValue(row, 'Date', 'date');
+  const score = parseScore(getColumnValue(row, 'score', 'Score') || undefined);
+  const scoredJobId = getColumnValue(row, 'scored_jobId', 'scored_job_id');
+  const status = getColumnValue(row, 'status', 'Status') || 'PENDING';
+
+  if (!applywizzId || !rawUrl) {
+    return null;
+  }
+
+  return {
+    applywizzId,
+    clientName: clientName || applywizzId,
+    rawUrl,
+    date,
+    score,
+    scoredJobId,
+    status,
+  };
+}
+
+async function persistCandidateApplicationRows(segment: CandidateSegment): Promise<number> {
+  let created = 0;
+  for (const job of segment.jobs) {
+    try {
+      await upsertApplication({
+        applywizz_id: segment.applywizzId,
+        job_url: job.canonicalUrl,
+        company_name: segment.clientName || segment.applywizzId,
+        status: 'READY_FOR_REVIEW',
+        resolved_fields: [],
+      });
+      created++;
+    } catch (err: any) {
+      console.warn(
+        `[Segregator] ⚠️ Could not upsert candidate_applications for ${segment.applywizzId} ${job.canonicalUrl}: ${err.message}`
+      );
+    }
+  }
+  return created;
+}
 
 /**
  * Options configuring candidate segregation and profile synchronization.
@@ -113,6 +269,9 @@ export async function segregateCandidatesByApplyWizzId(
 
   const segmentsMap = new Map<string, CandidateSegment>();
   let rowCount = 0;
+  let csvFormat: CsvIngestFormat | null = null;
+  let formatLogged = false;
+  let skippedUnknownFormatRows = 0;
 
   await new Promise<void>((resolve, reject) => {
     const stream = fs.createReadStream(csvPath);
@@ -123,21 +282,34 @@ export async function segregateCandidatesByApplyWizzId(
       .on('data', (row: Record<string, string>) => {
         rowCount++;
 
-        const applywizzId = (row['Applywizz ID'] || row['applywizz_id'] || row['ApplywizzID'] || '').trim();
-        const clientName = (row['Client Name'] || row['client_name'] || row['ClientName'] || '').trim();
-        const rawUrl = (row.url || row.URL || row.job_url || '').trim();
-        const date = row.Date || row.date || '';
-        const rawScore = row.score !== undefined ? row.score : (row.Score !== undefined ? row.Score : 0);
-        const numScore = typeof rawScore === 'number' ? rawScore : parseFloat(String(rawScore).trim());
-        const score = isNaN(numScore) ? 0 : numScore;
-        const scoredJobId = row.scored_jobId || row.scored_job_id || '';
-        const status = row.status || 'PENDING';
+        if (csvFormat === null) {
+          csvFormat = detectCsvFormat(Object.keys(row));
+          if (!formatLogged) {
+            console.log(
+              `[Segregator] Format detected: ${csvFormat === 'UNKNOWN' ? 'UNKNOWN' : csvFormat}`
+            );
+            formatLogged = true;
+          }
+        }
 
-        if (!applywizzId || !rawUrl) {
+        if (csvFormat === 'UNKNOWN') {
+          skippedUnknownFormatRows++;
+          if (skippedUnknownFormatRows === 1) {
+            console.error(
+              '[Segregator] Unknown CSV format — expected OLD (Applywizz ID, Client Name, url, score) or NEW (company_job_url, applywizz_id, score, lead_name). Skipping rows.'
+            );
+          }
           return;
         }
 
-        // Score filter: Discard rows with score < 20 || score > 60
+        const parsed = parseCsvJobRow(row, csvFormat);
+        if (!parsed) {
+          console.error('[Segregator] Invalid row for detected format — skipping row');
+          return;
+        }
+
+        const { applywizzId, clientName, rawUrl, date, score, scoredJobId, status } = parsed;
+
         if (score < 20 || score > 60) {
           console.log(`[Segregator] ❌ Dropped job score=${score} | candidate=${applywizzId} | job=${rawUrl}`);
           return;
@@ -151,7 +323,7 @@ export async function segregateCandidatesByApplyWizzId(
 
         if (!segmentsMap.has(applywizzId)) {
           if (limit && segmentsMap.size >= limit) {
-            return; // Skip candidates beyond the limit
+            return;
           }
           segmentsMap.set(applywizzId, {
             applywizzId,
@@ -164,7 +336,6 @@ export async function segregateCandidatesByApplyWizzId(
 
         const segment = segmentsMap.get(applywizzId)!;
 
-        // Add job if not duplicate for this candidate and below maxJobs limit
         if (!segment.jobs.some((j) => j.canonicalUrl === canonicalUrl)) {
           if (!maxJobsPerCandidate || segment.jobs.length < maxJobsPerCandidate) {
             segment.jobs.push({
@@ -330,6 +501,16 @@ export async function segregateCandidatesByApplyWizzId(
       segmentsMap.delete(id);
       console.log(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
     }
+  }
+
+  let applicationRowsUpserted = 0;
+  for (const segment of segmentsMap.values()) {
+    applicationRowsUpserted += await persistCandidateApplicationRows(segment);
+  }
+  if (applicationRowsUpserted > 0) {
+    console.log(
+      `[Segregator] 💾 Upserted ${applicationRowsUpserted} candidate_applications row(s) for Zoho-connected candidates.`
+    );
   }
 
   return segmentsMap;
