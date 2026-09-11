@@ -21,6 +21,14 @@ import { upsertAnswer } from '../../db/qaBank.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { generateFingerprint } from '../../resolver/fingerprint.js';
 import { wsManager } from '../ws.js';
+import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
+import { isUserAdmin } from './auth.js';
+import { getCachedWorkHistory, setCachedWorkHistory } from '../workHistoryCache.js';
+import {
+  fetchAllowedCandidates,
+  fetchWorkHistoryForDate,
+  getYesterdayIST,
+} from '../../services/workHistoryClient.js';
 import type { ResolvedField } from '../../types/index.js';
 
 export const applicationsRouter = Router();
@@ -247,12 +255,9 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     const resolvedEmailProofStatus = email_proof_status !== undefined ? email_proof_status : emailProofStatus;
     const resolvedEmailProofAttemptedAt = email_proof_attempted_at !== undefined ? email_proof_attempted_at : emailProofAttemptedAt;
 
-    const currentStatus = (application?.status || '') as ApplicationStatus;
     let effectiveStatus = status as ApplicationStatus;
-    if (status === 'APPLYING' && currentStatus === 'QUEUED') {
-      console.warn(
-        `[API] Status → APPLYING blocked for ${targetAppId} (still QUEUED — worker sets APPLYING on dequeue)`
-      );
+    if (status === 'APPLYING') {
+      console.log(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
       effectiveStatus = 'QUEUED';
     }
     console.log(`[API] Status → ${effectiveStatus} (PATCH /applications/${appId})`);
@@ -388,7 +393,11 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
     const finalJobUrl = targetJobUrl || application?.job_url || application?.jobUrl;
     const finalApplywizz = application?.applywizz_id || application?.applywizzId || (appId.includes('_') ? appId.split('_')[0] : appId);
     const fieldsToSave = resolved_fields || application?.resolved_fields || application?.resolvedFields || [];
-    const newStatus = (status || application?.status || 'READY_FOR_REVIEW') as ApplicationStatus;
+    let newStatus = (status || application?.status || 'READY_FOR_REVIEW') as ApplicationStatus;
+    if (newStatus === 'APPLYING') {
+      console.log(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
+      newStatus = 'QUEUED';
+    }
 
     if (!finalJobUrl) {
       res.status(400).json({ error: 'Cannot approve application without job URL.' });
@@ -437,6 +446,102 @@ applicationsRouter.get('/notifications', async (_req: Request, res: Response): P
   } catch (err: any) {
     console.error('[Applications Router] Failed to get notifications:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch notifications' });
+  }
+});
+
+/**
+ * GET /api/applications
+ * Returns applications filtered strictly by authenticated CA email and candidate they are viewing.
+ */
+applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> => {
+  const user = (req as any).user;
+  const userEmail = getAuthenticatedCaEmail(req as any);
+  const isAdmin = isUserAdmin(user || userEmail);
+
+  const rawCandidate = req.query.applywizzId || req.query.applywizz_id || req.query.candidateId;
+  const applywizzId = (typeof rawCandidate === 'string' ? rawCandidate : '').trim();
+
+  const targetDate =
+    typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+      ? req.query.date
+      : getYesterdayIST();
+
+  try {
+    let allowedIds: Set<string> | null = null;
+    if (!isAdmin) {
+      if (!userEmail) {
+        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        return;
+      }
+      let cached = getCachedWorkHistory(userEmail, targetDate) || getCachedWorkHistory(userEmail);
+      if (!cached) {
+        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      if (cached.candidateIds.length === 0 && !req.query.date) {
+        const allowedResult = await fetchAllowedCandidates(userEmail);
+        if (allowedResult.candidateIds.length > 0) {
+          setCachedWorkHistory(userEmail, allowedResult.records, allowedResult.candidateIds, allowedResult.unreachable, allowedResult.resolvedDate);
+          cached = {
+            records: allowedResult.records,
+            candidateIds: allowedResult.candidateIds,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+            unreachable: allowedResult.unreachable,
+            resolvedDate: allowedResult.resolvedDate,
+          };
+        }
+      }
+      allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+
+      if (applywizzId && !allowedIds.has(applywizzId.toUpperCase())) {
+        console.warn(
+          `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA on ${targetDate})`
+        );
+        res.status(403).json({
+          error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
+          applications: [],
+        });
+        return;
+      }
+    }
+
+    let applications: any[] = [];
+    if (isSupabaseConfigured()) {
+      const supabase = getDbClient();
+      let query = supabase.from('candidate_applications').select('*');
+      if (applywizzId) {
+        query = query.eq('applywizz_id', applywizzId);
+      } else if (allowedIds) {
+        query = query.in('applywizz_id', Array.from(allowedIds));
+      }
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      applications = (data || []).filter((app: any) => {
+        if (!isAdmin && userEmail && app.assigned_ca_email) {
+          return app.assigned_ca_email.trim().toLowerCase() === userEmail.trim().toLowerCase();
+        }
+        return true;
+      });
+    }
+
+    const logCandidate = applywizzId ? ` candidate=${applywizzId}` : '';
+    console.log(
+      `[API] GET /api/applications (ca_email=${userEmail || 'admin'}${logCandidate}) → filtered to ${applications.length} applications`
+    );
+    res.json({ applications });
+  } catch (err: any) {
+    console.error('[Applications Router] Failed to fetch applications:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

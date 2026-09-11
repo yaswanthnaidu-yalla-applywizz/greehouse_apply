@@ -152,6 +152,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
 
   // Asynchronous queue insertion (default production flow - Phase V2-4c)
   if (!isSync) {
+    console.log(`[API] Submit endpoint received → setting status to: QUEUED`);
     try {
       const { submissionOrder, application } = await enqueueApplication(appId, {
         assignedCaEmail: userEmail,
