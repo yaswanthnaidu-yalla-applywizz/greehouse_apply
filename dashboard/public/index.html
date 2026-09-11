@@ -1246,9 +1246,13 @@
     // Horizontal Job Queue Tabs Component
     // -------------------------------------------------------------
     function JobQueueView({ candidate, selectedJobUrl, onSelectJob }) {
-      const handleJobSelect = (jobUrl) => {
-        console.log(`[Dashboard] Job card clicked → detail view only (jobUrl: ${jobUrl})`);
-        onSelectJob(jobUrl);
+      const handleJobSelect = (job) => {
+        const jobKey = job.canonicalUrl || job.rawUrl;
+        const currentStatus = job.status || 'READY_FOR_REVIEW';
+        console.log(
+          `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → action taken: navigate`
+        );
+        onSelectJob(jobKey);
       };
 
       if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
@@ -1297,7 +1301,7 @@
                 <button
                   key={`${jobKey}-${idx}`}
                   type="button"
-                  onClick={() => handleJobSelect(jobKey)}
+                  onClick={() => handleJobSelect(job)}
                   className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
                     isSelected
                       ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
@@ -2939,21 +2943,47 @@
       }, [currentUser, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
 
       const fetchCandidateDetail = useCallback(async (applywizzId) => {
+        console.log(`[Dashboard] Selected ${applywizzId} → fetching jobs assigned to this candidate only`);
         try {
           const res = await fetch(`/api/candidates/${applywizzId}`, {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
             const detail = await res.json();
-            setCandidateDetail(detail);
+            const jobsRes = await fetch(`/api/candidates/${encodeURIComponent(applywizzId)}/jobs`, {
+              headers: getAuthHeaders(),
+            });
 
-            if (detail.jobs && detail.jobs.length > 0) {
-              const firstJobUrl = detail.jobs[0].canonicalUrl || detail.jobs[0].rawUrl;
+            if (jobsRes.status === 403) {
+              console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} is not assigned to current CA`);
+              setCandidateDetail({
+                ...detail,
+                jobs: [],
+              });
+              setSelectedJobUrl(null);
+              setApplication(null);
+              return;
+            }
+
+            const jobsPayload = jobsRes.ok ? await jobsRes.json() : null;
+            const candidateJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
+            setCandidateDetail({
+              ...detail,
+              jobs: candidateJobs,
+            });
+
+            if (candidateJobs.length > 0) {
+              const firstJobUrl = candidateJobs[0].canonicalUrl || candidateJobs[0].rawUrl;
               setSelectedJobUrl(firstJobUrl);
             } else {
               setSelectedJobUrl(null);
               setApplication(null);
             }
+          } else if (res.status === 403) {
+            console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} not accessible`);
+            setCandidateDetail(null);
+            setSelectedJobUrl(null);
+            setApplication(null);
           }
         } catch (err) {
           console.error(`Failed to fetch candidate ${applywizzId}:`, err);
