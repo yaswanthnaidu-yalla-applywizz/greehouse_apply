@@ -3,6 +3,7 @@
 # 📦 User shorthand: **"do it"**
 - Commit and push all changes since last push; stage only product code (respect `.gitignore` — no local/planning docs).
 - Do not add `Co-authored-by: Cursor` (use Git Bash `git commit-tree` if the shell rewrites `git commit`).
+- After each push, reply with commit SHA(s) and a short bullet summary of what changed.
 
 # 🚨 STRICT RULE: ApplyWizz API Usage
 - NEVER call the ApplyWizz API (`https://www.apply-wizz.me/api/get-client-details`) without notifying the user and getting explicit permission first.

@@ -266,7 +266,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const handleTriggerSubmit = async () => {
     if (isSubmitting || submitFlowActive) return;
 
-    console.log(`[Dashboard] Submit clicked → status = QUEUED (appId: ${appId})`);
+    console.log(`[Dashboard] Submit button clicked → triggers API (appId: ${appId})`);
     setIsSubmitting(true);
     if (onStatusChange) {
       onStatusChange('QUEUED');
