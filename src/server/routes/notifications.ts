@@ -34,7 +34,12 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
     const isAdmin = isUserAdmin((req as any).user || userEmail);
 
     let allowedCandidateIds: string[] | undefined = undefined;
-    if (!isAdmin && userEmail) {
+    if (!isAdmin) {
+      if (!userEmail) {
+        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
+        return;
+      }
       const targetDate = dateParam || getYesterdayIST();
       let cached = getCachedWorkHistory(userEmail, targetDate);
       if (!cached) {

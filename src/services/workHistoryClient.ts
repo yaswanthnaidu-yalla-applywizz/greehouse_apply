@@ -37,9 +37,13 @@ function getWorkHistoryBaseUrl(): string {
 
 /**
  * Builds CA-scoped work-history URL: from=date, to=date, ca_email=signed-in email.
+ * Throws an error if caEmail is missing.
  */
 export function buildCaWorkHistoryUrl(caEmail: string, dateStr: string): string {
-  const email = caEmail.trim().toLowerCase();
+  const email = (caEmail || '').trim().toLowerCase();
+  if (!email) {
+    throw new Error('[WorkHistory] ❌ CA email missing — cannot proceed');
+  }
   const base = getWorkHistoryBaseUrl();
   return `${base}?from=${dateStr}&to=${dateStr}&ca_email=${email}`;
 }
@@ -144,14 +148,14 @@ async function fetchRecordsForDate(
   caEmail: string,
   dateStr: string
 ): Promise<WorkHistoryCandidateRecord[] | null> {
-  const normalizedEmail = caEmail.trim().toLowerCase();
+  const normalizedEmail = (caEmail || '').trim().toLowerCase();
   if (!normalizedEmail) {
-    console.warn('[WorkHistory] Failed: missing ca_email (authenticated user email required)');
-    return null;
+    console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+    throw new Error('[WorkHistory] ❌ CA email missing — cannot proceed');
   }
 
-  console.log(`[WorkHistory] Fetching for ca_email=${normalizedEmail}`);
   const fullUrl = buildCaWorkHistoryUrl(normalizedEmail, dateStr);
+  console.log(`[WorkHistory] Fetching ${fullUrl}`);
   const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
   if (!outcome.ok) {
     return null;

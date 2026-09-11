@@ -107,6 +107,24 @@ function normalizeBooleanValue(value: string): 'Yes' | 'No' | null {
   return null;
 }
 
+export function isCountryCodeField(fieldId: string, name: string, label: string): boolean {
+  const combined = `${fieldId} ${name} ${label}`.toLowerCase();
+  if (/sponsorship|visa|relocat|citizen/i.test(combined)) return false;
+  return (
+    fieldId === 'country' ||
+    name === 'country' ||
+    fieldId === 'country_code' ||
+    name === 'country_code' ||
+    /country\s*code|phone\s*country/i.test(combined) ||
+    (combined.includes('country') && !/salary|relocation/i.test(combined))
+  );
+}
+
+export function isSponsorshipQuestion(fieldId: string, name: string, label: string): boolean {
+  const combined = `${fieldId} ${name} ${label}`.toLowerCase();
+  return /sponsorship|visa|require.*sponsorship|employer-based visa/i.test(combined);
+}
+
 async function clickBooleanOption(
   locator: Locator,
   fieldName: string,
@@ -146,6 +164,8 @@ export async function fillSingleField(
   const name = field.name || field.fieldId || '';
   const fieldId = field.fieldId || field.name || '';
   const label = field.label || name;
+  const isCountryCode = isCountryCodeField(fieldId, name, label);
+  const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
 
   const fillResult: FieldFillResult = {
     fieldId,
@@ -282,9 +302,69 @@ export async function fillSingleField(
       // Select Dropdown (Native, Select2, React-Select)
       // ==========================================
       const booleanValue = normalizeBooleanValue(val);
-      const selectValue = booleanValue || val;
+      let selectValue = booleanValue || val;
+
+      // Special resolution for country code dropdown (phone country) - strictly +1 (United States)
+      let targetCountryName = 'United States';
+      let targetDialCode = '+1';
+      if (isCountryCode) {
+        selectValue = targetCountryName;
+      }
+
+      // Check for sponsorship question rendered as radio buttons in the DOM
+      if (isSponsorship) {
+        const sponsorshipRadios = page.locator(
+          `input[type="radio"][name="${escapeAttr(name)}"], input[type="radio"][name="${escapeAttr(fieldId)}"], input[type="radio"][name*="sponsorship"], input[type="radio"][name*="visa"]`
+        );
+        const radioCount = await sponsorshipRadios.count().catch(() => 0);
+        if (radioCount > 0) {
+          let radioClicked = false;
+          let radioSelectorUsed = '';
+          for (let r = 0; r < radioCount; r++) {
+            const radio = sponsorshipRadios.nth(r);
+            const rVal = (await radio.getAttribute('value').catch(() => '')) || '';
+            const rId = (await radio.getAttribute('id').catch(() => '')) || '';
+            let rText = '';
+            if (rId) {
+              const lLoc = page.locator(`label[for="${escapeId(rId)}"]`).first();
+              if ((await lLoc.count()) > 0) rText = (await lLoc.innerText().catch(() => '')) || '';
+            }
+            if (!rText) {
+              const parentL = radio.locator('..').first();
+              if ((await parentL.count()) > 0) rText = (await parentL.innerText().catch(() => '')) || '';
+            }
+            if (/^yes\b/i.test(rText.trim()) || /^yes\b/i.test(rVal.trim()) || ['true', '1'].includes(rVal.trim().toLowerCase())) {
+              radioSelectorUsed = rId ? `#${rId}` : `input[type="radio"][name="${escapeAttr(name)}"][value="${rVal}"]`;
+              await radio.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+              await radio.click({ force: true, timeout: 3000 });
+              radioClicked = true;
+              break;
+            }
+          }
+          if (radioClicked) {
+            fillResult.success = true;
+            console.log(
+              `[Submitter] Sponsorship field → selector: ${radioSelectorUsed || 'radio[name=' + name + ']'} → attempted click: Yes → result: selected`
+            );
+            return fillResult;
+          }
+        }
+      }
+
       const selectSelectors = [
         (field as any).metadata?.selector,
+        ...(isCountryCode ? [
+          '#country',
+          'input#country',
+          'select#country',
+          'select[name="country"]',
+          'select#job_application_country',
+          'select[name="job_application[country]"]',
+          '#phone_country_code',
+          'select[name*="phone_country"]',
+          'select[name*="country_code"]',
+          '[data-testid="country-dropdown"]',
+        ] : []),
         `select#${escapeId(name)}`,
         `select#${escapeId(fieldId)}`,
         `select#${escapeId(name.replace(/_/g, '-'))}`,
@@ -328,35 +408,66 @@ export async function fillSingleField(
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
           await found.locator.click({ force: true }).catch(() => {});
           await page.waitForTimeout(150);
-          await found.locator.pressSequentially(selectValue, { delay: 35 });
+
+          const typeQuery = isCountryCode ? targetCountryName : isSponsorship ? 'Yes' : selectValue;
+          await found.locator.pressSequentially(typeQuery, { delay: 35 });
           await page.waitForTimeout(350);
 
-          const escapedVal = selectValue.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-          const optionCandidates = page.locator('.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country)');
+          const optionCandidates = page.locator(
+            isCountryCode
+              ? '.select__option, [id*="-option"], [role="option"]'
+              : '.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country)'
+          );
 
-          // 1. Exact match
-          let matchedOpt = optionCandidates.filter({
-            hasText: new RegExp(`^${escapedVal}$`, 'i'),
-          }).first();
-
-          // 2. Prefix match (e.g., "United States" matching "United States +1")
-          if ((await matchedOpt.count()) === 0) {
+          let matchedOpt = optionCandidates.first();
+          if (isCountryCode) {
             matchedOpt = optionCandidates.filter({
-              hasText: new RegExp(`^${escapedVal}`, 'i'),
+              hasText: new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i'),
             }).first();
-          }
-
-          // 3. Substring / fuzzy match
-          if ((await matchedOpt.count()) === 0) {
+          } else if (isSponsorship) {
             matchedOpt = optionCandidates.filter({
-              hasText: new RegExp(escapedVal, 'i'),
+              hasText: /^yes\b/i,
             }).first();
+            if ((await matchedOpt.count()) === 0) {
+              matchedOpt = optionCandidates.filter({
+                hasText: /yes/i,
+              }).first();
+            }
+          } else {
+            const escapedVal = selectValue.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+            // 1. Exact match
+            matchedOpt = optionCandidates.filter({
+              hasText: new RegExp(`^${escapedVal}$`, 'i'),
+            }).first();
+
+            // 2. Prefix match (e.g., "United States" matching "United States +1")
+            if ((await matchedOpt.count()) === 0) {
+              matchedOpt = optionCandidates.filter({
+                hasText: new RegExp(`^${escapedVal}`, 'i'),
+              }).first();
+            }
+
+            // 3. Substring / fuzzy match
+            if ((await matchedOpt.count()) === 0) {
+              matchedOpt = optionCandidates.filter({
+                hasText: new RegExp(escapedVal, 'i'),
+              }).first();
+            }
           }
 
           if ((await matchedOpt.count()) > 0) {
             await matchedOpt.scrollIntoViewIfNeeded().catch(() => {});
             await matchedOpt.click({ force: true, timeout: 2500 });
-            if (booleanValue) {
+            fillResult.success = true;
+            if (isCountryCode) {
+              console.log(
+                `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
+              );
+            } else if (isSponsorship) {
+              console.log(
+                `[Submitter] Sponsorship field → selector: ${found.selector} → attempted click: Yes → result: selected`
+              );
+            } else if (booleanValue) {
               console.log(
                 `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → clicked ✅`
               );
@@ -375,34 +486,60 @@ export async function fillSingleField(
         } else {
           // Native HTML <select> (supports Select2 hidden elements via force: true)
           let selected = false;
-          // 1. Try exact label match
-          try {
-            await found.locator.selectOption({ label: selectValue }, { force: true, timeout: 2000 });
-            selected = true;
-          } catch {}
 
-          // 2. Try value match
-          if (!selected) {
-            try {
-              await found.locator.selectOption({ value: selectValue }, { force: true, timeout: 2000 });
-              selected = true;
-            } catch {}
-          }
-
-          // 3. Try fuzzy/case-insensitive option match
-          if (!selected) {
+          if (isCountryCode) {
             try {
               const optionsList = await found.locator.locator('option').allInnerTexts();
-              const lowerVal = selectValue.toLowerCase().trim();
-              const matchedOpt = optionsList.find((opt) => {
-                const o = opt.toLowerCase().trim();
-                return o === lowerVal || o.startsWith(lowerVal) || o.includes(lowerVal) || lowerVal.includes(o);
-              });
-              if (matchedOpt) {
-                await found.locator.selectOption({ label: matchedOpt.trim() }, { force: true, timeout: 2000 });
+              const matchOpt = optionsList.find((opt) =>
+                opt.includes(targetCountryName) || opt.includes(targetDialCode)
+              );
+              if (matchOpt) {
+                await found.locator.selectOption({ label: matchOpt.trim() }, { force: true, timeout: 2000 });
                 selected = true;
               }
             } catch {}
+          } else if (isSponsorship) {
+            try {
+              const optionsList = await found.locator.locator('option').allInnerTexts();
+              const matchOpt = optionsList.find((opt) => /^yes\b/i.test(opt.trim()) || opt.toLowerCase().includes('yes'));
+              if (matchOpt) {
+                await found.locator.selectOption({ label: matchOpt.trim() }, { force: true, timeout: 2000 });
+                selected = true;
+              }
+            } catch {}
+          }
+
+          // Fallback standard options matching
+          if (!selected) {
+            // 1. Try exact label match
+            try {
+              await found.locator.selectOption({ label: selectValue }, { force: true, timeout: 2000 });
+              selected = true;
+            } catch {}
+
+            // 2. Try value match
+            if (!selected) {
+              try {
+                await found.locator.selectOption({ value: selectValue }, { force: true, timeout: 2000 });
+                selected = true;
+              } catch {}
+            }
+
+            // 3. Try fuzzy/case-insensitive option match
+            if (!selected) {
+              try {
+                const optionsList = await found.locator.locator('option').allInnerTexts();
+                const lowerVal = selectValue.toLowerCase().trim();
+                const matchedOpt = optionsList.find((opt) => {
+                  const o = opt.toLowerCase().trim();
+                  return o === lowerVal || o.startsWith(lowerVal) || o.includes(lowerVal) || lowerVal.includes(o);
+                });
+                if (matchedOpt) {
+                  await found.locator.selectOption({ label: matchedOpt.trim() }, { force: true, timeout: 2000 });
+                  selected = true;
+                }
+              } catch {}
+            }
           }
 
           // Trigger change events natively and on jQuery for Select2 UI sync
@@ -414,12 +551,20 @@ export async function fillSingleField(
           }).catch(() => {});
 
           if (selected) {
-            if (booleanValue) {
+            fillResult.success = true;
+            if (isCountryCode) {
+              console.log(
+                `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
+              );
+            } else if (isSponsorship) {
+              console.log(
+                `[Submitter] Sponsorship field → selector: ${found.selector} → attempted click: Yes → result: selected`
+              );
+            } else if (booleanValue) {
               console.log(
                 `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → selected ✅`
               );
             }
-            fillResult.success = true;
           } else {
             throw new Error(`Could not select option "${val}" in ${found.selector}`);
           }
@@ -481,12 +626,19 @@ export async function fillSingleField(
           const cleanLabel = labelText.trim().toLowerCase();
           const cleanTarget = val.toLowerCase().trim();
 
-          if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget)) {
+          const isSponsorshipMatch = isSponsorship && (/^yes\b/i.test(cleanLabel) || /^yes\b/i.test(cleanTarget) || ['true', '1'].includes(radioVal?.toLowerCase() || ''));
+          if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget) || isSponsorshipMatch) {
             const optionSelector =
               radioVal && booleanValue && radioVal.toLowerCase() === booleanValue.toLowerCase()
                 ? `input[type="radio"][value="${booleanValue}"]`
                 : `input[type="radio"][name="${escapeAttr(name)}"]`;
-            if (booleanValue) {
+            if (isSponsorship) {
+              await radio.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+              await radio.click({ force: true, timeout: 3000 });
+              console.log(
+                `[Submitter] Sponsorship field → selector: ${optionSelector} → attempted click: Yes → result: selected`
+              );
+            } else if (booleanValue) {
               await clickBooleanOption(radio, fieldId, optionSelector, booleanValue);
             } else {
               await radio.scrollIntoViewIfNeeded().catch(() => {});
@@ -499,9 +651,17 @@ export async function fillSingleField(
       }
 
       if (!checked) {
-        const labelLoc = page.locator('label').filter({ hasText: val }).first();
+        const labelLoc = isSponsorship
+          ? page.locator('label').filter({ hasText: /^yes\b/i }).first()
+          : page.locator('label').filter({ hasText: val }).first();
         if ((await labelLoc.count()) > 0) {
-          if (booleanValue) {
+          if (isSponsorship) {
+            await labelLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+            await labelLoc.click({ force: true });
+            console.log(
+              `[Submitter] Sponsorship field → selector: label:has-text("Yes") → attempted click: Yes → result: selected`
+            );
+          } else if (booleanValue) {
             await clickBooleanOption(labelLoc, fieldId, `label:has-text("${booleanValue}")`, booleanValue);
           } else {
             await labelLoc.click({ force: true });
@@ -513,6 +673,11 @@ export async function fillSingleField(
       if (checked) {
         fillResult.success = true;
       } else {
+        if (isSponsorship) {
+          console.log(
+            `[Submitter] Sponsorship field → selector: input[type="radio"][name="${escapeAttr(name)}"] → attempted click: Yes → result: NOT SELECTED`
+          );
+        }
         throw new Error(`Radio option "${val}" not matched for group ${name}`);
       }
     } else if (rawType === 'checkbox') {
@@ -776,69 +941,104 @@ export async function fillSingleField(
             /phone|mobile/i.test(fieldId);
           if (isPhoneField) {
             try {
-              const cleanApplywizzId = (applywizzId || '').trim().toUpperCase();
-              const isAkshitha = cleanApplywizzId === 'AWL-31428' || cleanApplywizzId.includes('AKSHITHA');
-              const isYaswanth = cleanApplywizzId === 'AWL-YASWANTH';
+              const targetCountryCode = 'us';
+              const targetCountry = 'United States';
+              const targetDial = '+1';
 
-              const candProfile = applywizzId ? await getProfile(applywizzId) : null;
-              const isUs = isAkshitha || candProfile?.country_code === '+1' || /united states|usa/i.test(candProfile?.country || '');
-              const isIndia = !isUs && (isYaswanth || candProfile?.country_code === '+91' || /india/i.test(candProfile?.country || ''));
-
-              if (isUs || isIndia) {
-                const targetCountryCode = isUs ? 'us' : 'in';
-
-                // 1. Try intl-tel-input JavaScript instance
-                await found.locator.evaluate((el: HTMLInputElement, code: string) => {
-                  try {
-                    const iti = (window as any).intlTelInputGlobals?.getInstance?.(el) || (el as any).iti;
-                    if (iti && typeof iti.setCountry === 'function') {
-                      iti.setCountry(code);
+              // 1. Try intl-tel-input JavaScript instance
+              await found.locator.evaluate((el: HTMLInputElement, code: string) => {
+                try {
+                  const iti = (window as any).intlTelInputGlobals?.getInstance?.(el) || (el as any).iti;
+                  if (iti && typeof iti.setCountry === 'function') {
+                    iti.setCountry(code);
+                    return true;
+                  }
+                  if (typeof (window as any).$ !== 'undefined') {
+                    const $ = (window as any).$;
+                    if (typeof $(el).intlTelInput === 'function') {
+                      $(el).intlTelInput('setCountry', code);
                       return true;
                     }
-                    if (typeof (window as any).$ !== 'undefined') {
-                      const $ = (window as any).$;
-                      if (typeof $(el).intlTelInput === 'function') {
-                        $(el).intlTelInput('setCountry', code);
-                        return true;
-                      }
-                    }
-                  } catch {}
-                  return false;
-                }, targetCountryCode).catch(() => {});
+                  }
+                } catch {}
+                return false;
+              }, targetCountryCode).catch(() => {});
 
-                // 2. Try UI dropdown interaction if flag/country is visible
-                const itiContainer = found.locator.locator('xpath=ancestor::*[contains(@class, "iti")][1]');
-                const flagBtn = (await itiContainer.count()) > 0
-                  ? itiContainer.locator('.iti__selected-country, .iti__selected-flag, .iti__flag-container [role="combobox"]').first()
-                  : page.locator('.iti__selected-country, .iti__selected-flag, .iti__flag-container [role="combobox"]').first();
+              // 2. Try UI dropdown interaction if flag/country is visible
+              const itiContainer = found.locator.locator('xpath=ancestor::*[contains(@class, "iti")][1]');
+              const flagBtn = (await itiContainer.count()) > 0
+                ? itiContainer.locator('.iti__selected-country, .iti__selected-flag, .iti__flag-container [role="combobox"]').first()
+                : page.locator('.iti__selected-country, .iti__selected-flag, .iti__flag-container [role="combobox"]').first();
 
-                if ((await flagBtn.count()) > 0 && (await flagBtn.isVisible())) {
-                  const titleText = (await flagBtn.getAttribute('title').catch(() => '')) || '';
-                  const ariaLabel = (await flagBtn.getAttribute('aria-label').catch(() => '')) || '';
-                  const btnText = (await flagBtn.innerText().catch(() => '')) || '';
-                  const combinedStatus = `${titleText} ${ariaLabel} ${btnText}`.toLowerCase();
+              if ((await flagBtn.count()) > 0 && (await flagBtn.isVisible())) {
+                const titleText = (await flagBtn.getAttribute('title').catch(() => '')) || '';
+                const ariaLabel = (await flagBtn.getAttribute('aria-label').catch(() => '')) || '';
+                const btnText = (await flagBtn.innerText().catch(() => '')) || '';
+                const combinedStatus = `${titleText} ${ariaLabel} ${btnText}`.toLowerCase();
 
-                  const alreadyMatches = isUs
-                    ? (combinedStatus.includes('united states') || combinedStatus.includes('+1'))
-                    : (combinedStatus.includes('india') || combinedStatus.includes('+91'));
+                const alreadyMatches = combinedStatus.includes('united states') || combinedStatus.includes('+1');
 
-                  if (!alreadyMatches) {
-                    console.log(`[Form Filler] 📞 Setting intl-tel-input country to ${isUs ? 'United States (+1)' : 'India (+91)'}`);
-                    await flagBtn.click({ timeout: 2000 }).catch(() => {});
+                if (!alreadyMatches) {
+                  console.log(`[Form Filler] 📞 Setting intl-tel-input country to United States (+1)`);
+                  await flagBtn.click({ timeout: 2000 }).catch(() => {});
+                  await page.waitForTimeout(200);
+
+                  const countryItem = page.locator(
+                    `li.iti__country[data-country-code="${targetCountryCode}"], ` +
+                    `li.iti__country[data-dial-code="1"], ` +
+                    `li.iti__country:has-text("United States")`
+                  ).first();
+
+                  if ((await countryItem.count()) > 0) {
+                    await countryItem.scrollIntoViewIfNeeded().catch(() => {});
+                    await countryItem.click({ timeout: 2000 }).catch(() => {});
                     await page.waitForTimeout(200);
+                  } else {
+                    await page.keyboard.press('Escape').catch(() => {});
+                  }
+                }
+              }
 
-                    const countryItem = page.locator(
-                      `li.iti__country[data-country-code="${targetCountryCode}"], ` +
-                      `li.iti__country[data-dial-code="${isUs ? '1' : '91'}"], ` +
-                      `li.iti__country:has-text("${isUs ? 'United States' : 'India'}")`
-                    ).first();
+              // 3. Also check for adjacent modern Greenhouse React-Select or native #country dropdown
+              const countryDrop = page.locator('#country, input#country, select#country, select[name="country"]').first();
+              if ((await countryDrop.count()) > 0 && (await countryDrop.isVisible())) {
+                const isSelected = await countryDrop.evaluate((el: HTMLElement) => {
+                  if (el.tagName === 'SELECT') return (el as HTMLSelectElement).selectedIndex > 0;
+                  const container = el.closest('.select__control, .select-shell');
+                  const singleVal = container?.querySelector('.select__single-value');
+                  return Boolean(singleVal && singleVal.textContent?.trim());
+                }).catch(() => false);
 
-                    if ((await countryItem.count()) > 0) {
-                      await countryItem.scrollIntoViewIfNeeded().catch(() => {});
-                      await countryItem.click({ timeout: 2000 }).catch(() => {});
-                      await page.waitForTimeout(200);
+                if (!isSelected) {
+                  console.log(`[Form Filler] 📞 Setting phone country dropdown to United States (+1)`);
+                  const tagName = await countryDrop.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'INPUT');
+                  if (tagName === 'SELECT') {
+                    const opts = await countryDrop.locator('option').allInnerTexts().catch(() => []);
+                    const matchOpt = opts.find((o) => o.includes(targetCountry) || o.includes(targetDial));
+                    if (matchOpt) {
+                      await countryDrop.selectOption({ label: matchOpt.trim() }, { force: true }).catch(() => {});
+                      console.log(
+                        `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
+                      );
+                    }
+                  } else {
+                    await countryDrop.scrollIntoViewIfNeeded().catch(() => {});
+                    await countryDrop.click({ force: true }).catch(() => {});
+                    await page.waitForTimeout(150);
+                    await countryDrop.pressSequentially(targetCountry, { delay: 35 });
+                    await page.waitForTimeout(300);
+                    const opt = page.locator('.select__option, [id*="-option"], [role="option"]').filter({
+                      hasText: new RegExp(`(?:${targetCountry}|\\${targetDial})`, 'i'),
+                    }).first();
+                    if ((await opt.count()) > 0) {
+                      await opt.scrollIntoViewIfNeeded().catch(() => {});
+                      await opt.click({ force: true, timeout: 2000 }).catch(() => {});
+                      console.log(
+                        `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
+                      );
                     } else {
-                      await page.keyboard.press('Escape').catch(() => {});
+                      await page.keyboard.press('Enter').catch(() => {});
+                      await page.keyboard.press('Tab').catch(() => {});
                     }
                   }
                 }
@@ -855,6 +1055,16 @@ export async function fillSingleField(
   } catch (fieldErr: any) {
     fillResult.success = false;
     fillResult.error = fieldErr.message;
+    if (isCountryCode) {
+      console.log(
+        `[Submitter] Country code field → selector: ${fieldId} → attempted value: ${val} → result: NOT FILLED`
+      );
+    }
+    if (isSponsorship) {
+      console.log(
+        `[Submitter] Sponsorship field → selector: ${fieldId} → attempted click: Yes → result: NOT SELECTED`
+      );
+    }
     console.warn(`[Form Filler] ⚠️ Could not populate field "${label}" (${name}): ${fieldErr.message}`);
   }
 

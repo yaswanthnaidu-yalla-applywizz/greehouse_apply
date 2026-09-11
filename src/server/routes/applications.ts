@@ -470,7 +470,8 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let allowedIds: Set<string> | null = null;
     if (!isAdmin) {
       if (!userEmail) {
-        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
       let cached = getCachedWorkHistory(userEmail, targetDate) || getCachedWorkHistory(userEmail);
