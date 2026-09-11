@@ -213,6 +213,8 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     return;
   }
 
+  console.log(`[API] PATCH /applications/${appId}: status = ${status}`);
+
   try {
     const targetJobUrl = jobUrl || (req.query.jobUrl as string) || (req.query.job_url as string);
     let application: any = await getApplication(appId, targetJobUrl);

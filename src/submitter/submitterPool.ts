@@ -7,6 +7,7 @@
  */
 
 import {
+  countApplicationsByStatus,
   getNextQueuedApplicationForRoundRobin,
   updateStatus,
   type ApplicationRow,
@@ -45,6 +46,9 @@ export class SubmitterPool {
       this.lanePromises.push(this.runWorker(workerIndex));
     }
     this.dispatchPromise = this.dispatchQueue();
+    console.log(
+      '[Queue] Submission worker pool started (polls candidate_applications.status = QUEUED; requires ENABLE_QUEUE_WORKER=true)'
+    );
     console.log('[Submitter] Worker pool started with 3 concurrent workers.');
   }
 
@@ -66,8 +70,9 @@ export class SubmitterPool {
     const workerIndex = this.nextWorkerIndex;
     this.nextWorkerIndex = (this.nextWorkerIndex + 1) % 3;
     this.pendingAssignments += 1;
+    const appRef = application.id || application.applywizz_id;
     console.log(
-      `[Submitter] Worker ${workerIndex + 1} assigned ${application.applywizz_id} ${application.id || application.job_url} | ${this.getIdleCount()} idle.`
+      `[Submitter] Worker ${workerIndex + 1} assigned app-${appRef} | ${this.getIdleCount()} idle.`
     );
 
     return new Promise<LiveSubmitResult>((resolve, reject) => {
@@ -78,12 +83,23 @@ export class SubmitterPool {
   private async dispatchQueue(): Promise<void> {
     while (this.isRunning) {
       try {
+        const waitingCount = await countApplicationsByStatus('QUEUED');
+        if (waitingCount > 0) {
+          console.log(
+            `[Queue] Fetched ${waitingCount} applications waiting for submission (status=QUEUED)`
+          );
+        }
         const application = await getNextQueuedApplicationForRoundRobin();
         if (application) {
           void this.enqueue(application).catch((error: Error) => {
             console.error(`[Submitter] Queue assignment failed: ${error.message}`);
           });
           continue;
+        }
+        if (waitingCount > 0) {
+          console.warn(
+            `[Queue] ${waitingCount} QUEUED application(s) found but none were assigned — check Supabase RPC get_next_queued_application or row locks`
+          );
         }
       } catch (error) {
         console.error(`[Submitter] Queue acquisition failed: ${(error as Error).message}`);

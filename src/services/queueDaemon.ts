@@ -18,9 +18,9 @@ export interface QueueDaemonOptions {
 }
 
 /**
- * Dispatches approved applications across a fixed worker pool in round-robin order.
- * Applications are sorted by candidate and creation time before assignment, so each
- * candidate's jobs retain their database order while cycling through all workers.
+ * Standalone round-robin dispatcher (not wired in server/index.ts).
+ * Production submit flow uses SubmissionQueueDaemon + status QUEUED via enqueueApplication.
+ * This class polls the same QUEUED status for optional alternate deployments.
  */
 export class QueueDaemon {
   private readonly workerCount: number;
@@ -38,7 +38,7 @@ export class QueueDaemon {
   }
 
   public async runOnce(): Promise<QueueWorker[]> {
-    const applications = (await listApplications({ status: 'APPROVED' }))
+    const applications = (await listApplications({ status: 'QUEUED' }))
       .filter((application) => !this.assignedApplicationIds.has(this.applicationKey(application)))
       .sort((a, b) => {
         const candidateOrder = a.applywizz_id.localeCompare(b.applywizz_id);
@@ -51,13 +51,18 @@ export class QueueDaemon {
       applications: [],
     }));
 
+    if (applications.length > 0) {
+      console.log(
+        `[Queue] Fetched ${applications.length} applications waiting for submission (status=QUEUED)`
+      );
+    }
+
     applications.forEach((application, index) => {
       const worker = workers[index % this.workerCount];
       worker.applications.push(application);
       this.assignedApplicationIds.add(this.applicationKey(application));
-      console.log(
-        `[Queue] Worker ${worker.id} assigned ${application.applywizz_id} ${application.id || application.job_url} (${application.job_url})`
-      );
+      const appRef = application.id || application.applywizz_id;
+      console.log(`[Submitter] Worker ${worker.id} assigned app-${appRef}`);
     });
 
     this.activeWorkers = Math.min(

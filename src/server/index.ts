@@ -1182,8 +1182,15 @@ export function startServer(
     let queueDaemon: SubmissionQueueDaemon | null = null;
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 2;
+      console.log(
+        `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, dequeue status=QUEUED)`
+      );
       queueDaemon = new SubmissionQueueDaemon({ concurrency });
       queueDaemon.start();
+    } else {
+      console.warn(
+        '[Queue] ENABLE_QUEUE_WORKER is not "true" — POST /submit will set status=QUEUED but no in-process worker will run'
+      );
     }
   });
 
