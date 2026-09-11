@@ -1013,6 +1013,25 @@ export async function listApplications(filter?: {
   return results;
 }
 
+/** Count applications in a given status (Supabase head count, memory fallback). */
+export async function countApplicationsByStatus(status: ApplicationStatus): Promise<number> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { count, error } = await supabase
+        .from('candidate_applications')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', status);
+      if (!error && typeof count === 'number') {
+        return count;
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return Array.from(memoryApplications.values()).filter((a) => a.status === status).length;
+}
+
 /**
  * Inserts or transitions an application into the global submission queue (Phase V2-4c).
  * Calculates submission_order = MAX(submission_order) + 1 across all active/submitted applications.
@@ -1098,6 +1117,13 @@ export async function enqueueApplication(
   };
 
   cacheApplicationLocally(updatedApp);
+  const resolvedId = updatedApp.id || applicationIdOrApplywizzId;
+  console.log(`[API] POST /applications/${resolvedId}/submit: status = QUEUED (submission_order=${nextOrder})`);
+  if (process.env.ENABLE_QUEUE_WORKER !== 'true') {
+    console.warn(
+      `[Queue] ENABLE_QUEUE_WORKER is not "true" — app ${resolvedId} will remain QUEUED until a submission worker runs`
+    );
+  }
   return { submissionOrder: nextOrder, application: updatedApp };
 }
 
