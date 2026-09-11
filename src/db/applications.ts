@@ -388,7 +388,7 @@ export async function updateStatus(
   id: string,
   status: ApplicationStatus,
   extra?: UpdateStatusExtra
-): Promise<void> {
+): Promise<boolean> {
   const updatePayload: Partial<ApplicationRow> = {
     status,
     updated_at: new Date().toISOString(),
@@ -423,10 +423,23 @@ export async function updateStatus(
   const mem = memoryApplications.get(id);
   const cleanApplywizz = id.includes('_') ? id.split('_')[0] : id;
   const targetJobUrl = (extra && typeof extra === 'object' && extra.job_url) || mem?.job_url;
+  let previousStatus: ApplicationStatus | undefined = mem?.status;
 
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
+      if (!previousStatus) {
+        let statusQuery = supabase.from('candidate_applications').select('status');
+        if (isUuid) {
+          statusQuery = statusQuery.eq('id', id);
+        } else if (targetJobUrl) {
+          statusQuery = statusQuery.eq('applywizz_id', cleanApplywizz).eq('job_url', targetJobUrl);
+        } else {
+          statusQuery = statusQuery.eq('applywizz_id', cleanApplywizz);
+        }
+        const { data: current } = await statusQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
+        previousStatus = current?.status as ApplicationStatus | undefined;
+      }
       const query = supabase.from('candidate_applications').update(updatePayload);
       let updateRes;
       if (isUuid) {
@@ -454,6 +467,15 @@ export async function updateStatus(
       memoryApplications.set(key, { ...app, ...updatePayload });
     }
   }
+
+  const statusChanged = previousStatus !== status;
+  const appLabel = `${cleanApplywizz} ${id}`;
+  if (statusChanged) {
+    console.log(`[DB] updateStatus ${appLabel}: ${previousStatus || 'UNKNOWN'} → ${status} (status changed, broadcast sent).`);
+  } else {
+    console.log(`[DB] updateStatus: status unchanged, no broadcast. (${appLabel}: ${status})`);
+  }
+  return statusChanged;
 }
 
 type ApplicationRef = Partial<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'job_url'>>;
