@@ -28,7 +28,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   onSelectJob,
 }) => {
   const handleJobSelect = (jobUrl: string) => {
-    console.log(`[Dashboard] Job row clicked: selecting ${jobUrl}; submit handler not invoked`);
+    console.log(`[Dashboard] Job card clicked → detail view only (jobUrl: ${jobUrl})`);
     onSelectJob(jobUrl);
   };
 
