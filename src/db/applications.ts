@@ -27,9 +27,19 @@ export type ApplicationStatus =
   | 'EXPIRED'
   | 'OTP_REQUIRED'
   | 'CAPTCHA_TIMEOUT'
-  | 'CAPTCHA_REQUIRED';
+  | 'CAPTCHA_REQUIRED'
+  | 'EMAIL_PROOF_PENDING';
 
-export type EmailProofStatus = 'pending' | 'captured' | 'timed_out';
+export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
+
+export interface EmailProofJson {
+  from: string;
+  to?: string;
+  subject: string;
+  received_at: string;
+  body_text: string;
+  body_html?: string;
+}
 
 export interface ApplicationRow {
   id?: string;
@@ -44,11 +54,13 @@ export interface ApplicationRow {
   resolved_fields: any[];
   proof_web_url?: string | null;
   proof_captured_at?: string | null;
-  proof_email_url?: string | null;
-  proof_email_captured_at?: string | null;
   proof_failed_url?: string | null;
   proof_failed_captured_at?: string | null;
+  proof_email_url?: string | null;
+  proof_email_json?: EmailProofJson | null;
+  proof_email_captured_at?: string | null;
   email_proof_status?: EmailProofStatus | null;
+  manual_email_review?: boolean;
   email_proof_attempted_at?: string | null;
   error_message?: string | null;
   dry_run_screenshot_url?: string | null;
@@ -359,7 +371,9 @@ export type UpdateStatusExtra =
       proof_failed_captured_at?: string | null;
       proof_email_url?: string | null;
       proof_email_captured_at?: string | null;
+      proof_email_json?: EmailProofJson | null;
       email_proof_status?: EmailProofStatus | null;
+      manual_email_review?: boolean;
       email_proof_attempted_at?: string | null;
       dry_run_screenshot_url?: string | null;
       error_message?: string | null;
@@ -388,8 +402,10 @@ export async function updateStatus(
     if (extra.proof_failed_url !== undefined) updatePayload.proof_failed_url = extra.proof_failed_url;
     if (extra.proof_failed_captured_at !== undefined) updatePayload.proof_failed_captured_at = extra.proof_failed_captured_at;
     if (extra.proof_email_url !== undefined) updatePayload.proof_email_url = extra.proof_email_url;
+    if (extra.proof_email_json !== undefined) updatePayload.proof_email_json = extra.proof_email_json;
     if (extra.proof_email_captured_at !== undefined) updatePayload.proof_email_captured_at = extra.proof_email_captured_at;
     if (extra.email_proof_status !== undefined) updatePayload.email_proof_status = extra.email_proof_status;
+    if (extra.manual_email_review !== undefined) updatePayload.manual_email_review = extra.manual_email_review;
     if (extra.email_proof_attempted_at !== undefined) updatePayload.email_proof_attempted_at = extra.email_proof_attempted_at;
     if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
   }
@@ -608,6 +624,23 @@ export async function attachEmailProofToApplication(
 }
 
 /**
+ * Attaches parsed confirmation email content (JSON) — primary email proof (no screenshot).
+ */
+export async function attachEmailProofJsonToApplication(
+  application: ApplicationRef,
+  proofEmailJson: EmailProofJson,
+  capturedAt?: string
+): Promise<boolean> {
+  const updatePayload = {
+    proof_email_json: proofEmailJson,
+    proof_email_captured_at: capturedAt || proofEmailJson.received_at || new Date().toISOString(),
+    email_proof_status: 'captured' as EmailProofStatus,
+    updated_at: new Date().toISOString(),
+  };
+  return patchApplicationRecord(application, updatePayload, 'attachEmailProofJsonToApplication');
+}
+
+/**
  * Updates the email proof lifecycle status (e.g. 'pending', 'captured', 'timed_out').
  */
 export async function updateEmailProofStatus(
@@ -682,6 +715,8 @@ export interface ApplicationDto {
   proofCapturedAt: string | null;
   proof_email_url: string | null;
   proofEmailUrl: string | null;
+  proof_email_json: EmailProofJson | null;
+  proofEmailJson: EmailProofJson | null;
   proof_email_captured_at: string | null;
   proofEmailCapturedAt: string | null;
   email_proof_status: EmailProofStatus | null;
@@ -737,6 +772,7 @@ export function serializeApplicationDto(
   const proofWebUrl = merged.proof_web_url || merged.proofWebUrl || null;
   const proofCapturedAt = merged.proof_captured_at || merged.proofCapturedAt || null;
   const proofEmailUrl = merged.proof_email_url || merged.proofEmailUrl || null;
+  const proofEmailJson = (merged.proof_email_json || merged.proofEmailJson || null) as EmailProofJson | null;
   const proofEmailCapturedAt = merged.proof_email_captured_at || merged.proofEmailCapturedAt || null;
   const emailProofStatus = (merged.email_proof_status || merged.emailProofStatus || null) as EmailProofStatus | null;
   const emailProofAttemptedAt = merged.email_proof_attempted_at || merged.emailProofAttemptedAt || null;
@@ -773,6 +809,8 @@ export function serializeApplicationDto(
     proofCapturedAt,
     proof_email_url: proofEmailUrl,
     proofEmailUrl,
+    proof_email_json: proofEmailJson,
+    proofEmailJson,
     proof_email_captured_at: proofEmailCapturedAt,
     proofEmailCapturedAt,
     email_proof_status: emailProofStatus,

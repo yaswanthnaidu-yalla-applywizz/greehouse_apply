@@ -20,6 +20,7 @@ import {
 import { upsertAnswer } from '../../db/qaBank.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { generateFingerprint } from '../../resolver/fingerprint.js';
+import { wsManager } from '../ws.js';
 import type { ResolvedField } from '../../types/index.js';
 
 export const applicationsRouter = Router();
@@ -199,6 +200,8 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     proofEmailUrl,
     proof_email_captured_at,
     proofEmailCapturedAt,
+    proof_email_json,
+    proofEmailJson,
     email_proof_status,
     emailProofStatus,
     email_proof_attempted_at,
@@ -240,6 +243,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     const resolvedProofFailedCapturedAt = proof_failed_captured_at !== undefined ? proof_failed_captured_at : proofFailedCapturedAt;
     const resolvedProofEmailUrl = proof_email_url !== undefined ? proof_email_url : proofEmailUrl;
     const resolvedProofEmailCapturedAt = proof_email_captured_at !== undefined ? proof_email_captured_at : proofEmailCapturedAt;
+    const resolvedProofEmailJson = proof_email_json !== undefined ? proof_email_json : proofEmailJson;
     const resolvedEmailProofStatus = email_proof_status !== undefined ? email_proof_status : emailProofStatus;
     const resolvedEmailProofAttemptedAt = email_proof_attempted_at !== undefined ? email_proof_attempted_at : emailProofAttemptedAt;
 
@@ -249,6 +253,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       proof_failed_url: resolvedProofFailedUrl,
       proof_failed_captured_at: resolvedProofFailedCapturedAt,
       proof_email_url: resolvedProofEmailUrl,
+      proof_email_json: resolvedProofEmailJson,
       proof_email_captured_at: resolvedProofEmailCapturedAt,
       email_proof_status: resolvedEmailProofStatus,
       email_proof_attempted_at: resolvedEmailProofAttemptedAt,
@@ -269,6 +274,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
         proof_failed_url: resolvedProofFailedUrl || application?.proof_failed_url || application?.proofFailedUrl,
         proof_failed_captured_at: resolvedProofFailedCapturedAt || application?.proof_failed_captured_at || application?.proofFailedCapturedAt,
         proof_email_url: resolvedProofEmailUrl || application?.proof_email_url || application?.proofEmailUrl,
+        proof_email_json: resolvedProofEmailJson || application?.proof_email_json || application?.proofEmailJson,
         proof_email_captured_at: resolvedProofEmailCapturedAt || application?.proof_email_captured_at || application?.proofEmailCapturedAt,
         email_proof_status: resolvedEmailProofStatus || application?.email_proof_status || application?.emailProofStatus,
         email_proof_attempted_at: resolvedEmailProofAttemptedAt || application?.email_proof_attempted_at || application?.emailProofAttemptedAt,
@@ -277,7 +283,63 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       });
     }
 
-    res.json({ success: true, status, applicationId: targetAppId });
+    // Emit WebSocket event on worker failure for instant UI notification
+    if (status === 'FAILED') {
+      const failReason = resolvedErrorMessage || application?.error_message || 'Submission execution failed.';
+      wsManager.emitApplicationFailed({
+        appId: targetAppId,
+        reason: failReason,
+        timestamp: new Date().toISOString(),
+        jobUrl: finalJobUrl,
+        applywizzId: finalApplywizz,
+        companyName: application?.company_name || application?.companyName,
+        jobTitle: application?.job_title || application?.jobTitle,
+        proofFailedUrl: resolvedProofFailedUrl || application?.proof_failed_url || application?.proofFailedUrl,
+      });
+    }
+
+    // Fetch latest hydrated application record and return full serialized DTO
+    let updatedApp: any = await getApplication(targetAppId, finalJobUrl);
+    if (!updatedApp && application) {
+      updatedApp = {
+        ...application,
+        status,
+        error_message: resolvedErrorMessage !== undefined ? resolvedErrorMessage : application.error_message,
+        proof_failed_url: resolvedProofFailedUrl || application.proof_failed_url,
+        proof_failed_captured_at: resolvedProofFailedCapturedAt || application.proof_failed_captured_at,
+        proof_web_url: resolvedProofWebUrl || application.proof_web_url,
+        proof_captured_at: resolvedProofCapturedAt || application.proof_captured_at,
+      };
+    }
+
+    if (updatedApp) {
+      updatedApp = await hydrateApplicationProofUrls(updatedApp);
+    }
+
+    const companyName = updatedApp?.company_name || updatedApp?.companyName || application?.company_name || application?.companyName || null;
+    const jobTitle = updatedApp?.job_title || updatedApp?.jobTitle || application?.job_title || application?.jobTitle || null;
+
+    const serializedDto = updatedApp
+      ? serializeApplicationDto(updatedApp, {
+          applywizz_id: finalApplywizz,
+          job_url: finalJobUrl,
+          company_name: companyName,
+          job_title: jobTitle,
+          status,
+        })
+      : {
+          success: true,
+          status,
+          applicationId: targetAppId,
+          error_message: resolvedErrorMessage,
+          errorMessage: resolvedErrorMessage,
+        };
+
+    res.json({
+      success: true,
+      applicationId: targetAppId,
+      ...serializedDto,
+    });
   } catch (err: any) {
     console.error(`[Applications Router] ❌ Failed to update status for ${appId}:`, err);
     res.status(500).json({ error: err.message });

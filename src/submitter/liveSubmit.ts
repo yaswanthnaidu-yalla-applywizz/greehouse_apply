@@ -21,6 +21,7 @@ import {
   captureJobSubmittedScreenshot,
   captureAndSaveEmailProof,
 } from './proofCapture.js';
+import { emailProofPoller } from './emailProofPoller.js';
 import {
   registerSubmissionSession,
   verifySubmissionSignals,
@@ -1083,24 +1084,62 @@ export async function submitOtpToPausedSession(
         console.log(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
       }
 
-      if (application.id) {
-        await updateStatus(application.id, 'APPLIED', {
-          proof_web_url: proofResult.proofWebUrl,
-          proof_captured_at: proofResult.proofCapturedAt,
-        });
-      }
-
-      // Asynchronously capture confirmation email proof from Zoho Mail in the background
-      captureAndSaveEmailProof(application).catch((err: any) => {
-        console.warn(`[Live Submit] ⚠️ Background email proof capture failed: ${err.message}`);
+      const targetAppId = application.id || canonicalKey;
+      const submittedAt = new Date().toISOString();
+      await updateStatus(targetAppId, 'EMAIL_PROOF_PENDING', {
+        proof_web_url: proofResult.proofWebUrl,
+        proof_captured_at: proofResult.proofCapturedAt,
+        job_url: application.job_url,
       });
 
       await closeSubmissionSession(canonicalKey);
       await clearPausedSession(canonicalKey);
 
+      // Attempt immediate confirmation email verification (up to 15s)
+      console.log(`[Live Submit] 📧 Checking for immediate confirmation email after OTP...`);
+      const emailProof = await captureAndSaveEmailProof(application, {
+        timeoutMs: 15000,
+        sinceTimestamp: new Date(submittedAt).getTime() - 2 * 60 * 1000,
+      }).catch(() => null);
+
+      if (emailProof) {
+        console.log(`[Live Submit] 🎉 Confirmation email verified immediately after OTP! Marking APPLIED.`);
+        await updateStatus(targetAppId, 'APPLIED', {
+          proof_web_url: proofResult.proofWebUrl,
+          proof_captured_at: proofResult.proofCapturedAt,
+          proof_email_json: emailProof,
+          proof_email_captured_at: emailProof.received_at || new Date().toISOString(),
+          email_proof_status: 'captured',
+          job_url: application.job_url,
+        });
+
+        return {
+          success: true,
+          status: 'APPLIED',
+          applicationId: canonicalKey,
+          proofUrl: proofResult.proofWebUrl,
+          proofWebUrl: proofResult.proofWebUrl,
+          proofCapturedAt: proofResult.proofCapturedAt,
+        };
+      }
+
+      // Zero matches on immediate check: transition to EMAIL_PROOF_PENDING & start 30s background retry
+      console.log(
+        `[Live Submit] ⏳ Confirmation email not found immediately after OTP. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
+      );
+      const appForPoller: ApplicationRow = {
+        ...application,
+        id: targetAppId,
+        submitted_at: submittedAt,
+        proof_web_url: proofResult.proofWebUrl,
+        proof_captured_at: proofResult.proofCapturedAt,
+        status: 'EMAIL_PROOF_PENDING',
+      };
+      emailProofPoller.startPolling(appForPoller);
+
       return {
         success: true,
-        status: 'APPLIED',
+        status: 'EMAIL_PROOF_PENDING',
         applicationId: canonicalKey,
         proofUrl: proofResult.proofWebUrl,
         proofWebUrl: proofResult.proofWebUrl,
@@ -1703,22 +1742,60 @@ export async function runLiveSubmit(
         console.log(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
       }
 
-      // 9. Update DB status to APPLIED
-      if (application.id) {
-        await updateStatus(application.id, 'APPLIED', {
+      // 9. Attach web proof & set submission timestamp
+      const submittedAt = new Date().toISOString();
+      const targetAppId = application.id || applicationId;
+      await updateStatus(targetAppId, 'EMAIL_PROOF_PENDING', {
+        proof_web_url: proofResult.proofWebUrl,
+        proof_captured_at: proofResult.proofCapturedAt,
+        job_url: application.job_url,
+      });
+
+      // 10. Attempt immediate email confirmation check (up to 15s)
+      console.log(`[Live Submit] 📧 Checking for immediate confirmation email matching company & apply time...`);
+      const emailProof = await captureAndSaveEmailProof(application, {
+        timeoutMs: 15000,
+        sinceTimestamp: new Date(submittedAt).getTime() - 2 * 60 * 1000,
+      }).catch(() => null);
+
+      if (emailProof) {
+        console.log(`[Live Submit] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
+        await updateStatus(targetAppId, 'APPLIED', {
           proof_web_url: proofResult.proofWebUrl,
           proof_captured_at: proofResult.proofCapturedAt,
+          proof_email_json: emailProof,
+          proof_email_captured_at: emailProof.received_at || new Date().toISOString(),
+          email_proof_status: 'captured',
+          job_url: application.job_url,
         });
+
+        return {
+          success: true,
+          status: 'APPLIED',
+          applicationId,
+          proofWebUrl: proofResult.proofWebUrl,
+          proofCapturedAt: proofResult.proofCapturedAt,
+          summary: fillSummary,
+        };
       }
 
-      // Asynchronously capture confirmation email proof from Zoho Mail in the background
-      captureAndSaveEmailProof(application).catch((err: any) => {
-        console.warn(`[Live Submit] ⚠️ Background email proof capture failed: ${err.message}`);
-      });
+      // Zero matches on immediate check: transition to EMAIL_PROOF_PENDING & start 30s background retry
+      console.log(
+        `[Live Submit] ⏳ Confirmation email not found immediately. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
+      );
+      const appForPoller: ApplicationRow = {
+        ...application,
+        id: targetAppId,
+        submitted_at: submittedAt,
+        proof_web_url: proofResult.proofWebUrl,
+        proof_captured_at: proofResult.proofCapturedAt,
+        status: 'EMAIL_PROOF_PENDING',
+      };
+      emailProofPoller.startPolling(appForPoller);
 
       return {
         success: true,
-        status: 'APPLIED',
+        status: 'EMAIL_PROOF_PENDING',
         applicationId,
         proofWebUrl: proofResult.proofWebUrl,
         proofCapturedAt: proofResult.proofCapturedAt,

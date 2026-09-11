@@ -22,6 +22,11 @@ import type {
   ResolvedField,
   ApplicationStatus,
 } from './types.js';
+import { useCandidateApplicationsRealtime } from './hooks/useCandidateApplicationsRealtime.js';
+import {
+  mergeApplicationFromRealtimeRow,
+  patchJobInCandidateDetail,
+} from '../src/dashboard/applicationRealtimeMerge.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -129,6 +134,15 @@ export const App: React.FC = () => {
   });
   const [workHistoryBannerDismissed, setWorkHistoryBannerDismissed] = useState<boolean>(false);
   const [noCandidatesMessage, setNoCandidatesMessage] = useState<string | null>(null);
+
+  // Real-time failure toast/banner alert received via WebSocket
+  const [failureAlert, setFailureAlert] = useState<{
+    appId: string;
+    reason: string;
+    timestamp: string;
+    companyName?: string;
+    jobTitle?: string;
+  } | null>(null);
 
   const getAuthHeaders = (): HeadersInit => {
     if (typeof window === 'undefined') return {};
@@ -291,6 +305,82 @@ export const App: React.FC = () => {
     return () => clearInterval(pollInterval);
   }, [currentUser, selectedDate, fetchInitialData, fetchNotifications]);
 
+  // Connect to WebSocket /ws for real-time application failure toasts
+  useEffect(() => {
+    if (!currentUser || typeof window === 'undefined') return;
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: any = null;
+    let isDisposed = false;
+
+    const connectWs = () => {
+      if (isDisposed) return;
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'APPLICATION_FAILED') {
+              console.log('[Dashboard WS] ⚠️ Received APPLICATION_FAILED:', data);
+              setFailureAlert({
+                appId: data.appId,
+                reason: data.reason || 'Submission failed.',
+                timestamp: data.timestamp || new Date().toISOString(),
+                companyName: data.companyName,
+                jobTitle: data.jobTitle,
+              });
+
+              // Auto-dismiss alert after 10 seconds
+              setTimeout(() => {
+                setFailureAlert((curr) => (curr?.appId === data.appId ? null : curr));
+              }, 10000);
+
+              // Instantly refresh data & notifications
+              fetchInitialData(true, selectedDate);
+              fetchNotifications(selectedDate);
+              if (selectedCandidateId) {
+                fetchCandidateDetail(selectedCandidateId);
+              }
+              if (selectedCandidateId && selectedJobUrl) {
+                fetchJobApplication(selectedCandidateId, selectedJobUrl);
+              }
+            }
+          } catch (e) {
+            console.warn('[Dashboard WS] Message parse error:', e);
+          }
+        };
+
+        ws.onclose = () => {
+          if (!isDisposed) {
+            reconnectTimeout = setTimeout(connectWs, 5000);
+          }
+        };
+
+        ws.onerror = () => {
+          if (ws) ws.close();
+        };
+      } catch (err) {
+        console.warn('[Dashboard WS] Connection error:', err);
+        if (!isDisposed) {
+          reconnectTimeout = setTimeout(connectWs, 5000);
+        }
+      }
+    };
+
+    connectWs();
+
+    return () => {
+      isDisposed = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
+    };
+  }, [currentUser, selectedDate, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
+
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
     try {
@@ -350,6 +440,22 @@ export const App: React.FC = () => {
     }
   }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
+  const handleRealtimeApplicationRow = useCallback(
+    (row: Record<string, unknown>) => {
+      setApplication((prev: any) => mergeApplicationFromRealtimeRow(prev, row));
+      setCandidateDetail((prev) => (prev ? patchJobInCandidateDetail(prev, row) : prev));
+    },
+    []
+  );
+
+  useCandidateApplicationsRealtime({
+    apiBaseUrl: API_BASE_URL,
+    getAuthHeaders: () => getAuthHeaders() as Record<string, string>,
+    applywizzId: selectedCandidateId,
+    enabled: Boolean(currentUser && selectedCandidateId),
+    onRowChange: handleRealtimeApplicationRow,
+  });
+
   // Field Edit Handler
   const handleFieldUpdate = (updatedField: ResolvedField) => {
     if (!application) return;
@@ -373,6 +479,16 @@ export const App: React.FC = () => {
     setApplication((prev: any) => ({
       ...prev,
       status: newStatus,
+      error_message:
+        updatedPayload?.error_message ||
+        updatedPayload?.errorMessage ||
+        updatedPayload?.error ||
+        prev.error_message,
+      errorMessage:
+        updatedPayload?.error_message ||
+        updatedPayload?.errorMessage ||
+        updatedPayload?.error ||
+        prev.errorMessage,
       proof_web_url:
         updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || prev.proof_web_url,
       proof_captured_at:
@@ -395,6 +511,10 @@ export const App: React.FC = () => {
         updatedPayload?.emailProofStatus ||
         updatedPayload?.email_proof_status ||
         prev.emailProofStatus,
+      proof_email_json:
+        updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proof_email_json,
+      proofEmailJson:
+        updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proofEmailJson,
       proof_failed_url:
         updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proof_failed_url,
       proofFailedUrl:
@@ -412,7 +532,11 @@ export const App: React.FC = () => {
     if (candidateDetail && selectedJobUrl) {
       const updatedJobs = candidateDetail.jobs.map((j) => {
         if (j.canonicalUrl === selectedJobUrl || j.rawUrl === selectedJobUrl) {
-          return { ...j, status: newStatus };
+          const err =
+            updatedPayload?.error_message ||
+            updatedPayload?.errorMessage ||
+            updatedPayload?.error;
+          return { ...j, status: newStatus, error_message: err ?? j.error_message };
         }
         return j;
       });
@@ -435,6 +559,7 @@ export const App: React.FC = () => {
           proof_email_captured_at:
             updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
           email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
+          proof_email_json: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json,
           proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
           proof_failed_captured_at:
             updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
@@ -759,6 +884,33 @@ export const App: React.FC = () => {
             onClick={() => setWorkHistoryBannerDismissed(true)}
             className="text-[#92400E] hover:text-[#1A1A2E] text-sm font-black transition-opacity"
             title="Dismiss warning"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Real-time Worker Failure Banner / Toast */}
+      {failureAlert && (
+        <div className="bg-[#FEE2E2] border-b-2 border-[#EF4444] px-6 py-3 text-xs font-bold text-[#991B1B] flex items-center justify-between shadow-md flex-shrink-0 animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <span className="text-base">🚨</span>
+            <div>
+              <span className="font-black uppercase tracking-wider text-[#7F1D1D]">Submission Failed: </span>
+              <span>
+                {failureAlert.companyName ? `${failureAlert.companyName} — ` : ''}
+                {failureAlert.reason}
+              </span>
+              <span className="ml-2 font-mono font-normal text-[11px] text-[#B91C1C]">
+                ({new Date(failureAlert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setFailureAlert(null)}
+            className="text-[#991B1B] hover:text-[#7F1D1D] text-sm font-black px-1.5 py-0.5 rounded hover:bg-white/50 transition-colors"
+            title="Dismiss alert"
           >
             ✕
           </button>

@@ -22,6 +22,7 @@ import {
 } from '../../submitter/liveSubmit.js';
 import { verifySubmissionSignals, registerSubmissionSession } from '../../submitter/captchaResume.js';
 import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } from '../../submitter/proofCapture.js';
+import { emailProofPoller } from '../../submitter/emailProofPoller.js';
 import { fillForm } from '../../submitter/formFiller.js';
 import { getApplication, updateStatus, enqueueApplication, hydrateApplicationProofUrls } from '../../db/applications.js';
 import {
@@ -160,6 +161,16 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         applicationId: result.applicationId,
         proofWebUrl: result.proofWebUrl,
         proofCapturedAt: result.proofCapturedAt,
+        summary: result.summary,
+      });
+    } else if (result.status === 'EMAIL_PROOF_PENDING') {
+      res.status(200).json({
+        success: true,
+        status: 'EMAIL_PROOF_PENDING',
+        applicationId: result.applicationId,
+        proofWebUrl: result.proofWebUrl,
+        proofCapturedAt: result.proofCapturedAt,
+        message: 'Web submission confirmed. Polling Zoho Mail for confirmation email proof (up to 10 minutes).',
         summary: result.summary,
       });
     } else if (result.status === 'OTP_REQUIRED') {
@@ -585,10 +596,24 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
       return;
     }
 
+    if (app.proof_email_json) {
+      const json = app.proof_email_json;
+      res.status(200).json({
+        success: true,
+        alreadyCaptured: true,
+        proofEmailJson: json,
+        proof_email_json: json,
+        proofEmailCapturedAt: app.proof_email_captured_at,
+        emailProofStatus: 'captured',
+      });
+      return;
+    }
+
     if (app.proof_email_url) {
       res.status(200).json({
         success: true,
         alreadyCaptured: true,
+        legacyScreenshotOnly: true,
         proofEmailUrl: app.proof_email_url,
         proofEmailCapturedAt: app.proof_email_captured_at,
         emailProofStatus: 'captured',
@@ -605,16 +630,31 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
     }
 
     console.log(`[Submissions Router] 📧 Manual email proof capture triggered for ${appId}`);
-    const emailUrl = await captureAndSaveEmailProof(app, {
+    const emailJson = await captureAndSaveEmailProof(app, {
       timeoutMs: req.body?.timeoutMs ?? 45000,
       isManual: true,
     });
 
-    if (emailUrl) {
+    if (emailJson) {
+      // Stop background poller since manual search succeeded
+      emailProofPoller.stopPolling(appId);
+      if (app.id) emailProofPoller.stopPolling(app.id);
+
+      // Promote status to APPLIED if it was pending confirmation email
+      await updateStatus(app.id || appId, 'APPLIED', {
+        proof_email_json: emailJson,
+        proof_email_captured_at: emailJson.received_at || new Date().toISOString(),
+        email_proof_status: 'captured',
+        manual_email_review: false,
+        job_url: app.job_url,
+      });
+
       const updated = await getApplication(appId, jobUrl);
       res.status(200).json({
         success: true,
-        proofEmailUrl: emailUrl,
+        status: 'APPLIED',
+        proofEmailJson: emailJson,
+        proof_email_json: emailJson,
         proofEmailCapturedAt: updated?.proof_email_captured_at || new Date().toISOString(),
         emailProofStatus: 'captured',
       });

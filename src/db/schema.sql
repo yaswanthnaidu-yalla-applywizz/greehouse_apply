@@ -99,7 +99,8 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
             'FAILED',
             'EXPIRED',
             'OTP_REQUIRED',
-            'CAPTCHA_TIMEOUT'
+            'CAPTCHA_TIMEOUT',
+            'EMAIL_PROOF_PENDING'
         )),
     submission_order INTEGER,                            -- Global FIFO sequence number for daemon queue
     assigned_ca_email TEXT,                              -- Assigned Campus Ambassador email for user isolation
@@ -110,9 +111,11 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
     proof_captured_at TIMESTAMPTZ,
     proof_failed_url TEXT,                               -- Supabase Storage signed URL of failure screenshot
     proof_failed_captured_at TIMESTAMPTZ,
-    proof_email_url TEXT,                                -- Supabase Storage URL of confirmation email proof screenshot
+    proof_email_url TEXT,                                -- Legacy screenshot URL (deprecated; use proof_email_json)
+    proof_email_json JSONB,                              -- Parsed confirmation email { from, subject, received_at, body_text }
     proof_email_captured_at TIMESTAMPTZ,
-    email_proof_status TEXT CHECK (email_proof_status IN ('pending', 'captured', 'timed_out')),
+    email_proof_status TEXT CHECK (email_proof_status IN ('pending', 'captured', 'timed_out', 'manual_review_needed')),
+    manual_email_review BOOLEAN DEFAULT false,          -- True if 10m auto-polling completed without email match
     email_proof_attempted_at TIMESTAMPTZ,
     error_message TEXT,                                 -- Populated on FAILED status
     dry_run_screenshot_url TEXT,                        -- Supabase Storage URL of dry-run form screenshot

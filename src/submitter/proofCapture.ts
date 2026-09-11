@@ -12,19 +12,19 @@ import {
   uploadFailedScreenshot,
   uploadJobOpenScreenshot,
   uploadJobSubmittedScreenshot,
-  uploadEmailProof,
 } from '../db/storage.js';
 import {
   attachProofToApplication,
   attachFailedProofToApplication,
-  attachEmailProofToApplication,
+  attachEmailProofJsonToApplication,
   updateEmailProofStatus,
   getApplication,
   type ApplicationRow,
+  type EmailProofJson,
 } from '../db/applications.js';
 import { isApplicationUuid } from '../db/storage.js';
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
-import { zohoReader } from '../services/zohoReader.js';
+import { queryZohoConfirmationEmail } from '../services/zoho-connector.js';
 
 export interface ProofCaptureResult {
   proofWebUrl: string;
@@ -273,7 +273,7 @@ export async function captureJobSubmittedScreenshot(
 export async function captureAndSaveEmailProof(
   application: ApplicationRow | string,
   options: { timeoutMs?: number; isManual?: boolean; sinceTimestamp?: number } = {}
-): Promise<string | null> {
+): Promise<EmailProofJson | null> {
   const storageKey = resolveStorageKey(application);
   let appRow: ApplicationRow | null = null;
 
@@ -347,42 +347,38 @@ export async function captureAndSaveEmailProof(
       await new Promise((resolve) => setTimeout(resolve, 8000));
     }
 
-    const sinceTimestamp = options.sinceTimestamp !== undefined
-      ? options.sinceTimestamp
-      : (options.isManual
-        ? 0
-        : (appRow.submitted_at
-          ? new Date(appRow.submitted_at).getTime() - 60000
-          : (appRow.proof_captured_at
-            ? new Date(appRow.proof_captured_at).getTime() - 60000
-            : Date.now() - 3 * 60 * 1000)));
+    const appliedIso = appRow.submitted_at || appRow.proof_captured_at || appRow.reviewed_at || new Date().toISOString();
+    const companyName = (appRow.company_name || '').trim();
+    if (!companyName) {
+      console.warn(`[Email Proof] ⚠️ Missing company_name on application ${storageKey}; cannot match inbox email.`);
+      await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
+      return null;
+    }
 
-    const result = await zohoReader.captureConfirmationEmailScreenshot(companyEmail, {
-      companyName: appRow.company_name || undefined,
-      jobTitle: appRow.job_title || undefined,
+    const result = await queryZohoConfirmationEmail({
+      candidateEmail: companyEmail,
+      companyName,
+      companyEmail: (appRow as any).company_email || undefined,
+      submissionTime: appliedIso,
       timeoutMs: options.timeoutMs ?? (options.isManual ? 45000 : 180000),
-      sinceTimestamp,
-      isManual: options.isManual,
     });
 
-    if (result.success && result.screenshotBuffer) {
-      const capturedAt = new Date().toISOString();
-      const emailProofUrl = await uploadEmailProof(storageKey, result.screenshotBuffer);
-
-      const attached = await attachEmailProofToApplication(appRef, emailProofUrl, capturedAt);
+    if (result.matched && result.email) {
+      const capturedAt = result.email.received_at || new Date().toISOString();
+      const attached = await attachEmailProofJsonToApplication(appRef, result.email, capturedAt);
       if (attached) {
         console.log(
-          `[Email Proof] 📧 Successfully captured and uploaded email proof for ${storageKey}: ${emailProofUrl}`
+          `[Email Proof] 📧 Stored confirmation email JSON for ${storageKey} (subject: "${result.email.subject}")`
         );
       } else {
         console.warn(
-          `[Email Proof] ⚠️ Could not update DB record with email proof URL: upload succeeded for ${storageKey} but DB attach failed`
+          `[Email Proof] ⚠️ Could not update DB record with email proof JSON for ${storageKey}`
         );
       }
-      return emailProofUrl;
+      return result.email;
     } else {
       console.warn(
-        `[Email Proof] ⚠️ Confirmation email not found within timeout for ${storageKey}: ${result.errorMessage}`
+        `[Email Proof] ⚠️ Confirmation email not found within ±5m window for ${storageKey}: ${result.errorMessage}`
       );
       await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
       return null;

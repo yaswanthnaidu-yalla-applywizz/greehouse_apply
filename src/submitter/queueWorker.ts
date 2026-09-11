@@ -11,6 +11,7 @@
 
 import { getNextQueuedApplicationForRoundRobin, updateStatus, type ApplicationRow } from '../db/applications.js';
 import { runLiveSubmit } from './liveSubmit.js';
+import { wsManager } from '../server/ws.js';
 
 export interface QueueDaemonOptions {
   /** Number of concurrent submission workers (1-3, default 2) */
@@ -106,6 +107,18 @@ export class SubmissionQueueDaemon {
           console.log(
             `[Worker ${workerId}] ✅ Application ${appId} completed with status: ${result.status} (proof: ${result.proofWebUrl || 'none'})`
           );
+
+          if (result.status === 'FAILED') {
+            wsManager.emitApplicationFailed({
+              appId,
+              reason: result.errorMessage || 'Submission execution failed.',
+              jobUrl: app.job_url,
+              applywizzId: app.applywizz_id,
+              companyName: app.company_name || undefined,
+              jobTitle: app.job_title || undefined,
+              proofFailedUrl: (result as any).proofFailedUrl || undefined,
+            });
+          }
         } catch (submitErr: any) {
           console.error(
             `[Worker ${workerId}] ❌ Submission failed for application ${appId}: ${submitErr.message}`
@@ -116,6 +129,15 @@ export class SubmissionQueueDaemon {
               job_url: app.job_url,
             });
           } catch {}
+
+          wsManager.emitApplicationFailed({
+            appId,
+            reason: submitErr.message || 'Worker submission exception.',
+            jobUrl: app.job_url,
+            applywizzId: app.applywizz_id,
+            companyName: app.company_name || undefined,
+            jobTitle: app.job_title || undefined,
+          });
         }
 
         // Sleep pollIntervalMs before looking for the next application

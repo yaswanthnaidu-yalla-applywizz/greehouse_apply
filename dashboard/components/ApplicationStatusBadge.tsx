@@ -13,6 +13,7 @@ export interface ApplicationStatusBadgeProps {
   status: ApplicationStatus | string;
   proofWebUrl?: string | null;
   proofEmailUrl?: string | null;
+  proofEmailJson?: { from: string; subject: string; received_at: string; body_text: string } | null;
   emailProofStatus?: 'pending' | 'captured' | 'timed_out' | null;
   applicationId?: string;
   jobUrl?: string;
@@ -29,6 +30,7 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
   status,
   proofWebUrl,
   proofEmailUrl,
+  proofEmailJson,
   emailProofStatus,
   applicationId,
   jobUrl,
@@ -66,7 +68,10 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
           const nextProofWeb = appData.proof_web_url || appData.proofWebUrl || null;
           const nextProofEmail = appData.proof_email_url || appData.proofEmailUrl || null;
           const nextProofFailed = appData.proof_failed_url || appData.proofFailedUrl || null;
-          const emailProofArrived = Boolean(nextProofEmail) && nextProofEmail !== proofEmailUrlRef.current;
+          const nextProofEmailJson = appData.proof_email_json || appData.proofEmailJson || null;
+          const emailProofArrived =
+            Boolean(nextProofEmailJson) ||
+            (Boolean(nextProofEmail) && nextProofEmail !== proofEmailUrlRef.current);
           const webProofArrived = Boolean(nextProofWeb) && nextProofWeb !== proofWebUrlRef.current;
           const failedProofArrived =
             Boolean(nextProofFailed) && nextProofFailed !== lastPolledFailedProofRef.current;
@@ -109,7 +114,7 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
       );
 
     case 'APPLIED':
-      if (proofWebUrl && !proofEmailUrl) {
+      if (proofWebUrl && !proofEmailUrl && !proofEmailJson) {
         return (
           <span
             className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}

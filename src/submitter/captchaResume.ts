@@ -6,7 +6,8 @@
  */
 
 import type { Browser, BrowserContext, Page } from 'playwright';
-import { captureWebProof, captureFailedScreenshot } from './proofCapture.js';
+import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } from './proofCapture.js';
+import { emailProofPoller } from './emailProofPoller.js';
 import { updateStatus, getApplication, type ApplicationRow } from '../db/applications.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 
@@ -124,16 +125,60 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       // 4. Capture full-page proof screenshot & upload to Supabase Storage
       const proofResult = await captureWebProof(page, application);
 
-      // 5. Update DB status to APPLIED
-      if (application.id) {
-        await updateStatus(application.id, 'APPLIED');
-      }
+      const targetAppId = application.id || applicationId;
+      const submittedAt = new Date().toISOString();
+      await updateStatus(targetAppId, 'EMAIL_PROOF_PENDING', {
+        proof_web_url: proofResult.proofWebUrl,
+        proof_captured_at: proofResult.proofCapturedAt,
+        job_url: application.job_url,
+      });
 
       await closeSubmissionSession(applicationId);
 
+      // Attempt immediate confirmation email verification (up to 15s)
+      console.log(`[Captcha Resume] 📧 Checking for immediate confirmation email after CAPTCHA resume...`);
+      const emailProof = await captureAndSaveEmailProof(application, {
+        timeoutMs: 15000,
+        sinceTimestamp: new Date(submittedAt).getTime() - 2 * 60 * 1000,
+      }).catch(() => null);
+
+      if (emailProof) {
+        console.log(`[Captcha Resume] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
+        await updateStatus(targetAppId, 'APPLIED', {
+          proof_web_url: proofResult.proofWebUrl,
+          proof_captured_at: proofResult.proofCapturedAt,
+          proof_email_json: emailProof,
+          proof_email_captured_at: emailProof.received_at || new Date().toISOString(),
+          email_proof_status: 'captured',
+          job_url: application.job_url,
+        });
+
+        return {
+          success: true,
+          status: 'APPLIED',
+          applicationId,
+          proofWebUrl: proofResult.proofWebUrl,
+          proofCapturedAt: proofResult.proofCapturedAt,
+        };
+      }
+
+      // Zero matches on immediate check: transition to EMAIL_PROOF_PENDING & start 30s background retry
+      console.log(
+        `[Captcha Resume] ⏳ Confirmation email not found immediately. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
+      );
+      const appForPoller: ApplicationRow = {
+        ...application,
+        id: targetAppId,
+        submitted_at: submittedAt,
+        proof_web_url: proofResult.proofWebUrl,
+        proof_captured_at: proofResult.proofCapturedAt,
+        status: 'EMAIL_PROOF_PENDING',
+      };
+      emailProofPoller.startPolling(appForPoller);
+
       return {
         success: true,
-        status: 'APPLIED',
+        status: 'EMAIL_PROOF_PENDING',
         applicationId,
         proofWebUrl: proofResult.proofWebUrl,
         proofCapturedAt: proofResult.proofCapturedAt,

@@ -104,6 +104,18 @@ export interface ApplicationDetail {
   proofFailedCapturedAt?: string | null;
   proof_email_url?: string | null;
   proofEmailUrl?: string | null;
+  proof_email_json?: {
+    from: string;
+    subject: string;
+    received_at: string;
+    body_text: string;
+  } | null;
+  proofEmailJson?: {
+    from: string;
+    subject: string;
+    received_at: string;
+    body_text: string;
+  } | null;
   proof_email_captured_at?: string | null;
   proofEmailCapturedAt?: string | null;
   email_proof_status?: EmailProofStatus | null;

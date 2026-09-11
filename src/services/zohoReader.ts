@@ -11,6 +11,7 @@
 
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { config } from '../config/env.js';
+import type { EmailProofJson } from '../db/applications.js';
 
 export interface ZohoOtpResult {
   success: boolean;
@@ -18,6 +19,146 @@ export interface ZohoOtpResult {
   subject?: string;
   receivedAt?: string;
   errorMessage?: string;
+}
+
+export function parseZohoEmailTimestamp(
+  whenText: string,
+  whenTitle?: string,
+  referenceDate: Date = new Date()
+): number | null {
+  if (whenTitle) {
+    const titleClean = whenTitle.replace(/[·📎]/g, ' ').replace(/\s+/g, ' ').trim();
+    const titleParsed = Date.parse(titleClean);
+    if (!Number.isNaN(titleParsed) && titleParsed > 0) {
+      return titleParsed;
+    }
+  }
+
+  if (!whenText) return null;
+  const clean = whenText.replace(/[·📎]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return null;
+
+  // 1. Direct parse
+  const direct = Date.parse(clean);
+  if (!Number.isNaN(direct) && direct > 0) {
+    const d = new Date(direct);
+    if (d.getFullYear() < 2000) {
+      d.setFullYear(referenceDate.getFullYear());
+      return d.getTime();
+    }
+    return direct;
+  }
+
+  // 2. Format: "Today, 11:25 AM" or "Today 11:25 AM"
+  const todayMatch = clean.match(/today(?:,\s*|\s+)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (todayMatch) {
+    let hours = parseInt(todayMatch[1], 10);
+    const minutes = parseInt(todayMatch[2], 10);
+    const seconds = todayMatch[3] ? parseInt(todayMatch[3], 10) : 0;
+    const meridian = (todayMatch[4] || '').toLowerCase();
+    if (meridian === 'pm' && hours < 12) hours += 12;
+    if (meridian === 'am' && hours === 12) hours = 0;
+
+    const d = new Date(referenceDate);
+    d.setHours(hours, minutes, seconds, 0);
+    return d.getTime();
+  }
+
+  // 3. Format: "Yesterday, 3:45 PM"
+  const yesterdayMatch = clean.match(/yesterday(?:,\s*|\s+)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (yesterdayMatch) {
+    let hours = parseInt(yesterdayMatch[1], 10);
+    const minutes = parseInt(yesterdayMatch[2], 10);
+    const seconds = yesterdayMatch[3] ? parseInt(yesterdayMatch[3], 10) : 0;
+    const meridian = (yesterdayMatch[4] || '').toLowerCase();
+    if (meridian === 'pm' && hours < 12) hours += 12;
+    if (meridian === 'am' && hours === 12) hours = 0;
+
+    const d = new Date(referenceDate.getTime() - 24 * 60 * 60 * 1000);
+    d.setHours(hours, minutes, seconds, 0);
+    return d.getTime();
+  }
+
+  // 4. Format: Plain time e.g. "11:25 AM"
+  const timeMatch = clean.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1], 10);
+    const minutes = parseInt(timeMatch[2], 10);
+    const seconds = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+    const meridian = (timeMatch[4] || '').toLowerCase();
+    if (meridian === 'pm' && hours < 12) hours += 12;
+    if (meridian === 'am' && hours === 12) hours = 0;
+
+    const d = new Date(referenceDate);
+    d.setHours(hours, minutes, seconds, 0);
+    return d.getTime();
+  }
+
+  // 5. Month Day: "11 Sep" or "Sep 11"
+  const monthDayMatch = clean.match(/^([a-zA-Z]{3,9})\s+(\d{1,2})$/) || clean.match(/^(\d{1,2})\s+([a-zA-Z]{3,9})$/);
+  if (monthDayMatch) {
+    const withYear = `${clean}, ${referenceDate.getFullYear()}`;
+    const p = Date.parse(withYear);
+    if (!Number.isNaN(p)) return p;
+  }
+
+  return null;
+}
+
+export function normalizeCompanySearchTerm(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(inc|incorporated|llc|ltd|limited|corp|corporation|technologies|tech|solutions|systems|co|gmbh|sa|bv|holdings|group)\b/gi, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function matchCompanyInEmail(targetCompany: string, from: string, subject: string, body: string): boolean {
+  if (!targetCompany) return false;
+  const normTarget = normalizeCompanySearchTerm(targetCompany);
+  if (!normTarget || normTarget.length < 2) return false;
+
+  const combined = `${from} ${subject} ${body}`.toLowerCase();
+  const normCombined = normalizeCompanySearchTerm(combined);
+
+  if (normCombined.includes(normTarget) || combined.includes(normTarget)) {
+    return true;
+  }
+
+  const tokens = normTarget.split(/\s+/).filter((t) => t.length >= 3);
+  if (tokens.length > 0 && tokens.every((t) => combined.includes(t))) {
+    return true;
+  }
+
+  const fromDomainMatch = from.match(/@([a-z0-9.-]+)/i);
+  if (fromDomainMatch) {
+    const domain = fromDomainMatch[1].toLowerCase();
+    if (tokens.some((t) => domain.includes(t))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function matchConfirmationContent(subject: string, body: string): boolean {
+  const combined = `${subject} ${body}`.toLowerCase();
+  return (
+    combined.includes('thank you for applying') ||
+    combined.includes('thanks for applying') ||
+    combined.includes('thank you for your application') ||
+    combined.includes('thanks for your application') ||
+    combined.includes('we received your application') ||
+    combined.includes('we have received your application') ||
+    combined.includes('application received') ||
+    combined.includes('your application has been submitted') ||
+    combined.includes('application submitted') ||
+    combined.includes('confirming your application') ||
+    combined.includes('application confirmation') ||
+    combined.includes('application to') ||
+    combined.includes('applied to')
+  );
 }
 
 class ZohoReaderService {
@@ -378,27 +519,27 @@ class ZohoReaderService {
   }
 
   /**
-   * Searches for an application confirmation email (e.g. "Thank you for applying", "Application received")
-   * for the given candidate and captures a screenshot proof of the rendered email view.
-   *
-   * @param candidateEmail - Candidate's company email (e.g. user@applywizard.ai)
-   * @param criteria - Optional company name or job title to match specific application
+   * Finds a confirmation email received after apply time with matching company name; returns JSON text (no screenshot).
    */
-  public async captureConfirmationEmailScreenshot(
+  public async captureConfirmationEmailContent(
     candidateEmail: string,
-    criteria: { companyName?: string; jobTitle?: string; timeoutMs?: number; sinceTimestamp?: number; isManual?: boolean } = {}
-  ): Promise<{
-    success: boolean;
-    screenshotBuffer?: Buffer;
-    subject?: string;
-    errorMessage?: string;
-  }> {
+    criteria: {
+      companyName?: string;
+      jobTitle?: string;
+      timeoutMs?: number;
+      sinceTimestamp?: number;
+      isManual?: boolean;
+    } = {}
+  ): Promise<{ success: boolean; email?: EmailProofJson; errorMessage?: string }> {
     const timeoutMs = criteria.timeoutMs ?? (criteria.isManual ? 45000 : 180000);
-    const sinceTimestamp = criteria.sinceTimestamp !== undefined
-      ? criteria.sinceTimestamp
-      : (criteria.isManual ? 0 : (Date.now() - 3 * 60 * 1000));
+    const sinceTimestamp =
+      criteria.sinceTimestamp !== undefined ? criteria.sinceTimestamp : Date.now() - 30 * 60 * 1000;
     const normalizedEmail = candidateEmail.trim().toLowerCase();
+    const targetCompany = (criteria.companyName || '').trim();
 
+    if (!targetCompany || targetCompany.length < 2) {
+      return { success: false, errorMessage: 'Company name is required to match the correct confirmation email.' };
+    }
     if (!normalizedEmail) {
       return { success: false, errorMessage: 'Candidate email is required for confirmation email capture.' };
     }
@@ -411,22 +552,17 @@ class ZohoReaderService {
       }
 
       console.log(
-        `[Zoho Reader] 📧 Looking up confirmation email for ${normalizedEmail}${
-          criteria.companyName ? ` (company: ${criteria.companyName})` : ''
-        } (manual: ${Boolean(criteria.isManual)})...`
+        `[Zoho Reader] 📧 Looking up confirmation email for ${normalizedEmail} (company: "${targetCompany}", since: ${new Date(sinceTimestamp).toISOString()})...`
       );
 
-      // 1. Filter by candidate email
       const filterInput = this.page.locator('input[placeholder*="Filter by email" i]').first();
       await filterInput.waitFor({ state: 'visible', timeout: 10000 });
       await filterInput.fill('');
       await filterInput.fill(normalizedEmail);
       await this.page.waitForTimeout(500);
 
-      // 2. Select the candidate row in the left users list
       const candidateItem = this.page.locator(`text="${normalizedEmail}"`).first();
-      const count = await candidateItem.count();
-      if (count === 0) {
+      if ((await candidateItem.count()) === 0) {
         const prefix = normalizedEmail.split('@')[0];
         const partialItem = this.page.locator(`text="${prefix}"`).first();
         if ((await partialItem.count()) === 0) {
@@ -439,17 +575,14 @@ class ZohoReaderService {
 
       await this.page.waitForTimeout(600);
 
-      // 3. Click "Read mails" or "Refresh list"
       const readMailsBtn = this.page.locator('button:has-text("Read mails"), button:has-text("Refresh list")').first();
       if ((await readMailsBtn.count()) > 0 && (await readMailsBtn.isVisible())) {
         await readMailsBtn.click().catch(() => {});
         await this.page.waitForTimeout(1500);
       }
 
-      // 4. Poll incoming emails for confirmation messages
       const startTime = Date.now();
       const pollInterval = config.ZOHO_CONNECTOR_POLL_INTERVAL_MS || 2500;
-      const targetCompany = (criteria.companyName || '').trim().toLowerCase();
 
       while (Date.now() - startTime < timeoutMs) {
         const refreshBtn = this.page.locator('button#readMailsBtn, button:has-text("Read mails")').first();
@@ -461,96 +594,88 @@ class ZohoReaderService {
         }
         await this.page.waitForTimeout(1000);
 
-        // Inspect recent messages in the candidate's folder
         const allRows = this.page.locator('#messageList button.msg-item, .message-col button.msg-item');
         const rowCount = await allRows.count();
         const checkLimit = Math.min(rowCount, 10);
 
         for (let i = 0; i < checkLimit; i++) {
           const row = allRows.nth(i);
-          const isVis = await row.isVisible().catch(() => false);
-          if (!isVis) continue;
+          if (!(await row.isVisible().catch(() => false))) continue;
 
-          const whenText = (await row.locator('.when').innerText().catch(() => '')).replace(/[·📎\s]+/g, ' ').trim();
+          const whenLocator = row.locator('.when');
+          const whenTitle = (await whenLocator.getAttribute('title').catch(() => '')) || '';
+          const whenText = (await whenLocator.innerText().catch(() => '')).replace(/[·📎\s]+/g, ' ').trim();
           const subject = (await row.locator('.subject').innerText().catch(() => '')).trim();
           const from = (await row.locator('.from').innerText().catch(() => '')).trim();
 
-          const parsedTime = whenText ? Date.parse(whenText) : NaN;
-          if (sinceTimestamp > 0 && !Number.isNaN(parsedTime) && parsedTime < sinceTimestamp && !criteria.isManual) {
+          const parsedTime = parseZohoEmailTimestamp(whenText, whenTitle);
+          if (parsedTime === null || parsedTime < sinceTimestamp) {
+            if (i === 0 && parsedTime !== null) {
+              console.log(
+                `[Zoho Reader] ⏳ Latest email (${whenText}) is before apply window; waiting for new mail...`
+              );
+            }
+            break;
+          }
+
+          await row.click().catch(() => {});
+          await this.page
+            .waitForSelector('#messageBody .body-html, #messageBody .body-text, #messageBody', { timeout: 4000 })
+            .catch(() => {});
+          await this.page.waitForTimeout(600);
+
+          const bodyText = ((await this.page
+            .locator('#messageBody .body-html, #messageBody .body-text, #messageBody')
+            .first()
+            .innerText()
+            .catch(() => '')) || '').trim();
+
+          if (!matchCompanyInEmail(targetCompany, from, subject, bodyText)) {
+            continue;
+          }
+          if (!matchConfirmationContent(subject, bodyText)) {
             continue;
           }
 
-          const combinedHeader = `${subject} ${from}`.toLowerCase();
-          const isHeaderMatch =
-            (targetCompany && targetCompany.length > 2 && combinedHeader.includes(targetCompany)) ||
-            combinedHeader.includes('thank you') ||
-            combinedHeader.includes('application') ||
-            combinedHeader.includes('applied') ||
-            combinedHeader.includes('received') ||
-            combinedHeader.includes('greenhouse') ||
-            combinedHeader.includes('confirm') ||
-            combinedHeader.includes('candidate') ||
-            criteria.isManual;
+          const receivedAt = new Date(parsedTime).toISOString();
+          console.log(`[Zoho Reader] 📧 Matched confirmation email: "${subject}" @ ${receivedAt}`);
 
-          if (isHeaderMatch) {
-            await row.click().catch(() => {});
-            await this.page
-              .waitForSelector('#messageBody .body-html, #messageBody .body-text, #messageBody', { timeout: 4000 })
-              .catch(() => {});
-            await this.page.waitForTimeout(600);
-
-            const emailContainer = this.page
-              .locator('#messageBody .body-html, #messageBody .body-text, #messageBody')
-              .first();
-            const containerExists = (await emailContainer.count()) > 0;
-            const targetLocator = containerExists ? emailContainer : this.page.locator('body');
-
-            const text = ((await targetLocator.innerText().catch(() => '')) || '').toLowerCase();
-            const isConfirmation =
-              text.includes('thank you for applying') ||
-              text.includes('thank you for your application') ||
-              text.includes('we received your application') ||
-              text.includes('application received') ||
-              text.includes('applied') ||
-              text.includes('greenhouse') ||
-              text.includes('application') ||
-              (targetCompany && targetCompany.length > 2 && text.includes(targetCompany));
-
-            if (isConfirmation || criteria.isManual) {
-              console.log(
-                `[Zoho Reader] 📸 Confirmation email found! Capturing screenshot proof (subject: "${subject}")...`
-              );
-              await this.page.waitForTimeout(1000);
-
-              const screenshotBuffer = await targetLocator.screenshot({
-                type: 'png',
-              });
-
-              return {
-                success: true,
-                screenshotBuffer,
-                subject: subject || targetCompany || 'Confirmation Email',
-              };
-            }
-          }
+          return {
+            success: true,
+            email: {
+              from: from || 'Unknown',
+              subject: subject || 'Application confirmation',
+              received_at: receivedAt,
+              body_text: bodyText,
+            },
+          };
         }
 
         await this.page.waitForTimeout(pollInterval);
       }
 
       throw new Error(
-        `Timed out waiting for application confirmation email in Zoho Reader.`
+        `Timed out waiting for confirmation email for "${targetCompany}" after apply time.`
       );
     } catch (err: any) {
       console.error(`[Zoho Reader] ❌ Confirmation email capture failed for ${candidateEmail}: ${err.message}`);
-      return {
-        success: false,
-        errorMessage: err.message,
-      };
+      return { success: false, errorMessage: err.message };
     } finally {
       await this.idlePage();
       release();
     }
+  }
+
+  /** @deprecated Screenshots removed — use captureConfirmationEmailContent. */
+  public async captureConfirmationEmailScreenshot(
+    candidateEmail: string,
+    criteria: Parameters<ZohoReaderService['captureConfirmationEmailContent']>[1] = {}
+  ): Promise<{ success: boolean; screenshotBuffer?: Buffer; subject?: string; errorMessage?: string }> {
+    const result = await this.captureConfirmationEmailContent(candidateEmail, criteria);
+    if (!result.success) {
+      return { success: false, errorMessage: result.errorMessage };
+    }
+    return { success: true, subject: result.email?.subject };
   }
 
   /**
@@ -579,3 +704,4 @@ class ZohoReaderService {
 
 export const zohoReader = new ZohoReaderService();
 export default zohoReader;
+

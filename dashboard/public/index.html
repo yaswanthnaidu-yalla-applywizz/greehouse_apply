@@ -36,6 +36,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/dist/umd/supabase.js"></script>
 
   <style>
     /* Custom scrollbars */
@@ -189,7 +190,7 @@
     // -------------------------------------------------------------
     // Application Status Badge Component
     // -------------------------------------------------------------
-    function ApplicationStatusBadge({ status, applicationId, jobUrl, onStatusChange, proofWebUrl, proofEmailUrl, emailProofStatus, className = '' }) {
+    function ApplicationStatusBadge({ status, applicationId, jobUrl, onStatusChange, proofWebUrl, proofEmailUrl, proofEmailJson, emailProofStatus, className = '' }) {
       const statusRef = useRef(status);
       statusRef.current = status;
       const emailProofStatusRef = useRef(emailProofStatus);
@@ -249,7 +250,7 @@
             </span>
           );
         case 'APPLIED':
-          if (proofWebUrl && !proofEmailUrl) {
+          if (proofWebUrl && !proofEmailUrl && !proofEmailJson) {
             return (
               <span
                 className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
@@ -325,6 +326,7 @@
       unresolvedFieldsCount,
       proofWebUrl,
       proofEmailUrl,
+      proofEmailJson,
       emailProofStatus,
       dryRunScreenshotUrl,
       proofFailedUrl,
@@ -347,6 +349,7 @@
       const [showOtpModal, setShowOtpModal] = useState(false);
       const [proofUrl, setProofUrl] = useState(proofWebUrl || null);
       const [emailProof, setEmailProof] = useState(proofEmailUrl || null);
+      const [emailProofJsonState, setEmailProofJsonState] = useState(proofEmailJson || null);
       const [isCapturingEmailProof, setIsCapturingEmailProof] = useState(false);
       const [showProofViewer, setShowProofViewer] = useState(false);
       const [toastMessage, setToastMessage] = useState(null);
@@ -370,6 +373,12 @@
         }
       }, [proofEmailUrl]);
 
+      useEffect(() => {
+        if (proofEmailJson) {
+          setEmailProofJsonState(proofEmailJson);
+        }
+      }, [proofEmailJson]);
+
       const hasUnresolved = unresolvedFieldsCount > 0;
       const isApplying = applicationStatus === 'APPLYING' || isSubmitting;
       const isApplied = applicationStatus === 'APPLIED';
@@ -378,8 +387,9 @@
       const hasProofActions =
         Boolean(dryRunScreenshotUrl) ||
         Boolean(proofUrl || proofWebUrl || isApplied) ||
+        Boolean(emailProofJsonState || proofEmailJson) ||
         Boolean(emailProof || proofEmailUrl) ||
-        Boolean((proofUrl || proofWebUrl) && !(emailProof || proofEmailUrl)) ||
+        Boolean((proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl)) ||
         Boolean(isFailed && proofFailedUrl);
 
       const pollStatusUpdate = async () => {
@@ -390,6 +400,10 @@
           });
           if (res.ok) {
             const appData = await res.json();
+            const resolvedJson = appData.proofEmailJson || appData.proof_email_json || null;
+            if (resolvedJson) {
+              setEmailProofJsonState(resolvedJson);
+            }
             const resolvedEmail = appData.proofEmailUrl || appData.proof_email_url || null;
             if (resolvedEmail) {
               setEmailProof(resolvedEmail);
@@ -484,23 +498,25 @@
             }
           );
           const data = await res.json();
-          if (res.ok && data.success && data.proofEmailUrl) {
-            setEmailProof(data.proofEmailUrl);
-            setToastMessage('🎉 Confirmation email proof screenshot captured!');
+          const capturedJson = data.proofEmailJson || data.proof_email_json;
+          if (res.ok && data.success && capturedJson) {
+            setEmailProofJsonState(capturedJson);
+            setToastMessage('🎉 Confirmation email proof captured!');
             setTimeout(() => setToastMessage(null), 6000);
             if (onStatusChange) {
               onStatusChange('APPLIED', {
                 ...data,
-                proof_email_url: data.proofEmailUrl,
-                proofEmailUrl: data.proofEmailUrl,
+                proof_email_json: capturedJson,
+                proofEmailJson: capturedJson,
                 proof_email_captured_at: data.proofEmailCapturedAt,
                 proofEmailCapturedAt: data.proofEmailCapturedAt,
                 email_proof_status: 'captured',
                 emailProofStatus: 'captured',
               });
             }
-            setToastMessage('✅ Email proof screenshot captured!');
-            setTimeout(() => setToastMessage(null), 4000);
+            if (onViewEmailProof) {
+              onViewEmailProof();
+            }
           } else {
             setToastMessage(`⚠️ ${data.error || 'Confirmation email not found yet. Retrying in background...'}`);
             setTimeout(() => setToastMessage(null), 5000);
@@ -710,7 +726,7 @@
           )}
 
           {/* Get Email SS Button (Manual retry when web proof is present but email proof is missing) */}
-          {(proofUrl || proofWebUrl) && !(emailProof || proofEmailUrl) && (
+          {(proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl) && (
             <button
               type="button"
               onClick={handleCaptureEmailProof}
@@ -726,25 +742,19 @@
               ) : (
                 <>
                   <span>📥</span>
-                  <span>Get email SS</span>
+                  <span>Fetch email proof</span>
                 </>
               )}
             </button>
           )}
 
           {/* View Email Proof Button */}
-          {(emailProof || proofEmailUrl) && (
+          {(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl) && (
             <button
               type="button"
               onClick={() => {
                 if (onViewEmailProof) {
                   onViewEmailProof();
-                } else {
-                  const targetProof = emailProof || proofEmailUrl;
-                  if (targetProof) {
-                    setProofUrl(targetProof);
-                    setShowProofViewer(true);
-                  }
                 }
               }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#BFDBFE] hover:bg-[#93C5FD] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
@@ -1029,6 +1039,62 @@
               )}
             </div>
           )}
+        </div>
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Email proof (JSON) renderer — no screenshots
+    // -------------------------------------------------------------
+    function EmailProofRenderer({ proof, companyName }) {
+      if (!proof) return null;
+      const received = proof.received_at ? new Date(proof.received_at).toLocaleString() : proof.received_at;
+      const body = (proof.body_text || '').slice(0, 4000);
+      const highlight = (text, company) => {
+        if (!company || company.length < 2) return text;
+        const parts = text.split(new RegExp(`(${company.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')})`, 'gi'));
+        return parts.map((part, i) =>
+          part.toLowerCase() === company.toLowerCase()
+            ? React.createElement('strong', { key: i, className: 'font-bold bg-[#FEF3C7] px-0.5 rounded' }, part)
+            : part
+        );
+      };
+      return (
+        <article className="bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[4px_4px_0px_#1A1A2E] overflow-hidden text-[#1A1A2E]">
+          <header className="px-5 py-4 bg-[#EFF6FF] border-b-2 border-[#1A1A2E]">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] font-mono mb-1">Confirmation email proof</p>
+            <h3 className="text-sm font-bold break-words">{proof.subject || '(No subject)'}</h3>
+            <p className="text-xs font-mono mt-2"><span className="text-[#64748B]">From </span>{proof.from}</p>
+            <p className="text-xs font-mono"><span className="text-[#64748B]">Received </span>{received}</p>
+          </header>
+          <div className="px-5 py-4 bg-[#FAF4EB] max-h-[50vh] overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap break-words">
+            {highlight(body, companyName)}
+          </div>
+        </article>
+      );
+    }
+
+    function EmailProofModal({ isOpen, onClose, proof, companyName, metadata = {} }) {
+      useEffect(() => {
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        if (isOpen) {
+          window.addEventListener('keydown', onKey);
+          document.body.style.overflow = 'hidden';
+        }
+        return () => {
+          window.removeEventListener('keydown', onKey);
+          document.body.style.overflow = 'unset';
+        };
+      }, [isOpen, onClose]);
+      if (!isOpen || !proof) return null;
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1A2E]/80 backdrop-blur-sm" onClick={onClose}>
+          <div className="relative w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-end mb-2">
+              <button type="button" onClick={onClose} className="text-white font-bold px-2 py-1 border border-white/40 rounded">✕</button>
+            </div>
+            <EmailProofRenderer proof={proof} companyName={companyName} />
+          </div>
         </div>
       );
     }
@@ -1420,6 +1486,7 @@
       const [viewerOpen, setViewerOpen] = useState(false);
       const [viewerImageUrl, setViewerImageUrl] = useState(null);
       const [viewerTitle, setViewerTitle] = useState('Application Proof');
+      const [emailProofOpen, setEmailProofOpen] = useState(false);
       const appId = application?.id || application?.applywizzId || application?.applywizz_id || 'app-default';
       const jobUrl = application?.jobUrl || application?.job_url || '';
       const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
@@ -1635,6 +1702,12 @@
 
       return (
         <div className="flex-1 overflow-y-auto px-5 py-3.5 md:px-7 md:py-4 max-w-5xl mx-auto w-full custom-scrollbar">
+          <EmailProofModal
+            isOpen={emailProofOpen}
+            onClose={() => setEmailProofOpen(false)}
+            proof={application.proof_email_json || application.proofEmailJson}
+            companyName={application.companyName || application.company_name}
+          />
           <ProofViewer
             isOpen={viewerOpen}
             onClose={() => setViewerOpen(false)}
@@ -1671,6 +1744,7 @@
                     onStatusChange={onStatusChange}
                     proofWebUrl={application.proof_web_url || application.proofWebUrl}
                     proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
+                    proofEmailJson={application.proof_email_json || application.proofEmailJson}
                     emailProofStatus={application.email_proof_status || application.emailProofStatus}
                   />
                 </div>
@@ -1685,6 +1759,15 @@
                 >
                   {application.jobUrl || application.job_url}
                 </a>
+                {currentStatus === 'FAILED' &&
+                  (application.error_message || application.errorMessage) && (
+                    <p
+                      className="mt-2 text-[11px] font-mono text-[#991B1B] bg-[#FEE2E2] border border-[#1A1A2E] rounded-lg px-2.5 py-1.5 max-w-2xl"
+                      title="Failure reason from submission worker"
+                    >
+                      {application.error_message || application.errorMessage}
+                    </p>
+                  )}
               </div>
 
               <div className="shrink-0 flex flex-col items-end gap-1.5">
@@ -1695,6 +1778,7 @@
                   unresolvedFieldsCount={unresCount}
                   proofWebUrl={application.proof_web_url || application.proofWebUrl}
                   proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
+                  proofEmailJson={application.proof_email_json || application.proofEmailJson}
                   emailProofStatus={application.email_proof_status || application.emailProofStatus}
                   dryRunScreenshotUrl={application.dry_run_screenshot_url || application.dryRunScreenshotUrl}
                   proofFailedUrl={application.proof_failed_url || application.proofFailedUrl}
@@ -1719,11 +1803,9 @@
                     }
                   }}
                   onViewEmailProof={() => {
-                    const url = application.proof_email_url || application.proofEmailUrl;
-                    if (url) {
-                      setViewerImageUrl(url);
-                      setViewerTitle('Zoho Confirmation Email Proof');
-                      setViewerOpen(true);
+                    const json = application.proof_email_json || application.proofEmailJson;
+                    if (json) {
+                      setEmailProofOpen(true);
                     }
                   }}
                   onViewDryRun={() => {
@@ -2533,6 +2615,84 @@
     }
 
     // -------------------------------------------------------------
+    // Supabase Realtime merge helpers (candidate_applications)
+    // -------------------------------------------------------------
+    function urlsMatchRealtime(a, b) {
+      if (!a || !b) return false;
+      if (a === b) return true;
+      try {
+        const na = decodeURIComponent(a);
+        const nb = decodeURIComponent(b);
+        return na === nb || na.includes(nb) || nb.includes(na);
+      } catch {
+        return a.includes(b) || b.includes(a);
+      }
+    }
+
+    function applicationRowMatchesView(row, view) {
+      const rowId = row.id || '';
+      const viewId = view?.id || '';
+      if (rowId && viewId && rowId === viewId) return true;
+      const rowJob = row.job_url || '';
+      const viewJob = view?.jobUrl || view?.job_url || '';
+      return urlsMatchRealtime(rowJob, viewJob);
+    }
+
+    function mergeApplicationFromRealtimeRow(prev, row) {
+      if (!prev || !row) return prev;
+      if (!applicationRowMatchesView(row, prev)) return prev;
+      const errorMessage = row.error_message ?? undefined;
+      return {
+        ...prev,
+        id: row.id || prev.id,
+        status: row.status ?? prev.status,
+        error_message: errorMessage ?? prev.error_message,
+        errorMessage: errorMessage ?? prev.errorMessage,
+        proof_web_url: row.proof_web_url ?? prev.proof_web_url,
+        proofWebUrl: row.proof_web_url ?? prev.proofWebUrl,
+        proof_captured_at: row.proof_captured_at ?? prev.proof_captured_at,
+        proofCapturedAt: row.proof_captured_at ?? prev.proofCapturedAt,
+        proof_failed_url: row.proof_failed_url ?? prev.proof_failed_url,
+        proofFailedUrl: row.proof_failed_url ?? prev.proofFailedUrl,
+        proof_failed_captured_at: row.proof_failed_captured_at ?? prev.proof_failed_captured_at,
+        proofFailedCapturedAt: row.proof_failed_captured_at ?? prev.proofFailedCapturedAt,
+        proof_email_url: row.proof_email_url ?? prev.proof_email_url,
+        proofEmailUrl: row.proof_email_url ?? prev.proofEmailUrl,
+        proof_email_json: row.proof_email_json ?? prev.proof_email_json,
+        proofEmailJson: row.proof_email_json ?? prev.proofEmailJson,
+        proof_email_captured_at: row.proof_email_captured_at ?? prev.proof_email_captured_at,
+        email_proof_status: row.email_proof_status ?? prev.email_proof_status,
+        emailProofStatus: row.email_proof_status ?? prev.emailProofStatus,
+        dry_run_screenshot_url: row.dry_run_screenshot_url ?? prev.dry_run_screenshot_url,
+        dryRunScreenshotUrl: row.dry_run_screenshot_url ?? prev.dryRunScreenshotUrl,
+        submitted_at: row.submitted_at ?? prev.submitted_at,
+        submittedAt: row.submitted_at ?? prev.submittedAt,
+        updated_at: row.updated_at ?? prev.updated_at,
+      };
+    }
+
+    function patchJobInCandidateDetail(detail, row) {
+      const rowJob = row.job_url || '';
+      const status = row.status;
+      const error_message = row.error_message;
+      return {
+        ...detail,
+        jobs: detail.jobs.map((job) => {
+          const jobUrl = job.canonicalUrl || job.rawUrl || '';
+          if (!urlsMatchRealtime(jobUrl, rowJob)) return job;
+          return {
+            ...job,
+            status: status ?? job.status,
+            error_message: error_message ?? job.error_message,
+          };
+        }),
+      };
+    }
+
+    let supabaseRealtimeClient = null;
+    let supabaseRealtimeClientKey = '';
+
+    // -------------------------------------------------------------
     // Main App Component
     // -------------------------------------------------------------
     function App() {
@@ -2577,6 +2737,7 @@
       });
       const [workHistoryBannerDismissed, setWorkHistoryBannerDismissed] = useState(false);
       const [noCandidatesMessage, setNoCandidatesMessage] = useState(null);
+      const [failureAlert, setFailureAlert] = useState(null);
 
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [notifications, setNotifications] = useState([]);
@@ -2798,6 +2959,80 @@
         };
       }, [currentUser, fetchInitialData, fetchNotifications, ensureAdminHydrated]);
 
+      // Connect to WebSocket /ws for real-time application failure toasts
+      useEffect(() => {
+        if (!currentUser) return;
+        let ws = null;
+        let reconnectTimeout = null;
+        let isDisposed = false;
+
+        const connectWs = () => {
+          if (isDisposed) return;
+          try {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onmessage = (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'APPLICATION_FAILED') {
+                  console.log('[Dashboard WS] ⚠️ Received APPLICATION_FAILED:', data);
+                  setFailureAlert({
+                    appId: data.appId,
+                    reason: data.reason || 'Submission failed.',
+                    timestamp: data.timestamp || new Date().toISOString(),
+                    companyName: data.companyName,
+                    jobTitle: data.jobTitle,
+                  });
+
+                  setTimeout(() => {
+                    setFailureAlert((curr) => (curr?.appId === data.appId ? null : curr));
+                  }, 10000);
+
+                  fetchInitialData(true);
+                  fetchNotifications();
+                  if (selectedCandidateId) {
+                    fetchCandidateDetail(selectedCandidateId);
+                  }
+                  if (selectedCandidateId && selectedJobUrl) {
+                    fetchJobApplication(selectedCandidateId, selectedJobUrl);
+                  }
+                }
+              } catch (e) {
+                console.warn('[Dashboard WS] Message parse error:', e);
+              }
+            };
+
+            ws.onclose = () => {
+              if (!isDisposed) {
+                reconnectTimeout = setTimeout(connectWs, 5000);
+              }
+            };
+
+            ws.onerror = () => {
+              if (ws) ws.close();
+            };
+          } catch (err) {
+            console.warn('[Dashboard WS] Connection error:', err);
+            if (!isDisposed) {
+              reconnectTimeout = setTimeout(connectWs, 5000);
+            }
+          }
+        };
+
+        connectWs();
+
+        return () => {
+          isDisposed = true;
+          if (reconnectTimeout) clearTimeout(reconnectTimeout);
+          if (ws) {
+            ws.onclose = null;
+            ws.close();
+          }
+        };
+      }, [currentUser, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
+
       const fetchCandidateDetail = useCallback(async (applywizzId) => {
         try {
           const res = await fetch(`/api/candidates/${applywizzId}`, {
@@ -2853,6 +3088,75 @@
         }
       }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
+      useEffect(() => {
+        if (!currentUser || !selectedCandidateId) return;
+        if (!window.supabase || !window.supabase.createClient) {
+          console.warn('[Realtime] @supabase/supabase-js not loaded');
+          return;
+        }
+
+        let channel = null;
+        let cancelled = false;
+
+        const onRow = (row, eventType) => {
+          if (!row) return;
+          console.log(
+            `[Realtime] candidate_applications ${eventType} applywizz=${selectedCandidateId} status=${row.status} id=${row.id || ''}`
+          );
+          setApplication((prev) => mergeApplicationFromRealtimeRow(prev, row));
+          setCandidateDetail((prev) => (prev ? patchJobInCandidateDetail(prev, row) : prev));
+        };
+
+        (async () => {
+          try {
+            const res = await fetch('/api/config/supabase-realtime', { headers: getAuthHeaders() });
+            if (!res.ok || cancelled) return;
+            const cfg = await res.json();
+            if (!cfg.enabled || !cfg.url || !cfg.anonKey) {
+              if (!cfg.enabled) {
+                console.warn('[Realtime] Supabase Realtime not configured (missing SUPABASE_ANON_KEY).');
+              }
+              return;
+            }
+
+            const clientKey = `${cfg.url}::${cfg.anonKey.slice(0, 8)}`;
+            if (!supabaseRealtimeClient || supabaseRealtimeClientKey !== clientKey) {
+              supabaseRealtimeClient = window.supabase.createClient(cfg.url, cfg.anonKey, {
+                auth: { persistSession: false, autoRefreshToken: false },
+                realtime: { params: { eventsPerSecond: 10 } },
+              });
+              supabaseRealtimeClientKey = clientKey;
+            }
+
+            const filter = `applywizz_id=eq.${selectedCandidateId}`;
+            channel = supabaseRealtimeClient
+              .channel(`candidate_applications:${selectedCandidateId}`)
+              .on(
+                'postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'candidate_applications', filter },
+                (payload) => onRow(payload.new, 'UPDATE')
+              )
+              .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'candidate_applications', filter },
+                (payload) => onRow(payload.new, 'INSERT')
+              )
+              .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                  console.log(`[Realtime] Subscribed to candidate_applications for ${selectedCandidateId}`);
+                }
+              });
+          } catch (err) {
+            console.warn('[Realtime] Failed to subscribe:', err);
+          }
+        })();
+
+        return () => {
+          cancelled = true;
+          if (channel) channel.unsubscribe();
+        };
+      }, [currentUser, selectedCandidateId]);
+
       const handleFieldUpdate = (updatedField) => {
         if (!application) return;
         const fields = application.resolvedFields || application.resolved_fields || [];
@@ -2871,6 +3175,16 @@
         setApplication((prev) => ({
           ...prev,
           status: newStatus,
+          error_message:
+            updatedPayload?.error_message ||
+            updatedPayload?.errorMessage ||
+            updatedPayload?.error ||
+            prev.error_message,
+          errorMessage:
+            updatedPayload?.error_message ||
+            updatedPayload?.errorMessage ||
+            updatedPayload?.error ||
+            prev.errorMessage,
           proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || prev.proof_web_url,
           proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at || prev.proof_captured_at,
           proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proof_email_url,
@@ -2878,6 +3192,8 @@
           proof_email_captured_at: updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at || prev.proof_email_captured_at,
           email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status || prev.email_proof_status,
           emailProofStatus: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status || prev.emailProofStatus,
+          proof_email_json: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proof_email_json,
+          proofEmailJson: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proofEmailJson,
           proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proof_failed_url,
           proofFailedUrl: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proofFailedUrl,
           proof_failed_captured_at: updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at || prev.proof_failed_captured_at,
@@ -2887,7 +3203,11 @@
         if (candidateDetail && selectedJobUrl) {
           const updatedJobs = candidateDetail.jobs.map((j) => {
             if (j.canonicalUrl === selectedJobUrl || j.rawUrl === selectedJobUrl) {
-              return { ...j, status: newStatus };
+              const err =
+                updatedPayload?.error_message ||
+                updatedPayload?.errorMessage ||
+                updatedPayload?.error;
+              return { ...j, status: newStatus, error_message: err ?? j.error_message };
             }
             return j;
           });
@@ -2909,6 +3229,7 @@
               proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url,
               proof_email_captured_at: updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
               email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
+              proof_email_json: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json,
               proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
               proof_failed_captured_at: updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
               dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url,
@@ -3226,6 +3547,33 @@
                 onClick={() => setWorkHistoryBannerDismissed(true)}
                 className="text-[#92400E] hover:text-[#1A1A2E] text-sm font-black transition-opacity"
                 title="Dismiss warning"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Real-time Worker Failure Banner / Toast */}
+          {failureAlert && (
+            <div className="bg-[#FEE2E2] border-b-2 border-[#EF4444] px-6 py-3 text-xs font-bold text-[#991B1B] flex items-center justify-between shadow-md flex-shrink-0 animate-fadeIn">
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">🚨</span>
+                <div>
+                  <span className="font-black uppercase tracking-wider text-[#7F1D1D]">Submission Failed: </span>
+                  <span>
+                    {failureAlert.companyName ? `${failureAlert.companyName} — ` : ''}
+                    {failureAlert.reason}
+                  </span>
+                  <span className="ml-2 font-mono font-normal text-[11px] text-[#B91C1C]">
+                    ({new Date(failureAlert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFailureAlert(null)}
+                className="text-[#991B1B] hover:text-[#7F1D1D] text-sm font-black px-1.5 py-0.5 rounded hover:bg-white/50 transition-colors"
+                title="Dismiss alert"
               >
                 ✕
               </button>
