@@ -35,6 +35,15 @@ export function getISTDateString(daysAgo: number = 0): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/** Returns yesterday's calendar date using the current IST (UTC+5:30) date. */
+export function getYesterdayIST(): string {
+  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  ist.setUTCDate(ist.getUTCDate() - 1);
+  const date = ist.toISOString().split('T')[0];
+  console.log(`[WorkHistory] 🕒 Computed yesterday in IST (UTC+5:30): ${date}`);
+  return date;
+}
+
 /**
  * Queries work-history API for a specific date (IST).
  * Returns null if network error, HTTP error, or timeout occurs.
@@ -145,7 +154,7 @@ export async function fetchAllowedCandidates(caEmail: string): Promise<WorkHisto
   let unreachableCount = 0;
 
   for (let daysBack = 1; daysBack <= 7; daysBack++) {
-    const dateStr = getISTDateString(daysBack);
+    const dateStr = daysBack === 1 ? getYesterdayIST() : getISTDateString(daysBack);
     const records = await fetchRecordsForDate(caEmail, dateStr);
 
     if (records === null) {

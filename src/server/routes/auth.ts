@@ -13,7 +13,7 @@ import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { config } from '../../config/env.js';
 import { sendOtpEmail } from '../../services/azureEmail.js';
 import { checkOtpCooldown, generateAndStoreOtp, verifyStoredOtp } from '../../services/otpStore.js';
-import { fetchAllowedCandidates, getISTDateString } from '../../services/workHistoryClient.js';
+import { fetchAllowedCandidates, getYesterdayIST } from '../../services/workHistoryClient.js';
 import { hydrateAdminProfilesFromWorkHistory } from '../../services/adminProfileHydrate.js';
 import { setCachedWorkHistory } from '../workHistoryCache.js';
 
@@ -586,7 +586,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       setCachedWorkHistory(normalizedEmail, whResult.records, whResult.candidateIds, workHistoryUnreachable, whResult.resolvedDate);
     } else {
       try {
-        await hydrateAdminProfilesFromWorkHistory(getISTDateString(0));
+        await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
       } catch (hydrateErr: any) {
         console.warn('[Auth] Admin profile hydration on login failed:', hydrateErr?.message);
       }
@@ -734,7 +734,7 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
       setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, workHistoryUnreachable, whResult.resolvedDate);
     } else if (isAdmin) {
       try {
-        await hydrateAdminProfilesFromWorkHistory(getISTDateString(0));
+        await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
       } catch (hydrateErr: any) {
         console.warn('[Auth] Admin profile hydration on MFA verify failed:', hydrateErr?.message);
       }
@@ -786,7 +786,7 @@ authRouter.post('/hydrate-admin', async (req: Request, res: Response): Promise<v
 
     const bodyDate = typeof req.body?.date === 'string' ? req.body.date.trim() : '';
     const dateStr =
-      /^\d{4}-\d{2}-\d{2}$/.test(bodyDate) ? bodyDate : getISTDateString(0);
+      /^\d{4}-\d{2}-\d{2}$/.test(bodyDate) ? bodyDate : getYesterdayIST();
 
     const hydratedCount = await hydrateAdminProfilesFromWorkHistory(dateStr);
     res.json({ success: true, hydratedCount, date: dateStr });

@@ -32,6 +32,7 @@ export interface ProfileRow {
   resume_text?: string | null;
   resume_facts?: Record<string, any> | null;
   raw_api_payload?: Record<string, any> | null;
+  zoho_connected?: boolean;
   last_api_fetch_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -143,6 +144,11 @@ export async function upsertProfile(
     email: companyEmail || profile.email || null,
     updated_at: new Date().toISOString(),
   };
+
+  // Preserve scanner-managed flag when not explicitly provided on upsert
+  if (profile.zoho_connected === undefined) {
+    delete payload.zoho_connected;
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -265,6 +271,7 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
         resume_url: profileData.resumeUrl || (isAkshitha ? 'resumes/AWL-31428_resume.pdf' : null),
         resume_storage_path: profileData.localResumePath || (isAkshitha ? 'resumes/AWL-31428_resume.pdf' : null),
         raw_api_payload: profileData.demographics ? { demographics: profileData.demographics } : null,
+        zoho_connected: Boolean(profileData.zoho_connected ?? profileData.zohoConnected),
       };
     } catch {}
   }

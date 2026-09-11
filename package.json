@@ -27,7 +27,8 @@
     "daemon": "tsx src/submitter/queueWorker.ts",
     "daemon:prod": "node dist/submitter/queueWorker.js",
     "ingest:storage": "tsx src/scanner/storageCsvIngestion.ts",
-    "scan:zoho-connected": "npx tsx scripts/scanZohoConnected.ts"
+    "scan:zoho-connected": "npx tsx scripts/scanZohoConnected.ts",
+    "delete:old-jobs": "npx tsx scripts/deleteOldJobsAndApplications.ts"
   },
   "keywords": [
     "greenhouse",

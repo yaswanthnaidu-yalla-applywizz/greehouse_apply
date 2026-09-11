@@ -202,7 +202,12 @@
       const lastPolledFailedProofRef = useRef(null);
 
       useEffect(() => {
-        const shouldPollStatus = status === 'APPLYING' || status === 'QUEUED' || status === 'FAILED';
+        const shouldPollStatus =
+          status === 'APPLYING' ||
+          status === 'QUEUED' ||
+          status === 'OTP_REQUIRED' ||
+          status === 'CAPTCHA_REQUIRED' ||
+          status === 'FAILED';
         const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
         if ((!shouldPollStatus && !shouldPollEmailProof) || !applicationId) return;
 
@@ -240,13 +245,13 @@
 
       switch (status) {
         case 'QUEUED':
+        case 'CAPTCHA_REQUIRED':
+        case 'OTP_REQUIRED':
+        case 'APPLYING':
           return (
-            <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
-              title="Queued for automated submission daemon"
-            >
-              <span className="w-2 h-2 rounded-full bg-[#EA580C]"></span>
-              <span>Queued for Submit</span>
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Automated submission in progress">
+              <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+              <span>Submitting... (Live)</span>
             </span>
           );
         case 'APPLIED':
@@ -270,26 +275,11 @@
               <span>Applied &amp; Verified</span>
             </span>
           );
-        case 'APPLYING':
-          return (
-            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}>
-              <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
-              <span>Submitting... (Live)</span>
-            </span>
-          );
         case 'DRY_RUN_COMPLETE':
           return (
             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
               <span className="w-2 h-2 rounded-full bg-[#1E3A5F]"></span>
               <span>Dry-Run Complete</span>
-            </span>
-          );
-        case 'CAPTCHA_REQUIRED':
-        case 'OTP_REQUIRED':
-          return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-[#451A03] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ring-2 ring-[#FBBF24] animate-pulse ${className}`} title="Verification code or CAPTCHA required — complete challenge to proceed">
-              <span className="text-sm leading-none">🔐</span>
-              <span>{status === 'CAPTCHA_REQUIRED' ? 'CAPTCHA Required' : 'OTP Required'}</span>
             </span>
           );
         case 'FAILED':
@@ -317,6 +307,24 @@
     }
 
     // -------------------------------------------------------------
+    // Submitting Spinner
+    // -------------------------------------------------------------
+    function SubmittingSpinner({ text = 'Submitting...', className = '' }) {
+      return (
+        <div
+          className={`flex items-center justify-center gap-3 px-4 py-3 bg-[#E88474] text-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E] animate-pulse ${className}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" aria-hidden="true" />
+          <span className="text-sm font-bold font-mono tracking-wide">{text}</span>
+        </div>
+      );
+    }
+
+    const SUBMIT_FLOW_STATUSES = new Set(['APPLYING', 'QUEUED', 'OTP_REQUIRED', 'CAPTCHA_REQUIRED']);
+
+    // -------------------------------------------------------------
     // Submission Controls Component
     // -------------------------------------------------------------
     function SubmissionControls({
@@ -336,17 +344,12 @@
       onTriggerDryRun,
       onTriggerSubmit,
       onStatusChange,
-      onOtpVerified,
       onViewProof,
       onViewEmailProof,
       onViewDryRun,
       onViewFailureScreenshot,
     }) {
       const [applicationStatus, setApplicationStatus] = useState(status);
-      const [otpValue, setOtpValue] = useState('');
-      const [otpLoading, setOtpLoading] = useState(false);
-      const [otpError, setOtpError] = useState(null);
-      const [showOtpModal, setShowOtpModal] = useState(false);
       const [proofUrl, setProofUrl] = useState(proofWebUrl || null);
       const [emailProof, setEmailProof] = useState(proofEmailUrl || null);
       const [emailProofJsonState, setEmailProofJsonState] = useState(proofEmailJson || null);
@@ -356,9 +359,6 @@
 
       useEffect(() => {
         setApplicationStatus(status);
-        if (status === 'OTP_REQUIRED') {
-          setOtpError(null);
-        }
       }, [status]);
 
       useEffect(() => {
@@ -380,10 +380,9 @@
       }, [proofEmailJson]);
 
       const hasUnresolved = unresolvedFieldsCount > 0;
-      const isApplying = applicationStatus === 'APPLYING' || isSubmitting;
+      const isApplying = isSubmitting || SUBMIT_FLOW_STATUSES.has(String(applicationStatus));
       const isApplied = applicationStatus === 'APPLIED';
       const isFailed = applicationStatus === 'FAILED';
-      const isOtp = applicationStatus === 'OTP_REQUIRED';
       const hasProofActions =
         Boolean(dryRunScreenshotUrl) ||
         Boolean(proofUrl || proofWebUrl || isApplied) ||
@@ -414,71 +413,6 @@
           }
         } catch (err) {
           console.warn(`[SubmissionControls] Status poll error for ${applicationId}:`, err);
-        }
-      };
-
-      const handleVerifyOtp = async () => {
-        const cleanOtp = otpValue.trim();
-        if (!cleanOtp) {
-          setOtpError('Please enter the OTP code.');
-          return;
-        }
-
-        setOtpLoading(true);
-        setOtpError(null);
-        setApplicationStatus('APPLYING');
-        if (onStatusChange) onStatusChange('APPLYING');
-
-        try {
-          const res = await fetch(
-            `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/submit-otp`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-              body: JSON.stringify({ otp: cleanOtp, jobUrl: jobUrl || undefined }),
-            }
-          );
-          const data = await res.json();
-          const resolvedProofUrl = data.proofUrl || data.proofWebUrl;
-          const proofCapturedAt = data.proofCapturedAt;
-
-          if (!res.ok || data.status !== 'APPLIED') {
-            setOtpError(data.error || 'OTP verification failed.');
-            setApplicationStatus('OTP_REQUIRED');
-            await pollStatusUpdate();
-            return;
-          }
-
-          setApplicationStatus('APPLIED');
-          setProofUrl(resolvedProofUrl);
-          setShowOtpModal(false);
-          setShowProofViewer(true);
-          setOtpValue('');
-          setToastMessage('🎉 Application submitted! Proof captured.');
-          setTimeout(() => setToastMessage(null), 6000);
-
-          if (onStatusChange) {
-            onStatusChange('APPLIED', {
-              ...data,
-              proofWebUrl: resolvedProofUrl,
-              proof_web_url: resolvedProofUrl,
-              proofCapturedAt,
-              proof_captured_at: proofCapturedAt,
-            });
-          }
-
-          if (onOtpVerified) {
-            onOtpVerified({ proofWebUrl: resolvedProofUrl, proofCapturedAt });
-          } else if (resolvedProofUrl && onViewProof) {
-            onViewProof();
-          }
-        } catch (err) {
-          console.error('OTP verification failed:', err);
-          setOtpError(err.message || 'OTP verification failed.');
-          setApplicationStatus('OTP_REQUIRED');
-          await pollStatusUpdate();
-        } finally {
-          setOtpLoading(false);
         }
       };
 
@@ -536,76 +470,6 @@
 
       return (
         <>
-          {/* OTP Entry Modal */}
-          {isOtp && showOtpModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#1A1A2E]/50 p-4">
-              <div
-                className="bg-white border-2 border-[#1A1A2E] rounded-xl p-6 w-full max-w-md shadow-[6px_6px_0px_#1A1A2E]"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="otp-modal-title"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <h2 id="otp-modal-title" className="text-lg font-bold text-[#1A1A2E] flex items-center gap-2">
-                    <span>🔐</span>
-                    <span>Enter OTP</span>
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => setShowOtpModal(false)}
-                    className="text-[#64748B] hover:text-[#1A1A2E] text-sm font-bold px-1.5 py-0.5 rounded"
-                    title="Close modal"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <p className="text-xs text-[#64748B] mb-4 font-medium">
-                  A verification code was sent after submission. Enter it below to complete the application.
-                </p>
-                {otpError && (
-                  <div className="mb-3 px-3 py-2 bg-[#FEE2E2] border border-[#EF4444] rounded text-xs text-[#991B1B] font-semibold flex items-center gap-2">
-                    <span>⚠️</span>
-                    <span>{otpError}</span>
-                  </div>
-                )}
-                <input
-                  type="text"
-                  inputMode="text"
-                  maxLength={16}
-                  autoComplete="one-time-code"
-                  placeholder="Enter OTP code (e.g. Aebf0aDc)"
-                  value={otpValue}
-                  disabled={otpLoading}
-                  onChange={(e) => {
-                    setOtpValue(e.target.value);
-                    if (otpError) setOtpError(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !otpLoading) handleVerifyOtp();
-                  }}
-                  className="w-full px-3 py-2.5 mb-4 rounded-md border-2 border-[#1A1A2E] text-sm font-mono text-[#1A1A2E] placeholder:text-[#94A3B8] focus:outline-none focus:ring-2 focus:ring-[#F59E0B] disabled:opacity-60"
-                />
-                {otpValue.trim() && (
-                  <button
-                    type="button"
-                    onClick={handleVerifyOtp}
-                    disabled={otpLoading}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-sm font-bold text-white bg-[#F59E0B] hover:bg-[#D97706] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {otpLoading ? (
-                      <>
-                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        <span>Submitting &amp; Resuming...</span>
-                      </>
-                    ) : (
-                      <span>Submit OTP &amp; Resume Application</span>
-                    )}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* Proof Viewer Modal */}
           {showProofViewer && proofUrl && (
             <ProofViewer
@@ -628,19 +492,10 @@
             </div>
           )}
 
-          <div className="flex items-center gap-2.5 flex-wrap">
-          {/* CAPTCHA / OTP Action Button */}
-          {isOtp && !showOtpModal && (
-            <button
-              type="button"
-              onClick={() => setShowOtpModal(true)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-[#451A03] bg-[#F59E0B] hover:bg-[#D97706] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
-            >
-              <span>🔐</span>
-              <span>OTP Required — Enter OTP</span>
-            </button>
-          )}
+          <div className="flex flex-col items-end gap-2.5 w-full min-w-[200px]">
+          {isApplying && <SubmittingSpinner text="Submitting..." className="w-full" />}
 
+          <div className="flex items-center gap-2.5 flex-wrap justify-end">
           <button
             type="button"
             onClick={onTriggerDryRun}
@@ -776,6 +631,7 @@
           )}
             </div>
           )}
+          </div>
           </div>
         </>
       );
@@ -1549,6 +1405,24 @@
         (f) => (f.isRequired || f.required) && (!f.value || f.value.trim().length === 0 || f.source === 'unresolved')
       ).length;
       const currentStatus = application?.status || 'READY_FOR_REVIEW';
+      const submitFlowActive =
+        isSubmitting ||
+        currentStatus === 'APPLYING' ||
+        currentStatus === 'QUEUED' ||
+        currentStatus === 'OTP_REQUIRED' ||
+        currentStatus === 'CAPTCHA_REQUIRED';
+      const badgeStatus =
+        currentStatus === 'QUEUED' ||
+        currentStatus === 'OTP_REQUIRED' ||
+        currentStatus === 'CAPTCHA_REQUIRED'
+          ? 'APPLYING'
+          : currentStatus;
+
+      useEffect(() => {
+        if (currentStatus === 'APPLIED' || currentStatus === 'FAILED') {
+          setIsSubmitting(false);
+        }
+      }, [currentStatus]);
 
       const isDemographic = (label) => {
         const l = (label || '').toLowerCase();
@@ -1650,6 +1524,9 @@
       };
 
       const handleTriggerSubmit = async () => {
+        if (isSubmitting || submitFlowActive) return;
+
+        console.log(`[Dashboard] Operator submitted ${appId} → auto-flow started`);
         setIsSubmitting(true);
         if (onStatusChange) onStatusChange('APPLYING');
         try {
@@ -1662,40 +1539,51 @@
             }),
           });
           const data = await res.json();
-          let proofWebUrl = data.proofWebUrl;
-          let proofCapturedAt = data.proofCapturedAt;
 
-          if (data.status === 'APPLIED' && !proofWebUrl) {
-            try {
-              const proofRes = await fetch(`/api/applications/${encodeURIComponent(appId)}/proof`, {
-                headers: getAuthHeaders(),
+          if (!res.ok || data.status === 'FAILED') {
+            if (onStatusChange) {
+              onStatusChange('FAILED', {
+                ...data,
+                error: data.error || data.error_message || 'Submit request failed',
               });
-              if (proofRes.ok) {
-                const proofData = await proofRes.json();
-                proofWebUrl = proofData.proofWebUrl;
-                proofCapturedAt = proofData.proofCapturedAt;
-              }
-            } catch {}
+            }
+            setIsSubmitting(false);
+            return;
           }
 
-          if (data.status && onStatusChange) {
-            onStatusChange(data.status, {
-              ...data,
-              proofWebUrl,
-              proofCapturedAt,
-            });
+          if (data.status === 'APPLIED') {
+            let proofWebUrl = data.proofWebUrl;
+            let proofCapturedAt = data.proofCapturedAt;
+            if (!proofWebUrl) {
+              try {
+                const proofRes = await fetch(`/api/applications/${encodeURIComponent(appId)}/proof`, {
+                  headers: getAuthHeaders(),
+                });
+                if (proofRes.ok) {
+                  const proofData = await proofRes.json();
+                  proofWebUrl = proofData.proofWebUrl;
+                  proofCapturedAt = proofData.proofCapturedAt;
+                }
+              } catch {}
+            }
+            if (onStatusChange) {
+              onStatusChange('APPLIED', { ...data, proofWebUrl, proofCapturedAt });
+            }
+            if (proofWebUrl) {
+              setViewerImageUrl(proofWebUrl);
+              setViewerTitle('Live Application Confirmation Proof');
+              setViewerOpen(true);
+            }
+            setIsSubmitting(false);
+            return;
           }
 
-          if (proofWebUrl) {
-            setViewerImageUrl(proofWebUrl);
-            setViewerTitle('Live Application Confirmation Proof');
-            setViewerOpen(true);
+          if (onStatusChange) {
+            onStatusChange('APPLYING', data);
           }
         } catch (err) {
           console.error('Submission failed:', err);
           if (onStatusChange) onStatusChange('FAILED', { error: err.message });
-          alert(`Submission error: ${err.message}`);
-        } finally {
           setIsSubmitting(false);
         }
       };
@@ -1738,7 +1626,7 @@
                   </span>
                   <DifficultyBadge fieldsCount={fields.length} />
                   <ApplicationStatusBadge
-                    status={currentStatus}
+                    status={badgeStatus}
                     applicationId={appId}
                     jobUrl={jobUrl}
                     onStatusChange={onStatusChange}
@@ -1787,13 +1675,6 @@
                   onTriggerDryRun={handleTriggerDryRun}
                   onTriggerSubmit={handleTriggerSubmit}
                   onStatusChange={onStatusChange}
-                  onOtpVerified={({ proofWebUrl }) => {
-                    if (proofWebUrl) {
-                      setViewerImageUrl(proofWebUrl);
-                      setViewerTitle('Live Application Confirmation Proof');
-                      setViewerOpen(true);
-                    }
-                  }}
                   onViewProof={() => {
                     const url = application.proof_web_url || application.proofWebUrl;
                     if (url) {
@@ -1992,10 +1873,10 @@
                     <button
                       type="button"
                       onClick={handleTriggerSubmit}
-                      disabled={isSubmitting}
-                      className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                      disabled={submitFlowActive}
+                      className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      {isSubmitting ? 'Submitting...' : 'Submit Application Now →'}
+                      {submitFlowActive ? 'Submitting...' : 'Submit Application Now →'}
                     </button>
                   </div>
                 )}

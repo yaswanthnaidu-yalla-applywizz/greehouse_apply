@@ -5,11 +5,11 @@
 import { upsertProfile } from '../db/profiles.js';
 import {
   fetchAdminWorkHistoryForDate,
-  getISTDateString,
+  getYesterdayIST,
 } from './workHistoryClient.js';
 
 export async function hydrateAdminProfilesFromWorkHistory(dateStr?: string): Promise<number> {
-  const date = dateStr || getISTDateString(0);
+  const date = dateStr || getYesterdayIST();
   const whResult = await fetchAdminWorkHistoryForDate(date);
   let count = 0;
 

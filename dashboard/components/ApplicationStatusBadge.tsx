@@ -49,7 +49,12 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
   const lastPolledFailedProofRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const shouldPollStatus = status === 'APPLYING' || status === 'QUEUED' || status === 'FAILED';
+    const shouldPollStatus =
+      status === 'APPLYING' ||
+      status === 'QUEUED' ||
+      status === 'OTP_REQUIRED' ||
+      status === 'CAPTCHA_REQUIRED' ||
+      status === 'FAILED';
     const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
     if ((!shouldPollStatus && !shouldPollEmailProof) || !applicationId) {
       return;
@@ -103,13 +108,16 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
 
   switch (status) {
     case 'QUEUED':
+    case 'CAPTCHA_REQUIRED':
+    case 'OTP_REQUIRED':
+    case 'APPLYING':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
-          title="Queued for automated submission daemon"
+          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
+          title="Automated submission in progress"
         >
-          <span className="w-2 h-2 rounded-full bg-[#EA580C]"></span>
-          <span>Queued for Submit</span>
+          <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+          <span>Submitting... (Live)</span>
         </span>
       );
 
@@ -135,16 +143,6 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         </span>
       );
 
-    case 'APPLYING':
-      return (
-        <span
-          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
-        >
-          <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
-          <span>Submitting... (Live)</span>
-        </span>
-      );
-
     case 'DRY_RUN_COMPLETE':
       return (
         <span
@@ -152,18 +150,6 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         >
           <span className="w-2 h-2 rounded-full bg-[#1E3A5F]"></span>
           <span>Dry-Run Complete</span>
-        </span>
-      );
-
-    case 'CAPTCHA_REQUIRED':
-    case 'OTP_REQUIRED':
-      return (
-        <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-[#451A03] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ring-2 ring-[#FBBF24] animate-pulse ${className}`}
-          title="Verification code or CAPTCHA required — complete challenge to proceed"
-        >
-          <span className="text-sm leading-none">🔐</span>
-          <span>{status === 'CAPTCHA_REQUIRED' ? 'CAPTCHA Required' : 'OTP Required'}</span>
         </span>
       );
 

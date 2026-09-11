@@ -14,7 +14,7 @@ import {
 } from '../../db/applications.js';
 import { isUserAdmin } from './auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from '../workHistoryCache.js';
-import { fetchWorkHistoryForDate, getISTDateString } from '../../services/workHistoryClient.js';
+import { fetchWorkHistoryForDate, getYesterdayIST } from '../../services/workHistoryClient.js';
 
 export const notificationsRouter = Router();
 
@@ -35,7 +35,7 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
 
     let allowedCandidateIds: string[] | undefined = undefined;
     if (!isAdmin) {
-      const targetDate = dateParam || getISTDateString(0);
+      const targetDate = dateParam || getYesterdayIST();
       let cached = getCachedWorkHistory(userEmail, targetDate);
       if (!cached) {
         const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
