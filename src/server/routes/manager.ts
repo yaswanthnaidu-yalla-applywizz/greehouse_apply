@@ -44,6 +44,10 @@ function requireManager(req: Request, res: Response): boolean {
   return true;
 }
 
+function isAdminRequest(req: Request): boolean {
+  return isUserAdmin((req as Request & { user?: unknown }).user);
+}
+
 function serializeManagerApplication(application: ApplicationRow) {
   return {
     ...application,
@@ -161,8 +165,9 @@ function isWaitingForEmail(row: ManagerApplicationRow): boolean {
 managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
+  const isAdmin = isAdminRequest(req);
   const managerEmail = getAuthenticatedEmail(req);
-  if (!managerEmail) {
+  if (!isAdmin && !managerEmail) {
     res.status(401).json({ error: 'Authenticated manager email is required.' });
     return;
   }
@@ -179,7 +184,6 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
   }
 
   try {
-    const caIds = await fetchLinkedCaIds(managerEmail);
     if (!isSupabaseConfigured()) {
       res.status(503).json({ error: 'Manager dashboard requires Supabase.' });
       return;
@@ -189,14 +193,17 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
     let query = getDbClient()
       .from('candidate_applications')
       .select('*, profiles!inner(applywizz_id, client_name)')
-      .in('applywizz_id', caIds.length ? caIds : ['__no_linked_ca__'])
       .gte('created_at', startIso)
       .lte('created_at', endIso);
+    if (!isAdmin) {
+      const caIds = await fetchLinkedCaIds(managerEmail);
+      query = query.in('applywizz_id', caIds.length ? caIds : ['__no_linked_ca__']);
+    }
     const { data, error } = await query;
     if (error) throw error;
 
     const applications = (data || []) as ManagerApplicationRow[];
-    const filtered = requestedCa.toLowerCase() === 'all'
+    const filtered = isAdmin || requestedCa.toLowerCase() === 'all'
       ? applications
       : applications.filter(
           (row) => assignedCaName(row).toLowerCase() === requestedCa.toLowerCase()
@@ -254,7 +261,7 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
 
     res.json({
       date,
-      ca: requestedCa.toLowerCase() === 'all' ? 'all' : requestedCa,
+      ca: isAdmin || requestedCa.toLowerCase() === 'all' ? 'all' : requestedCa,
       rows,
       clients: rows.map((row) => row.client),
       totals,

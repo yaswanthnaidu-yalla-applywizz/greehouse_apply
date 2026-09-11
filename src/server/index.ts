@@ -364,23 +364,23 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     if (!isAdmin) {
       const targetDate = dateParam || getYesterdayIST();
       if (!userEmail) {
-        console.warn('[WorkHistory] /api/stats: no ca_email on JWT session — skipping work-history fetch');
-        allowedCandidateIds = [];
-      } else {
-        let cached = getCachedWorkHistory(userEmail, targetDate);
-        if (!cached) {
-          const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
-          setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
-          cached = {
-            records: whResult.records,
-            candidateIds: whResult.candidateIds,
-            expiresAt: Date.now() + 5 * 60 * 1000,
-            unreachable: whResult.unreachable,
-            resolvedDate: whResult.resolvedDate,
-          };
-        }
-        allowedCandidateIds = cached.candidateIds;
+        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
+        return;
       }
+      let cached = getCachedWorkHistory(userEmail, targetDate);
+      if (!cached) {
+        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
+        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      allowedCandidateIds = cached.candidateIds;
     }
 
     const outcomes = await getSubmissionOutcomeCounts({
@@ -492,8 +492,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       workHistoryRecords = cached.records;
       allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
     } else {
-      console.warn('[WorkHistory] /api/candidates: no ca_email on JWT session — skipping work-history fetch');
-      workHistoryUnreachable = true;
+      console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+      res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
+      return;
     }
 
     res.setHeader('X-Work-History-Unreachable', String(workHistoryUnreachable));
@@ -665,7 +666,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
       caWorkHistoryEmail = userEmail;
@@ -854,7 +856,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
 
@@ -997,7 +1000,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
       let cached = getCachedWorkHistory(userEmail) || getCachedWorkHistory(userEmail, getYesterdayIST());
@@ -1062,7 +1066,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        res.status(401).json({ error: 'Unauthorized: missing user email on session.' });
+        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
       let cached = getCachedWorkHistory(userEmail);
