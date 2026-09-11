@@ -100,6 +100,36 @@ async function findElementLocator(
   return null;
 }
 
+function normalizeBooleanValue(value: string): 'Yes' | 'No' | null {
+  const normalized = value.trim().toLowerCase();
+  if (['yes', 'y', 'true', '1', 'agree', 'checked'].includes(normalized)) return 'Yes';
+  if (['no', 'n', 'false', '0', 'disagree', 'unchecked'].includes(normalized)) return 'No';
+  return null;
+}
+
+async function clickBooleanOption(
+  locator: Locator,
+  fieldName: string,
+  selector: string,
+  value: 'Yes' | 'No'
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await locator.scrollIntoViewIfNeeded({ timeout: 2000 });
+      await locator.click({ force: true, timeout: 3000 });
+      console.log(
+        `[Submitter] Boolean field "${fieldName}" → selector: ${selector} → clicked ✅ (${value})`
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) await locator.scrollIntoViewIfNeeded().catch(() => {});
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Could not click boolean option ${selector}`);
+}
+
 /**
  * Fills a single resolved field into the active Playwright page DOM.
  */
@@ -251,6 +281,8 @@ export async function fillSingleField(
       // ==========================================
       // Select Dropdown (Native, Select2, React-Select)
       // ==========================================
+      const booleanValue = normalizeBooleanValue(val);
+      const selectValue = booleanValue || val;
       const selectSelectors = [
         (field as any).metadata?.selector,
         `select#${escapeId(name)}`,
@@ -296,10 +328,10 @@ export async function fillSingleField(
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
           await found.locator.click({ force: true }).catch(() => {});
           await page.waitForTimeout(150);
-          await found.locator.pressSequentially(val, { delay: 35 });
+          await found.locator.pressSequentially(selectValue, { delay: 35 });
           await page.waitForTimeout(350);
 
-          const escapedVal = val.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+          const escapedVal = selectValue.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
           const optionCandidates = page.locator('.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country)');
 
           // 1. Exact match
@@ -322,7 +354,13 @@ export async function fillSingleField(
           }
 
           if ((await matchedOpt.count()) > 0) {
-            await matchedOpt.click({ force: true, timeout: 2500 }).catch(() => {});
+            await matchedOpt.scrollIntoViewIfNeeded().catch(() => {});
+            await matchedOpt.click({ force: true, timeout: 2500 });
+            if (booleanValue) {
+              console.log(
+                `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → clicked ✅`
+              );
+            }
           } else {
             await page.keyboard.press('Enter').catch(() => {});
             await page.keyboard.press('Tab').catch(() => {});
@@ -339,14 +377,14 @@ export async function fillSingleField(
           let selected = false;
           // 1. Try exact label match
           try {
-            await found.locator.selectOption({ label: val }, { force: true, timeout: 2000 });
+            await found.locator.selectOption({ label: selectValue }, { force: true, timeout: 2000 });
             selected = true;
           } catch {}
 
           // 2. Try value match
           if (!selected) {
             try {
-              await found.locator.selectOption({ value: val }, { force: true, timeout: 2000 });
+              await found.locator.selectOption({ value: selectValue }, { force: true, timeout: 2000 });
               selected = true;
             } catch {}
           }
@@ -355,7 +393,7 @@ export async function fillSingleField(
           if (!selected) {
             try {
               const optionsList = await found.locator.locator('option').allInnerTexts();
-              const lowerVal = val.toLowerCase().trim();
+              const lowerVal = selectValue.toLowerCase().trim();
               const matchedOpt = optionsList.find((opt) => {
                 const o = opt.toLowerCase().trim();
                 return o === lowerVal || o.startsWith(lowerVal) || o.includes(lowerVal) || lowerVal.includes(o);
@@ -376,6 +414,11 @@ export async function fillSingleField(
           }).catch(() => {});
 
           if (selected) {
+            if (booleanValue) {
+              console.log(
+                `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → selected ✅`
+              );
+            }
             fillResult.success = true;
           } else {
             throw new Error(`Could not select option "${val}" in ${found.selector}`);
@@ -414,6 +457,7 @@ export async function fillSingleField(
 
       let checked = false;
 
+      const booleanValue = normalizeBooleanValue(val);
       if (count > 0) {
         for (let r = 0; r < count; r++) {
           const radio = radioGroup.nth(r);
@@ -438,7 +482,16 @@ export async function fillSingleField(
           const cleanTarget = val.toLowerCase().trim();
 
           if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget)) {
-            await radio.check({ force: true });
+            const optionSelector =
+              radioVal && booleanValue && radioVal.toLowerCase() === booleanValue.toLowerCase()
+                ? `input[type="radio"][value="${booleanValue}"]`
+                : `input[type="radio"][name="${escapeAttr(name)}"]`;
+            if (booleanValue) {
+              await clickBooleanOption(radio, fieldId, optionSelector, booleanValue);
+            } else {
+              await radio.scrollIntoViewIfNeeded().catch(() => {});
+              await radio.check({ force: true });
+            }
             checked = true;
             break;
           }
@@ -448,7 +501,11 @@ export async function fillSingleField(
       if (!checked) {
         const labelLoc = page.locator('label').filter({ hasText: val }).first();
         if ((await labelLoc.count()) > 0) {
-          await labelLoc.click({ force: true });
+          if (booleanValue) {
+            await clickBooleanOption(labelLoc, fieldId, `label:has-text("${booleanValue}")`, booleanValue);
+          } else {
+            await labelLoc.click({ force: true });
+          }
           checked = true;
         }
       }
@@ -462,7 +519,8 @@ export async function fillSingleField(
       // ==========================================
       // Checkbox
       // ==========================================
-      const isAffirmative = ['true', '1', 'yes', 'y', 'checked', 'agree'].includes(val.toLowerCase());
+      const booleanValue = normalizeBooleanValue(val);
+      const isAffirmative = booleanValue === 'Yes';
       if (isAffirmative) {
         const checkboxSelectors = [
           (field as any).metadata?.selector,
@@ -476,7 +534,15 @@ export async function fillSingleField(
 
         const found = await findElementLocator(page, checkboxSelectors, timeoutMs);
         if (found) {
-          await found.locator.check({ force: true });
+          const checkboxSelector = found.selector || checkboxSelectors[0];
+          console.log(
+            `[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → value: Yes`
+          );
+          await found.locator.scrollIntoViewIfNeeded().catch(() => {});
+          await found.locator.check({ force: true, timeout: 3000 }).catch(async () => {
+            await clickBooleanOption(found.locator, fieldId, checkboxSelector, 'Yes');
+          });
+          console.log(`[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → clicked ✅`);
           fillResult.success = true;
         } else {
           const labelLoc = page.locator(`label:has-text("${label}")`).first();

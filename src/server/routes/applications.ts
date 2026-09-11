@@ -247,7 +247,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     const resolvedEmailProofStatus = email_proof_status !== undefined ? email_proof_status : emailProofStatus;
     const resolvedEmailProofAttemptedAt = email_proof_attempted_at !== undefined ? email_proof_attempted_at : emailProofAttemptedAt;
 
-    await updateStatus(targetAppId, status as ApplicationStatus, {
+    const statusChanged = await updateStatus(targetAppId, status as ApplicationStatus, {
       proof_web_url: resolvedProofWebUrl,
       proof_captured_at: resolvedProofCapturedAt,
       proof_failed_url: resolvedProofFailedUrl,
@@ -284,7 +284,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     }
 
     // Emit WebSocket event on worker failure for instant UI notification
-    if (status === 'FAILED') {
+    if (status === 'FAILED' && statusChanged) {
       const failReason = resolvedErrorMessage || application?.error_message || 'Submission execution failed.';
       wsManager.emitApplicationFailed({
         appId: targetAppId,
