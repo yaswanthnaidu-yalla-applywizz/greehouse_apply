@@ -188,7 +188,7 @@ Located in [`src/db/applications.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply
 
 ### Application & Review Routes (`src/server/routes/applications.ts`)
 - **`GET /api/applications/:id`**: Returns full application detail DTO via `serializeApplicationDto`.
-- **`PATCH /api/applications/:id/status`**: Updates status and accepts `proof_failed_url`, `proof_email_url`, `dry_run_screenshot_url`, etc., updating Supabase and memory cache in one call.
+- **`PATCH /api/applications/:id/status`**: Updates status and accepts `proof_failed_url`, `proof_email_url`, `dry_run_screenshot_url`, `error_message`, etc., updating Supabase and memory cache in one call, emitting WebSocket `APPLICATION_FAILED` on worker failure, and returning full serialized DTO.
 - **`PATCH /api/applications/:id/fields/:fieldId`**: Updates a single field value, flags `has_manual_edits: true`, and saves to `candidate_qa_bank` with `source: 'manual'`.
 - **`POST /api/applications/:id/approve`**: Operator approves form fields for automated submission.
 - **`GET /api/applications/notifications`**: Recent submissions with status outcomes.
@@ -203,6 +203,12 @@ Located in [`src/db/applications.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply
 - **`POST /api/submissions/dry-run`**: Triggers headless Playwright dry-run, capturing `dry_run_screenshot_url`.
 - **`POST /api/submissions/submit`**: Enqueues or immediately submits live application.
 - **`POST /api/submissions/resume-captcha`**: Resumes submission after operator enters OTP / solves CAPTCHA.
+- **`POST /api/applications/:id/capture-email-proof`**: Triggers structured Zoho confirmation email fetch within `submission_time ± 5min` window with company verification.
+
+### WebSocket & Real-Time Events (`src/server/ws.ts`)
+- **`WS /ws`**: Real-time bidirectional socket server mounted on HTTP server. Broadcasts events to all connected operator dashboard sessions:
+  - `APPLICATION_FAILED`: `{ type: 'APPLICATION_FAILED', appId, reason, timestamp, companyName, jobTitle, proofFailedUrl }` — triggers instant UI toast/banner alert without polling lag.
+  - `APPLICATION_STATUS_CHANGED`: Status lifecycle transitions.
 
 ### Auth & Security Routes (`src/server/routes/auth.ts`)
 - **`POST /api/auth/login`**: CA / admin authentication. Supports Microsoft Authenticator TOTP QR setup and MFA token validation.
@@ -236,6 +242,11 @@ node dist/server/index.js
 npm run dev
 ```
 
+### Scanning Zoho Connected Accounts
+```bash
+npm run scan:zoho-connected
+```
+
 ### Applying Migrations
 Migrations live in `src/db/migrations/`:
 - `001_add_company_email.sql`
@@ -247,5 +258,95 @@ Migrations live in `src/db/migrations/`:
 - `007_proof_failed_url.sql` (Failure proof columns + storage RLS policies)
 - `008_proof_email_json.sql` (JSONB column for structured Zoho confirmation email)
 - `009_add_email_proof_pending_status.sql` (Adds EMAIL_PROOF_PENDING application status enum value)
+- `010_realtime_candidate_applications.sql` (Supabase Realtime publication setup)
 
 Run the SQL files in order in the Supabase SQL Editor.
+
+---
+
+## 🤖 10. Automation Agent — Operational Instructions & Handover Guidelines
+
+This section documents the specific runtime contracts, pipelines, and handover procedures for the **Automation Agent** handling Playwright headless automation, live submissions, and email verification.
+
+### A. Submitter Lifecycle & Status Transitions
+1. **Form Filling & Multi-Signal Submission**:
+   - Primary script: `src/submitter/liveSubmit.ts` (invoked directly or via `src/submitter/queueWorker.ts`).
+   - Browser launches in headless Chromium mode using strict Railway-compatible flags:
+     `['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled', '--disable-gpu']`.
+   - Post-submit signal verification waits up to 30s across DOM tokens, title changes, and URL redirect patterns.
+
+2. **Web Confirmation & Proof Capture**:
+   - Upon web verification success, `captureWebProof` captures a full-page confirmation screenshot and uploads it to `proofs_web`.
+   - On submission failure or validation errors, `captureFailedScreenshot` captures a full-page failure screenshot and uploads it to `proofs_failed`.
+
+3. **Email Proof Gating (`EMAIL_PROOF_PENDING` ➔ `APPLIED`)**:
+   - **Never mark `APPLIED` immediately upon web confirmation.**
+   - Once web proof is captured, the application is transitioned to status `'EMAIL_PROOF_PENDING'`.
+   - The submitter attempts an initial immediate check (15s timeout) against Zoho Mail.
+   - **If matching email found**: attaches `proof_email_json` and promotes status to `'APPLIED'`.
+   - **If zero matches**: kicks off `emailProofPoller.startPolling(application)` which retries every 30s for up to 10 minutes.
+   - **On 10-minute timeout**: marks `email_proof_status = 'manual_review_needed'`, sets `manual_email_review = true`, and preserves `'EMAIL_PROOF_PENDING'` for operator manual review.
+
+### B. Zoho Mail Confirmation Verification Rules
+- **No Screenshots for Emails**: Never take screenshot images of emails; extract structured JSON (`EmailProofJson`) containing `from`, `to`, `subject`, `received_at`, `body_text`, and `body_html`.
+- **Timestamp Cutoff**: Strict cutoff verification `received_at >= submitted_at - 2m`. All older emails are skipped. Zoho relative date strings (`"11:25 AM"`, `"Today, 11:25 AM"`, `"Yesterday, 3:45 PM"`) are parsed via `parseZohoEmailTimestamp`.
+- **Company Name Normalization**: Strip legal suffixes (`Inc`, `LLC`, `Ltd`, `Corp`, `Technologies`, etc.) via `normalizeCompanySearchTerm` and verify matches across sender domain, from name, subject, and email body via `matchCompanyInEmail`.
+
+### C. Connected Users Scanner (`scripts/scanZohoConnected.ts`)
+- Scrapes `https://zoho-mail-reader.onrender.com/` using `ZOHO_READER_EMAIL` / `ZOHO_READER_PASSWORD` (or fallback `ZOHO_CONNECTOR_USER` / `ZOHO_CONNECTOR_PASS`).
+- Filters by `"Connected"` status, iterates pagination, deduplicates emails, and saves to `cache/zoho_connected_emails.json`.
+- Run via:
+  ```bash
+  npm run scan:zoho-connected
+  ```
+
+### D. Inter-Agent Handover Points
+- **To Frontend Agent**:
+  - Expose `'EMAIL_PROOF_PENDING'` status badges and wire up `EmailProofModal` to render `proof_email_json.body_text` / `body_html`.
+  - When `manual_email_review === true`, display the manual email search button calling `POST /api/applications/:id/capture-email-proof`.
+- **To Backend Agent**:
+  - Ensure migrations `008_proof_email_json.sql` and `009_add_email_proof_pending_status.sql` are applied in Supabase.
+  - Verify that `serializeApplicationDto` propagates `proof_email_json` and `manual_email_review`.
+- **To Debugging Agent**:
+  - Inspect `[Live Submit]`, `[Email Proof Poller]`, and `[Zoho Reader]` console logs to trace background retry loops and poller terminations.
+
+
+---
+
+## 🧭 11. Mandatory Backend Agent Operational Instructions
+
+As the **Backend Agent**, you own server architecture, REST/WebSocket APIs, Supabase persistence, queue worker daemon, and candidate synchronization. You must strictly follow these instructions on every task:
+
+### 1. Zero Synthetic Tests & Extreme Token Efficiency
+- **NEVER create synthetic/mock test scripts**, mock fixtures, or throwaway test loops.
+- Do not bloat responses with speculative code or conversational filler. Keep updates minimal, targeted, and production-grade.
+
+### 2. ApplyWizz API Strict Protection (Rule 1)
+- **NEVER execute external HTTP calls to the ApplyWizz API without explicit, real-time user permission.**
+- Always read candidate profiles from local cache (`cache/profiles/{applywizzId}.json`) and Supabase table `profiles`.
+- If an un-cached candidate is encountered, **log and skip** rather than initiating an outbound request.
+
+### 3. Railway Deployment Compatibility (Zero Windows Dependencies)
+- All network listeners must bind to `0.0.0.0` using `process.env.PORT` dynamically.
+- Never use Windows-specific path separators or OS-dependent executables (`path.resolve` / `path.join` only).
+- Verify TypeScript compilation integrity (`npm run build`) before concluding any task. Zero compilation errors permitted.
+
+### 4. Status Update & Error Handling Protocol
+- Whenever updating status to `FAILED`:
+  - Always persist `error_message` to `candidate_applications.error_message`.
+  - Always emit `{ type: 'APPLICATION_FAILED', appId, reason, timestamp }` via `wsManager.emitApplicationFailed(...)`.
+  - Always return the full hydrated DTO via `serializeApplicationDto(...)`.
+
+### 5. Zoho Email Proof Rules (No Screenshots)
+- Confirmation emails **MUST NEVER** be captured as screenshots.
+- Query Zoho Mail via REST connector (`src/services/zoho-connector.ts`).
+- Enforce strict dual-verification:
+  1. Window: `received_time >= submission_time - 5min AND received_time <= submission_time + 5min`.
+  2. Company match: `from_address CONTAINS company_email OR subject CONTAINS company_name`.
+- Persist structured payload in `proof_email_json` JSONB column.
+
+### 6. Candidate Ingestion, Score Filtering & Zoho Gate
+- In `src/candidate/segregator.ts`:
+  - Discard CSV rows with `score < 20 || score > 60`.
+  - Gate candidates using `isZohoConnected(profile.company_email)` from `src/services/zohoConnectedAllowlist.ts`. If not in allowlist, discard from queue with `⛔ Skipping <id> — not in Zoho allowlist`.
+

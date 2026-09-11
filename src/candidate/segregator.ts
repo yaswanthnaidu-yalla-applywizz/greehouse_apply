@@ -19,6 +19,7 @@ import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
 import { profileRowToCandidateProfile, upsertProfile, getProfile, updateResumeStoragePath } from '../db/profiles.js';
 import { uploadResume } from '../db/storage.js';
+import { isZohoConnected } from '../services/zohoConnectedAllowlist.js';
 import type { CandidateSegment } from '../types/index.js';
 
 /**
@@ -127,11 +128,21 @@ export async function segregateCandidatesByApplyWizzId(
         const clientName = (row['Client Name'] || row['client_name'] || row['ClientName'] || '').trim();
         const rawUrl = (row.url || row.URL || row.job_url || '').trim();
         const date = row.Date || row.date || '';
-        const score = row.score || 0;
+        const rawScore = row.score !== undefined ? row.score : (row.Score !== undefined ? row.Score : 0);
+        const numScore = typeof rawScore === 'number' ? rawScore : parseFloat(String(rawScore).trim());
+        const score = isNaN(numScore) ? 0 : numScore;
         const scoredJobId = row.scored_jobId || row.scored_job_id || '';
         const status = row.status || 'PENDING';
 
         if (!applywizzId || !rawUrl) {
+          return;
+        }
+
+        // Score filter: Discard rows with score < 20 || score > 60
+        if (score < 20 || score > 60) {
+          console.log(
+            `[Candidate Segregator] ⏭️ Discarding row for candidate ${applywizzId} (job: ${rawUrl}) — score ${score} out of range [20, 60].`
+          );
           return;
         }
 
@@ -305,6 +316,15 @@ export async function segregateCandidatesByApplyWizzId(
     console.log(
       `[Candidate Segregator] ✅ Profile sync complete: ${fromSupabase} from Supabase (0 API calls), ${fromApi} new via API (${completed}/${totalCandidates} total).`
     );
+  }
+
+  // Zoho gate: Verify candidate's company email is in Zoho allowlist
+  for (const [id, segment] of Array.from(segmentsMap.entries())) {
+    const companyEmail = segment.profile?.email || null;
+    if (!isZohoConnected(companyEmail)) {
+      segmentsMap.delete(id);
+      console.log(`[Candidate Segregator] ⛔ Skipping ${id} — not in Zoho allowlist.`);
+    }
   }
 
   return segmentsMap;
