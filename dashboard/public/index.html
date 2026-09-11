@@ -189,22 +189,43 @@
     // -------------------------------------------------------------
     // Application Status Badge Component
     // -------------------------------------------------------------
-    function ApplicationStatusBadge({ status, applicationId, onStatusChange, proofWebUrl, proofEmailUrl, className = '' }) {
+    function ApplicationStatusBadge({ status, applicationId, jobUrl, onStatusChange, proofWebUrl, proofEmailUrl, emailProofStatus, className = '' }) {
       const statusRef = useRef(status);
       statusRef.current = status;
+      const emailProofStatusRef = useRef(emailProofStatus);
+      emailProofStatusRef.current = emailProofStatus;
+      const proofWebUrlRef = useRef(proofWebUrl);
+      proofWebUrlRef.current = proofWebUrl;
+      const proofEmailUrlRef = useRef(proofEmailUrl);
+      proofEmailUrlRef.current = proofEmailUrl;
+      const lastPolledFailedProofRef = useRef(null);
 
       useEffect(() => {
-        if ((status !== 'APPLYING' && status !== 'QUEUED') || !applicationId) return;
+        const shouldPollStatus = status === 'APPLYING' || status === 'QUEUED' || status === 'FAILED';
+        const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
+        if ((!shouldPollStatus && !shouldPollEmailProof) || !applicationId) return;
 
         const pollInterval = setInterval(async () => {
           try {
-            const url = `/api/applications/${encodeURIComponent(applicationId)}`;
+            const url = `/api/applications/${encodeURIComponent(applicationId)}${jobUrl ? `?jobUrl=${encodeURIComponent(jobUrl)}` : ''}`;
             const res = await fetch(url, { headers: getAuthHeaders() });
             if (res.ok) {
               const appData = await res.json();
-              if (appData.status && appData.status !== statusRef.current) {
+              const nextEmailStatus = appData.email_proof_status || appData.emailProofStatus || emailProofStatusRef.current;
+              const nextProofWeb = appData.proof_web_url || appData.proofWebUrl || null;
+              const nextProofEmail = appData.proof_email_url || appData.proofEmailUrl || null;
+              const nextProofFailed = appData.proof_failed_url || appData.proofFailedUrl || null;
+              const emailProofArrived = Boolean(nextProofEmail) && nextProofEmail !== proofEmailUrlRef.current;
+              const webProofArrived = Boolean(nextProofWeb) && nextProofWeb !== proofWebUrlRef.current;
+              const failedProofArrived = Boolean(nextProofFailed) && nextProofFailed !== lastPolledFailedProofRef.current;
+              if (nextProofFailed) {
+                lastPolledFailedProofRef.current = nextProofFailed;
+              }
+              const emailStatusChanged = nextEmailStatus && nextEmailStatus !== emailProofStatusRef.current;
+              const statusChanged = appData.status && appData.status !== statusRef.current;
+              if (statusChanged || emailStatusChanged || emailProofArrived || webProofArrived || failedProofArrived) {
                 if (onStatusChange) {
-                  onStatusChange(appData.status, appData);
+                  onStatusChange(appData.status || statusRef.current, appData);
                 }
               }
             }
@@ -214,7 +235,7 @@
         }, 2000);
 
         return () => clearInterval(pollInterval);
-      }, [status, applicationId, onStatusChange]);
+      }, [status, emailProofStatus, applicationId, jobUrl, onStatusChange, proofWebUrl, proofEmailUrl]);
 
       switch (status) {
         case 'QUEUED':
@@ -262,11 +283,12 @@
               <span>Dry-Run Complete</span>
             </span>
           );
+        case 'CAPTCHA_REQUIRED':
         case 'OTP_REQUIRED':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-[#451A03] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ring-2 ring-[#FBBF24] animate-pulse ${className}`} title="Verification code required — enter OTP to complete submission">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-[#451A03] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ring-2 ring-[#FBBF24] animate-pulse ${className}`} title="Verification code or CAPTCHA required — complete challenge to proceed">
               <span className="text-sm leading-none">🔐</span>
-              <span>OTP Required</span>
+              <span>{status === 'CAPTCHA_REQUIRED' ? 'CAPTCHA Required' : 'OTP Required'}</span>
             </span>
           );
         case 'FAILED':
@@ -305,6 +327,7 @@
       proofEmailUrl,
       emailProofStatus,
       dryRunScreenshotUrl,
+      proofFailedUrl,
       isSubmitting = false,
       isDryRunning = false,
       apiBaseUrl = '',
@@ -315,6 +338,7 @@
       onViewProof,
       onViewEmailProof,
       onViewDryRun,
+      onViewFailureScreenshot,
     }) {
       const [applicationStatus, setApplicationStatus] = useState(status);
       const [otpValue, setOtpValue] = useState('');
@@ -349,17 +373,29 @@
       const hasUnresolved = unresolvedFieldsCount > 0;
       const isApplying = applicationStatus === 'APPLYING' || isSubmitting;
       const isApplied = applicationStatus === 'APPLIED';
+      const isFailed = applicationStatus === 'FAILED';
       const isOtp = applicationStatus === 'OTP_REQUIRED';
+      const hasProofActions =
+        Boolean(dryRunScreenshotUrl) ||
+        Boolean(proofUrl || proofWebUrl || isApplied) ||
+        Boolean(emailProof || proofEmailUrl) ||
+        Boolean((proofUrl || proofWebUrl) && !(emailProof || proofEmailUrl)) ||
+        Boolean(isFailed && proofFailedUrl);
 
       const pollStatusUpdate = async () => {
         try {
-          const res = await fetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`, {
+          const pollUrl = `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}${jobUrl ? `?jobUrl=${encodeURIComponent(jobUrl)}` : ''}`;
+          const res = await fetch(pollUrl, {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
             const appData = await res.json();
-            if (appData.status && onStatusChange) {
-              onStatusChange(appData.status, appData);
+            const resolvedEmail = appData.proofEmailUrl || appData.proof_email_url || null;
+            if (resolvedEmail) {
+              setEmailProof(resolvedEmail);
+            }
+            if (onStatusChange) {
+              onStatusChange(appData.status || applicationStatus, appData);
             }
           }
         } catch (err) {
@@ -640,6 +676,11 @@
             )}
           </button>
 
+          {hasProofActions && (
+            <div className="flex flex-wrap items-center justify-end gap-1.5 w-full pt-0.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] font-mono w-full text-right">
+                Proofs
+              </span>
           {dryRunScreenshotUrl && onViewDryRun && (
             <button
               type="button"
@@ -712,6 +753,19 @@
               <span>View Email Proof</span>
             </button>
           )}
+
+          {isFailed && proofFailedUrl && onViewFailureScreenshot && (
+            <button
+              type="button"
+              onClick={onViewFailureScreenshot}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#7F1D1D] bg-[#FECACA] hover:bg-[#FCA5A5] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
+            >
+              <span>🛑</span>
+              <span>View Failure Screenshot</span>
+            </button>
+          )}
+            </div>
+          )}
           </div>
         </>
       );
@@ -720,7 +774,7 @@
     // -------------------------------------------------------------
     // Editable Form Field Component
     // -------------------------------------------------------------
-    function EditableFormField({ field, applicationId, onFieldUpdate }) {
+    function EditableFormField({ field, applicationId, jobUrl, onFieldUpdate }) {
       const [isEditing, setIsEditing] = useState(false);
       const [value, setValue] = useState(field.value || '');
       const [isConfirming, setIsConfirming] = useState(false);
@@ -765,7 +819,7 @@
             {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-              body: JSON.stringify({ value }),
+              body: JSON.stringify({ value, jobUrl }),
             }
           );
 
@@ -1366,7 +1420,7 @@
       const [viewerOpen, setViewerOpen] = useState(false);
       const [viewerImageUrl, setViewerImageUrl] = useState(null);
       const [viewerTitle, setViewerTitle] = useState('Application Proof');
-      const appId = application?.applywizzId || application?.applywizz_id || application?.id || 'app-default';
+      const appId = application?.id || application?.applywizzId || application?.applywizz_id || 'app-default';
       const jobUrl = application?.jobUrl || application?.job_url || '';
       const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
 
@@ -1398,6 +1452,26 @@
             localStorage.setItem(storageKey, JSON.stringify(Array.from(nextSet)));
           }
         } catch {}
+      };
+
+      const persistApproval = async (fieldsToPersist) => {
+        try {
+          const targetFields = fieldsToPersist || fields;
+          const targetAppId = application?.id || application?.applywizzId || application?.applywizz_id || appId;
+          await fetch(`/api/applications/${encodeURIComponent(targetAppId)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({
+              jobUrl,
+              resolved_fields: targetFields,
+              companyName: application?.companyName || application?.company_name,
+              jobTitle: application?.jobTitle || application?.job_title,
+              status: application?.status || 'READY_FOR_REVIEW',
+            }),
+          });
+        } catch (e) {
+          console.warn('[FormRenderer] Could not persist approval to server:', e);
+        }
       };
 
       const fields = application?.resolvedFields || application?.resolved_fields || [];
@@ -1435,6 +1509,7 @@
         if (currentField) {
           const next = new Set([...approvedFieldIds, currentField.fieldId]);
           saveApprovedFields(next);
+          persistApproval();
         }
         if (boundedIndex < displayFields.length - 1) {
           setCarouselIndex((prev) => prev + 1);
@@ -1444,6 +1519,7 @@
       const handleApproveAll = () => {
         const next = new Set(displayFields.map((f) => f.fieldId));
         saveApprovedFields(next);
+        persistApproval();
         setCarouselIndex(Math.max(0, displayFields.length - 1));
       };
 
@@ -1591,9 +1667,11 @@
                   <ApplicationStatusBadge
                     status={currentStatus}
                     applicationId={appId}
+                    jobUrl={jobUrl}
                     onStatusChange={onStatusChange}
                     proofWebUrl={application.proof_web_url || application.proofWebUrl}
                     proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
+                    emailProofStatus={application.email_proof_status || application.emailProofStatus}
                   />
                 </div>
                 <h1 className="text-base md:text-lg font-bold text-[#1A1A2E] leading-tight truncate">
@@ -1619,6 +1697,7 @@
                   proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
                   emailProofStatus={application.email_proof_status || application.emailProofStatus}
                   dryRunScreenshotUrl={application.dry_run_screenshot_url || application.dryRunScreenshotUrl}
+                  proofFailedUrl={application.proof_failed_url || application.proofFailedUrl}
                   isSubmitting={isSubmitting}
                   isDryRunning={isDryRunning}
                   onTriggerDryRun={handleTriggerDryRun}
@@ -1652,6 +1731,14 @@
                     if (url) {
                       setViewerImageUrl(url);
                       setViewerTitle('Dry-Run Form Verification Screenshot');
+                      setViewerOpen(true);
+                    }
+                  }}
+                  onViewFailureScreenshot={() => {
+                    const url = application.proof_failed_url || application.proofFailedUrl;
+                    if (url) {
+                      setViewerImageUrl(url);
+                      setViewerTitle('Failure Screenshot');
                       setViewerOpen(true);
                     }
                   }}
@@ -1760,6 +1847,7 @@
                       key={currentField.fieldId}
                       field={currentField}
                       applicationId={appId}
+                      jobUrl={jobUrl}
                       onFieldUpdate={onFieldUpdate}
                     />
 
@@ -1850,6 +1938,7 @@
                     key={`${field.fieldId}-${index}`}
                     field={field}
                     applicationId={appId}
+                    jobUrl={jobUrl}
                     onFieldUpdate={onFieldUpdate}
                   />
                 ))}
@@ -2476,6 +2565,7 @@
       const [application, setApplication] = useState(null);
 
       const [isLoadingCandidates, setIsLoadingCandidates] = useState(true);
+      const [isAuthHydrating, setIsAuthHydrating] = useState(false);
       const [isLoadingApplication, setIsLoadingApplication] = useState(false);
 
       const [workHistoryUnreachable, setWorkHistoryUnreachable] = useState(() => {
@@ -2528,6 +2618,37 @@
         const token = localStorage.getItem('applywizz_auth_token');
         return token ? { Authorization: `Bearer ${token}` } : {};
       };
+
+      const isAdminSession = () => {
+        if (localStorage.getItem('applywizz_is_admin') === 'true') return true;
+        const email = (currentUser?.email || '').trim().toLowerCase();
+        return (
+          ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(email) ||
+          email.startsWith('yaswanth') ||
+          email.startsWith('admin@')
+        );
+      };
+
+      const ensureAdminHydrated = useCallback(async () => {
+        if (!isAdminSession()) return;
+        const token = localStorage.getItem('applywizz_auth_token');
+        if (!token) return;
+        setIsAuthHydrating(true);
+        try {
+          await fetch('/api/auth/hydrate-admin', {
+            method: 'POST',
+            headers: {
+              ...getAuthHeaders(),
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ date: selectedDate }),
+          });
+        } catch (err) {
+          console.warn('Admin hydration request failed:', err);
+        } finally {
+          setIsAuthHydrating(false);
+        }
+      }, [currentUser, selectedDate]);
 
       const fetchNotifications = useCallback(async () => {
         try {
@@ -2660,14 +2781,22 @@
 
       useEffect(() => {
         if (!currentUser) return;
-        fetchInitialData(false);
-        fetchNotifications();
+        let cancelled = false;
+        (async () => {
+          await ensureAdminHydrated();
+          if (cancelled) return;
+          fetchInitialData(false);
+          fetchNotifications();
+        })();
         const pollInterval = setInterval(() => {
           fetchInitialData(true);
           fetchNotifications();
         }, 3000);
-        return () => clearInterval(pollInterval);
-      }, [currentUser, fetchInitialData, fetchNotifications]);
+        return () => {
+          cancelled = true;
+          clearInterval(pollInterval);
+        };
+      }, [currentUser, fetchInitialData, fetchNotifications, ensureAdminHydrated]);
 
       const fetchCandidateDetail = useCallback(async (applywizzId) => {
         try {
@@ -2737,13 +2866,21 @@
         });
       };
 
-      const handleStatusChange = (newStatus, updatedPayload) => {
+      const handleStatusChange = async (newStatus, updatedPayload) => {
         if (!application) return;
         setApplication((prev) => ({
           ...prev,
           status: newStatus,
           proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || prev.proof_web_url,
           proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at || prev.proof_captured_at,
+          proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proof_email_url,
+          proofEmailUrl: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proofEmailUrl,
+          proof_email_captured_at: updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at || prev.proof_email_captured_at,
+          email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status || prev.email_proof_status,
+          emailProofStatus: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status || prev.emailProofStatus,
+          proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proof_failed_url,
+          proofFailedUrl: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proofFailedUrl,
+          proof_failed_captured_at: updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at || prev.proof_failed_captured_at,
           dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url || prev.dry_run_screenshot_url,
         }));
 
@@ -2755,6 +2892,31 @@
             return j;
           });
           setCandidateDetail({ ...candidateDetail, jobs: updatedJobs });
+        }
+
+        // Persist status change to Supabase immediately
+        const appId = application.id || application.applywizzId || application.applywizz_id;
+        const targetJobUrl = application.jobUrl || application.job_url || selectedJobUrl;
+        try {
+          await fetch(`/api/applications/${encodeURIComponent(appId)}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({
+              status: newStatus,
+              jobUrl: targetJobUrl,
+              proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url,
+              proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at,
+              proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url,
+              proof_email_captured_at: updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
+              email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
+              proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
+              proof_failed_captured_at: updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
+              dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url,
+              error_message: updatedPayload?.error || updatedPayload?.errorMessage || updatedPayload?.error_message,
+            }),
+          });
+        } catch (err) {
+          console.warn('[App] Failed to persist status change to backend:', err);
         }
 
         if (newStatus === 'APPLIED' || newStatus === 'FAILED' || newStatus === 'APPLYING') {
@@ -3009,6 +3171,20 @@
                                   </a>
                                 </div>
                               )}
+
+                              {!isSuccess && !isApplying && notif.proofFailedUrl && (
+                                <div className="mt-1.5 flex justify-end">
+                                  <a
+                                    href={notif.proofFailedUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-[10px] font-bold text-[#991B1B] underline hover:text-[#7F1D1D]"
+                                  >
+                                    View Failure Screenshot ↗
+                                  </a>
+                                </div>
+                              )}
                             </div>
                           );
                         })
@@ -3148,7 +3324,7 @@
                 candidates={candidates}
                 selectedId={selectedCandidateId}
                 onSelectCandidate={(id) => setSelectedCandidateId(id)}
-                isLoading={isLoadingCandidates}
+                isLoading={isLoadingCandidates || isAuthHydrating}
                 emptyMessage={noCandidatesMessage}
                 selectedDate={selectedDate}
               />

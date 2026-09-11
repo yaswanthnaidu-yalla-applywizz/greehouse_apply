@@ -48,7 +48,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
   const [viewerTitle, setViewerTitle] = useState<string>('Application Proof');
-  const appId = application?.applywizzId || application?.applywizz_id || application?.id || 'app-default';
+  const appId = application?.id || application?.applywizzId || application?.applywizz_id || 'app-default';
   const jobUrl = application?.jobUrl || application?.job_url || '';
   const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
 
@@ -80,6 +80,31 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         localStorage.setItem(storageKey, JSON.stringify(Array.from(nextSet)));
       }
     } catch {}
+  };
+
+  const persistApproval = async (fieldsToPersist?: ResolvedField[]) => {
+    try {
+      const targetFields = fieldsToPersist || fields;
+      const targetAppId = application?.id || application?.applywizzId || application?.applywizz_id || appId;
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+      await fetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(targetAppId)}/approve`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jobUrl,
+          resolved_fields: targetFields,
+          companyName: application?.companyName || application?.company_name,
+          jobTitle: application?.jobTitle || application?.job_title,
+          status: application?.status || 'READY_FOR_REVIEW',
+        }),
+      });
+    } catch (e) {
+      console.warn('[FormRenderer] Could not persist approval to server:', e);
+    }
   };
 
   const fields: ResolvedField[] = application?.resolvedFields || application?.resolved_fields || [];
@@ -116,6 +141,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     if (currentField) {
       const next = new Set([...approvedFieldIds, currentField.fieldId]);
       saveApprovedFields(next);
+      persistApproval();
     }
     if (boundedIndex < displayFields.length - 1) {
       setCarouselIndex((prev) => prev + 1);
@@ -125,6 +151,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const handleApproveAll = () => {
     const next = new Set(displayFields.map((f) => f.fieldId));
     saveApprovedFields(next);
+    persistApproval();
     setCarouselIndex(Math.max(0, displayFields.length - 1));
   };
 
@@ -291,7 +318,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 status={currentStatus}
                 proofWebUrl={application.proof_web_url || application.proofWebUrl}
                 proofEmailUrl={application.proof_email_url || application.proofEmailUrl}
+                emailProofStatus={application.email_proof_status || application.emailProofStatus}
                 applicationId={appId}
+                jobUrl={jobUrl}
                 apiBaseUrl={apiBaseUrl}
                 onStatusChange={onStatusChange}
               />
@@ -321,6 +350,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               emailProofStatus={application.email_proof_status || application.emailProofStatus}
               dryRunScreenshotUrl={
                 application.dry_run_screenshot_url || application.dryRunScreenshotUrl
+              }
+              proofFailedUrl={
+                application.proof_failed_url || application.proofFailedUrl
               }
               isSubmitting={isSubmitting}
               isDryRunning={isDryRunning}
@@ -357,6 +389,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 if (url) {
                   setViewerImageUrl(url);
                   setViewerTitle('Dry-Run Form Verification Screenshot');
+                  setViewerOpen(true);
+                }
+              }}
+              onViewFailureScreenshot={() => {
+                const url = application.proof_failed_url || application.proofFailedUrl;
+                if (url) {
+                  setViewerImageUrl(url);
+                  setViewerTitle('Failure Screenshot');
                   setViewerOpen(true);
                 }
               }}
@@ -470,6 +510,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 <EditableFormField
                   field={currentField}
                   applicationId={appId}
+                  jobUrl={jobUrl}
                   onFieldUpdate={(updated) => {
                     if (onFieldUpdate) onFieldUpdate(updated);
                   }}
@@ -562,6 +603,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   key={`${field.fieldId}-${index}`}
                   field={field}
                   applicationId={appId}
+                  jobUrl={jobUrl}
                   onFieldUpdate={onFieldUpdate}
                 />
               );

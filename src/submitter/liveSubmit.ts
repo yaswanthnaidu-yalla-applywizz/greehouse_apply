@@ -59,6 +59,8 @@ export interface LiveSubmitResult {
   message?: string;
   proofWebUrl?: string;
   proofCapturedAt?: string;
+  proofFailedUrl?: string;
+  proofFailedCapturedAt?: string;
   requiresOtp?: boolean;
   /** @deprecated Use requiresOtp */
   requiresCaptcha?: boolean;
@@ -574,6 +576,64 @@ export async function detectCaptchaIframe(
 export const detectCaptchaWidgets = detectCaptchaIframe;
 
 /**
+ * Detects form filling and inline validation errors on the page after submission attempt.
+ */
+export async function detectFormFillingErrors(
+  page: Page
+): Promise<{ hasError: boolean; message?: string }> {
+  try {
+    // 1. Check for standard error message elements in DOM
+    const errorSelectors = [
+      '.field-error',
+      '.field_error',
+      '.field-with-errors',
+      '.errors',
+      '.error-message',
+      '.flash-error',
+      '.validation-error',
+      '[aria-invalid="true"]',
+      'span.error:not(:empty)',
+      'div.error:not(:empty)',
+      'p.error:not(:empty)',
+      'label.error:not(:empty)',
+    ];
+
+    for (const sel of errorSelectors) {
+      const loc = page.locator(sel);
+      const count = await loc.count().catch(() => 0);
+      for (let i = 0; i < Math.min(count, 5); i++) {
+        const el = loc.nth(i);
+        const visible = await el.isVisible().catch(() => false);
+        if (visible) {
+          const text = (await el.innerText().catch(() => '')).trim();
+          if (text && text.length > 0 && !/^\s*$/.test(text)) {
+            return { hasError: true, message: `Validation error: "${text}"` };
+          }
+        }
+      }
+    }
+
+    // 2. Check for HTML5 invalid form inputs that blocked submission
+    const invalidInputs = page.locator('input:invalid, select:invalid, textarea:invalid');
+    const invalidCount = await invalidInputs.count().catch(() => 0);
+    if (invalidCount > 0) {
+      const firstInvalid = invalidInputs.first();
+      const validationMsg = await firstInvalid.evaluate(
+        (el: HTMLInputElement) => el.validationMessage || ''
+      ).catch(() => '');
+      const fieldName =
+        (await firstInvalid.getAttribute('name').catch(() => '')) ||
+        (await firstInvalid.getAttribute('id').catch(() => '')) ||
+        'required field';
+      const detail = validationMsg ? `${fieldName} (${validationMsg})` : `${fieldName} is invalid or required`;
+      return { hasError: true, message: `Required field validation failed: ${detail}` };
+    }
+  } catch {}
+
+  return { hasError: false };
+}
+
+/**
  * Checks if the page contains an active CAPTCHA challenge or OTP verification prompt.
  */
 export async function detectCaptchaOrOtp(
@@ -791,16 +851,30 @@ export async function pollCaptchaSolved(
             proofCapturedAt: proofResult.proofCapturedAt,
           };
         } else {
-          const errorMsg = verification.error || 'Submission verification timed out after CAPTCHA solve.';
-          console.warn(`[Live Submit] ❌ Verification failed after CAPTCHA solve: ${errorMsg}`);
+          const isTimeout = /time.*out/i.test(verification.error || '');
+          const errorMsg = verification.error || 'Timeout: Submission verification timed out.';
+          if (isTimeout) {
+            console.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
+          } else {
+            console.warn(`[Live Submit] ❌ Verification failed: ${errorMsg}`);
+          }
+          let failedProofUrl: string | undefined;
+          let failedCapturedAt: string | undefined;
           try {
-            const failed = await captureFailedScreenshot(page, applicationId);
+            const failed = await captureFailedScreenshot(page, application);
             if (failed?.url) {
-              console.log(`[Live Submit] 📸 Verification failure screenshot URL: ${failed.url}`);
+              console.log(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
+              failedProofUrl = failed.proofFailedUrl || failed.url;
+              failedCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
             }
           } catch {}
           if (application.id) {
-            await updateStatus(application.id, 'FAILED', errorMsg);
+            await updateStatus(application.id, 'FAILED', {
+              error_message: errorMsg,
+              proof_failed_url: failedProofUrl,
+              proof_failed_captured_at: failedCapturedAt,
+              job_url: application.job_url,
+            });
           }
           await clearPausedSession(applicationId);
           await closeSubmissionSession(applicationId);
@@ -810,6 +884,8 @@ export async function pollCaptchaSolved(
             status: 'FAILED',
             applicationId,
             errorMessage: errorMsg,
+            proofFailedUrl: failedProofUrl,
+            proofFailedCapturedAt: failedCapturedAt,
           };
         }
       }
@@ -821,14 +897,18 @@ export async function pollCaptchaSolved(
   }
 
   // Timeout reached (5 min)
-  const timeoutMsg = 'CAPTCHA not solved within 5 minutes';
-  console.warn(`[Live Submit] ⏱️ CAPTCHA_TIMEOUT: ${timeoutMsg} for application ${applicationId}`);
+  const timeoutMsg = 'Timeout: Session timed out after 5 minutes';
+  console.warn(`[Live Submit] ⏱️ Timeout: ${timeoutMsg} for application ${applicationId}`);
 
+  let timeoutFailedUrl: string | undefined;
+  let timeoutCapturedAt: string | undefined;
   try {
     if (!page.isClosed()) {
-      const failed = await captureFailedScreenshot(page, applicationId);
+      const failed = await captureFailedScreenshot(page, application);
       if (failed?.url) {
-        console.log(`[Live Submit] 📸 CAPTCHA timeout failure screenshot URL: ${failed.url}`);
+        console.log(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
+        timeoutFailedUrl = failed.proofFailedUrl || failed.url;
+        timeoutCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
       }
     }
   } catch (err: any) {
@@ -838,7 +918,12 @@ export async function pollCaptchaSolved(
   const targetAppId = application.id || application.applywizz_id || applicationId;
   if (targetAppId) {
     try {
-      await updateStatus(targetAppId, 'FAILED', timeoutMsg);
+      await updateStatus(targetAppId, 'FAILED', {
+        error_message: timeoutMsg,
+        proof_failed_url: timeoutFailedUrl,
+        proof_failed_captured_at: timeoutCapturedAt,
+        job_url: application.job_url,
+      });
     } catch (err: any) {
       console.warn(`[Live Submit] ⚠️ Error updating status to FAILED on timeout: ${err.message}`);
     }
@@ -853,6 +938,8 @@ export async function pollCaptchaSolved(
     applicationId,
     message: timeoutMsg,
     errorMessage: timeoutMsg,
+    proofFailedUrl: timeoutFailedUrl,
+    proofFailedCapturedAt: timeoutCapturedAt,
   };
 }
 
@@ -874,6 +961,8 @@ export interface SubmitOtpResult {
   proofUrl?: string;
   proofWebUrl?: string;
   proofCapturedAt?: string;
+  proofFailedUrl?: string;
+  proofFailedCapturedAt?: string;
   errorMessage?: string;
 }
 
@@ -914,7 +1003,7 @@ export async function submitOtpToPausedSession(
     const detected = await detectOTPField(page);
     if (!detected.found || !detected.selector) {
       if (page && !page.isClosed()) {
-        const failed = await captureFailedScreenshot(page, canonicalKey).catch(() => null);
+        const failed = await captureFailedScreenshot(page, application).catch(() => null);
         if (failed?.url) {
           console.log(`[Live Submit] 📸 OTP missing field failure screenshot URL: ${failed.url}`);
         }
@@ -1019,23 +1108,38 @@ export async function submitOtpToPausedSession(
       };
     }
 
-    const errorMsg =
-      verification.error || 'Confirmation signals not detected within 30 seconds after OTP submission.';
+    const isTimeout = /time.*out/i.test(verification.error || '');
+    const errorMsg = isTimeout
+      ? 'Timeout: OTP was not filled in time.'
+      : (verification.error || 'OTP submission verification failed.');
 
-    console.warn(`[Live Submit] ❌ OTP submission verification failed: ${errorMsg}`);
+    if (isTimeout) {
+      console.warn(`[Live Submit] ⏱️ Timeout: OTP verification timed out for application ${canonicalKey}`);
+    } else {
+      console.warn(`[Live Submit] ❌ OTP submission verification failed: ${errorMsg}`);
+    }
 
+    let failedProofUrl: string | undefined;
+    let failedCapturedAt: string | undefined;
     // Capture failure screenshot on verification failure
     if (page && !page.isClosed()) {
-      const failed = await captureFailedScreenshot(page, canonicalKey).catch(() => null);
+      const failed = await captureFailedScreenshot(page, application).catch(() => null);
       if (failed?.url) {
         console.log(`[Live Submit] 📸 OTP verification failure screenshot URL: ${failed.url}`);
+        failedProofUrl = failed.proofFailedUrl || failed.url;
+        failedCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
       }
     }
 
     // Critical: on verification failure or timeout, keep session paused for retry!
     if (application.id) {
       try {
-        await updateStatus(application.id, 'OTP_REQUIRED', errorMsg);
+        await updateStatus(application.id, 'OTP_REQUIRED', {
+          error_message: errorMsg,
+          proof_failed_url: failedProofUrl,
+          proof_failed_captured_at: failedCapturedAt,
+          job_url: application.job_url,
+        });
       } catch {}
     }
 
@@ -1044,21 +1148,40 @@ export async function submitOtpToPausedSession(
       status: 'FAILED',
       applicationId: canonicalKey,
       errorMessage: errorMsg,
+      proofFailedUrl: failedProofUrl,
+      proofFailedCapturedAt: failedCapturedAt,
     };
   } catch (err: any) {
-    const errorMsg = err.message || 'Error occurred during OTP submission.';
-    console.error(`[Live Submit] ❌ OTP submit error for ${canonicalKey}:`, err);
+    const isTimeout = /time.*out/i.test(err.message || '');
+    const errorMsg = isTimeout
+      ? 'Timeout: OTP was not filled in time.'
+      : (err.message || 'Error occurred during OTP submission.');
 
+    if (isTimeout) {
+      console.warn(`[Live Submit] ⏱️ Timeout: OTP submission timed out for ${canonicalKey}`);
+    } else {
+      console.error(`[Live Submit] ❌ OTP submit error for ${canonicalKey}:`, err);
+    }
+
+    let errProofUrl: string | undefined;
+    let errCapturedAt: string | undefined;
     if (page && !page.isClosed()) {
-      const failed = await captureFailedScreenshot(page, canonicalKey).catch(() => null);
+      const failed = await captureFailedScreenshot(page, application).catch(() => null);
       if (failed?.url) {
         console.log(`[Live Submit] 📸 OTP submit error failure screenshot URL: ${failed.url}`);
+        errProofUrl = failed.proofFailedUrl || failed.url;
+        errCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
       }
     }
 
     if (application.id) {
       try {
-        await updateStatus(application.id, 'OTP_REQUIRED', errorMsg);
+        await updateStatus(application.id, 'OTP_REQUIRED', {
+          error_message: errorMsg,
+          proof_failed_url: errProofUrl,
+          proof_failed_captured_at: errCapturedAt,
+          job_url: application.job_url,
+        });
       } catch {}
     }
 
@@ -1067,6 +1190,8 @@ export async function submitOtpToPausedSession(
       status: 'FAILED',
       applicationId: canonicalKey,
       errorMessage: errorMsg,
+      proofFailedUrl: errProofUrl,
+      proofFailedCapturedAt: errCapturedAt,
     };
   }
 }
@@ -1179,11 +1304,41 @@ export async function runLiveSubmit(
     }
 
     // 4. Fill all form fields
-    fillSummary = await fillForm(page, application, {
-      minJitterMs: options.minJitterMs ?? 300,
-      maxJitterMs: options.maxJitterMs ?? 800,
-      timeoutMs: 5000,
-    });
+    try {
+      fillSummary = await fillForm(page, application, {
+        minJitterMs: options.minJitterMs ?? 300,
+        maxJitterMs: options.maxJitterMs ?? 800,
+        timeoutMs: 5000,
+      });
+    } catch (fillErr: any) {
+      const fillErrMsg = `Form filling error: ${fillErr.message || 'Failed to populate application fields.'}`;
+      console.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+      let failedProof: any = null;
+      if (page && !page.isClosed()) {
+        failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+        if (failedProof?.url) {
+          console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+        }
+        screenshotCaptured = true;
+      }
+      if (application.id) {
+        await updateStatus(application.id, 'FAILED', {
+          error_message: fillErrMsg,
+          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+          job_url: application.job_url,
+        }).catch(() => {});
+      }
+      return {
+        success: false,
+        status: 'FAILED',
+        applicationId,
+        errorMessage: fillErrMsg,
+        summary: fillSummary,
+        proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+        proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+      };
+    }
 
     // 5. Locate and click form submit button
     const preSubmitUrl = page.url();
@@ -1210,14 +1365,33 @@ export async function runLiveSubmit(
     }
 
     if (!submitClicked) {
+      const fillErrMsg = 'Form filling error: Submit button could not be located on the application form.';
+      console.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+      let failedProof: any = null;
       if (page && !page.isClosed()) {
-        const failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+        failedProof = await captureFailedScreenshot(page, application).catch(() => null);
         if (failedProof?.url) {
           console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
         }
         screenshotCaptured = true;
       }
-      throw new Error('Submit button could not be located on the application form.');
+      if (application.id) {
+        await updateStatus(application.id, 'FAILED', {
+          error_message: fillErrMsg,
+          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+          job_url: application.job_url,
+        }).catch(() => {});
+      }
+      return {
+        success: false,
+        status: 'FAILED',
+        applicationId,
+        errorMessage: fillErrMsg,
+        summary: fillSummary,
+        proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+        proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+      };
     }
 
     // Capture screenshot immediately after clicking submit button (before detecting block)
@@ -1307,7 +1481,7 @@ export async function runLiveSubmit(
           try {
             const otpDetectedTime = pausedAt || Date.now();
             const zohoResult = await zohoReader.fetchLatestOtp(companyEmail, {
-              timeoutMs: Math.max(config.ZOHO_CONNECTOR_TIMEOUT_MS || 90000, 90000),
+              timeoutMs: Math.max(config.ZOHO_CONNECTOR_TIMEOUT_MS || 120000, 120000),
               sinceTimestamp: otpDetectedTime - 60000,
             });
 
@@ -1332,16 +1506,30 @@ export async function runLiveSubmit(
                 throw new Error(submitResult.errorMessage || 'Auto-submitted OTP was rejected or failed verification.');
               }
             } else {
-              throw new Error(zohoResult.errorMessage || 'Failed to extract OTP from Zoho Mail Reader within timeout.');
+              throw new Error(zohoResult.errorMessage || 'Timeout: OTP was not filled in time.');
             }
           } catch (autoOtpErr: any) {
-            console.error(`[Live Submit] ❌ Automated OTP resolution failed: ${autoOtpErr.message}`);
+            const isTimeout = /time.*out|not filled in time/i.test(autoOtpErr.message || '');
+            const otpErrMsg = isTimeout
+              ? 'Timeout: OTP was not filled in time.'
+              : `OTP error: ${autoOtpErr.message}`;
+
+            if (isTimeout) {
+              console.warn(`[Live Submit] ⏱️ Timeout: OTP was not filled in time for application ${applicationId}`);
+            } else {
+              console.error(`[Live Submit] ❌ ${otpErrMsg} for application ${applicationId}`);
+            }
             // User requested error out on failure
             keepSessionOpen = false;
             screenshotCaptured = true;
-            await captureFailedScreenshot(page, application).catch(() => null);
+            const failedProof = await captureFailedScreenshot(page, application).catch(() => null);
             if (application.id) {
-              await updateStatus(application.id, 'FAILED', autoOtpErr.message).catch(() => {});
+              await updateStatus(application.id, 'FAILED', {
+                error_message: otpErrMsg,
+                proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+                proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+                job_url: application.job_url,
+              }).catch(() => {});
             }
             await clearPausedSession(sessionKey).catch(() => {});
             await closeSubmissionSession(sessionKey).catch(() => {});
@@ -1350,8 +1538,10 @@ export async function runLiveSubmit(
               success: false,
               status: 'FAILED',
               applicationId,
-              errorMessage: `Automated OTP resolution failed: ${autoOtpErr.message}`,
+              errorMessage: otpErrMsg,
               summary: fillSummary,
+              proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+              proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
             };
           }
         }
@@ -1366,6 +1556,38 @@ export async function runLiveSubmit(
           requiresCaptcha: true,
           challengeType: 'otp',
           summary: fillSummary,
+        };
+      }
+
+      // Check for form filling / validation errors on page before assuming CAPTCHA block
+      const fillError = await detectFormFillingErrors(page);
+      if (fillError.hasError) {
+        const fillErrMsg = `Form filling error: ${fillError.message}`;
+        console.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+        let failedProof: any = null;
+        if (page && !page.isClosed()) {
+          failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+          if (failedProof?.url) {
+            console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+          }
+          screenshotCaptured = true;
+        }
+        if (application.id) {
+          await updateStatus(application.id, 'FAILED', {
+            error_message: fillErrMsg,
+            proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+            proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+            job_url: application.job_url,
+          }).catch(() => {});
+        }
+        return {
+          success: false,
+          status: 'FAILED',
+          applicationId,
+          errorMessage: fillErrMsg,
+          summary: fillSummary,
+          proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+          proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
         };
       }
 
@@ -1503,19 +1725,37 @@ export async function runLiveSubmit(
         summary: fillSummary,
       };
     } else {
-      const errorMsg = verification.error || 'Submission verification timed out after 30s without confirmation signals.';
-      console.warn(`[Live Submit] ❌ Submission verification failed: ${errorMsg}`);
+      const isTimeout = /time.*out/i.test(verification.error || '');
+      const isFormError = /form (filling|validation) error/i.test(verification.error || '');
+      let errorMsg: string;
 
+      if (isFormError) {
+        errorMsg = verification.error || 'Form filling error: Validation failed.';
+        console.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
+      } else if (isTimeout) {
+        errorMsg = 'Timeout: Submission verification timed out after 30s.';
+        console.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
+      } else {
+        errorMsg = verification.error || 'Submission verification failed.';
+        console.warn(`[Live Submit] ❌ Submission verification failed: ${errorMsg} for application ${applicationId}`);
+      }
+
+      let failedProof: any = null;
       if (page && !page.isClosed() && !screenshotCaptured) {
-        const failed = await captureFailedScreenshot(page, application).catch(() => null);
-        if (failed?.url) {
-          console.log(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failed.url}`);
+        failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+        if (failedProof?.url) {
+          console.log(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failedProof.url}`);
         }
         screenshotCaptured = true;
       }
 
       if (application.id) {
-        await updateStatus(application.id, 'FAILED', errorMsg);
+        await updateStatus(application.id, 'FAILED', {
+          error_message: errorMsg,
+          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+          job_url: application.job_url,
+        });
       }
 
       return {
@@ -1524,22 +1764,42 @@ export async function runLiveSubmit(
         applicationId,
         errorMessage: errorMsg,
         summary: fillSummary,
+        proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+        proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
       };
     }
   } catch (err: any) {
-    console.error(`[Live Submit] ❌ Submission execution error for ${applicationId}:`, err);
+    const isTimeout = /time.*out/i.test(err.message || '');
+    const isFillError = /form filling error|fillSingleField|fillForm/i.test(err.message || '');
+    let finalErrMsg = err.message || 'Submission execution failed.';
 
+    if (isFillError) {
+      finalErrMsg = `Form filling error: ${err.message}`;
+      console.error(`[Live Submit] ❌ ${finalErrMsg} for application ${applicationId}`);
+    } else if (isTimeout) {
+      finalErrMsg = `Timeout: ${err.message}`;
+      console.warn(`[Live Submit] ⏱️ Timeout: ${finalErrMsg} for application ${applicationId}`);
+    } else {
+      console.error(`[Live Submit] ❌ Submission execution error for application ${applicationId}: ${finalErrMsg}`);
+    }
+
+    let failedProof: any = null;
     if (page && !page.isClosed() && !screenshotCaptured) {
-      const failed = await captureFailedScreenshot(page, application).catch(() => null);
-      if (failed?.url) {
-        console.log(`[Live Submit] 📸 Submission execution error failure screenshot URL: ${failed.url}`);
+      failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+      if (failedProof?.url) {
+        console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
       }
       screenshotCaptured = true;
     }
 
     if (application.id) {
       try {
-        await updateStatus(application.id, 'FAILED', err.message);
+        await updateStatus(application.id, 'FAILED', {
+          error_message: finalErrMsg,
+          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+          job_url: application.job_url,
+        });
       } catch {}
     }
 
@@ -1547,8 +1807,10 @@ export async function runLiveSubmit(
       success: false,
       status: 'FAILED',
       applicationId,
-      errorMessage: err.message,
+      errorMessage: finalErrMsg,
       summary: fillSummary,
+      proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+      proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
     };
   } finally {
     if (!keepSessionOpen) {
@@ -1558,6 +1820,14 @@ export async function runLiveSubmit(
           const failed = await captureFailedScreenshot(page, application);
           if (failed?.url) {
             console.log(`[Live Submit] 📸 Pre-close failure screenshot URL: ${failed.url}`);
+            const targetAppId = application.id || application.applywizz_id;
+            if (targetAppId) {
+              await updateStatus(targetAppId, 'FAILED', {
+                proof_failed_url: failed.proofFailedUrl || failed.url,
+                proof_failed_captured_at: failed.proofFailedCapturedAt || failed.capturedAt,
+                job_url: application.job_url,
+              }).catch(() => {});
+            }
           }
         } catch (preCloseErr: any) {
           console.warn(`[Live Submit] ⚠️ Pre-close screenshot failed: ${preCloseErr.message}`);

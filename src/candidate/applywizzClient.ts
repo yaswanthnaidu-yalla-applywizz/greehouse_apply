@@ -167,12 +167,18 @@ export class ApplyWizzClient {
     const cleanId = applywizzId.trim();
     const cachePath = path.join(this.cacheDir, `${cleanId}.json`);
     const isYaswanth = cleanId.toUpperCase() === 'AWL-YASWANTH';
+    const isAkshitha = cleanId.toUpperCase() === 'AWL-31428' || cleanId.toLowerCase().includes('akshitha');
 
-    const enforceYaswanth = (p: ApplyWizzCandidateProfile) => {
+    const enforceCandidateDefaults = (p: ApplyWizzCandidateProfile) => {
       if (isYaswanth) {
         p.country = 'India';
         p.countryCode = '+91';
         if (!p.location) p.location = 'Hyderabad, Telangana, India';
+      } else if (isAkshitha) {
+        if (!p.country) p.country = 'United States of America';
+        if (!p.countryCode) p.countryCode = '+1';
+        if (!p.phone) p.phone = '940-222-8193';
+        if (!p.location) p.location = 'Dallas, Texas, United States';
       }
       return p;
     };
@@ -182,10 +188,10 @@ export class ApplyWizzClient {
         const cachedRaw = await fs.promises.readFile(cachePath, 'utf-8');
         const cached = JSON.parse(cachedRaw);
         if (cached?.profile && cached?.raw) {
-          return { profile: enforceYaswanth(cached.profile), raw: cached.raw };
+          return { profile: enforceCandidateDefaults(cached.profile), raw: cached.raw };
         }
         if (cached?.applywizzId) {
-          return { profile: enforceYaswanth(cached as ApplyWizzCandidateProfile), raw: {} };
+          return { profile: enforceCandidateDefaults(cached as ApplyWizzCandidateProfile), raw: {} };
         }
       } catch (err: any) {
         console.warn(`[ApplyWizz Client] ⚠️ Corrupt cache for ${cleanId}, re-fetching: ${err.message}`);
@@ -195,17 +201,17 @@ export class ApplyWizzClient {
     try {
       const { profile, raw } = await this.fetchFromApi(cleanId);
       await fs.promises.writeFile(cachePath, JSON.stringify({ profile, raw }, null, 2), 'utf-8');
-      return { profile: enforceYaswanth(profile), raw };
+      return { profile: enforceCandidateDefaults(profile), raw };
     } catch (err) {
       if (fs.existsSync(cachePath)) {
         try {
           const cachedRaw = await fs.promises.readFile(cachePath, 'utf-8');
           const cached = JSON.parse(cachedRaw);
           if (cached?.profile) {
-            return { profile: enforceYaswanth(cached.profile), raw: cached.raw || {} };
+            return { profile: enforceCandidateDefaults(cached.profile), raw: cached.raw || {} };
           }
           if (cached?.applywizzId) {
-            return { profile: enforceYaswanth(cached as ApplyWizzCandidateProfile), raw: {} };
+            return { profile: enforceCandidateDefaults(cached as ApplyWizzCandidateProfile), raw: {} };
           }
         } catch {}
       }
@@ -413,17 +419,18 @@ export class ApplyWizzClient {
     };
 
     const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
-    const country = isYaswanth ? 'India' : (addInfo.country || client.country || undefined);
-    const countryCode = isYaswanth ? '+91' : (addInfo.country_code || client.country_code || undefined);
+    const isAkshitha = applywizzId.trim().toUpperCase() === 'AWL-31428' || applywizzId.trim().toLowerCase().includes('akshitha');
+    const country = isYaswanth ? 'India' : (addInfo.country || client.country || (isAkshitha ? 'United States of America' : undefined));
+    const countryCode = isYaswanth ? '+91' : (addInfo.country_code || client.country_code || (isAkshitha ? '+1' : undefined));
 
     return {
       applywizzId,
       clientName: fullName,
-      firstName,
-      lastName,
+      firstName: firstName || (isAkshitha ? 'AKSHITHA' : ''),
+      lastName: lastName || (isAkshitha ? 'G' : ''),
       email,
-      phone,
-      location: isYaswanth ? (location || 'Hyderabad, Telangana, India') : location,
+      phone: isAkshitha ? (phone || '940-222-8193') : phone,
+      location: isYaswanth ? (location || 'Hyderabad, Telangana, India') : (isAkshitha ? (location || 'Dallas, Texas, United States') : location),
       country,
       countryCode,
       linkedinUrl,

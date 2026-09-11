@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
     resolved_fields JSONB NOT NULL,                     -- Array<ResolvedField> snapshot
     proof_web_url TEXT,                                  -- Supabase Storage signed/public URL of confirmation screenshot
     proof_captured_at TIMESTAMPTZ,
+    proof_failed_url TEXT,                               -- Supabase Storage signed URL of failure screenshot
+    proof_failed_captured_at TIMESTAMPTZ,
     proof_email_url TEXT,                                -- Supabase Storage URL of confirmation email proof screenshot
     proof_email_captured_at TIMESTAMPTZ,
     email_proof_status TEXT CHECK (email_proof_status IN ('pending', 'captured', 'timed_out')),
@@ -178,4 +180,17 @@ CREATE POLICY "Allow storage access to proofs_dry_run" ON storage.objects
     FOR ALL
     USING (bucket_id = 'proofs_dry_run')
     WITH CHECK (bucket_id = 'proofs_dry_run');
+
+DROP POLICY IF EXISTS "Allow storage access to proofs_failed" ON storage.objects;
+CREATE POLICY "Allow storage access to proofs_failed" ON storage.objects
+    FOR ALL
+    USING (bucket_id = 'proofs_failed')
+    WITH CHECK (bucket_id = 'proofs_failed');
+
+DROP POLICY IF EXISTS "Allow storage access to proofs_mail" ON storage.objects;
+CREATE POLICY "Allow storage access to proofs_mail" ON storage.objects
+    FOR ALL
+    USING (bucket_id = 'proofs_mail')
+    WITH CHECK (bucket_id = 'proofs_mail');
+
 

@@ -9,6 +9,24 @@ export const PROOFS_FAILED_BUCKET = 'proofs_failed';
 export const PROOFS_MAIL_BUCKET = 'proofs_mail';
 export const CSV_UPLOADS_BUCKET = 'csv_uploads';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function webProofStoragePath(applicationId: string): string {
+  return `proofs/${applicationId}_web.png`;
+}
+
+export function failedProofStoragePath(applicationId: string): string {
+  return `${applicationId}_failed.png`;
+}
+
+export function emailProofStoragePath(applicationId: string): string {
+  return `${applicationId}_mail_proof.png`;
+}
+
+export function isApplicationUuid(id: string): boolean {
+  return UUID_RE.test(id);
+}
+
 /**
  * Ensures required storage buckets exist in Supabase.
  * Optimized: Only maintains 3 proof buckets + 1 private csv_uploads dropzone.
@@ -99,7 +117,7 @@ export async function uploadProof(
   applicationId: string,
   imageBuffer: Buffer
 ): Promise<string> {
-  const storagePath = `proofs/${applicationId}_web.png`;
+  const storagePath = webProofStoragePath(applicationId);
 
   if (isSupabaseConfigured()) {
     try {
@@ -173,7 +191,7 @@ export async function uploadFailedScreenshot(
   applicationId: string,
   imageBuffer: Buffer
 ): Promise<string> {
-  const storagePath = `${applicationId}_failed.png`;
+  const storagePath = failedProofStoragePath(applicationId);
 
   if (isSupabaseConfigured()) {
     try {
@@ -243,7 +261,7 @@ export async function uploadEmailProof(
   applicationId: string,
   imageBuffer: Buffer
 ): Promise<string> {
-  const storagePath = `${applicationId}_mail_proof.png`;
+  const storagePath = emailProofStoragePath(applicationId);
 
   if (isSupabaseConfigured()) {
     try {

@@ -56,6 +56,7 @@ export const App: React.FC = () => {
   const [application, setApplication] = useState<any | null>(null);
 
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(true);
+  const [isAuthHydrating, setIsAuthHydrating] = useState<boolean>(false);
   const [isLoadingApplication, setIsLoadingApplication] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
@@ -134,6 +135,38 @@ export const App: React.FC = () => {
     const token = localStorage.getItem('applywizz_auth_token');
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
+
+  const isAdminSession = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    if (localStorage.getItem('applywizz_is_admin') === 'true') return true;
+    const email = (currentUser?.email || '').trim().toLowerCase();
+    return (
+      ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(email) ||
+      email.startsWith('yaswanth') ||
+      email.startsWith('admin@')
+    );
+  };
+
+  const ensureAdminHydrated = useCallback(async (dateStr: string): Promise<void> => {
+    if (!isAdminSession()) return;
+    const token = localStorage.getItem('applywizz_auth_token');
+    if (!token) return;
+    setIsAuthHydrating(true);
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/hydrate-admin`, {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ date: dateStr }),
+      });
+    } catch (err) {
+      console.warn('Admin hydration request failed:', err);
+    } finally {
+      setIsAuthHydrating(false);
+    }
+  }, [currentUser]);
 
   const handleSignOut = () => {
     localStorage.removeItem('applywizz_auth_token');
@@ -237,9 +270,17 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    fetchInitialData(false, selectedDate);
-    fetchNotifications(selectedDate);
-  }, [currentUser, selectedDate]);
+    let cancelled = false;
+    (async () => {
+      await ensureAdminHydrated(selectedDate);
+      if (cancelled) return;
+      fetchInitialData(false, selectedDate);
+      fetchNotifications(selectedDate);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, selectedDate, ensureAdminHydrated, fetchInitialData, fetchNotifications]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -326,7 +367,7 @@ export const App: React.FC = () => {
   };
 
   // Status Change Handler (from Submissions, Dry Run, or Polling)
-  const handleStatusChange = (newStatus: ApplicationStatus, updatedPayload?: any) => {
+  const handleStatusChange = async (newStatus: ApplicationStatus, updatedPayload?: any) => {
     if (!application) return;
 
     setApplication((prev: any) => ({
@@ -338,6 +379,30 @@ export const App: React.FC = () => {
         updatedPayload?.proofCapturedAt ||
         updatedPayload?.proof_captured_at ||
         prev.proof_captured_at,
+      proof_email_url:
+        updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proof_email_url,
+      proofEmailUrl:
+        updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proofEmailUrl,
+      proof_email_captured_at:
+        updatedPayload?.proofEmailCapturedAt ||
+        updatedPayload?.proof_email_captured_at ||
+        prev.proof_email_captured_at,
+      email_proof_status:
+        updatedPayload?.emailProofStatus ||
+        updatedPayload?.email_proof_status ||
+        prev.email_proof_status,
+      emailProofStatus:
+        updatedPayload?.emailProofStatus ||
+        updatedPayload?.email_proof_status ||
+        prev.emailProofStatus,
+      proof_failed_url:
+        updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proof_failed_url,
+      proofFailedUrl:
+        updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proofFailedUrl,
+      proof_failed_captured_at:
+        updatedPayload?.proofFailedCapturedAt ||
+        updatedPayload?.proof_failed_captured_at ||
+        prev.proof_failed_captured_at,
       dry_run_screenshot_url:
         updatedPayload?.screenshotUrl ||
         updatedPayload?.dry_run_screenshot_url ||
@@ -352,6 +417,33 @@ export const App: React.FC = () => {
         return j;
       });
       setCandidateDetail({ ...candidateDetail, jobs: updatedJobs });
+    }
+
+    // Persist status change to Supabase immediately
+    const appId = application.id || application.applywizzId || application.applywizz_id;
+    const targetJobUrl = application.jobUrl || application.job_url || selectedJobUrl;
+    try {
+      await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          status: newStatus,
+          jobUrl: targetJobUrl,
+          proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url,
+          proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at,
+          proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url,
+          proof_email_captured_at:
+            updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
+          email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
+          proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
+          proof_failed_captured_at:
+            updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
+          dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url,
+          error_message: updatedPayload?.error || updatedPayload?.errorMessage || updatedPayload?.error_message,
+        }),
+      });
+    } catch (err) {
+      console.warn(`[App] Failed to persist status change ${newStatus} to backend:`, err);
     }
 
     if (newStatus === 'APPLIED' || newStatus === 'FAILED' || newStatus === 'APPLYING') {
@@ -611,6 +703,20 @@ export const App: React.FC = () => {
                               </a>
                             </div>
                           )}
+
+                          {!isSuccess && !isApplying && notif.proofFailedUrl && (
+                            <div className="mt-1.5 flex justify-end">
+                              <a
+                                href={notif.proofFailedUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[10px] font-bold text-[#991B1B] underline hover:text-[#7F1D1D]"
+                              >
+                                View Failure Screenshot ↗
+                              </a>
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -753,7 +859,7 @@ export const App: React.FC = () => {
             candidates={candidates}
             selectedId={selectedCandidateId}
             onSelectCandidate={(id) => setSelectedCandidateId(id)}
-            isLoading={isLoadingCandidates}
+            isLoading={isLoadingCandidates || isAuthHydrating}
             emptyMessage={noCandidatesMessage}
             selectedDate={selectedDate}
           />

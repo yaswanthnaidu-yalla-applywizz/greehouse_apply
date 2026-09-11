@@ -99,11 +99,11 @@ const envSchema = z.object({
   /** Zoho Mail Reader Login Password */
   ZOHO_CONNECTOR_PASS: z.string().optional(),
 
-  /** Zoho Mail Reader timeout in milliseconds (default: 90000) */
-  ZOHO_CONNECTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
+  /** Zoho Mail Reader timeout in milliseconds (default: 120000) */
+  ZOHO_CONNECTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
 
-  /** Zoho Mail Reader polling interval in milliseconds (default: 3000) */
-  ZOHO_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(3000),
+  /** Zoho Mail Reader polling interval in milliseconds (default: 5000) */
+  ZOHO_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
 
   /** Azure Communication / Microsoft 365 Client ID */
   AZURE_CLIENT_ID: z.string().optional(),

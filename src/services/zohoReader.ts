@@ -179,7 +179,7 @@ class ZohoReaderService {
     candidateEmail: string,
     options: { timeoutMs?: number; sinceTimestamp?: number } = {}
   ): Promise<ZohoOtpResult> {
-    const timeoutMs = options.timeoutMs ?? config.ZOHO_CONNECTOR_TIMEOUT_MS ?? 90000;
+    const timeoutMs = options.timeoutMs ?? config.ZOHO_CONNECTOR_TIMEOUT_MS ?? 120000;
     const sinceTimestamp = options.sinceTimestamp ?? (Date.now() - 3 * 60 * 1000);
     const normalizedEmail = candidateEmail.trim().toLowerCase();
 
@@ -223,14 +223,14 @@ class ZohoReaderService {
       // Wait for mailbox detail / readBlock to appear
       await this.page.waitForSelector('#readBlock:not(.hidden), button#readMailsBtn', { timeout: 10000 }).catch(() => {});
 
-      // 3. Poll incoming messages by clicking "Read mails" every 3 seconds
+      // 3. Poll incoming messages by clicking "Read mails" every 5 seconds
+      const pollInterval = config.ZOHO_CONNECTOR_POLL_INTERVAL_MS ?? 5000;
       console.log(
-        `[Zoho Reader] ⏳ Polling messages for verification/security code every 3s (up to ${Math.round(
+        `[Zoho Reader] ⏳ Polling messages for verification/security code every ${Math.round(pollInterval / 1000)}s (up to ${Math.round(
           timeoutMs / 1000
         )}s, cutoff: ${new Date(sinceTimestamp).toLocaleTimeString()})...`
       );
       const startTime = Date.now();
-      const pollInterval = 3000; // strictly every 3 seconds
 
       while (Date.now() - startTime < timeoutMs) {
         const cycleStart = Date.now();
@@ -308,7 +308,7 @@ class ZohoReaderService {
           }
         }
 
-        // Sleep remaining duration to enforce strict 3-second cadence between "Read mails" clicks
+        // Sleep remaining duration to enforce strict 5-second cadence between "Read mails" clicks
         const cycleElapsed = Date.now() - cycleStart;
         const sleepTime = Math.max(300, pollInterval - cycleElapsed);
         await this.page.waitForTimeout(sleepTime);

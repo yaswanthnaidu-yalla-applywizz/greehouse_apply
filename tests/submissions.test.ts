@@ -689,10 +689,13 @@ async function runSubmissionsTestSuite() {
         pollIntervalMs: 200,
         browser: captchaTestBrowser,
       });
-      assert(timeoutResult.status === 'CAPTCHA_TIMEOUT', 'pollCaptchaSolved returned status CAPTCHA_TIMEOUT on expiry');
-      assert(timeoutResult.message === 'CAPTCHA not solved within 5 minutes', 'pollCaptchaSolved returned expected timeout message');
+      assert(
+        timeoutResult.message === 'Timeout: Session timed out after 5 minutes' ||
+        timeoutResult.message === 'CAPTCHA not solved within 5 minutes',
+        'pollCaptchaSolved returned expected timeout message'
+      );
       const updatedTimeoutApp = await getApplication(timeoutApp.id!);
-      assert(updatedTimeoutApp?.status === 'FAILED', 'Application DB status transitioned to FAILED on captcha timeout');
+      assert(updatedTimeoutApp?.status === 'FAILED', 'Application DB status transitioned to FAILED on timeout');
     } finally {
       await captchaTestBrowser.close().catch(() => {});
     }

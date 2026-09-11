@@ -18,6 +18,7 @@ import {
   updateStatus,
   setProofUrl,
   setDryRunScreenshotUrl,
+  attachFailedProofToApplication,
   type ApplicationStatus,
 } from '../src/db/applications.js';
 import { captureWebProof } from '../src/submitter/proofCapture.js';
@@ -135,11 +136,15 @@ async function runProofLifecycleTestSuite() {
     assert(updated?.proof_captured_at !== null, 'proof_captured_at timestamp persisted in DB');
     assert(updated?.submitted_at !== null, 'submitted_at timestamp populated on APPLIED');
 
-    // Test transition to FAILED with error message
+    // Test transition to FAILED with error message and failure proof URL
+    const mockFailedProofUrl = 'https://storage.supabase.co/proofs_failed/test_failed.png';
+    const failedCapturedAt = new Date().toISOString();
+    await attachFailedProofToApplication({ id: recordId }, mockFailedProofUrl, failedCapturedAt);
     await updateStatus(recordId, 'FAILED', 'Form submission timed out');
     updated = await getApplication(recordId);
     assert(updated?.status === 'FAILED', 'Application transitioned to FAILED status');
     assert(updated?.error_message === 'Form submission timed out', 'error_message persisted on FAILED');
+    assert(updated?.proof_failed_url === mockFailedProofUrl, 'proof_failed_url persisted on FAILED');
 
     // Test transition to OTP_REQUIRED
     await updateStatus(recordId, 'OTP_REQUIRED');
@@ -184,9 +189,15 @@ async function runProofLifecycleTestSuite() {
     const appJson = await getRes.json();
     assert(appJson.id === recordId, 'API returns correct application id');
     assert(appJson.status === 'APPLIED', 'API returns status: "APPLIED"');
-    assert(appJson.proof_web_url === proofResult.proofWebUrl, 'API returns full proof_web_url');
+    assert(
+      typeof appJson.proof_web_url === 'string' &&
+        appJson.proof_web_url.includes(recordId) &&
+        appJson.proof_web_url.includes('proofs_web'),
+      'API returns hydrated proof_web_url for application'
+    );
     assert(appJson.proof_captured_at !== null, 'API returns proof_captured_at');
     assert(appJson.dry_run_screenshot_url === mockDryRunUrl, 'API returns dry_run_screenshot_url');
+    assert(appJson.proof_failed_url === mockFailedProofUrl, 'API returns proof_failed_url');
     assert(Array.isArray(appJson.resolved_fields), 'API returns resolved_fields array');
 
     // Lookup by applywizz_id
@@ -220,7 +231,12 @@ async function runProofLifecycleTestSuite() {
     pollRes = await fetch(`${apiBaseUrl}/api/applications/${recordId}`);
     pollData = await pollRes.json();
     assert(pollData.status === 'APPLIED', 'Polling step 2: Status transitioned to APPLIED');
-    assert(pollData.proof_web_url === mockProofUrl, 'Polling step 2: Proof URL immediately available');
+    assert(
+      typeof pollData.proof_web_url === 'string' &&
+        (pollData.proof_web_url === mockProofUrl ||
+          (pollData.proof_web_url.includes(recordId) && pollData.proof_web_url.includes('proofs_web'))),
+      'Polling step 2: Proof URL immediately available (raw or re-signed)'
+    );
 
   } finally {
     if (browser) await browser.close();

@@ -33,12 +33,15 @@ import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.j
 import {
   fetchAllowedCandidates,
   fetchWorkHistoryForDate,
+  fetchAdminWorkHistoryForDate,
+  ADMIN_WORK_HISTORY_CACHE_KEY,
   getISTDateString,
   type WorkHistoryCandidateRecord,
 } from '../services/workHistoryClient.js';
-import { cacheApplicationLocally, getSubmissionOutcomeCounts, getApplication } from '../db/applications.js';
+import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHydrate.js';
+import { cacheApplicationLocally, getSubmissionOutcomeCounts, getApplication, upsertApplication, serializeApplicationDto } from '../db/applications.js';
 import { getSignedResumeUrl, downloadResumeFromSupabase } from '../db/storage.js';
-import { isSupabaseConfigured } from '../db/client.js';
+import { isSupabaseConfigured, getDbClient } from '../db/client.js';
 import { SubmissionQueueDaemon } from '../submitter/queueWorker.js';
 import {
   demoApplication,
@@ -392,7 +395,34 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
     let workHistoryUnreachable = false;
 
-    if (!isAdmin) {
+    if (isAdmin) {
+      let cached = getCachedWorkHistory(ADMIN_WORK_HISTORY_CACHE_KEY, dateParam);
+      if (!cached) {
+        const whResult = await fetchAdminWorkHistoryForDate(dateParam);
+        try {
+          await hydrateAdminProfilesFromWorkHistory(dateParam);
+        } catch (hydrateErr: any) {
+          console.warn('[Server] Admin profile hydration on candidates list failed:', hydrateErr?.message);
+        }
+        setCachedWorkHistory(
+          ADMIN_WORK_HISTORY_CACHE_KEY,
+          whResult.records,
+          whResult.candidateIds,
+          whResult.unreachable,
+          whResult.resolvedDate,
+          dateParam
+        );
+        cached = {
+          records: whResult.records,
+          candidateIds: whResult.candidateIds,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          unreachable: whResult.unreachable,
+          resolvedDate: whResult.resolvedDate,
+        };
+      }
+      workHistoryUnreachable = cached.unreachable;
+      workHistoryRecords = cached.records;
+    } else {
       let cached = getCachedWorkHistory(userEmail, dateParam);
       if (!cached) {
         const whResult = await fetchWorkHistoryForDate(userEmail, dateParam);
@@ -473,7 +503,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     });
 
     // 2. Synthesize candidates from workHistoryRecords that are not yet in candidateSegments
-    if (!isAdmin && workHistoryRecords.length > 0) {
+    if (workHistoryRecords.length > 0) {
       const existingIds = new Set(candidateSummaries.map((c) => c.applywizzId.toUpperCase()));
       for (const rec of workHistoryRecords) {
         const idUpper = rec.applywizzId.toUpperCase();
@@ -802,6 +832,34 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const decodedUrl = decodeURIComponent(rawJobUrl);
 
+    // 0. FIRST check Supabase candidate_applications table as authoritative source of truth
+    let supabaseRecord: any = null;
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = getDbClient();
+        const { data, error } = await supabase
+          .from('candidate_applications')
+          .select('*')
+          .eq('applywizz_id', applywizzId)
+          .eq('job_url', decodedUrl)
+          .maybeSingle();
+
+        if (!error && data) {
+          supabaseRecord = data;
+        } else if (rawJobUrl !== decodedUrl) {
+          const { data: altData } = await supabase
+            .from('candidate_applications')
+            .select('*')
+            .eq('applywizz_id', applywizzId)
+            .eq('job_url', rawJobUrl)
+            .maybeSingle();
+          if (altData) supabaseRecord = altData;
+        }
+      } catch (err: any) {
+        console.warn(`[Server] Error querying Supabase for candidate application ${applywizzId}:`, err.message);
+      }
+    }
+
     // 1. Check exact key match in applicationsMap
     let appItem =
       applicationsMap.get(`${applywizzId}::${decodedUrl}`) ||
@@ -849,6 +907,34 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       } catch {}
     }
 
+    // If Supabase record exists, return it immediately as source of truth
+    if (supabaseRecord) {
+      const resolvedFields = supabaseRecord.resolved_fields || appItem?.resolvedFields || [];
+      const status = supabaseRecord.status;
+      const companyName = supabaseRecord.company_name || appItem?.companyName || '';
+      const jobTitle = supabaseRecord.job_title || appItem?.jobTitle || '';
+      const candidateName = (appItem as any)?.candidateName || '';
+
+      cacheApplicationLocally({
+        ...supabaseRecord,
+        company_name: companyName,
+        job_title: jobTitle,
+      });
+
+      res.json(
+        serializeApplicationDto(supabaseRecord, {
+          applywizz_id: applywizzId,
+          job_url: supabaseRecord.job_url || decodedUrl,
+          company_name: companyName,
+          job_title: jobTitle,
+          candidate_name: candidateName,
+          status,
+          resolved_fields: resolvedFields,
+        })
+      );
+      return;
+    }
+
     if (appItem) {
       const rowId = (appItem as any).id || `${appItem.applywizzId}_${Buffer.from(appItem.jobUrl).toString('base64url').slice(0, 16)}`;
       let resolvedFields = appItem.resolvedFields;
@@ -870,9 +956,27 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         }
       } catch {}
 
+      // Persist to Supabase if not yet present so it exists for next navigation
+      let persistedRow: any = null;
+      try {
+        persistedRow = await upsertApplication({
+          applywizz_id: appItem.applywizzId,
+          job_url: appItem.jobUrl,
+          company_name: appItem.companyName,
+          job_title: appItem.jobTitle,
+          status: status as any || 'READY_FOR_REVIEW',
+          resolved_fields: resolvedFields,
+          proof_web_url: proofWebUrl,
+          dry_run_screenshot_url: dryRunScreenshotUrl,
+          has_manual_edits: hasManualEdits,
+        });
+      } catch {}
+
+      const finalId = persistedRow?.id || rowId;
+
       cacheApplicationLocally({
         ...toApplicationRow(appItem),
-        id: rowId,
+        id: finalId,
         resolved_fields: resolvedFields,
         status: status as any,
         proof_web_url: proofWebUrl,
@@ -880,18 +984,21 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         has_manual_edits: hasManualEdits,
       });
 
-      res.json({
-        ...appItem,
-        id: rowId,
-        status,
-        resolvedFields,
-        proof_web_url: proofWebUrl,
-        proofWebUrl,
-        dry_run_screenshot_url: dryRunScreenshotUrl,
-        dryRunScreenshotUrl,
-        hasManualEdits,
-        has_manual_edits: hasManualEdits,
-      });
+      res.json(
+        serializeApplicationDto(
+          { ...appItem, ...(persistedRow || {}) },
+          {
+            id: finalId,
+            applywizz_id: applywizzId,
+            job_url: appItem.jobUrl,
+            status,
+            resolved_fields: resolvedFields,
+            proof_web_url: proofWebUrl,
+            dry_run_screenshot_url: dryRunScreenshotUrl,
+            has_manual_edits: hasManualEdits,
+          }
+        )
+      );
       return;
     }
 

@@ -6,6 +6,16 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import {
+  getSignedProofUrl,
+  PROOFS_BUCKET,
+  PROOFS_FAILED_BUCKET,
+  PROOFS_MAIL_BUCKET,
+  webProofStoragePath,
+  failedProofStoragePath,
+  emailProofStoragePath,
+  isApplicationUuid,
+} from './storage.js';
 
 export type ApplicationStatus =
   | 'READY_FOR_REVIEW'
@@ -16,7 +26,8 @@ export type ApplicationStatus =
   | 'FAILED'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
-  | 'CAPTCHA_TIMEOUT';
+  | 'CAPTCHA_TIMEOUT'
+  | 'CAPTCHA_REQUIRED';
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out';
 
@@ -35,6 +46,8 @@ export interface ApplicationRow {
   proof_captured_at?: string | null;
   proof_email_url?: string | null;
   proof_email_captured_at?: string | null;
+  proof_failed_url?: string | null;
+  proof_failed_captured_at?: string | null;
   email_proof_status?: EmailProofStatus | null;
   email_proof_attempted_at?: string | null;
   error_message?: string | null;
@@ -90,7 +103,8 @@ export async function upsertApplication(
   };
 
   // Only pass id to Supabase if it's already a valid UUID
-  if (!payload.id) {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.id || '');
+  if (!isUuid) {
     delete payload.id;
   }
 
@@ -104,11 +118,17 @@ export async function upsertApplication(
         .single();
 
       if (!error && data) {
-        memoryApplications.set(data.id, data as ApplicationRow);
-        return data as ApplicationRow;
+        const row = data as ApplicationRow;
+        memoryApplications.set(row.id!, row);
+        const compositeKey = `${row.applywizz_id}_${Buffer.from(row.job_url).toString('base64url').slice(0, 16)}`;
+        memoryApplications.set(compositeKey, row);
+        return row;
+      }
+      if (error) {
+        console.error(`[DB] upsertApplication Supabase error (${app.applywizz_id}, ${app.job_url}):`, error.message);
       }
     } catch (err: any) {
-      // Fall through to memory
+      console.warn(`[DB] upsertApplication exception:`, err);
     }
   }
 
@@ -127,6 +147,7 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
   if (!cleanId) return null;
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+  const targetJobUrl = jobUrl || memoryApplications.get(cleanId)?.job_url;
 
   if (isSupabaseConfigured()) {
     try {
@@ -153,13 +174,14 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
       }
 
       // Query by applywizz_id
+      const candidateId = cleanId.includes('_') ? cleanId.split('_')[0] : cleanId;
       let query = supabase
         .from('candidate_applications')
         .select('*')
-        .eq('applywizz_id', cleanId);
+        .eq('applywizz_id', candidateId);
 
-      if (jobUrl) {
-        query = query.eq('job_url', jobUrl);
+      if (targetJobUrl) {
+        query = query.eq('job_url', targetJobUrl);
       }
 
       const { data, error } = await query
@@ -188,8 +210,9 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
   const mem = memoryApplications.get(cleanId);
   if (mem) return mem;
 
+  const candidateId = cleanId.includes('_') ? cleanId.split('_')[0] : cleanId;
   for (const app of memoryApplications.values()) {
-    if (app.applywizz_id === cleanId && (!jobUrl || app.job_url === jobUrl)) {
+    if ((app.applywizz_id === cleanId || app.applywizz_id === candidateId) && (!targetJobUrl || app.job_url === targetJobUrl)) {
       return app;
     }
   }
@@ -202,7 +225,7 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
       const apps = JSON.parse(raw);
       if (Array.isArray(apps)) {
         const found = apps.find((a: any) =>
-          (a.applywizzId === cleanId || a.id === cleanId) && (!jobUrl || a.jobUrl === jobUrl)
+          (a.applywizzId === cleanId || a.id === cleanId || a.applywizzId === candidateId) && (!targetJobUrl || a.jobUrl === targetJobUrl)
         );
         if (found) {
           const fallbackId: string = found.id || `${found.applywizzId}_${Buffer.from(found.jobUrl || '').toString('base64url').slice(0, 16)}`;
@@ -267,7 +290,7 @@ export async function getApplicationByCandidateAndJob(
 export async function updateResolvedFields(
   id: string,
   resolvedFields: any[],
-  extra?: { has_manual_edits?: boolean; reviewed_at?: string | null }
+  extra?: { has_manual_edits?: boolean; reviewed_at?: string | null; job_url?: string; applywizz_id?: string }
 ): Promise<void> {
   const updatePayload: Record<string, any> = {
     resolved_fields: resolvedFields,
@@ -281,16 +304,37 @@ export async function updateResolvedFields(
     updatePayload.reviewed_at = extra.reviewed_at;
   }
 
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  const mem = memoryApplications.get(id);
+  const cleanApplywizz = extra?.applywizz_id || mem?.applywizz_id || (id.includes('_') ? id.split('_')[0] : id);
+  const targetJobUrl = extra?.job_url || mem?.job_url;
+
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      await supabase
-        .from('candidate_applications')
-        .update(updatePayload)
-        .eq('id', id);
-      return;
+      let updateRes;
+      if (isUuid) {
+        updateRes = await supabase
+          .from('candidate_applications')
+          .update(updatePayload)
+          .eq('id', id);
+      } else if (cleanApplywizz && targetJobUrl) {
+        updateRes = await supabase
+          .from('candidate_applications')
+          .update(updatePayload)
+          .eq('applywizz_id', cleanApplywizz)
+          .eq('job_url', targetJobUrl);
+      } else if (cleanApplywizz) {
+        updateRes = await supabase
+          .from('candidate_applications')
+          .update(updatePayload)
+          .eq('applywizz_id', cleanApplywizz);
+      }
+      if (updateRes?.error) {
+        console.error(`[DB] updateResolvedFields Supabase error (${id}):`, updateRes.error.message);
+      }
     } catch (err: any) {
-      // Fall through to memory
+      console.warn(`[DB] updateResolvedFields exception:`, err);
     }
   }
 
@@ -298,7 +342,29 @@ export async function updateResolvedFields(
   if (existing) {
     memoryApplications.set(id, { ...existing, ...updatePayload });
   }
+  for (const [key, app] of memoryApplications.entries()) {
+    const jobMatch = !targetJobUrl || app.job_url === targetJobUrl;
+    if (app.id === id || ((app.applywizz_id === id || app.applywizz_id === cleanApplywizz) && jobMatch)) {
+      memoryApplications.set(key, { ...app, ...updatePayload });
+    }
+  }
 }
+
+export type UpdateStatusExtra =
+  | string
+  | {
+      proof_web_url?: string | null;
+      proof_captured_at?: string | null;
+      proof_failed_url?: string | null;
+      proof_failed_captured_at?: string | null;
+      proof_email_url?: string | null;
+      proof_email_captured_at?: string | null;
+      email_proof_status?: EmailProofStatus | null;
+      email_proof_attempted_at?: string | null;
+      dry_run_screenshot_url?: string | null;
+      error_message?: string | null;
+      job_url?: string | null;
+    };
 
 /**
  * Updates application lifecycle status.
@@ -306,7 +372,7 @@ export async function updateResolvedFields(
 export async function updateStatus(
   id: string,
   status: ApplicationStatus,
-  extra?: string | { proof_web_url?: string; proof_captured_at?: string; error_message?: string; job_url?: string }
+  extra?: UpdateStatusExtra
 ): Promise<void> {
   const updatePayload: Partial<ApplicationRow> = {
     status,
@@ -319,13 +385,27 @@ export async function updateStatus(
     if (extra.error_message !== undefined) updatePayload.error_message = extra.error_message;
     if (extra.proof_web_url !== undefined) updatePayload.proof_web_url = extra.proof_web_url;
     if (extra.proof_captured_at !== undefined) updatePayload.proof_captured_at = extra.proof_captured_at;
+    if (extra.proof_failed_url !== undefined) updatePayload.proof_failed_url = extra.proof_failed_url;
+    if (extra.proof_failed_captured_at !== undefined) updatePayload.proof_failed_captured_at = extra.proof_failed_captured_at;
+    if (extra.proof_email_url !== undefined) updatePayload.proof_email_url = extra.proof_email_url;
+    if (extra.proof_email_captured_at !== undefined) updatePayload.proof_email_captured_at = extra.proof_email_captured_at;
+    if (extra.email_proof_status !== undefined) updatePayload.email_proof_status = extra.email_proof_status;
+    if (extra.email_proof_attempted_at !== undefined) updatePayload.email_proof_attempted_at = extra.email_proof_attempted_at;
+    if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
   }
 
   if (status === 'APPLIED') {
     updatePayload.submitted_at = new Date().toISOString();
   }
 
+  if (status === 'FAILED' && updatePayload.proof_failed_url && !updatePayload.proof_failed_captured_at) {
+    updatePayload.proof_failed_captured_at = new Date().toISOString();
+  }
+
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  const mem = memoryApplications.get(id);
+  const cleanApplywizz = id.includes('_') ? id.split('_')[0] : id;
+  const targetJobUrl = (extra && typeof extra === 'object' && extra.job_url) || mem?.job_url;
 
   if (isSupabaseConfigured()) {
     try {
@@ -334,16 +414,16 @@ export async function updateStatus(
       let updateRes;
       if (isUuid) {
         updateRes = await query.eq('id', id);
-      } else if (extra && typeof extra === 'object' && extra.job_url) {
-        updateRes = await query.eq('applywizz_id', id).eq('job_url', extra.job_url);
+      } else if (targetJobUrl) {
+        updateRes = await query.eq('applywizz_id', cleanApplywizz).eq('job_url', targetJobUrl);
       } else {
-        updateRes = await query.eq('applywizz_id', id);
+        updateRes = await query.eq('applywizz_id', cleanApplywizz);
       }
       if (updateRes?.error) {
         console.error(`[DB] updateStatus Supabase error (${id}, ${status}):`, updateRes.error.message);
       }
     } catch (err: any) {
-      // Fall through to memory
+      console.warn(`[DB] updateStatus exception:`, err);
     }
   }
 
@@ -352,11 +432,118 @@ export async function updateStatus(
     memoryApplications.set(id, { ...existing, ...updatePayload });
   }
   for (const [key, app] of memoryApplications.entries()) {
-    const jobMatch = !(extra && typeof extra === 'object' && extra.job_url) || app.job_url === extra.job_url;
-    if (app.id === id || (app.applywizz_id === id && jobMatch)) {
+    const jobMatch = !targetJobUrl || app.job_url === targetJobUrl;
+    if (app.id === id || ((app.applywizz_id === id || app.applywizz_id === cleanApplywizz) && jobMatch)) {
       memoryApplications.set(key, { ...app, ...updatePayload });
     }
   }
+}
+
+type ApplicationRef = Partial<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'job_url'>>;
+
+function applicationMemoryKey(application: ApplicationRef): string {
+  return (
+    application.id ||
+    (application.applywizz_id && application.job_url
+      ? `${application.applywizz_id}_${Buffer.from(application.job_url).toString('base64url').slice(0, 16)}`
+      : '')
+  );
+}
+
+/**
+ * Persists a partial application update to Supabase and in-memory cache.
+ * Returns true when at least one store was updated.
+ */
+async function patchApplicationRecord(
+  application: ApplicationRef,
+  updatePayload: Record<string, unknown>,
+  contextLabel: string
+): Promise<boolean> {
+  let persisted = false;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      if (application.id) {
+        const { error } = await supabase
+          .from('candidate_applications')
+          .update(updatePayload)
+          .eq('id', application.id);
+        if (!error) {
+          persisted = true;
+        } else {
+          console.warn(
+            `[DB] ⚠️ Could not update DB record (${contextLabel}) for id=${application.id}: ${error.message}`
+          );
+        }
+      }
+
+      if (!persisted && application.applywizz_id && application.job_url) {
+        const { error } = await supabase
+          .from('candidate_applications')
+          .update(updatePayload)
+          .eq('applywizz_id', application.applywizz_id)
+          .eq('job_url', application.job_url);
+        if (!error) {
+          persisted = true;
+        } else {
+          console.warn(
+            `[DB] ⚠️ Could not update DB record (${contextLabel}) for ${application.applywizz_id}: ${error.message}`
+          );
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[DB] ⚠️ Could not update DB record (${contextLabel}): ${err.message}`);
+    }
+  }
+
+  const memoryKey = applicationMemoryKey(application);
+  const keysToUpdate = new Set<string>();
+  if (memoryKey) keysToUpdate.add(memoryKey);
+  if (application.id) keysToUpdate.add(application.id);
+
+  for (const key of keysToUpdate) {
+    const existing = memoryApplications.get(key);
+    if (existing) {
+      memoryApplications.set(key, { ...existing, ...updatePayload } as ApplicationRow);
+      persisted = true;
+    }
+  }
+
+  if (!persisted) {
+    console.warn(
+      `[DB] ⚠️ Could not update DB record (${contextLabel}): no row matched (id=${application.id || 'n/a'}, applywizz_id=${application.applywizz_id || 'n/a'})`
+    );
+  }
+
+  return persisted;
+}
+
+/**
+ * Re-signs private bucket proof URLs for API/dashboard consumers (avoids expired signed URLs in <img>).
+ */
+export async function hydrateApplicationProofUrls(app: ApplicationRow): Promise<ApplicationRow> {
+  const storageKey = app.id && isApplicationUuid(app.id) ? app.id : null;
+  if (!storageKey || !isSupabaseConfigured()) {
+    return app;
+  }
+
+  const hydrated = { ...app };
+
+  if (hydrated.proof_web_url) {
+    const signed = await getSignedProofUrl(PROOFS_BUCKET, webProofStoragePath(storageKey));
+    if (signed) hydrated.proof_web_url = signed;
+  }
+  if (hydrated.proof_failed_url) {
+    const signed = await getSignedProofUrl(PROOFS_FAILED_BUCKET, failedProofStoragePath(storageKey));
+    if (signed) hydrated.proof_failed_url = signed;
+  }
+  if (hydrated.proof_email_url) {
+    const signed = await getSignedProofUrl(PROOFS_MAIL_BUCKET, emailProofStoragePath(storageKey));
+    if (signed) hydrated.proof_email_url = signed;
+  }
+
+  return hydrated;
 }
 
 /**
@@ -375,109 +562,59 @@ export async function setProofUrl(
  * Resolves by UUID when available, otherwise by (applywizz_id, job_url).
  */
 export async function attachProofToApplication(
-  application: Partial<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'job_url'>>,
+  application: ApplicationRef,
   proofUrl: string,
   capturedAt?: string
-): Promise<void> {
+): Promise<boolean> {
   const updatePayload = {
     proof_web_url: proofUrl,
     proof_captured_at: capturedAt || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+  return patchApplicationRecord(application, updatePayload, 'attachProofToApplication');
+}
 
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      if (application.id) {
-        const { error } = await supabase
-          .from('candidate_applications')
-          .update(updatePayload)
-          .eq('id', application.id);
-        if (!error) return;
-      }
-
-      if (application.applywizz_id && application.job_url) {
-        const { error } = await supabase
-          .from('candidate_applications')
-          .update(updatePayload)
-          .eq('applywizz_id', application.applywizz_id)
-          .eq('job_url', application.job_url);
-        if (!error) return;
-      }
-    } catch {}
-  }
-
-  const memoryKey =
-    application.id ||
-    (application.applywizz_id && application.job_url
-      ? `${application.applywizz_id}_${Buffer.from(application.job_url).toString('base64url').slice(0, 16)}`
-      : '');
-  if (!memoryKey) return;
-
-  const existing = memoryApplications.get(memoryKey);
-  if (existing) {
-    memoryApplications.set(memoryKey, { ...existing, ...updatePayload });
-  }
+/**
+ * Attaches a failure screenshot URL to an application record.
+ */
+export async function attachFailedProofToApplication(
+  application: ApplicationRef,
+  proofFailedUrl: string,
+  capturedAt?: string
+): Promise<boolean> {
+  const updatePayload = {
+    proof_failed_url: proofFailedUrl,
+    proof_failed_captured_at: capturedAt || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  return patchApplicationRecord(application, updatePayload, 'attachFailedProofToApplication');
 }
 
 /**
  * Attaches a post-submission confirmation email proof screenshot URL to an application record.
  */
 export async function attachEmailProofToApplication(
-  application: Partial<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'job_url'>>,
+  application: ApplicationRef,
   proofEmailUrl: string,
   capturedAt?: string
-): Promise<void> {
+): Promise<boolean> {
   const updatePayload = {
     proof_email_url: proofEmailUrl,
     proof_email_captured_at: capturedAt || new Date().toISOString(),
     email_proof_status: 'captured' as EmailProofStatus,
     updated_at: new Date().toISOString(),
   };
-
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      if (application.id) {
-        const { error } = await supabase
-          .from('candidate_applications')
-          .update(updatePayload)
-          .eq('id', application.id);
-        if (!error) return;
-      }
-
-      if (application.applywizz_id && application.job_url) {
-        const { error } = await supabase
-          .from('candidate_applications')
-          .update(updatePayload)
-          .eq('applywizz_id', application.applywizz_id)
-          .eq('job_url', application.job_url);
-        if (!error) return;
-      }
-    } catch {}
-  }
-
-  const memoryKey =
-    application.id ||
-    (application.applywizz_id && application.job_url
-      ? `${application.applywizz_id}_${Buffer.from(application.job_url).toString('base64url').slice(0, 16)}`
-      : '');
-  if (!memoryKey) return;
-
-  const existing = memoryApplications.get(memoryKey);
-  if (existing) {
-    memoryApplications.set(memoryKey, { ...existing, ...updatePayload });
-  }
+  return patchApplicationRecord(application, updatePayload, 'attachEmailProofToApplication');
 }
 
 /**
  * Updates the email proof lifecycle status (e.g. 'pending', 'captured', 'timed_out').
  */
 export async function updateEmailProofStatus(
-  application: Partial<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'job_url'>>,
+  application: ApplicationRef,
   status: EmailProofStatus,
   extra?: { attemptedAt?: string }
-): Promise<void> {
+): Promise<boolean> {
   const updatePayload: Record<string, any> = {
     email_proof_status: status,
     updated_at: new Date().toISOString(),
@@ -487,71 +624,186 @@ export async function updateEmailProofStatus(
     updatePayload.email_proof_attempted_at = extra?.attemptedAt || new Date().toISOString();
   }
 
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      if (application.id) {
-        const { error } = await supabase
-          .from('candidate_applications')
-          .update(updatePayload)
-          .eq('id', application.id);
-        if (!error) return;
-      }
-
-      if (application.applywizz_id && application.job_url) {
-        const { error } = await supabase
-          .from('candidate_applications')
-          .update(updatePayload)
-          .eq('applywizz_id', application.applywizz_id)
-          .eq('job_url', application.job_url);
-        if (!error) return;
-      }
-    } catch {}
-  }
-
-  const memoryKey =
-    application.id ||
-    (application.applywizz_id && application.job_url
-      ? `${application.applywizz_id}_${Buffer.from(application.job_url).toString('base64url').slice(0, 16)}`
-      : '');
-  if (!memoryKey) return;
-
-  const existing = memoryApplications.get(memoryKey);
-  if (existing) {
-    memoryApplications.set(memoryKey, { ...existing, ...updatePayload });
-  }
+  return patchApplicationRecord(application, updatePayload, 'updateEmailProofStatus');
 }
 
 /**
  * Sets the dry-run screenshot URL for an application.
+ * Resolves by UUID when available, otherwise by (applywizz_id, job_url) or applywizz_id.
  */
 export async function setDryRunScreenshotUrl(
-  id: string,
+  applicationOrId: string | ApplicationRef,
   screenshotUrl: string
-): Promise<void> {
+): Promise<boolean> {
   const updatePayload = {
     dry_run_screenshot_url: screenshotUrl,
     updated_at: new Date().toISOString(),
   };
 
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      await supabase
-        .from('candidate_applications')
-        .update(updatePayload)
-        .eq('id', id);
-      return;
-    } catch (err: any) {
-      // Fall through
-    }
-  }
+  const appRef: ApplicationRef =
+    typeof applicationOrId === 'string'
+      ? isApplicationUuid(applicationOrId)
+        ? { id: applicationOrId }
+        : { applywizz_id: applicationOrId.includes('_') ? applicationOrId.split('_')[0] : applicationOrId }
+      : applicationOrId;
 
-  const existing = memoryApplications.get(id);
-  if (existing) {
-    memoryApplications.set(id, { ...existing, ...updatePayload });
-  }
+  return patchApplicationRecord(appRef, updatePayload, 'setDryRunScreenshotUrl');
 }
+
+/**
+ * Sets the failure screenshot URL for an application by UUID (symmetry with setDryRunScreenshotUrl).
+ */
+export async function setFailedScreenshotUrl(
+  id: string,
+  screenshotUrl: string,
+  capturedAt?: string
+): Promise<void> {
+  await attachFailedProofToApplication({ id }, screenshotUrl, capturedAt);
+}
+
+export interface ApplicationDto {
+  id?: string;
+  applywizz_id: string;
+  applywizzId: string;
+  job_url: string;
+  jobUrl: string;
+  company_name: string | null;
+  companyName: string | null;
+  job_title: string | null;
+  jobTitle: string | null;
+  candidate_name?: string | null;
+  candidateName?: string | null;
+  status: ApplicationStatus;
+  resolved_fields: any[];
+  resolvedFields: any[];
+  proof_web_url: string | null;
+  proofWebUrl: string | null;
+  proof_captured_at: string | null;
+  proofCapturedAt: string | null;
+  proof_email_url: string | null;
+  proofEmailUrl: string | null;
+  proof_email_captured_at: string | null;
+  proofEmailCapturedAt: string | null;
+  email_proof_status: EmailProofStatus | null;
+  emailProofStatus: EmailProofStatus | null;
+  email_proof_attempted_at: string | null;
+  emailProofAttemptedAt: string | null;
+  proof_failed_url: string | null;
+  proofFailedUrl: string | null;
+  proof_failed_captured_at: string | null;
+  proofFailedCapturedAt: string | null;
+  dry_run_screenshot_url: string | null;
+  dryRunScreenshotUrl: string | null;
+  error_message: string | null;
+  errorMessage: string | null;
+  has_manual_edits: boolean;
+  hasManualEdits: boolean;
+  reviewed_at: string | null;
+  reviewedAt: string | null;
+  submitted_at: string | null;
+  submittedAt: string | null;
+  submission_order?: number | null;
+  submissionOrder?: number | null;
+  assigned_ca_email?: string | null;
+  assignedCaEmail?: string | null;
+  created_at?: string;
+  createdAt?: string;
+  updated_at?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Shared serializer mapping database/in-memory application objects to a complete API DTO.
+ * Ensures strict parity with both snake_case and camelCase fields for web, email, failure, and dry-run proofs.
+ */
+export function serializeApplicationDto(
+  app: any,
+  overrides?: Record<string, any>
+): ApplicationDto {
+  const merged = { ...(app || {}), ...(overrides || {}) };
+
+  const applywizzId = merged.applywizz_id || merged.applywizzId || '';
+  const jobUrl = merged.job_url || merged.jobUrl || '';
+  const companyName = merged.company_name || merged.companyName || null;
+  const jobTitle = merged.job_title || merged.jobTitle || null;
+  const candidateName = merged.candidate_name || merged.candidateName || null;
+  const status = (merged.status || 'READY_FOR_REVIEW') as ApplicationStatus;
+  const resolvedFields = Array.isArray(merged.resolved_fields)
+    ? merged.resolved_fields
+    : Array.isArray(merged.resolvedFields)
+    ? merged.resolvedFields
+    : [];
+
+  const proofWebUrl = merged.proof_web_url || merged.proofWebUrl || null;
+  const proofCapturedAt = merged.proof_captured_at || merged.proofCapturedAt || null;
+  const proofEmailUrl = merged.proof_email_url || merged.proofEmailUrl || null;
+  const proofEmailCapturedAt = merged.proof_email_captured_at || merged.proofEmailCapturedAt || null;
+  const emailProofStatus = (merged.email_proof_status || merged.emailProofStatus || null) as EmailProofStatus | null;
+  const emailProofAttemptedAt = merged.email_proof_attempted_at || merged.emailProofAttemptedAt || null;
+  const proofFailedUrl = merged.proof_failed_url || merged.proofFailedUrl || null;
+  const proofFailedCapturedAt = merged.proof_failed_captured_at || merged.proofFailedCapturedAt || null;
+  const dryRunScreenshotUrl = merged.dry_run_screenshot_url || merged.dryRunScreenshotUrl || merged.screenshotUrl || null;
+  const errorMessage = merged.error_message || merged.errorMessage || null;
+  const hasManualEdits = Boolean(merged.has_manual_edits ?? merged.hasManualEdits ?? false);
+  const reviewedAt = merged.reviewed_at || merged.reviewedAt || null;
+  const submittedAt = merged.submitted_at || merged.submittedAt || null;
+  const submissionOrder = merged.submission_order ?? merged.submissionOrder ?? null;
+  const assignedCaEmail = merged.assigned_ca_email || merged.assignedCaEmail || null;
+  const createdAt = merged.created_at || merged.createdAt;
+  const updatedAt = merged.updated_at || merged.updatedAt;
+
+  return {
+    id: merged.id,
+    applywizz_id: applywizzId,
+    applywizzId,
+    job_url: jobUrl,
+    jobUrl,
+    company_name: companyName,
+    companyName,
+    job_title: jobTitle,
+    jobTitle,
+    candidate_name: candidateName,
+    candidateName,
+    status,
+    resolved_fields: resolvedFields,
+    resolvedFields,
+    proof_web_url: proofWebUrl,
+    proofWebUrl,
+    proof_captured_at: proofCapturedAt,
+    proofCapturedAt,
+    proof_email_url: proofEmailUrl,
+    proofEmailUrl,
+    proof_email_captured_at: proofEmailCapturedAt,
+    proofEmailCapturedAt,
+    email_proof_status: emailProofStatus,
+    emailProofStatus,
+    email_proof_attempted_at: emailProofAttemptedAt,
+    emailProofAttemptedAt,
+    proof_failed_url: proofFailedUrl,
+    proofFailedUrl,
+    proof_failed_captured_at: proofFailedCapturedAt,
+    proofFailedCapturedAt,
+    dry_run_screenshot_url: dryRunScreenshotUrl,
+    dryRunScreenshotUrl,
+    error_message: errorMessage,
+    errorMessage,
+    has_manual_edits: hasManualEdits,
+    hasManualEdits,
+    reviewed_at: reviewedAt,
+    reviewedAt,
+    submitted_at: submittedAt,
+    submittedAt,
+    submission_order: submissionOrder,
+    submissionOrder,
+    assigned_ca_email: assignedCaEmail,
+    assignedCaEmail,
+    created_at: createdAt,
+    createdAt,
+    updated_at: updatedAt,
+    updatedAt,
+  };
+}
+
 
 /**
  * Counts terminal submission outcomes (APPLIED / FAILED), deduped by candidate + job URL,
@@ -754,13 +1006,26 @@ export async function enqueueApplication(
     updated_at: new Date().toISOString(),
   };
 
-  if (isSupabaseConfigured() && app.id) {
+  if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      await supabase
-        .from('candidate_applications')
-        .update(updatePayload)
-        .eq('id', app.id);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(app.id || '');
+      let queueRes;
+      if (isUuid) {
+        queueRes = await supabase
+          .from('candidate_applications')
+          .update(updatePayload)
+          .eq('id', app.id);
+      } else {
+        queueRes = await supabase
+          .from('candidate_applications')
+          .update(updatePayload)
+          .eq('applywizz_id', app.applywizz_id)
+          .eq('job_url', app.job_url);
+      }
+      if (queueRes?.error) {
+        console.error(`[DB] enqueueApplication Supabase error:`, queueRes.error.message);
+      }
     } catch (err: any) {
       console.warn(`[DB] Could not update application to QUEUED in Supabase: ${err.message}`);
     }
@@ -856,6 +1121,7 @@ export interface NotificationItem {
   status: 'APPLYING' | 'APPLIED' | 'FAILED';
   reason?: string | null;
   proofWebUrl?: string | null;
+  proofFailedUrl?: string | null;
   timestamp: string;
 }
 
@@ -940,7 +1206,7 @@ export async function getRecentNotifications(
       const supabase = getDbClient();
       let query = supabase
         .from('candidate_applications')
-        .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, proof_web_url, updated_at, submitted_at')
+        .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, proof_web_url, proof_failed_url, updated_at, submitted_at')
         .in('status', ['APPLYING', 'APPLIED', 'FAILED'])
         .neq('applywizz_id', 'AWL-YASWANTH');
 
@@ -975,6 +1241,7 @@ export async function getRecentNotifications(
             status: row.status as 'APPLYING' | 'APPLIED' | 'FAILED',
             reason: row.error_message || null,
             proofWebUrl: row.proof_web_url || null,
+            proofFailedUrl: row.proof_failed_url || null,
             timestamp: row.updated_at || row.submitted_at || new Date().toISOString(),
           });
         }
@@ -1023,6 +1290,7 @@ export async function getRecentNotifications(
           status: app.status as 'APPLYING' | 'APPLIED' | 'FAILED',
           reason: app.error_message || null,
           proofWebUrl: app.proof_web_url || null,
+          proofFailedUrl: app.proof_failed_url || null,
           timestamp: app.updated_at || app.submitted_at || new Date().toISOString(),
         });
       }

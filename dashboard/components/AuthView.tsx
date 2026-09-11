@@ -207,6 +207,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
 
       localStorage.setItem('applywizz_auth_token', data.token);
       localStorage.setItem('applywizz_auth_user', JSON.stringify(verifiedUser));
+      if (data.isAdmin) {
+        localStorage.setItem('applywizz_is_admin', 'true');
+      } else {
+        localStorage.removeItem('applywizz_is_admin');
+      }
       if (data.workHistoryUnreachable) {
         localStorage.setItem('applywizz_wh_unreachable', 'true');
       } else {
@@ -285,6 +290,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
 
       localStorage.setItem('applywizz_auth_token', data.token);
       localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
+      if (data.isAdmin) {
+        localStorage.setItem('applywizz_is_admin', 'true');
+      } else {
+        localStorage.removeItem('applywizz_is_admin');
+      }
       if (data.workHistoryUnreachable) {
         localStorage.setItem('applywizz_wh_unreachable', 'true');
       } else {

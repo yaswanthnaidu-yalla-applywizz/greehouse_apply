@@ -483,7 +483,9 @@ export const akshithaSegment: CandidateSegment = {
     lastName: 'G',
     email: 'akshitha.reddy@applywizard.ai',
     phone: '940-222-8193',
-    location: 'Texas',
+    country: 'United States of America',
+    countryCode: '+1',
+    location: 'Dallas, Texas, United States',
     linkedinUrl: 'https://www.linkedin.com/in/akshitha-reddy',
     workAuthorization: 'H1B',
     requiresSponsorship: true,
@@ -593,7 +595,7 @@ const hippoResolvedFields: ResolvedField[] = [
   { fieldId: 'phone', name: 'question_38114564002', type: 'select', label: 'SMS Consent: Do you agree to receive mobile messages from us in relation to this job application?', value: 'Yes', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'how_did_you_hear_about_us', name: 'question_38114565002', type: 'select', label: 'How did you hear about us?', value: 'LinkedIn', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'if_other_please_specify_here', name: 'question_38114566002', type: 'text', label: 'If other, please specify here.', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
+  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States of America', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'by_checking_this_box_i_agree_to_allow_hippo_insurance_to_store_a', name: 'gdpr_processing_consent_given', type: 'checkbox', label: 'By checking this box, I agree to allow Hippo Insurance to store and process my data for the purpose of considering my eligibility regarding my current application for employment.', value: 'true', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
 ];
 
@@ -612,7 +614,7 @@ const mntnResolvedFields: ResolvedField[] = [
   { fieldId: 'race', name: 'race', type: 'select', label: 'Race', value: 'Asian', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'veteran_status', name: 'veteran_status', type: 'select', label: 'Veteran Status', value: 'I am not a protected veteran', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'disability_status', name: 'disability_status', type: 'select', label: 'Disability Status', value: 'No, I do not have a disability and have not had one in the past', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
+  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States of America', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'hispanic_ethnicity', name: 'hispanic_ethnicity', type: 'select', label: 'Are you Hispanic/Latino?', value: 'No', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
 ];
 
@@ -627,7 +629,7 @@ const prometheusResolvedFields: ResolvedField[] = [
   { fieldId: 'linkedin_url', name: 'question_32545340003', type: 'text', label: 'LinkedIn Profile', value: 'https://www.linkedin.com/in/akshitha-reddy', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'website_url', name: 'question_32545341003', type: 'text', label: 'Website', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
   { fieldId: 'will_you_now_or_in_the_future_require_sponsorship_to_work_in_the', name: 'question_32545342003', type: 'select', label: 'Will you now or in the future require sponsorship to work in the U.S.?', value: 'Yes', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
+  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States of America', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
 ];
 
 export const akshithaApplications: CandidateJobApplication[] = [

@@ -18,6 +18,9 @@ export interface WorkHistoryResult {
   resolvedDate: string | null;
 }
 
+/** Cache key for org-wide admin work-history (no CA email filter). */
+export const ADMIN_WORK_HISTORY_CACHE_KEY = '__admin__';
+
 /**
  * Generates YYYY-MM-DD string for IST (Asia/Kolkata, UTC+5:30) offset by `daysAgo`.
  */
@@ -90,6 +93,48 @@ export async function fetchWorkHistoryForDate(
     unreachable: false,
     resolvedDate: dateStr,
   };
+}
+
+/**
+ * Fetches all assigned candidates for a date (admin view — no ca_email filter).
+ */
+export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<WorkHistoryResult> {
+  const baseUrl = config.WORK_HISTORY_API_URL || 'https://applywizz-ca-management.vercel.app/api/ca/work-history';
+  const url = `${baseUrl}?from=${dateStr}&to=${dateStr}`;
+
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) {
+      console.warn(`[WorkHistory] ⚠️ Admin HTTP ${res.status} for date ${dateStr}`);
+      return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
+    }
+    const data: any = await res.json();
+    if (!data || !Array.isArray(data.records)) {
+      return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
+    }
+
+    const uniqueMap = new Map<string, WorkHistoryCandidateRecord>();
+    for (const r of data.records) {
+      const rawId = (r.applywizz_id || '').trim().toUpperCase();
+      if (rawId && !uniqueMap.has(rawId)) {
+        uniqueMap.set(rawId, {
+          applywizzId: rawId,
+          clientName: (r.client_name || rawId).trim(),
+          clientEmail: (r.client_email || '').trim().toLowerCase(),
+        });
+      }
+    }
+    const records = Array.from(uniqueMap.values());
+    return {
+      records,
+      candidateIds: records.map((r) => r.applywizzId),
+      unreachable: false,
+      resolvedDate: dateStr,
+    };
+  } catch (err: any) {
+    console.warn(`[WorkHistory] ⚠️ Admin fetch failed on ${dateStr}: ${err.message}`);
+    return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
+  }
 }
 
 /**

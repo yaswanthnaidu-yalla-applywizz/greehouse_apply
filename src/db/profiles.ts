@@ -95,16 +95,17 @@ export function getCompanyEmail(profile: ProfileRow): string | null {
  */
 export function profileRowToCandidateProfile(row: ProfileRow): ApplyWizzCandidateProfile {
   const isYaswanth = (row.applywizz_id || '').trim().toUpperCase() === 'AWL-YASWANTH';
+  const isAkshitha = (row.applywizz_id || '').trim().toUpperCase() === 'AWL-31428' || (row.client_name || '').toLowerCase().includes('akshitha');
   return {
     applywizzId: row.applywizz_id,
     clientName: row.client_name,
-    firstName: row.first_name || '',
-    lastName: row.last_name || '',
-    email: getCompanyEmail(row) || '',
-    phone: row.phone || '',
-    country: isYaswanth ? 'India' : (row.country || undefined),
-    countryCode: isYaswanth ? '+91' : (row.country_code || undefined),
-    location: isYaswanth ? (row.location || 'Hyderabad, Telangana, India') : (row.location || ''),
+    firstName: row.first_name || (isAkshitha ? 'AKSHITHA' : ''),
+    lastName: row.last_name || (isAkshitha ? 'G' : ''),
+    email: getCompanyEmail(row) || (isAkshitha ? 'akshitha.reddy@applywizard.ai' : ''),
+    phone: row.phone || (isAkshitha ? '940-222-8193' : ''),
+    country: isYaswanth ? 'India' : (isAkshitha ? (row.country || 'United States of America') : (row.country || undefined)),
+    countryCode: isYaswanth ? '+91' : (isAkshitha ? (row.country_code || '+1') : (row.country_code || undefined)),
+    location: isYaswanth ? (row.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (row.location || 'Dallas, Texas, United States') : (row.location || '')),
     linkedinUrl: row.linkedin_url || '',
     websiteUrl: row.website_url || undefined,
     githubUrl: row.github_url || undefined,
@@ -128,14 +129,16 @@ export async function upsertProfile(
   profile: Partial<ProfileRow> & { applywizz_id: string; client_name: string }
 ): Promise<ProfileRow> {
   const isYaswanth = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-YASWANTH';
+  const isAkshitha = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-31428' || (profile.client_name || '').toLowerCase().includes('akshitha');
   const companyEmail =
     profile.company_email ||
     extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
   const payload: ProfileRow = {
     ...profile,
-    country: isYaswanth ? 'India' : (profile.country ?? null),
-    country_code: isYaswanth ? '+91' : (profile.country_code ?? null),
-    location: isYaswanth ? (profile.location || 'Hyderabad, Telangana, India') : (profile.location ?? null),
+    country: isYaswanth ? 'India' : (isAkshitha ? (profile.country ?? 'United States of America') : (profile.country ?? null)),
+    country_code: isYaswanth ? '+91' : (isAkshitha ? (profile.country_code ?? '+1') : (profile.country_code ?? null)),
+    location: isYaswanth ? (profile.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (profile.location || 'Dallas, Texas, United States') : (profile.location ?? null)),
+    phone: isAkshitha ? (profile.phone || '940-222-8193') : (profile.phone ?? null),
     company_email: companyEmail,
     email: companyEmail || profile.email || null,
     updated_at: new Date().toISOString(),
@@ -204,6 +207,7 @@ export async function upsertProfile(
  */
 export async function getProfile(applywizzId: string): Promise<ProfileRow | null> {
   const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
+  const isAkshitha = applywizzId.trim().toUpperCase() === 'AWL-31428' || applywizzId.trim().toLowerCase().includes('akshitha');
 
   if (isSupabaseConfigured()) {
     try {
@@ -220,6 +224,11 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
           row.country = 'India';
           row.country_code = '+91';
           if (!row.location) row.location = 'Hyderabad, Telangana, India';
+        } else if (isAkshitha) {
+          if (!row.country) row.country = 'United States of America';
+          if (!row.country_code) row.country_code = '+1';
+          if (!row.phone) row.phone = '940-222-8193';
+          if (!row.location) row.location = 'Dallas, Texas, United States';
         }
         return row;
       }
@@ -238,23 +247,23 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
       return {
         applywizz_id: profileData.applywizzId || applywizzId,
         client_name: profileData.clientName || applywizzId,
-        first_name: profileData.firstName || null,
-        last_name: profileData.lastName || null,
-        email: profileData.email || null,
-        company_email: profileData.companyEmail || null,
-        phone: profileData.phone || null,
-        country: isYaswanth ? 'India' : (profileData.country || null),
-        country_code: isYaswanth ? '+91' : (profileData.countryCode || profileData.country_code || null),
-        location: isYaswanth ? (profileData.location || 'Hyderabad, Telangana, India') : (profileData.location || null),
+        first_name: profileData.firstName || (isAkshitha ? 'AKSHITHA' : null),
+        last_name: profileData.lastName || (isAkshitha ? 'G' : null),
+        email: profileData.email || (isAkshitha ? 'akshitha.reddy@applywizard.ai' : null),
+        company_email: profileData.companyEmail || (isAkshitha ? 'akshitha.reddy@applywizard.ai' : null),
+        phone: isAkshitha ? (profileData.phone || '940-222-8193') : (profileData.phone || null),
+        country: isYaswanth ? 'India' : (isAkshitha ? (profileData.country || 'United States of America') : (profileData.country || null)),
+        country_code: isYaswanth ? '+91' : (isAkshitha ? (profileData.countryCode || profileData.country_code || '+1') : (profileData.countryCode || profileData.country_code || null)),
+        location: isYaswanth ? (profileData.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (profileData.location || 'Dallas, Texas, United States') : (profileData.location || null)),
         linkedin_url: profileData.linkedinUrl || null,
         website_url: profileData.websiteUrl || null,
         github_url: profileData.githubUrl || null,
-        work_authorization: profileData.workAuthorization || null,
-        requires_sponsorship: Boolean(profileData.requiresSponsorship),
+        work_authorization: profileData.workAuthorization || (isAkshitha ? 'H1B' : null),
+        requires_sponsorship: isAkshitha ? true : Boolean(profileData.requiresSponsorship),
         education: profileData.education || [],
         work_experience: profileData.workExperience || [],
-        resume_url: profileData.resumeUrl || null,
-        resume_storage_path: profileData.localResumePath || null,
+        resume_url: profileData.resumeUrl || (isAkshitha ? 'resumes/AWL-31428_resume.pdf' : null),
+        resume_storage_path: profileData.localResumePath || (isAkshitha ? 'resumes/AWL-31428_resume.pdf' : null),
         raw_api_payload: profileData.demographics ? { demographics: profileData.demographics } : null,
       };
     } catch {}
@@ -278,6 +287,58 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
       requires_sponsorship: false,
       resume_url: 'resumes/AWL-YASHANTH_resume.pdf',
       resume_storage_path: 'resumes/AWL-YASHANTH_resume.pdf',
+    };
+  }
+
+  // Fallback for demo fixtures candidate AWL-31428 (Akshitha)
+  if (isAkshitha) {
+    return {
+      applywizz_id: 'AWL-31428',
+      client_name: 'AKSHITHA G',
+      first_name: 'AKSHITHA',
+      last_name: 'G',
+      email: 'akshitha.reddy@applywizard.ai',
+      company_email: 'akshitha.reddy@applywizard.ai',
+      phone: '940-222-8193',
+      country: 'United States of America',
+      country_code: '+1',
+      location: 'Dallas, Texas, United States',
+      linkedin_url: 'https://www.linkedin.com/in/akshitha-reddy',
+      work_authorization: 'H1B',
+      requires_sponsorship: true,
+      education: [
+        {
+          institution: 'University of North Texas',
+          degree: 'Master’s Degree',
+          fieldOfStudy: 'Computer Science',
+          graduationYear: '2023',
+        },
+      ],
+      work_experience: [
+        {
+          company: 'Professional Experience',
+          title: 'Business Analyst',
+          startDate: '01/2020',
+          endDate: 'Present',
+          description: 'Total years of professional experience: 4. Role: Business Analyst',
+        },
+      ],
+      resume_url: 'resumes/AWL-31428_resume.pdf',
+      resume_storage_path: 'resumes/AWL-31428_resume.pdf',
+      raw_api_payload: {
+        demographics: {
+          gender: 'Female',
+          isHispanicLatino: 'No',
+          raceEthnicity: 'Asian',
+          veteranStatus: 'I am not a protected veteran',
+          disabilityStatus: 'No, I do not have a disability',
+          willingToRelocate: true,
+          canWorkInOffice: true,
+          salaryRange: 'USD Yearly: 80k-100k, Hourly: 40-60',
+          yearsOfExperience: '4',
+          currentRole: 'Business Analyst',
+        },
+      },
     };
   }
 

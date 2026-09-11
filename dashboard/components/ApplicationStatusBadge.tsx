@@ -13,7 +13,9 @@ export interface ApplicationStatusBadgeProps {
   status: ApplicationStatus | string;
   proofWebUrl?: string | null;
   proofEmailUrl?: string | null;
+  emailProofStatus?: 'pending' | 'captured' | 'timed_out' | null;
   applicationId?: string;
+  jobUrl?: string;
   onStatusChange?: (newStatus: ApplicationStatus, updatedApp: any) => void;
   className?: string;
   apiBaseUrl?: string;
@@ -21,22 +23,33 @@ export interface ApplicationStatusBadgeProps {
 
 /**
  * Renders an application status badge and polls `GET /api/applications/:id`
- * every 2 seconds when status is `APPLYING`.
+ * every 2 seconds when status is `APPLYING` or `QUEUED`.
  */
 export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
   status,
   proofWebUrl,
   proofEmailUrl,
+  emailProofStatus,
   applicationId,
+  jobUrl,
   onStatusChange,
   className = '',
   apiBaseUrl = '',
 }) => {
   const statusRef = useRef(status);
   statusRef.current = status;
+  const emailProofStatusRef = useRef(emailProofStatus);
+  emailProofStatusRef.current = emailProofStatus;
+  const proofWebUrlRef = useRef(proofWebUrl);
+  proofWebUrlRef.current = proofWebUrl;
+  const proofEmailUrlRef = useRef(proofEmailUrl);
+  proofEmailUrlRef.current = proofEmailUrl;
+  const lastPolledFailedProofRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if ((status !== 'APPLYING' && status !== 'QUEUED') || !applicationId) {
+    const shouldPollStatus = status === 'APPLYING' || status === 'QUEUED' || status === 'FAILED';
+    const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
+    if ((!shouldPollStatus && !shouldPollEmailProof) || !applicationId) {
       return;
     }
 
@@ -44,16 +57,34 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
       try {
         const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
         const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-        const url = `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`;
+        const url = `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}${jobUrl ? `?jobUrl=${encodeURIComponent(jobUrl)}` : ''}`;
         const res = await fetch(url, { headers });
         if (res.ok) {
           const appData = await res.json();
-          if (appData.status && appData.status !== statusRef.current) {
-            console.log(
-              `[StatusBadge] 🔄 Application ${applicationId} status updated: ${statusRef.current} -> ${appData.status}`
-            );
+          const nextEmailStatus =
+            appData.email_proof_status || appData.emailProofStatus || emailProofStatusRef.current;
+          const nextProofWeb = appData.proof_web_url || appData.proofWebUrl || null;
+          const nextProofEmail = appData.proof_email_url || appData.proofEmailUrl || null;
+          const nextProofFailed = appData.proof_failed_url || appData.proofFailedUrl || null;
+          const emailProofArrived = Boolean(nextProofEmail) && nextProofEmail !== proofEmailUrlRef.current;
+          const webProofArrived = Boolean(nextProofWeb) && nextProofWeb !== proofWebUrlRef.current;
+          const failedProofArrived =
+            Boolean(nextProofFailed) && nextProofFailed !== lastPolledFailedProofRef.current;
+          if (nextProofFailed) {
+            lastPolledFailedProofRef.current = nextProofFailed;
+          }
+          const emailStatusChanged =
+            nextEmailStatus && nextEmailStatus !== emailProofStatusRef.current;
+          const statusChanged = appData.status && appData.status !== statusRef.current;
+
+          if (statusChanged || emailStatusChanged || emailProofArrived || webProofArrived || failedProofArrived) {
+            if (statusChanged) {
+              console.log(
+                `[StatusBadge] 🔄 Application ${applicationId} status updated: ${statusRef.current} -> ${appData.status}`
+              );
+            }
             if (onStatusChange) {
-              onStatusChange(appData.status as ApplicationStatus, appData);
+              onStatusChange((appData.status || statusRef.current) as ApplicationStatus, appData);
             }
           }
         }
@@ -63,7 +94,7 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     }, 2000);
 
     return () => clearInterval(pollInterval);
-  }, [status, applicationId, onStatusChange, apiBaseUrl]);
+  }, [status, emailProofStatus, applicationId, jobUrl, onStatusChange, apiBaseUrl, proofWebUrl, proofEmailUrl]);
 
   switch (status) {
     case 'QUEUED':
@@ -119,14 +150,15 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         </span>
       );
 
+    case 'CAPTCHA_REQUIRED':
     case 'OTP_REQUIRED':
       return (
         <span
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono bg-[#F59E0B] text-[#451A03] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ring-2 ring-[#FBBF24] animate-pulse ${className}`}
-          title="Verification code required — enter OTP to complete submission"
+          title="Verification code or CAPTCHA required — complete challenge to proceed"
         >
           <span className="text-sm leading-none">🔐</span>
-          <span>OTP Required</span>
+          <span>{status === 'CAPTCHA_REQUIRED' ? 'CAPTCHA Required' : 'OTP Required'}</span>
         </span>
       );
 
@@ -153,10 +185,10 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
       return (
         <span
           className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F97316] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
-          title="Manual CAPTCHA challenge timed out after 5 minutes"
+          title="Session timed out after 5 minutes"
         >
           <span className="w-2 h-2 rounded-full bg-white"></span>
-          <span>CAPTCHA Timeout</span>
+          <span>Timeout</span>
         </span>
       );
 

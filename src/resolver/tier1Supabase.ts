@@ -26,7 +26,17 @@ function matchBestOption(targetValue: string, options?: string[]): string {
     }
   }
 
-  // 2. Substring match
+  // 2. Special dial code match if target is +1 or +91
+  if (/^\+?\d{1,3}$/.test(targetValue.trim())) {
+    const cleanDigits = targetValue.replace(/\D/g, '');
+    for (const opt of options) {
+      if (new RegExp(`(\\+|\\b)${cleanDigits}\\b`).test(opt)) {
+        return opt;
+      }
+    }
+  }
+
+  // 3. Substring match
   for (const opt of options) {
     const normOpt = normalizeText(opt);
     if (normOpt.includes(normTarget) || normTarget.includes(normOpt)) {
@@ -34,7 +44,7 @@ function matchBestOption(targetValue: string, options?: string[]): string {
     }
   }
 
-  // 3. Boolean heuristics (Yes/No / Agree)
+  // 4. Boolean heuristics (Yes/No / Agree)
   if (normTarget === 'yes' || normTarget === 'true' || normTarget === '1' || normTarget === 'agree') {
     const yesOpt = options.find((o) => /^(yes|agree|i agree|accept|i accept|true|i acknowledge)/i.test(o.trim()) || o.trim() === '1');
     if (yesOpt) return yesOpt;
@@ -44,7 +54,7 @@ function matchBestOption(targetValue: string, options?: string[]): string {
     if (noOpt) return noOpt;
   }
 
-  // 4. Fuzzy option match
+  // 5. Fuzzy option match
   const fuse = new Fuse(options, { threshold: 0.6 });
   const results = fuse.search(targetValue);
   if (results.length > 0) {
@@ -66,6 +76,7 @@ function resolveStandardProfileAttribute(
   const normId = normalizeText(field.fieldId);
   const combined = `${normLabel} ${normName} ${normId}`;
   const isYaswanth = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-YASWANTH';
+  const isAkshitha = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-31428' || (profile.client_name || '').toLowerCase().includes('akshitha');
 
   // Cover Letter - NEVER fill or upload cover letters per policy
   if (/cover\s*letter|cover_letter/i.test(combined)) {
@@ -85,11 +96,11 @@ function resolveStandardProfileAttribute(
     normName === 'phone_country_code' ||
     /phone.*country|country.*phone/i.test(combined)
   ) {
-    const targetCountry = isYaswanth ? 'India' : (profile.country || 'India');
+    const targetCountry = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'India'));
     if (field.options && field.options.length > 0) {
       const countryMatch = matchBestOption(targetCountry, field.options);
       if (countryMatch) return countryMatch;
-      const codeMatch = matchBestOption(isYaswanth ? '+91' : (profile.country_code || '+91'), field.options);
+      const codeMatch = matchBestOption(isYaswanth ? '+91' : (profile.country_code || (isAkshitha ? '+1' : '+91')), field.options);
       if (codeMatch) return codeMatch;
     }
     return targetCountry;
@@ -103,7 +114,7 @@ function resolveStandardProfileAttribute(
     normName === 'dialing_code' ||
     /calling.*code|dialing.*code/i.test(combined)
   ) {
-    const targetCode = isYaswanth ? '+91' : (profile.country_code || '+91');
+    const targetCode = isYaswanth ? '+91' : (profile.country_code || (isAkshitha ? '+1' : '+91'));
     if (field.options && field.options.length > 0) {
       const codeMatch = matchBestOption(targetCode, field.options);
       if (codeMatch) return codeMatch;
@@ -117,7 +128,7 @@ function resolveStandardProfileAttribute(
     normName === 'country' ||
     /^(candidate|current)?\s*country(\s*of\s*residence)?$/i.test(normLabel)
   ) {
-    const targetCountry = isYaswanth ? 'India' : (profile.country || 'India');
+    const targetCountry = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'India'));
     return matchBestOption(targetCountry, field.options);
   }
 
@@ -283,7 +294,7 @@ function resolveStandardProfileAttribute(
 
   // Country
   if (/\bcountry\b|\bnationality\b/i.test(combined)) {
-    const rawVal = isYaswanth ? 'India' : (profile.country || 'United States');
+    const rawVal = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'United States'));
     return matchBestOption(rawVal, field.options);
   }
 
@@ -332,12 +343,18 @@ export async function resolveTier1(
   profile?: ProfileRow | null
 ): Promise<ResolvedField | null> {
   const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
+  const isAkshitha = applywizzId.trim().toUpperCase() === 'AWL-31428' || applywizzId.trim().toLowerCase().includes('akshitha');
   // 1. Profile Column & Deterministic Policy Match (Ground Truth)
   const candidateProfile = profile || (await getProfile(applywizzId));
   if (candidateProfile && isYaswanth) {
     candidateProfile.country = 'India';
     candidateProfile.country_code = '+91';
     if (!candidateProfile.location) candidateProfile.location = 'Hyderabad, Telangana, India';
+  } else if (candidateProfile && isAkshitha) {
+    if (!candidateProfile.country) candidateProfile.country = 'United States of America';
+    if (!candidateProfile.country_code) candidateProfile.country_code = '+1';
+    if (!candidateProfile.phone) candidateProfile.phone = '940-222-8193';
+    if (!candidateProfile.location) candidateProfile.location = 'Dallas, Texas, United States';
   }
   if (candidateProfile) {
     const matchedVal = resolveStandardProfileAttribute(field, candidateProfile);
