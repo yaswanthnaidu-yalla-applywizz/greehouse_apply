@@ -579,7 +579,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     let workHistoryUnreachable = false;
     const isAdmin = isUserAdmin(normalizedEmail);
 
-    if (!isAdmin) {
+    if (!isAdmin && normalizedEmail) {
       const whResult = await fetchAllowedCandidates(normalizedEmail);
       allowedCandidateIds = whResult.candidateIds;
       workHistoryUnreachable = whResult.unreachable;
