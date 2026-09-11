@@ -33,14 +33,9 @@ function getWorkHistoryBaseUrl(): string {
  * Builds CA-scoped work-history URL: from=date, to=date, ca_email=signed-in email.
  */
 export function buildCaWorkHistoryUrl(caEmail: string, dateStr: string): string {
-  const normalizedEmail = caEmail.trim().toLowerCase();
+  const email = caEmail.trim().toLowerCase();
   const base = getWorkHistoryBaseUrl();
-  const params = new URLSearchParams({
-    from: dateStr,
-    to: dateStr,
-    ca_email: normalizedEmail,
-  });
-  return `${base}?${params.toString()}`;
+  return `${base}?from=${dateStr}&to=${dateStr}&ca_email=${email}`;
 }
 
 /**
@@ -216,8 +211,7 @@ export async function fetchWorkHistoryForAuthenticatedCa(
  */
 export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<WorkHistoryResult> {
   const base = getWorkHistoryBaseUrl();
-  const params = new URLSearchParams({ from: dateStr, to: dateStr });
-  const fullUrl = `${base}?${params.toString()}`;
+  const fullUrl = `${base}?from=${dateStr}&to=${dateStr}`;
 
   const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_ADMIN_FETCH_TIMEOUT_MS);
   if (!outcome.ok) {
