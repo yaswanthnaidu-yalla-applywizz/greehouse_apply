@@ -1118,6 +1118,7 @@ export async function enqueueApplication(
 
   cacheApplicationLocally(updatedApp);
   const resolvedId = updatedApp.id || applicationIdOrApplywizzId;
+  console.log(`[API] Submit clicked → status = QUEUED (ready for queue daemon)`);
   console.log(`[API] Status → QUEUED (application ${resolvedId}, submission_order=${nextOrder})`);
   if (process.env.ENABLE_QUEUE_WORKER !== 'true') {
     console.warn(

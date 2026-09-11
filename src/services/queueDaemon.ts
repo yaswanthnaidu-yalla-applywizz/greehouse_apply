@@ -128,17 +128,25 @@ export class QueueDaemon {
         return;
       }
 
-      const result = await runLiveSubmit(application.id || application.applywizz_id, {
+      const appId = application.id || application.applywizz_id;
+      await updateStatus(appId, 'APPLYING', {
+        job_url: application.job_url,
+      });
+      console.log(`[Submitter] Worker ${workerId} submitting app-${appId} → status=APPLYING`);
+      console.log(`[API] Status → APPLYING (application ${appId}, submitter executing)`);
+
+      const result = await runLiveSubmit(appId, {
         headless: true,
         jobUrl: application.job_url,
       });
 
       if (result.status === 'APPLIED') {
-        await updateStatus(application.id || application.applywizz_id, 'APPLIED', {
+        await updateStatus(appId, 'APPLIED', {
           proof_web_url: result.proofWebUrl || null,
           proof_captured_at: result.proofCapturedAt || null,
           job_url: application.job_url,
         });
+        console.log(`[API] Status → APPLIED (application ${appId})`);
       } else if (result.status === 'FAILED') {
         await updateStatus(application.id || application.applywizz_id, 'FAILED', {
           proof_failed_url: result.proofFailedUrl || null,

@@ -108,6 +108,16 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
 
   switch (status) {
     case 'QUEUED':
+      return (
+        <span
+          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
+          title="Application queued for submission daemon"
+        >
+          <span className="w-2 h-2 rounded-full border-2 border-[#9A3412] border-t-transparent animate-spin"></span>
+          <span>Queued</span>
+        </span>
+      );
+
     case 'CAPTCHA_REQUIRED':
     case 'OTP_REQUIRED':
     case 'APPLYING':

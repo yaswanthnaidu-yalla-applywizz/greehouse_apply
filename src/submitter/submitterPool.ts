@@ -128,12 +128,20 @@ export class SubmitterPool {
       const { application } = work;
       const applicationId = application.id || application.applywizz_id;
       try {
+        await updateStatus(applicationId, 'APPLYING', {
+          job_url: application.job_url,
+        });
+        console.log(`[Submitter] Worker ${workerNumber} submitting app-${applicationId} → status=APPLYING`);
+        console.log(`[API] Status → APPLYING (application ${applicationId}, submitter executing)`);
+
         const result = await runLiveSubmit(applicationId, {
           headless: true,
           jobUrl: application.job_url,
         });
         work.resolve(result);
-        if (result.status === 'FAILED') {
+        if (result.status === 'APPLIED') {
+          console.log(`[API] Status → APPLIED (application ${applicationId})`);
+        } else if (result.status === 'FAILED') {
           this.emitFailure(application, result.errorMessage || 'Submission execution failed.', result);
         }
       } catch (error) {
