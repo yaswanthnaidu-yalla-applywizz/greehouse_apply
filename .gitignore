@@ -12,7 +12,16 @@ AGENTS.md
 agents.md
 CODEBASE_ANALYSIS.md
 codebase_analysis.md
+handover.md
+context.md
 *.plan.md
+
+# Planning, capacity scratch & deployment notes (not product docs)
+CAPACITY_*.md
+capacity_and_timing_math.md
+round_robin_queue_scheduler.md
+docs/capacity_deployment_report.md
+docs/railway_5_service_roadmap.md
 
 # Privacy, Sensitive Data & Project Specs
 project docs/
