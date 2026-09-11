@@ -15,12 +15,14 @@ import type { ResolvedField } from '../types.js';
 export interface EditableFormFieldProps {
   field: ResolvedField;
   applicationId: string;
+  jobUrl?: string;
   onFieldUpdate?: (updatedField: ResolvedField) => void;
 }
 
 export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   field,
   applicationId,
+  jobUrl,
   onFieldUpdate,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -73,7 +75,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
         {
           method: 'PATCH',
           headers,
-          body: JSON.stringify({ value }),
+          body: JSON.stringify({ value, jobUrl }),
         }
       );
 

@@ -16,11 +16,13 @@ import {
 } from '../db/storage.js';
 import {
   attachProofToApplication,
+  attachFailedProofToApplication,
   attachEmailProofToApplication,
   updateEmailProofStatus,
   getApplication,
   type ApplicationRow,
 } from '../db/applications.js';
+import { isApplicationUuid } from '../db/storage.js';
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
 import { zohoReader } from '../services/zohoReader.js';
 
@@ -37,7 +39,13 @@ function resolveStorageKey(application: ApplicationRow | string): string {
   if (typeof application === 'string') {
     return application;
   }
-  return application.id || application.applywizz_id;
+  if (application.id && isApplicationUuid(application.id)) {
+    return application.id;
+  }
+  if (application.id) {
+    return application.id;
+  }
+  return application.applywizz_id;
 }
 
 function resolveApplicationRef(
@@ -82,13 +90,15 @@ export async function captureWebProof(
   const proofWebUrl = await uploadProof(storageKey, screenshotBuffer);
   const appRef = resolveApplicationRef(application, jobUrl);
 
-  try {
-    await attachProofToApplication(appRef, proofWebUrl, capturedAt);
+  const attached = await attachProofToApplication(appRef, proofWebUrl, capturedAt);
+  if (attached) {
     console.log(
       `[Proof Capture] 📸 Proof screenshot saved for application ${storageKey}: ${proofWebUrl}`
     );
-  } catch (err: any) {
-    console.warn(`[Proof Capture] ⚠️ Could not update DB record with proof URL: ${err.message}`);
+  } else {
+    console.warn(
+      `[Proof Capture] ⚠️ Could not update DB record with proof URL: upload succeeded for ${storageKey} but DB attach failed`
+    );
   }
 
   return {
@@ -108,16 +118,37 @@ export async function captureWebProof(
  * @param page - Active Playwright page
  * @param application - Application record or ID string
  */
+export interface FailedProofCaptureResult {
+  proofFailedUrl: string;
+  proofFailedCapturedAt: string;
+  capturedAt: string;
+  url: string;
+  proofUrl: string;
+}
+
 export async function captureFailedScreenshot(
   page: Page,
-  application: ApplicationRow | string
-): Promise<{ proofFailedUrl: string; capturedAt: string; url: string; proofUrl: string }> {
+  application: ApplicationRow | string,
+  jobUrl?: string
+): Promise<FailedProofCaptureResult> {
   const capturedAt = new Date().toISOString();
-  const storageKey = resolveStorageKey(application);
+
+  let resolvedApp: ApplicationRow | null = null;
+  if (typeof application === 'object') {
+    resolvedApp = application;
+  } else if (typeof application === 'string') {
+    resolvedApp = await getApplication(application, jobUrl).catch(() => null);
+  }
+
+  const storageKey = resolvedApp ? resolveStorageKey(resolvedApp) : resolveStorageKey(application);
+  const appRef = resolvedApp
+    ? resolveApplicationRef(resolvedApp)
+    : resolveApplicationRef(application, jobUrl);
 
   if (page.isClosed()) {
     return {
       proofFailedUrl: '',
+      proofFailedCapturedAt: capturedAt,
       capturedAt,
       url: '',
       proofUrl: '',
@@ -136,6 +167,7 @@ export async function captureFailedScreenshot(
   if (!screenshotBuffer) {
     return {
       proofFailedUrl: '',
+      proofFailedCapturedAt: capturedAt,
       capturedAt,
       url: '',
       proofUrl: '',
@@ -143,12 +175,20 @@ export async function captureFailedScreenshot(
   }
 
   const proofFailedUrl = await uploadFailedScreenshot(storageKey, screenshotBuffer);
-  console.log(
-    `[Proof Capture] 📸 Failure screenshot saved for application ${storageKey}: ${proofFailedUrl}`
-  );
+  const attached = await attachFailedProofToApplication(appRef, proofFailedUrl, capturedAt);
+  if (attached) {
+    console.log(
+      `[Proof Capture] 📸 Failure screenshot saved for application ${storageKey}: ${proofFailedUrl}`
+    );
+  } else {
+    console.warn(
+      `[Proof Capture] ⚠️ Could not update DB record with failure proof URL: upload succeeded for ${storageKey} but DB attach failed`
+    );
+  }
 
   return {
     proofFailedUrl,
+    proofFailedCapturedAt: capturedAt,
     capturedAt,
     url: proofFailedUrl,
     proofUrl: proofFailedUrl,
@@ -329,15 +369,16 @@ export async function captureAndSaveEmailProof(
       const capturedAt = new Date().toISOString();
       const emailProofUrl = await uploadEmailProof(storageKey, result.screenshotBuffer);
 
-      await attachEmailProofToApplication(
-        appRef,
-        emailProofUrl,
-        capturedAt
-      );
-
-      console.log(
-        `[Email Proof] 📧 Successfully captured and uploaded email proof for ${storageKey}: ${emailProofUrl}`
-      );
+      const attached = await attachEmailProofToApplication(appRef, emailProofUrl, capturedAt);
+      if (attached) {
+        console.log(
+          `[Email Proof] 📧 Successfully captured and uploaded email proof for ${storageKey}: ${emailProofUrl}`
+        );
+      } else {
+        console.warn(
+          `[Email Proof] ⚠️ Could not update DB record with email proof URL: upload succeeded for ${storageKey} but DB attach failed`
+        );
+      }
       return emailProofUrl;
     } else {
       console.warn(

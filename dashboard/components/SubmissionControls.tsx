@@ -24,6 +24,7 @@ export interface SubmissionControlsProps {
   proofEmailUrl?: string | null;
   emailProofStatus?: 'pending' | 'captured' | 'timed_out' | null;
   dryRunScreenshotUrl?: string | null;
+  proofFailedUrl?: string | null;
   isSubmitting?: boolean;
   isDryRunning?: boolean;
   apiBaseUrl?: string;
@@ -34,6 +35,7 @@ export interface SubmissionControlsProps {
   onViewProof?: () => void;
   onViewEmailProof?: () => void;
   onViewDryRun?: () => void;
+  onViewFailureScreenshot?: () => void;
 }
 
 const getAuthHeaders = (): Record<string, string> => {
@@ -50,6 +52,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   proofEmailUrl,
   emailProofStatus,
   dryRunScreenshotUrl,
+  proofFailedUrl,
   isSubmitting = false,
   isDryRunning = false,
   apiBaseUrl = '',
@@ -60,6 +63,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   onViewProof,
   onViewEmailProof,
   onViewDryRun,
+  onViewFailureScreenshot,
 }) => {
   const [applicationStatus, setApplicationStatus] = useState<ApplicationStatus | string>(status);
   const [otpValue, setOtpValue] = useState('');
@@ -85,27 +89,56 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
     }
   }, [proofWebUrl]);
 
+  useEffect(() => {
+    if (proofEmailUrl) {
+      setEmailProof(proofEmailUrl);
+    }
+  }, [proofEmailUrl]);
+
   const hasUnresolved = unresolvedFieldsCount > 0;
   const isApplying = applicationStatus === 'APPLYING' || isSubmitting;
   const isApplied = applicationStatus === 'APPLIED';
+  const isFailed = applicationStatus === 'FAILED';
   const isOtp = applicationStatus === 'OTP_REQUIRED';
+  const hasProofActions =
+    Boolean(dryRunScreenshotUrl) ||
+    Boolean(proofUrl || proofWebUrl || isApplied) ||
+    Boolean(emailProof || proofEmailUrl) ||
+    Boolean((proofUrl || proofWebUrl) && !(emailProof || proofEmailUrl)) ||
+    Boolean(isFailed && proofFailedUrl);
 
   const pollStatusUpdate = async () => {
     try {
+      const pollUrl = `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}${jobUrl ? `?jobUrl=${encodeURIComponent(jobUrl)}` : ''}`;
       const res = await fetch(
-        `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}`,
+        pollUrl,
         { headers: getAuthHeaders() }
       );
       if (res.ok) {
         const appData = await res.json();
-        if (appData.status && onStatusChange) {
-          onStatusChange(appData.status as ApplicationStatus, appData);
+        const resolvedEmail =
+          appData.proofEmailUrl || appData.proof_email_url || null;
+        if (resolvedEmail) {
+          setEmailProof(resolvedEmail);
+        }
+        if (onStatusChange) {
+          onStatusChange((appData.status || applicationStatus) as ApplicationStatus, appData);
         }
       }
     } catch (err) {
       console.warn(`[SubmissionControls] Status poll error for ${applicationId}:`, err);
     }
   };
+
+  useEffect(() => {
+    if (applicationStatus !== 'APPLIED' || emailProofStatus !== 'pending' || !applicationId) {
+      return;
+    }
+    const pollInterval = setInterval(() => {
+      pollStatusUpdate();
+    }, 3000);
+    return () => clearInterval(pollInterval);
+  }, [applicationStatus, emailProofStatus, applicationId, jobUrl, apiBaseUrl]);
 
   const handleVerifyOtp = async () => {
     const cleanOtp = otpValue.trim();
@@ -407,6 +440,11 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
         )}
       </button>
 
+      {hasProofActions && (
+        <div className="flex flex-wrap items-center justify-end gap-1.5 w-full pt-0.5">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] font-mono w-full text-right">
+            Proofs
+          </span>
       {/* View Dry Run Screenshot Button */}
       {dryRunScreenshotUrl && onViewDryRun && (
         <button
@@ -477,6 +515,19 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
           <span>📧</span>
           <span>View Email Proof</span>
         </button>
+      )}
+
+      {isFailed && proofFailedUrl && onViewFailureScreenshot && (
+        <button
+          type="button"
+          onClick={onViewFailureScreenshot}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#7F1D1D] bg-[#FECACA] hover:bg-[#FCA5A5] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
+        >
+          <span>🛑</span>
+          <span>View Failure Screenshot</span>
+        </button>
+      )}
+        </div>
       )}
       </div>
     </>

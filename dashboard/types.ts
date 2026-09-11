@@ -98,6 +98,10 @@ export interface ApplicationDetail {
   proofWebUrl?: string | null;
   proof_captured_at?: string | null;
   proofCapturedAt?: string | null;
+  proof_failed_url?: string | null;
+  proofFailedUrl?: string | null;
+  proof_failed_captured_at?: string | null;
+  proofFailedCapturedAt?: string | null;
   proof_email_url?: string | null;
   proofEmailUrl?: string | null;
   proof_email_captured_at?: string | null;

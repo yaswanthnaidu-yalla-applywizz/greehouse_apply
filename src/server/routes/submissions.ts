@@ -23,7 +23,17 @@ import {
 import { verifySubmissionSignals, registerSubmissionSession } from '../../submitter/captchaResume.js';
 import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } from '../../submitter/proofCapture.js';
 import { fillForm } from '../../submitter/formFiller.js';
-import { getApplication, updateStatus, enqueueApplication } from '../../db/applications.js';
+import { getApplication, updateStatus, enqueueApplication, hydrateApplicationProofUrls } from '../../db/applications.js';
+import {
+  getSignedProofUrl,
+  PROOFS_BUCKET,
+  PROOFS_FAILED_BUCKET,
+  PROOFS_MAIL_BUCKET,
+  webProofStoragePath,
+  failedProofStoragePath,
+  emailProofStoragePath,
+  isApplicationUuid,
+} from '../../db/storage.js';
 
 export const submissionsRouter = Router();
 
@@ -166,6 +176,8 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       const failReason = result.errorMessage || 'Submission failed.';
       await updateStatus(appId, (result.status as any) || 'FAILED', {
         error_message: failReason,
+        proof_failed_url: result.proofFailedUrl,
+        proof_failed_captured_at: result.proofFailedCapturedAt,
         job_url: req.body?.jobUrl,
       }).catch(() => {});
 
@@ -174,6 +186,8 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         status: result.status,
         applicationId: result.applicationId,
         error: failReason,
+        proofFailedUrl: result.proofFailedUrl,
+        proofFailedCapturedAt: result.proofFailedCapturedAt,
         summary: result.summary,
       });
     }
@@ -350,6 +364,8 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
     const otpFailReason = result.errorMessage || 'OTP submission failed.';
     await updateStatus(appId, 'FAILED', {
       error_message: otpFailReason,
+      proof_failed_url: result.proofFailedUrl,
+      proof_failed_captured_at: result.proofFailedCapturedAt,
       job_url: req.body?.jobUrl,
     }).catch(() => {});
 
@@ -357,6 +373,8 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
       status: 'FAILED',
       applicationId: result.applicationId,
       error: otpFailReason,
+      proofFailedUrl: result.proofFailedUrl,
+      proofFailedCapturedAt: result.proofFailedCapturedAt,
     });
   } catch (err: any) {
     console.error(`[Submissions Router] ❌ Submit OTP route error for ${appId}:`, err);
@@ -433,11 +451,17 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
 
     if (!submitClicked) {
       const errorMsg = 'Submit button not found or not visible on resumed page.';
+      let failedProof: any = null;
       if (page && !page.isClosed()) {
-        await captureFailedScreenshot(page, application || sessionKey).catch(() => {});
+        failedProof = await captureFailedScreenshot(page, application || sessionKey).catch(() => null);
       }
       if (application.id) {
-        await updateStatus(application.id, 'FAILED', errorMsg);
+        await updateStatus(application.id, 'FAILED', {
+          error_message: errorMsg,
+          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+          job_url: application.job_url,
+        });
       }
       await closePausedSession(sessionKey);
       res.status(500).json({
@@ -445,6 +469,8 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
         status: 'FAILED',
         applicationId: sessionKey,
         error: errorMsg,
+        proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+        proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
       });
       return;
     }
@@ -476,12 +502,18 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
       verification.error || 'Submission confirmation signals not detected within 30 seconds.';
     console.warn(`[Submissions Router] ❌ Verification failed: ${errorMsg}`);
 
+    let failedProof: any = null;
     if (page && !page.isClosed()) {
-      await captureFailedScreenshot(page, application || sessionKey).catch(() => {});
+      failedProof = await captureFailedScreenshot(page, application || sessionKey).catch(() => null);
     }
 
     if (application.id) {
-      await updateStatus(application.id, 'FAILED', errorMsg);
+      await updateStatus(application.id, 'FAILED', {
+        error_message: errorMsg,
+        proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+        proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+        job_url: application.job_url,
+      });
     }
 
     await closePausedSession(sessionKey);
@@ -491,21 +523,29 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
       status: 'FAILED',
       applicationId: sessionKey,
       error: errorMsg,
+      proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+      proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
     });
   } catch (err: any) {
     console.error(`[Submissions Router] ❌ Resume route error for ${appId}:`, err);
 
+    let errProof: any = null;
     try {
       const resolved = resolvePausedSession(appId);
       if (resolved?.session?.page && !resolved.session.page.isClosed()) {
-        await captureFailedScreenshot(resolved.session.page, appId).catch(() => {});
+        errProof = await captureFailedScreenshot(resolved.session.page, appId).catch(() => null);
       }
     } catch {}
 
     try {
       const application = await getApplication(appId, req.body?.jobUrl);
       if (application?.id) {
-        await updateStatus(application.id, 'FAILED', err.message);
+        await updateStatus(application.id, 'FAILED', {
+          error_message: err.message,
+          proof_failed_url: errProof?.proofFailedUrl || errProof?.url,
+          proof_failed_captured_at: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
+          job_url: application.job_url,
+        });
       }
     } catch {}
 
@@ -513,7 +553,10 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
 
     res.status(500).json({
       success: false,
+      status: 'FAILED',
       error: err.message,
+      proofFailedUrl: errProof?.proofFailedUrl || errProof?.url,
+      proofFailedCapturedAt: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
     });
   }
 });
@@ -592,6 +635,63 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
 });
 
 /**
+ * GET /api/applications/:id/proof-url?kind=web|failed|email
+ * Returns a fresh signed URL for a private proof object (for dashboard <img> tags).
+ */
+submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Promise<void> => {
+  const rawId = req.params.id;
+  const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+  const jobUrl =
+    (typeof req.query.jobUrl === 'string' ? req.query.jobUrl : '') ||
+    (typeof req.query.job_url === 'string' ? req.query.job_url : '');
+  const kind = String(req.query.kind || 'web').toLowerCase();
+
+  try {
+    const app = await getApplication(appId, jobUrl);
+    if (!app) {
+      res.status(404).json({ error: `Application '${appId}' not found.` });
+      return;
+    }
+
+    const storageKey = app.id && isApplicationUuid(app.id) ? app.id : null;
+    if (!storageKey) {
+      res.status(400).json({ error: 'Application record has no UUID; cannot resolve storage proof path.' });
+      return;
+    }
+
+    let bucket = PROOFS_BUCKET;
+    let objectPath = webProofStoragePath(storageKey);
+    if (kind === 'failed') {
+      bucket = PROOFS_FAILED_BUCKET;
+      objectPath = failedProofStoragePath(storageKey);
+    } else if (kind === 'email' || kind === 'mail') {
+      bucket = PROOFS_MAIL_BUCKET;
+      objectPath = emailProofStoragePath(storageKey);
+    } else if (kind !== 'web') {
+      res.status(400).json({ error: `Invalid kind '${kind}'. Use web, failed, or email.` });
+      return;
+    }
+
+    const expiresIn = 86400;
+    const signedUrl = await getSignedProofUrl(bucket, objectPath, expiresIn);
+    if (!signedUrl) {
+      res.status(404).json({ error: `No signed URL available for ${kind} proof.` });
+      return;
+    }
+
+    res.status(200).json({
+      kind: kind === 'mail' ? 'email' : kind,
+      url: signedUrl,
+      expiresIn,
+      applicationId: app.id,
+    });
+  } catch (err: any) {
+    console.error(`[Submissions Router] ❌ proof-url error for ${appId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /api/applications/:id/proof
  * Retrieves proof screenshot URL and capture metadata for an application.
  */
@@ -600,11 +700,13 @@ submissionsRouter.get('/:id/proof', async (req: Request, res: Response): Promise
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
 
   try {
-    const app = await getApplication(appId);
+    let app = await getApplication(appId);
     if (!app) {
       res.status(404).json({ error: `Application '${appId}' not found.` });
       return;
     }
+
+    app = await hydrateApplicationProofUrls(app);
 
     if (!app.proof_web_url) {
       res.status(404).json({

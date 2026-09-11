@@ -701,6 +701,86 @@ export async function fillSingleField(
           if (isEmailField) {
             console.log(`[Form Filler] 📧 Email field filled with company email: ${val} (source: company_email)`);
           }
+
+          const isPhoneField =
+            fieldId === 'phone' ||
+            name === 'phone' ||
+            /phone|mobile/i.test(label) ||
+            /phone|mobile/i.test(name) ||
+            /phone|mobile/i.test(fieldId);
+          if (isPhoneField) {
+            try {
+              const cleanApplywizzId = (applywizzId || '').trim().toUpperCase();
+              const isAkshitha = cleanApplywizzId === 'AWL-31428' || cleanApplywizzId.includes('AKSHITHA');
+              const isYaswanth = cleanApplywizzId === 'AWL-YASWANTH';
+
+              const candProfile = applywizzId ? await getProfile(applywizzId) : null;
+              const isUs = isAkshitha || candProfile?.country_code === '+1' || /united states|usa/i.test(candProfile?.country || '');
+              const isIndia = !isUs && (isYaswanth || candProfile?.country_code === '+91' || /india/i.test(candProfile?.country || ''));
+
+              if (isUs || isIndia) {
+                const targetCountryCode = isUs ? 'us' : 'in';
+
+                // 1. Try intl-tel-input JavaScript instance
+                await found.locator.evaluate((el: HTMLInputElement, code: string) => {
+                  try {
+                    const iti = (window as any).intlTelInputGlobals?.getInstance?.(el) || (el as any).iti;
+                    if (iti && typeof iti.setCountry === 'function') {
+                      iti.setCountry(code);
+                      return true;
+                    }
+                    if (typeof (window as any).$ !== 'undefined') {
+                      const $ = (window as any).$;
+                      if (typeof $(el).intlTelInput === 'function') {
+                        $(el).intlTelInput('setCountry', code);
+                        return true;
+                      }
+                    }
+                  } catch {}
+                  return false;
+                }, targetCountryCode).catch(() => {});
+
+                // 2. Try UI dropdown interaction if flag/country is visible
+                const itiContainer = found.locator.locator('xpath=ancestor::*[contains(@class, "iti")][1]');
+                const flagBtn = (await itiContainer.count()) > 0
+                  ? itiContainer.locator('.iti__selected-country, .iti__selected-flag, .iti__flag-container [role="combobox"]').first()
+                  : page.locator('.iti__selected-country, .iti__selected-flag, .iti__flag-container [role="combobox"]').first();
+
+                if ((await flagBtn.count()) > 0 && (await flagBtn.isVisible())) {
+                  const titleText = (await flagBtn.getAttribute('title').catch(() => '')) || '';
+                  const ariaLabel = (await flagBtn.getAttribute('aria-label').catch(() => '')) || '';
+                  const btnText = (await flagBtn.innerText().catch(() => '')) || '';
+                  const combinedStatus = `${titleText} ${ariaLabel} ${btnText}`.toLowerCase();
+
+                  const alreadyMatches = isUs
+                    ? (combinedStatus.includes('united states') || combinedStatus.includes('+1'))
+                    : (combinedStatus.includes('india') || combinedStatus.includes('+91'));
+
+                  if (!alreadyMatches) {
+                    console.log(`[Form Filler] 📞 Setting intl-tel-input country to ${isUs ? 'United States (+1)' : 'India (+91)'}`);
+                    await flagBtn.click({ timeout: 2000 }).catch(() => {});
+                    await page.waitForTimeout(200);
+
+                    const countryItem = page.locator(
+                      `li.iti__country[data-country-code="${targetCountryCode}"], ` +
+                      `li.iti__country[data-dial-code="${isUs ? '1' : '91'}"], ` +
+                      `li.iti__country:has-text("${isUs ? 'United States' : 'India'}")`
+                    ).first();
+
+                    if ((await countryItem.count()) > 0) {
+                      await countryItem.scrollIntoViewIfNeeded().catch(() => {});
+                      await countryItem.click({ timeout: 2000 }).catch(() => {});
+                      await page.waitForTimeout(200);
+                    } else {
+                      await page.keyboard.press('Escape').catch(() => {});
+                    }
+                  }
+                }
+              }
+            } catch (itiErr: any) {
+              console.warn(`[Form Filler] ⚠️ intl-tel-input notice: ${itiErr.message}`);
+            }
+          }
         }
       } else {
         throw new Error(`Text or dropdown element not found for ${name} (${label})`);
@@ -937,6 +1017,32 @@ export async function fillForm(
               type: 'text',
               label: 'Email',
               valuePopulated: compEmail,
+              success: true,
+            });
+          }
+        }
+      }
+
+      // 4d. Check Phone
+      const phoneLoc = page.locator('#phone, input#phone, input[name="phone"], input[name="job_application[phone]"], input[type="tel"]').first();
+      if ((await phoneLoc.count()) > 0 && (await phoneLoc.isVisible())) {
+        const currentVal = await phoneLoc.inputValue().catch(() => '');
+        if (!currentVal || currentVal.trim() === '') {
+          let phoneVal = profile?.phone || '';
+          if (phoneVal) {
+            phoneVal = phoneVal.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
+            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty Phone with "${phoneVal}"`);
+            await phoneLoc.fill(phoneVal);
+            await phoneLoc.evaluate((el: HTMLInputElement) => {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }).catch(() => {});
+            results.push({
+              fieldId: 'phone',
+              name: 'phone',
+              type: 'text',
+              label: 'Phone',
+              valuePopulated: phoneVal,
               success: true,
             });
           }

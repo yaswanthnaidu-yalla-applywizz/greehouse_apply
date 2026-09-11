@@ -6,7 +6,7 @@
  */
 
 import type { Browser, BrowserContext, Page } from 'playwright';
-import { captureWebProof } from './proofCapture.js';
+import { captureWebProof, captureFailedScreenshot } from './proofCapture.js';
 import { updateStatus, getApplication, type ApplicationRow } from '../db/applications.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 
@@ -139,11 +139,26 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
         proofCapturedAt: proofResult.proofCapturedAt,
       };
     } else {
-      const errorMsg = verification.error || 'Submission confirmation signals not detected within 30 seconds.';
-      console.warn(`[Captcha Resume] ❌ Verification failed: ${errorMsg}`);
+      const isTimeout = /time.*out/i.test(verification.error || '');
+      const errorMsg = verification.error || 'Timeout: Submission verification timed out.';
+      if (isTimeout) {
+        console.warn(`[Captcha Resume] ⏱️ Timeout: ${errorMsg}`);
+      } else {
+        console.warn(`[Captcha Resume] ❌ Verification failed: ${errorMsg}`);
+      }
+
+      let failedProof: any = null;
+      if (page && !page.isClosed()) {
+        failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+      }
 
       if (application.id) {
-        await updateStatus(application.id, 'FAILED', errorMsg);
+        await updateStatus(application.id, 'FAILED', {
+          error_message: errorMsg,
+          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+          job_url: application.job_url,
+        });
       }
 
       await closeSubmissionSession(applicationId);
@@ -153,12 +168,25 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
         status: 'FAILED',
         applicationId,
         errorMessage: errorMsg,
+        proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+        proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
       };
     }
   } catch (err: any) {
     console.error(`[Captcha Resume] ❌ Error during submission resumption:`, err);
+
+    let errProof: any = null;
+    if (page && !page.isClosed()) {
+      errProof = await captureFailedScreenshot(page, application).catch(() => null);
+    }
+
     if (application.id) {
-      await updateStatus(application.id, 'FAILED', err.message);
+      await updateStatus(application.id, 'FAILED', {
+        error_message: err.message,
+        proof_failed_url: errProof?.proofFailedUrl || errProof?.url,
+        proof_failed_captured_at: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
+        job_url: application.job_url,
+      });
     }
     await closeSubmissionSession(applicationId);
 
@@ -167,6 +195,8 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       status: 'FAILED',
       applicationId,
       errorMessage: err.message,
+      proofFailedUrl: errProof?.proofFailedUrl || errProof?.url,
+      proofFailedCapturedAt: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
     };
   }
 }
@@ -221,13 +251,28 @@ export async function verifySubmissionSignals(
       }
 
       // 4. Check for inline validation or server errors
-      const errorCount = await page.locator('.field-error, .errors, .error-message, .flash-error').count().catch(() => 0);
-      if (errorCount > 0) {
-        const errorText = await page.locator('.field-error, .errors, .error-message, .flash-error').first().innerText().catch(() => '');
-        if (errorText && errorText.trim().length > 0) {
-          // If error persisted after 3 seconds, fail fast
-          if (Date.now() - startTime > 3000) {
-            return { verified: false, error: `Form validation error: ${errorText.trim()}` };
+      const errorSelectors = [
+        '.field-error',
+        '.field_error',
+        '.field-with-errors',
+        '.errors',
+        '.error-message',
+        '.flash-error',
+        '.validation-error',
+        '[aria-invalid="true"]',
+      ];
+      for (const sel of errorSelectors) {
+        const loc = page.locator(sel);
+        const count = await loc.count().catch(() => 0);
+        if (count > 0) {
+          const firstEl = loc.first();
+          if (await firstEl.isVisible().catch(() => false)) {
+            const errorText = await firstEl.innerText().catch(() => '');
+            if (errorText && errorText.trim().length > 0) {
+              if (Date.now() - startTime > 3000) {
+                return { verified: false, error: `Form filling error: ${errorText.trim()}` };
+              }
+            }
           }
         }
       }
@@ -238,5 +283,5 @@ export async function verifySubmissionSignals(
     }
   }
 
-  return { verified: false, error: `Confirmation signals not detected after ${timeoutMs / 1000}s timeout.` };
+  return { verified: false, error: `Timeout: Submission verification timed out after ${timeoutMs / 1000}s.` };
 }

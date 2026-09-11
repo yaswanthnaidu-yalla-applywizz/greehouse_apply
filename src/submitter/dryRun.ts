@@ -147,12 +147,13 @@ export async function runDryRun(
     }
 
     // 7. Update application state in Supabase
-    if (application.id) {
+    const targetAppId = application.id || application.applywizz_id;
+    if (targetAppId) {
       try {
         if (screenshotUrl) {
-          await setDryRunScreenshotUrl(application.id, screenshotUrl);
+          await setDryRunScreenshotUrl(application, screenshotUrl);
         }
-        await updateStatus(application.id, 'DRY_RUN_COMPLETE');
+        await updateStatus(targetAppId, 'DRY_RUN_COMPLETE', { job_url: application.job_url });
       } catch (dbErr: any) {
         console.warn(`[Dry Run] ⚠️ Could not update DB status: ${dbErr.message}`);
       }
