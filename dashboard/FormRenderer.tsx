@@ -386,6 +386,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               href={application.jobUrl || application.job_url}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => {
+                console.log(
+                  `[Dashboard] Job link clicked: navigating to ${jobUrl}; submit handler not invoked`
+                );
+              }}
               className="text-[11px] md:text-xs text-[#2563EB] hover:underline font-mono truncate max-w-md block mt-0.5 font-medium"
             >
               {application.jobUrl || application.job_url}

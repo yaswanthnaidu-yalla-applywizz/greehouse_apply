@@ -129,8 +129,10 @@ const envSchema = z.object({
   /** ApplyWizz CA Management authorized emails API endpoint */
   AUTHORIZED_EMAILS_API: z.string().default('https://applywizz-ca-management.vercel.app/api/ca/emails'),
 
-  /** ApplyWizz CA Management work-history API endpoint */
-  WORK_HISTORY_API_URL: z.string().default('https://applywizz-ca-management.vercel.app/api/ca/work-history'),
+  /** ApplyWizz CA Management work-history API endpoint (must include /api/ca/work-history) */
+  WORK_HISTORY_API_URL: z
+    .string()
+    .default('https://applywizz-ca-management.vercel.app/api/ca/work-history'),
 
   /** Additional comma-separated list of emails permitted to sign up */
   ALLOWED_SIGNUP_EMAILS: z.string().default('yaswanthnaiduyalla@applywizz.ai'),

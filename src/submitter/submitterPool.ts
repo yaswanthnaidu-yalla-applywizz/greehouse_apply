@@ -84,13 +84,21 @@ export class SubmitterPool {
     while (this.isRunning) {
       try {
         const waitingCount = await countApplicationsByStatus('QUEUED');
+        const applyingCount = await countApplicationsByStatus('APPLYING');
         if (waitingCount > 0) {
           console.log(
-            `[Queue] Fetched ${waitingCount} applications waiting for submission (status=QUEUED)`
+            `[Queue] Fetched ${waitingCount} applications with status=QUEUED → assigning to workers`
+          );
+        }
+        if (applyingCount > 0 && waitingCount === 0) {
+          console.warn(
+            `[Queue] ${applyingCount} application(s) with status=APPLYING and 0 QUEUED — workers only dequeue QUEUED (stuck APPLYING will not be reassigned)`
           );
         }
         const application = await getNextQueuedApplicationForRoundRobin();
         if (application) {
+          const appRef = application.id || application.applywizz_id;
+          console.log(`[Queue] Dequeued app-${appRef} for submitter pool`);
           void this.enqueue(application).catch((error: Error) => {
             console.error(`[Submitter] Queue assignment failed: ${error.message}`);
           });
@@ -98,7 +106,7 @@ export class SubmitterPool {
         }
         if (waitingCount > 0) {
           console.warn(
-            `[Queue] ${waitingCount} QUEUED application(s) found but none were assigned — check Supabase RPC get_next_queued_application or row locks`
+            `[Queue] ${waitingCount} application(s) with status=QUEUED but none dequeued — check Supabase RPC get_next_queued_application or row locks`
           );
         }
       } catch (error) {
