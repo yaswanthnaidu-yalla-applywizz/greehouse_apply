@@ -73,7 +73,7 @@ export function parseCliArgs(args: string[]): CliOptions {
       options.outputDir = arg.split('=')[1].trim();
     } else if (arg.startsWith('--port=') || arg.startsWith('-p=')) {
       options.port = parseInt(arg.split('=')[1].trim(), 10) || config.PORT;
-    } else if (arg.startsWith('--candidate=') || arg.startsWith('--candidateId=') || arg.startsWith('--applywizzId=') || arg.startsWith('-c=')) {
+    } else if (arg.startsWith('--candidate=') || arg.startsWith('--candidateId=') || arg.startsWith('--applywizzId=') || arg.startsWith('--applywizz_id=') || arg.startsWith('-c=')) {
       options.candidateId = arg.split('=')[1].trim();
     } else if (arg === '--candidate' || arg === '--candidateId' || arg === '--applywizzId' || arg === '-c') {
       if (i + 1 < args.length) {

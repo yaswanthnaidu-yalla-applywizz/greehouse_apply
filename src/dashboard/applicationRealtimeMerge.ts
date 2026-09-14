@@ -2,6 +2,8 @@
  * @fileoverview Maps Supabase Realtime `candidate_applications` rows into dashboard application state.
  */
 
+import { isSameApplywizzId } from './candidateQueueFilter.js';
+
 export type RealtimeApplicationRow = Record<string, unknown>;
 
 function urlsMatch(a: string, b: string): boolean {
@@ -31,9 +33,26 @@ export function applicationRowMatchesView(
 
 export function mergeApplicationFromRealtimeRow<T extends Record<string, unknown>>(
   prev: T | null,
-  row: RealtimeApplicationRow
+  row: RealtimeApplicationRow,
+  expectedApplywizzId?: string | null
 ): T | null {
   if (!prev) return prev;
+
+  const rowApplywizz = typeof row.applywizz_id === 'string' ? row.applywizz_id : '';
+  const prevApplywizz =
+    typeof prev.applywizz_id === 'string'
+      ? prev.applywizz_id
+      : typeof prev.applywizzId === 'string'
+        ? prev.applywizzId
+        : '';
+  const scopeId = expectedApplywizzId || prevApplywizz;
+  if (scopeId && rowApplywizz && !isSameApplywizzId(rowApplywizz, scopeId)) {
+    return prev;
+  }
+  if (scopeId && prevApplywizz && !isSameApplywizzId(prevApplywizz, scopeId)) {
+    return prev;
+  }
+
   if (!applicationRowMatchesView(row, prev as { id?: string; jobUrl?: string; job_url?: string })) {
     return prev;
   }
@@ -71,8 +90,18 @@ export function mergeApplicationFromRealtimeRow<T extends Record<string, unknown
 }
 
 export function patchJobInCandidateDetail<
-  T extends { jobs: Array<{ canonicalUrl?: string; rawUrl?: string; status?: string; error_message?: string }> }
+  T extends {
+    applywizzId?: string;
+    applywizz_id?: string;
+    jobs: Array<{ canonicalUrl?: string; rawUrl?: string; status?: string; error_message?: string }>;
+  }
 >(detail: T, row: RealtimeApplicationRow): T {
+  const detailId = detail.applywizzId || detail.applywizz_id;
+  const rowApplywizz = typeof row.applywizz_id === 'string' ? row.applywizz_id : '';
+  if (detailId && rowApplywizz && !isSameApplywizzId(detailId, rowApplywizz)) {
+    return detail;
+  }
+
   const rowJob = typeof row.job_url === 'string' ? row.job_url : '';
   const status = typeof row.status === 'string' ? row.status : undefined;
   const error_message =

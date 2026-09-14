@@ -1245,7 +1245,14 @@
     // -------------------------------------------------------------
     // Horizontal Job Queue Tabs Component
     // -------------------------------------------------------------
-    function JobQueueView({ candidate, selectedJobUrl, onSelectJob }) {
+    function JobQueueView({ candidate, selectedApplywizzId, selectedJobUrl, onSelectJob }) {
+      const queueJobs = useMemo(() => {
+        if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
+          return [];
+        }
+        return filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
+      }, [candidate, selectedApplywizzId]);
+
       const handleJobSelect = (job) => {
         const jobKey = job.canonicalUrl || job.rawUrl;
         const currentStatus = job.status || 'READY_FOR_REVIEW';
@@ -1255,7 +1262,15 @@
         onSelectJob(jobKey);
       };
 
-      if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
+      if (!candidate || !selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
+        return (
+          <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+            Loading applications for {selectedApplywizzId || 'candidate'}…
+          </div>
+        );
+      }
+
+      if (queueJobs.length === 0) {
         return (
           <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
             No jobs assigned for this candidate.
@@ -1271,7 +1286,7 @@
                 Assigned Applications Queue
               </span>
               <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#1A1A2E] text-[#1E3A5F] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
-                {candidate.jobs.length} Active
+                {queueJobs.length} Active
               </span>
               <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#1A1A2E] text-[#1E4620] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
                 ⚡ &lt; 23 Qs
@@ -1292,7 +1307,11 @@
           </div>
 
           <div className="flex gap-2.5 overflow-x-auto pb-3 custom-scrollbar">
-            {candidate.jobs.map((job, idx) => {
+            {[...queueJobs].sort((a, b) => {
+              const aEdited = a.hasManualEdits ? 1 : 0;
+              const bEdited = b.hasManualEdits ? 1 : 0;
+              return aEdited - bEdited;
+            }).map((job, idx) => {
               const jobKey = job.canonicalUrl || job.rawUrl;
               const isSelected = selectedJobUrl === jobKey || selectedJobUrl === job.rawUrl || selectedJobUrl === job.canonicalUrl;
               const initial = job.companyName ? job.companyName[0].toUpperCase() : 'G';
@@ -2524,6 +2543,34 @@
     }
 
     // -------------------------------------------------------------
+    // Per-candidate queue helpers
+    // -------------------------------------------------------------
+    function normalizeApplywizzId(id) {
+      return (id || '').trim().toUpperCase();
+    }
+
+    function isSameApplywizzId(a, b) {
+      const na = normalizeApplywizzId(a);
+      const nb = normalizeApplywizzId(b);
+      return Boolean(na && nb && na === nb);
+    }
+
+    function filterJobsForCandidate(jobs, applywizzId) {
+      const expected = normalizeApplywizzId(applywizzId);
+      if (!expected || !Array.isArray(jobs)) return [];
+      return jobs.filter((job) => {
+        const owner = normalizeApplywizzId(job.applywizzId || job.applywizz_id);
+        return !owner || owner === expected;
+      });
+    }
+
+    function candidateDetailMatchesSelection(detail, selectedApplywizzId) {
+      if (!detail || !selectedApplywizzId) return false;
+      const detailId = detail.applywizzId || detail.applywizz_id;
+      return isSameApplywizzId(detailId, selectedApplywizzId);
+    }
+
+    // -------------------------------------------------------------
     // Supabase Realtime merge helpers (candidate_applications)
     // -------------------------------------------------------------
     function urlsMatchRealtime(a, b) {
@@ -2547,8 +2594,13 @@
       return urlsMatchRealtime(rowJob, viewJob);
     }
 
-    function mergeApplicationFromRealtimeRow(prev, row) {
+    function mergeApplicationFromRealtimeRow(prev, row, expectedApplywizzId) {
       if (!prev || !row) return prev;
+      const rowApplywizz = row.applywizz_id || '';
+      const prevApplywizz = prev.applywizz_id || prev.applywizzId || '';
+      const scopeId = expectedApplywizzId || prevApplywizz;
+      if (scopeId && rowApplywizz && !isSameApplywizzId(rowApplywizz, scopeId)) return prev;
+      if (scopeId && prevApplywizz && !isSameApplywizzId(prevApplywizz, scopeId)) return prev;
       if (!applicationRowMatchesView(row, prev)) return prev;
       const errorMessage = row.error_message ?? undefined;
       return {
@@ -2581,6 +2633,10 @@
     }
 
     function patchJobInCandidateDetail(detail, row) {
+      const detailId = detail.applywizzId || detail.applywizz_id;
+      const rowApplywizz = row.applywizz_id || '';
+      if (detailId && rowApplywizz && !isSameApplywizzId(detailId, rowApplywizz)) return detail;
+
       const rowJob = row.job_url || '';
       const status = row.status;
       const error_message = row.error_message;
@@ -2660,6 +2716,11 @@
       });
       const [isNotifOpen, setIsNotifOpen] = useState(false);
       const notifRef = useRef(null);
+      const selectedCandidateRef = useRef(null);
+
+      useEffect(() => {
+        selectedCandidateRef.current = selectedCandidateId;
+      }, [selectedCandidateId]);
 
       // Close notification popover on outside click
       useEffect(() => {
@@ -2764,6 +2825,13 @@
       };
 
       const handleSignOut = () => {
+        const token = localStorage.getItem('applywizz_auth_token');
+        if (token) {
+          fetch('/api/auth/logout', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {});
+        }
         localStorage.removeItem('applywizz_auth_token');
         localStorage.removeItem('applywizz_auth_user');
         localStorage.removeItem('applywizz_wh_unreachable');
@@ -2943,21 +3011,27 @@
       }, [currentUser, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
 
       const fetchCandidateDetail = useCallback(async (applywizzId) => {
-        console.log(`[Dashboard] Selected ${applywizzId} → fetching jobs assigned to this candidate only`);
+        const requestedId = normalizeApplywizzId(applywizzId);
+        console.log(`[Dashboard] Selected ${requestedId} → fetching jobs assigned to this candidate only`);
         try {
-          const res = await fetch(`/api/candidates/${applywizzId}`, {
+          const res = await fetch(`/api/candidates/${encodeURIComponent(applywizzId)}`, {
             headers: getAuthHeaders(),
           });
           if (res.ok) {
             const detail = await res.json();
+            if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
+
             const jobsRes = await fetch(`/api/candidates/${encodeURIComponent(applywizzId)}/jobs`, {
               headers: getAuthHeaders(),
             });
+
+            if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
 
             if (jobsRes.status === 403) {
               console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} is not assigned to current CA`);
               setCandidateDetail({
                 ...detail,
+                applywizzId: requestedId,
                 jobs: [],
               });
               setSelectedJobUrl(null);
@@ -2966,9 +3040,18 @@
             }
 
             const jobsPayload = jobsRes.ok ? await jobsRes.json() : null;
-            const candidateJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
+            const returnedApplywizzId = jobsPayload?.applywizzId || jobsPayload?.applywizz_id;
+            if (returnedApplywizzId && !isSameApplywizzId(returnedApplywizzId, requestedId)) {
+              console.error(
+                `[Dashboard] Candidate mismatch: viewing ${requestedId}, jobs returned for ${returnedApplywizzId}`
+              );
+            }
+
+            const rawJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
+            const candidateJobs = filterJobsForCandidate(rawJobs, requestedId);
             setCandidateDetail({
               ...detail,
+              applywizzId: requestedId,
               jobs: candidateJobs,
             });
 
@@ -2991,20 +3074,38 @@
       }, []);
 
       useEffect(() => {
-        if (selectedCandidateId) {
-          fetchCandidateDetail(selectedCandidateId);
+        if (!selectedCandidateId) {
+          setCandidateDetail(null);
+          setSelectedJobUrl(null);
+          setApplication(null);
+          return;
         }
+        setCandidateDetail(null);
+        setSelectedJobUrl(null);
+        setApplication(null);
+        fetchCandidateDetail(selectedCandidateId);
       }, [selectedCandidateId, fetchCandidateDetail]);
 
       const fetchJobApplication = useCallback(async (applywizzId, jobUrl) => {
+        const requestedId = normalizeApplywizzId(applywizzId);
         setIsLoadingApplication(true);
         try {
           const encodedUrl = encodeURIComponent(jobUrl);
-          const res = await fetch(`/api/candidates/${applywizzId}/jobs/${encodedUrl}`, {
+          const res = await fetch(`/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}`, {
             headers: getAuthHeaders(),
           });
+          if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
+
           if (res.ok) {
             const appData = await res.json();
+            const appOwner = appData.applywizzId || appData.applywizz_id;
+            if (appOwner && !isSameApplywizzId(appOwner, requestedId)) {
+              console.warn(
+                `[Dashboard] Ignoring application for ${appOwner}; selected candidate is ${requestedId}`
+              );
+              setApplication(null);
+              return;
+            }
             setApplication(appData);
           } else {
             setApplication(null);
@@ -3013,7 +3114,9 @@
           console.error(`Failed to fetch application for ${applywizzId} / ${jobUrl}:`, err);
           setApplication(null);
         } finally {
-          setIsLoadingApplication(false);
+          if (isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
+            setIsLoadingApplication(false);
+          }
         }
       }, []);
 
@@ -3038,7 +3141,11 @@
           console.log(
             `[Realtime] candidate_applications ${eventType} applywizz=${selectedCandidateId} status=${row.status} id=${row.id || ''}`
           );
-          setApplication((prev) => mergeApplicationFromRealtimeRow(prev, row));
+          const selectedId = selectedCandidateRef.current;
+          const rowApplywizz = row.applywizz_id || '';
+          if (selectedId && rowApplywizz && !isSameApplywizzId(rowApplywizz, selectedId)) return;
+
+          setApplication((prev) => mergeApplicationFromRealtimeRow(prev, row, selectedId));
           setCandidateDetail((prev) => (prev ? patchJobInCandidateDetail(prev, row) : prev));
         };
 
@@ -3617,6 +3724,7 @@
                   <>
                     <JobQueueView
                       candidate={candidateDetail}
+                      selectedApplywizzId={selectedCandidateId}
                       selectedJobUrl={selectedJobUrl}
                       onSelectJob={(url) => setSelectedJobUrl(url)}
                     />

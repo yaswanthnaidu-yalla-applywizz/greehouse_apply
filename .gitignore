@@ -15,6 +15,10 @@ codebase_analysis.md
 handover.md
 context.md
 *.plan.md
+rules.md
+
+# AI agent project memory (.ai/ — local only, not versioned)
+.ai/
 
 # Planning, capacity scratch & deployment notes (not product docs)
 CAPACITY_*.md

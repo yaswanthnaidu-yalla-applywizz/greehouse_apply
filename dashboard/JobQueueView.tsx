@@ -9,24 +9,39 @@
  * - V2-implementation.md (Phase V2-UI)
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { DifficultyBadge } from './components/DifficultyBadge.js';
 import type { CandidateDetail } from './types.js';
+import {
+  candidateDetailMatchesSelection,
+  filterJobsForCandidate,
+} from '../src/dashboard/candidateQueueFilter.js';
 
 export interface JobQueueViewProps {
   /** Candidate details with assigned job records */
   candidate: CandidateDetail;
+  /** Selected directory applywizz_id — queue must match this exactly */
+  selectedApplywizzId: string | null;
   /** Currently selected job canonical or raw URL */
   selectedJobUrl: string | null;
   /** Callback fired when an operator selects a job tab */
   onSelectJob: (jobUrl: string) => void;
 }
 
+type CandidateJob = CandidateDetail['jobs'][number];
+
 export const JobQueueView: React.FC<JobQueueViewProps> = ({
   candidate,
+  selectedApplywizzId,
   selectedJobUrl,
   onSelectJob,
 }) => {
+  const queueJobs = useMemo(() => {
+    if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
+      return [];
+    }
+    return filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
+  }, [candidate, selectedApplywizzId]);
   const handleJobSelect = (job: CandidateJob) => {
     const jobKey = job.canonicalUrl || job.rawUrl;
     const currentStatus = job.status || 'READY_FOR_REVIEW';
@@ -36,7 +51,15 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
     onSelectJob(jobKey);
   };
 
-  if (!candidate || !candidate.jobs || candidate.jobs.length === 0) {
+  if (!candidate || !selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
+    return (
+      <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+        Loading applications for {selectedApplywizzId || 'candidate'}…
+      </div>
+    );
+  }
+
+  if (queueJobs.length === 0) {
     return (
       <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
         No jobs assigned for this candidate.
@@ -53,7 +76,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             Assigned Applications Queue
           </span>
           <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#1A1A2E] text-[#1E3A5F] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
-            {candidate.jobs.length} Active
+            {queueJobs.length} Active
           </span>
           <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#1A1A2E] text-[#1E4620] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
             ⚡ &lt; 23 Qs
@@ -75,7 +98,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
 
       {/* Horizontal Scrollable Tabs */}
       <div className="flex gap-2.5 overflow-x-auto pb-3 custom-scrollbar">
-        {[...candidate.jobs]
+        {[...queueJobs]
           .sort((a, b) => {
             const aEdited = a.hasManualEdits ? 1 : 0;
             const bEdited = b.hasManualEdits ? 1 : 0;
