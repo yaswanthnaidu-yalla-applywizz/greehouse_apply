@@ -190,6 +190,7 @@ function DetailList({ items, mode }: { items: ApplicationItem[]; mode: 'complete
 export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ apiBaseUrl = '' }) => {
   const [user, setUser] = useState<AuthUser | null>(() => {
     if (typeof window === 'undefined') return null;
+    if (!localStorage.getItem('applywizz_auth_token')) return null;
     try {
       const saved = localStorage.getItem('applywizz_auth_user');
       return saved ? JSON.parse(saved) as AuthUser : null;

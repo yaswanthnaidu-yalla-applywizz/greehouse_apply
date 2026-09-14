@@ -312,6 +312,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   // Static directory for dashboard web assets
   const publicDir = path.resolve(process.cwd(), 'dashboard/public');
+  const managerHtmlPath = path.join(publicDir, 'manager.html');
+  app.get('/manager', (_req: Request, res: Response) => {
+    if (fs.existsSync(managerHtmlPath)) {
+      res.sendFile(managerHtmlPath);
+      return;
+    }
+    res.status(404).send('Manager dashboard page not found.');
+  });
   if (fs.existsSync(publicDir)) {
     app.use(express.static(publicDir));
   }
@@ -832,7 +840,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           hasManualEdits,
         };
       })
-      .filter((job) => seg.applywizzId === DEMO_APPLYWIZZ_ID || job.canonicalUrl === DEMO_JOB_URL || job.fieldsCount < config.MAX_JOB_QUESTIONS);
+      .filter(
+        (job) =>
+          seg.applywizzId === DEMO_APPLYWIZZ_ID ||
+          seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
+          job.canonicalUrl === DEMO_JOB_URL ||
+          job.fieldsCount < config.MAX_JOB_QUESTIONS
+      );
 
     const totalBeforeScoreFilter = eligibleJobsWithStatus.length;
     const dashboardJobs = eligibleJobsWithStatus.filter((job) =>
