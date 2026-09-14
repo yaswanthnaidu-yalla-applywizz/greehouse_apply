@@ -102,7 +102,11 @@ async function findElementLocator(
 }
 
 const CUSTOM_SELECT_OPTION_LOCATOR =
-  '.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country), .select2-results__option:not(.iti__country)';
+  '.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country), .select2-results__option:not(.iti__country), [role="listbox"] [role="option"]:not(.iti__country), [class*="menu"] [role="option"]:not(.iti__country)';
+
+/** Greenhouse job-board remix-css searchable selects (not a native select element). */
+const GREENHOUSE_SELECT_INPUT_CONTAINER =
+  '[class*="select_input-container"], .select_input-container';
 
 type OptionTextMatcher = (optionText: string, answerText: string) => boolean;
 
@@ -110,6 +114,100 @@ function exactOptionTextMatch(optionText: string, answerText: string): boolean {
   const opt = optionText.trim();
   const ans = answerText.trim();
   return opt === ans || opt.toLowerCase() === ans.toLowerCase();
+}
+
+function fuzzyOptionTextMatch(optionText: string, answerText: string): boolean {
+  if (exactOptionTextMatch(optionText, answerText)) return true;
+  const opt = optionText.trim().toLowerCase();
+  const ans = answerText.trim().toLowerCase();
+  if (!opt || !ans) return false;
+  if (opt.startsWith(ans) || ans.startsWith(opt)) return true;
+  if (ans === 'yes' && /^yes\b/.test(opt)) return true;
+  if (ans === 'no' && /^no\b/.test(opt)) return true;
+  return opt.includes(ans) || ans.includes(opt);
+}
+
+async function isUsableNativeSelect(locator: Locator): Promise<boolean> {
+  const tagName = await locator.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
+  if (tagName !== 'SELECT') return false;
+  const visible = await locator.isVisible().catch(() => false);
+  if (!visible) return false;
+  const optionCount = await locator.locator('option').count().catch(() => 0);
+  return optionCount > 1;
+}
+
+async function isInteractiveSelectControl(locator: Locator): Promise<boolean> {
+  const tagName = await locator.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
+  const role = (await locator.getAttribute('role').catch(() => '')) || '';
+  const className = (await locator.getAttribute('class').catch(() => '')) || '';
+  const ariaCombobox = (await locator.getAttribute('aria-combobox').catch(() => '')) || '';
+  if (tagName === 'INPUT' && (role === 'combobox' || className.includes('select__input'))) return true;
+  if (role === 'combobox' || ariaCombobox === 'true') return true;
+  if (className.includes('select__input') || className.includes('select__control')) return true;
+  const nestedCombobox = locator.locator(
+    `input[role="combobox"], input[aria-combobox="true"], .select__input, ${GREENHOUSE_SELECT_INPUT_CONTAINER} input`
+  );
+  return (await nestedCombobox.count().catch(() => 0)) > 0;
+}
+
+/**
+ * Finds Greenhouse remix-css / React-Select combobox inputs when no native select is usable.
+ */
+async function findSearchableSelectControl(
+  page: Page,
+  fieldId: string,
+  name: string,
+  label: string,
+  metadataSelector?: string
+): Promise<{ locator: Locator; selector: string } | null> {
+  const ids = Array.from(new Set([name, fieldId].filter(Boolean)));
+  const candidates: string[] = [];
+
+  if (metadataSelector && !/^select#/i.test(metadataSelector.trim())) {
+    candidates.push(metadataSelector.trim());
+  }
+
+  for (const id of ids) {
+    candidates.push(
+      `#${escapeId(id)}`,
+      `${GREENHOUSE_SELECT_INPUT_CONTAINER} input#${escapeId(id)}`,
+      `${GREENHOUSE_SELECT_INPUT_CONTAINER} input[id="${escapeAttr(id)}"]`,
+      `input[role="combobox"]#${escapeId(id)}`,
+      `input[role="combobox"][id="${escapeAttr(id)}"]`,
+      `[aria-combobox="true"]#${escapeId(id)}`,
+      `input[id="${escapeAttr(id)}"][role="combobox"]`
+    );
+  }
+
+  candidates.push(
+    `input[role="combobox"][id*="${escapeAttr(name)}"]`,
+    `input[role="combobox"][id*="${escapeAttr(fieldId)}"]`,
+    `[role="combobox"][id*="${escapeAttr(name)}"]`,
+    `[aria-combobox="true"]`
+  );
+
+  const fromSelectors = await findElementLocator(page, candidates);
+  if (fromSelectors && (await isInteractiveSelectControl(fromSelectors.locator))) {
+    return fromSelectors;
+  }
+
+  if (label) {
+    const labelLoc = page.locator(`label:has-text("${label}")`).first();
+    if ((await labelLoc.count()) > 0) {
+      const fieldRoot = labelLoc.locator(
+        `xpath=ancestor::*[contains(@class,"field") or contains(@class,"question")][1]`
+      ).first();
+      const searchRoot = (await fieldRoot.count()) > 0 ? fieldRoot : labelLoc.locator('..').first();
+      const containerInput = searchRoot.locator(
+        `${GREENHOUSE_SELECT_INPUT_CONTAINER} input[type="text"], ${GREENHOUSE_SELECT_INPUT_CONTAINER} input[role="combobox"], input[role="combobox"], input[aria-combobox="true"], .select__input`
+      ).first();
+      if ((await containerInput.count()) > 0) {
+        return { locator: containerInput, selector: `label("${label}") → searchable select input` };
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -130,7 +228,9 @@ async function resolveComboboxControls(
     return { searchInput: nestedInput, openTrigger: control };
   }
 
-  const container = control.locator('xpath=ancestor-or-self::*[contains(@class,"select__control") or contains(@class,"select-shell") or contains(@class,"css-control")][1]').first();
+  const container = control.locator(
+    'xpath=ancestor-or-self::*[contains(@class,"select_input-container") or contains(@class,"select__control") or contains(@class,"select-shell") or contains(@class,"css-control")][1]'
+  ).first();
   if ((await container.count()) > 0) {
     const containerInput = container.locator('input[type="text"], input[role="combobox"], .select__input').first();
     if ((await containerInput.count()) > 0) {
@@ -187,9 +287,28 @@ async function fillInteractiveSelectDropdown(
     await page.waitForTimeout(500);
   }
 
-  const clicked = await clickDropdownOptionByMatch(page, answerText, matchOption);
+  let clicked = await clickDropdownOptionByMatch(page, answerText, matchOption);
+  if (!clicked) {
+    clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch);
+  }
 
   return clicked;
+}
+
+async function fillSearchableSelectInput(
+  page: Page,
+  control: Locator,
+  selector: string,
+  answerText: string,
+  matchOption: OptionTextMatcher = exactOptionTextMatch
+): Promise<boolean> {
+  const selected = await fillInteractiveSelectDropdown(page, control, answerText, matchOption);
+  if (selected) {
+    console.log(
+      `[Submitter] Populated via searchable select input → selector: ${selector} → value: ${answerText}`
+    );
+  }
+  return selected;
 }
 
 function normalizeBooleanValue(value: string): 'Yes' | 'No' | null {
@@ -487,10 +606,44 @@ export async function fillSingleField(
         const labelLoc = page.locator(`label:has-text("${label}")`).first();
         if ((await labelLoc.count()) > 0) {
           const parent = labelLoc.locator('..').first();
-          const candidateSelect = parent.locator('select, input[role="combobox"], .select__input, .select2-selection').first();
+          const candidateSelect = parent.locator(
+            `select, ${GREENHOUSE_SELECT_INPUT_CONTAINER} input, input[role="combobox"], input[aria-combobox="true"], .select__input, .select2-selection`
+          ).first();
           if ((await candidateSelect.count()) > 0) {
             found = { locator: candidateSelect, selector: `label("${label}") -> dropdown` };
           }
+        }
+      }
+
+      // Hidden/disabled native <select> while remix-css combobox input is the real control
+      if (found && !(await isUsableNativeSelect(found.locator))) {
+        const nativeTag = await found.locator.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
+        if (nativeTag === 'SELECT') {
+          const searchable = await findSearchableSelectControl(
+            page,
+            fieldId,
+            name,
+            label,
+            (field as any).metadata?.selector
+          );
+          if (searchable) {
+            found = searchable;
+          } else {
+            found = null;
+          }
+        }
+      }
+
+      if (!found) {
+        const searchable = await findSearchableSelectControl(
+          page,
+          fieldId,
+          name,
+          label,
+          (field as any).metadata?.selector
+        );
+        if (searchable) {
+          found = searchable;
         }
       }
 
@@ -498,14 +651,22 @@ export async function fillSingleField(
         const tagName = await found.locator.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'SELECT');
         const role = await found.locator.getAttribute('role').catch(() => null);
         const className = (await found.locator.getAttribute('class').catch(() => '')) || '';
+        const interactive =
+          (await isInteractiveSelectControl(found.locator)) ||
+          tagName === 'INPUT' ||
+          tagName === 'DIV' ||
+          tagName === 'BUTTON' ||
+          role === 'combobox' ||
+          className.includes('select__input');
 
-        if (tagName === 'INPUT' || tagName === 'DIV' || tagName === 'BUTTON' || role === 'combobox' || className.includes('select__input')) {
+        if (interactive) {
           const typeQuery = isCountryCode ? targetCountryName : selectValue;
           const countryMatcher: OptionTextMatcher = (optText) =>
             new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
-          const selected = await fillInteractiveSelectDropdown(
+          const selected = await fillSearchableSelectInput(
             page,
             found.locator,
+            found.selector,
             typeQuery,
             isCountryCode ? countryMatcher : exactOptionTextMatch
           );
@@ -516,11 +677,7 @@ export async function fillSingleField(
               console.log(
                 `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
               );
-            } else if (isSponsorship) {
-              console.log(
-                `[Submitter] Sponsorship field → selector: ${found.selector} → attempted click: ${selectValue} → result: selected`
-              );
-            } else if (booleanValue) {
+            } else if (booleanValue && !isSponsorship) {
               console.log(
                 `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → clicked ✅`
               );
@@ -625,14 +782,29 @@ export async function fillSingleField(
           }
         }
       } else {
-        // Fallback for custom Select2 or React-Select dropdowns
+        // Fallback: Select2, remix-css combobox, or role=combobox on page
+        const searchable = await findSearchableSelectControl(
+          page,
+          fieldId,
+          name,
+          label,
+          (field as any).metadata?.selector
+        );
+        if (searchable) {
+          const selected = await fillSearchableSelectInput(page, searchable.locator, searchable.selector, selectValue);
+          if (selected) {
+            fillResult.success = true;
+            return fillResult;
+          }
+        }
+
         const select2Trigger = page.locator(
-          `[id*="select2-${escapeId(name)}"], [id*="select2-${escapeId(fieldId)}"], .select2-selection, .css-control`
+          `[id*="select2-${escapeId(name)}"], [id*="select2-${escapeId(fieldId)}"], .select2-selection, .css-control, input[role="combobox"], [aria-combobox="true"]`
         ).first();
 
         const count = await select2Trigger.count();
         if (count > 0) {
-          const selected = await fillInteractiveSelectDropdown(page, select2Trigger, selectValue);
+          const selected = await fillSearchableSelectInput(page, select2Trigger, 'combobox-fallback', selectValue);
           if (selected) {
             fillResult.success = true;
           } else {

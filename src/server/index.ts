@@ -158,7 +158,76 @@ function isDashboardJobScoreEligible(
   if (isAdmin && isDashboardDemoFixtureJob(applywizzId, job)) {
     return true;
   }
+  if (isPinnedDemoApplywizzId(applywizzId) && isDashboardDemoFixtureJob(applywizzId, job)) {
+    return true;
+  }
   return isDashboardJobScoreInRange(job);
+}
+
+function isPinnedDemoApplywizzId(applywizzId: string): boolean {
+  const id = applywizzId.trim().toUpperCase();
+  return id === DEMO_APPLYWIZZ_ID.toUpperCase() || id === AKSHITHA_APPLYWIZZ_ID.toUpperCase();
+}
+
+function dashboardJobUrlKey(job: { rawUrl?: string; canonicalUrl?: string }): string {
+  return (job.canonicalUrl || job.rawUrl || '').trim().toLowerCase();
+}
+
+function mergeDashboardJobsByUrl(
+  primary: Array<Record<string, unknown>>,
+  additions: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const map = new Map<string, Record<string, unknown>>();
+  for (const job of [...primary, ...additions]) {
+    const key = dashboardJobUrlKey(job as { rawUrl?: string; canonicalUrl?: string });
+    if (!key) continue;
+    const prev = map.get(key);
+    map.set(key, prev ? { ...prev, ...job } : job);
+  }
+  return Array.from(map.values());
+}
+
+function resolvedApplicationsToJobRows(applywizzId: string): Array<Record<string, unknown>> {
+  return artifactCache.resolvedApplications
+    .filter((application) => application.applywizzId === applywizzId)
+    .map((application) => ({
+      rawUrl: application.jobUrl,
+      canonicalUrl: application.jobUrl,
+      companyName: application.companyName || 'Greenhouse Company',
+      jobTitle: application.jobTitle || 'Job Opening',
+      status: application.status || 'PENDING',
+      fieldsCount: application.resolvedFields?.length || 0,
+      hasManualEdits: Boolean((application as any).hasManualEdits || (application as any).has_manual_edits),
+    }));
+}
+
+function segmentToJobRows(segment: CandidateSegment | undefined): Array<Record<string, unknown>> {
+  if (!segment) return [];
+  return segment.jobs.map((job) => {
+    const jobUrl = job.canonicalUrl || job.rawUrl;
+    const template = templatesMap.get(jobUrl) || templatesMap.get(job.rawUrl);
+    return {
+      rawUrl: job.rawUrl,
+      canonicalUrl: jobUrl,
+      companyName: template?.companyName || 'Greenhouse Company',
+      jobTitle: template?.jobTitle || 'Job Opening',
+      status: template?.isExpired ? 'EXPIRED' : 'PENDING',
+      fieldsCount: template?.fields?.length || 0,
+      hasManualEdits: false,
+      score: job.score,
+    };
+  });
+}
+
+function resolvePinnedDemoSegment(applywizzId: string): CandidateSegment | undefined {
+  return (
+    candidatesMap.get(applywizzId) ||
+    (applywizzId === DEMO_APPLYWIZZ_ID
+      ? demoSegment
+      : applywizzId === AKSHITHA_APPLYWIZZ_ID
+        ? loadSecondaryDemoArtifacts().segment ?? undefined
+        : undefined)
+  );
 }
 
 export const artifactCache: ArtifactCache = {
@@ -941,7 +1010,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    const jobs: Array<Record<string, unknown>> = [];
+    let jobs: Array<Record<string, unknown>> = [];
 
     if (isSupabaseConfigured()) {
       const { data, error } = await getDbClient()
@@ -970,42 +1039,21 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    if (jobs.length === 0) {
-      for (const application of artifactCache.resolvedApplications) {
-        if (application.applywizzId !== applywizzId) continue;
-        jobs.push({
-          rawUrl: application.jobUrl,
-          canonicalUrl: application.jobUrl,
-          companyName: application.companyName || 'Greenhouse Company',
-          jobTitle: application.jobTitle || 'Job Opening',
-          status: application.status || 'PENDING',
-          fieldsCount: application.resolvedFields?.length || 0,
-          hasManualEdits: Boolean((application as any).hasManualEdits || (application as any).has_manual_edits),
-        });
+    const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);
+    if (pinnedDemo && isAdmin) {
+      jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
+      jobs = mergeDashboardJobsByUrl(jobs, segmentToJobRows(resolvePinnedDemoSegment(applywizzId)));
+    } else if (jobs.length === 0) {
+      jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
+      if (jobs.length === 0) {
+        jobs = mergeDashboardJobsByUrl(jobs, segmentToJobRows(resolvePinnedDemoSegment(applywizzId)));
       }
     }
 
-    if (jobs.length === 0) {
-      const segment =
-        candidatesMap.get(applywizzId) ||
-        (applywizzId === DEMO_APPLYWIZZ_ID
-          ? demoSegment
-          : applywizzId === AKSHITHA_APPLYWIZZ_ID
-          ? loadSecondaryDemoArtifacts().segment ?? undefined
-          : undefined);
-      for (const job of segment?.jobs || []) {
-        const jobUrl = job.canonicalUrl || job.rawUrl;
-        const template = templatesMap.get(jobUrl) || templatesMap.get(job.rawUrl);
-        jobs.push({
-          rawUrl: job.rawUrl,
-          canonicalUrl: jobUrl,
-          companyName: template?.companyName || 'Greenhouse Company',
-          jobTitle: template?.jobTitle || 'Job Opening',
-          status: template?.isExpired ? 'EXPIRED' : 'PENDING',
-          fieldsCount: template?.fields?.length || 0,
-          hasManualEdits: false,
-        });
-      }
+    if (pinnedDemo) {
+      jobs = jobs.filter((job) =>
+        isDashboardJobScoreEligible(applywizzId, job as { score?: string | number; canonicalUrl?: string; rawUrl?: string }, isAdmin)
+      );
     }
 
     console.log(
