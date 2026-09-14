@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApplyWizz — Manager Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-[#FFF5EB] text-[#1A1A2E]">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useMemo } = React;
+
+    function getTodayIST() {
+      const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
+    }
+
+    function getAuthHeaders() {
+      const token = localStorage.getItem('applywizz_auth_token');
+      return token ? { Authorization: `Bearer ${token}` } : {};
+    }
+
+    function ManagerApp() {
+      const [date, setDate] = useState(getTodayIST);
+      const [ca, setCa] = useState('all');
+      const [rows, setRows] = useState([]);
+      const [totals, setTotals] = useState({});
+      const [careerAssociates, setCareerAssociates] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const token = localStorage.getItem('applywizz_auth_token');
+      const userEmail = (() => {
+        try {
+          const raw = localStorage.getItem('applywizz_auth_user');
+          return raw ? JSON.parse(raw).email : '';
+        } catch { return ''; }
+      })();
+
+      const load = useCallback(async () => {
+        if (!localStorage.getItem('applywizz_auth_token')) {
+          setError('Sign in on the operator dashboard first, then open /manager again.');
+          return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+          const params = new URLSearchParams({ date, ca });
+          const res = await fetch(`/api/manager/dashboard?${params}`, { headers: getAuthHeaders() });
+          const payload = await res.json();
+          if (res.status === 401 || res.status === 403) {
+            setError(payload.error || 'Unauthorized — sign in again from the operator dashboard (/).');
+            return;
+          }
+          if (!res.ok) throw new Error(payload.error || 'Unable to load manager dashboard.');
+          setRows(payload.rows || []);
+          setTotals(payload.totals || {});
+          const cas = new Set((payload.rows || []).map((r) => r.assignedTo).filter(Boolean));
+          setCareerAssociates(Array.from(cas));
+        } catch (e) {
+          setError(e.message || 'Load failed');
+        } finally {
+          setLoading(false);
+        }
+      }, [date, ca]);
+
+      useEffect(() => { load(); }, [load]);
+
+      if (!token) {
+        return (
+          <main className="min-h-screen flex items-center justify-center p-6">
+            <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6 shadow-[4px_4px_0_#1A1A2E]">
+              <h1 className="text-xl font-black mb-2">Manager dashboard</h1>
+              <p className="text-sm mb-4">This page calls a protected API. Opening <code className="font-mono text-xs">/api/manager/dashboard</code> in the browser alone will always return 401.</p>
+              <a href="/" className="inline-block bg-[#E88474] border-2 border-[#1A1A2E] px-4 py-2 text-sm font-bold rounded shadow-[2px_2px_0_#1A1A2E]">Sign in on operator dashboard</a>
+            </div>
+          </main>
+        );
+      }
+
+      return (
+        <main className="min-h-screen p-4 md:p-8 font-sans">
+          <div className="max-w-7xl mx-auto">
+            <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6">
+              <div>
+                <p className="text-xs font-mono font-bold uppercase tracking-widest text-[#64748B]">ApplyWizz / Control room</p>
+                <h1 className="text-3xl font-black">Manager dashboard</h1>
+                {userEmail && <p className="text-xs font-mono text-[#64748B] mt-1">{userEmail}</p>}
+              </div>
+              <div className="flex flex-wrap gap-2 items-end">
+                <label className="text-xs font-bold uppercase">CA
+                  <select value={ca} onChange={(e) => setCa(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm bg-white">
+                    <option value="all">All</option>
+                    {careerAssociates.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs font-bold uppercase">Date
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
+                </label>
+                <button type="button" onClick={load} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
+                <a href="/" className="bg-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Operator dashboard</a>
+              </div>
+            </header>
+            {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
+            {loading && <p className="text-xs font-mono font-bold mb-4">Loading…</p>}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+              {[['Applications', totals.applications], ['Applied', totals.applied], ['Failed', totals.failed], ['Pending', totals.pending], ['Waiting email', totals.waiting_for_email]].map(([label, val]) => (
+                <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
+                  <p className="text-xs font-bold uppercase">{label}</p>
+                  <p className="text-2xl font-black mt-1">{val ?? 0}</p>
+                </div>
+              ))}
+            </div>
+            <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-xs">
+                <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
+                  <tr>{['Client', 'Apps', 'Completed', 'Pending', 'Failed', 'Assigned'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.client} className="border-b border-[#1A1A2E]/20">
+                      <td className="p-3 font-black">{row.client}</td>
+                      <td className="p-3 font-mono">{row.applications}</td>
+                      <td className="p-3 font-mono">{row.completed}</td>
+                      <td className="p-3 font-mono">{row.pending}</td>
+                      <td className="p-3 font-mono">{row.failed}</td>
+                      <td className="p-3 text-[#64748B]">{row.assignedTo || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!rows.length && !loading && <p className="p-6 text-center text-[#64748B]">No rows for this date.</p>}
+            </div>
+          </div>
+        </main>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<ManagerApp />);
+  </script>
+</body>
+</html>

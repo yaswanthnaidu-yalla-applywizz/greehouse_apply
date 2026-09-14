@@ -6,6 +6,12 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config/env.js';
+import {
+  akshithaApplications,
+  akshithaSegment,
+  akshithaTemplates,
+  AKSHITHA_APPLYWIZZ_ID,
+} from './akshithaDemoFixtures.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -13,9 +19,8 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 
-export const GENERATED_DEMO_APPLYWIZZ_ID = 'AWL-31428';
-/** @deprecated Use GENERATED_DEMO_APPLYWIZZ_ID — kept for existing dashboard checks */
-export const AKSHITHA_APPLYWIZZ_ID = GENERATED_DEMO_APPLYWIZZ_ID;
+export const GENERATED_DEMO_APPLYWIZZ_ID = AKSHITHA_APPLYWIZZ_ID;
+export { AKSHITHA_APPLYWIZZ_ID };
 
 export interface GeneratedDemoFixtureFile {
   applywizzId: string;
@@ -53,13 +58,17 @@ export function loadSecondaryDemoArtifacts(): {
   templates: ScannedJobTemplate[];
 } {
   const fixture = readGeneratedDemoFixtures();
-  if (!fixture) {
-    return { segment: null, applications: [], templates: [] };
+  if (fixture) {
+    return {
+      segment: fixture.segment,
+      applications: fixture.applications,
+      templates: fixture.templates,
+    };
   }
   return {
-    segment: fixture.segment,
-    applications: fixture.applications,
-    templates: fixture.templates,
+    segment: akshithaSegment,
+    applications: akshithaApplications,
+    templates: akshithaTemplates,
   };
 }
 
