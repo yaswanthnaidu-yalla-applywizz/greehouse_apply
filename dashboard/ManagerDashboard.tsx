@@ -233,6 +233,13 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ apiBaseUrl =
   const visibleRows = useMemo(() => careerAssociate === 'all' ? dashboard.rows : dashboard.rows.filter((row) => row.assignedTo === careerAssociate), [careerAssociate, dashboard.rows]);
   const toggle = (clientName: string, status: 'completed' | 'pending' | 'failed') => setExpanded(expanded === `${clientName}:${status}` ? null : `${clientName}:${status}`);
   const signOut = () => {
+    const token = localStorage.getItem('applywizz_auth_token');
+    if (token) {
+      fetch(`${apiBaseUrl}/api/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    }
     localStorage.removeItem('applywizz_auth_token');
     localStorage.removeItem('applywizz_auth_user');
     setUser(null);

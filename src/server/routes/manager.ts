@@ -36,16 +36,24 @@ const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
   'EMAIL_PROOF_PENDING',
 ];
 
+function getAuthenticatedEmail(req: Request): string {
+  const user = (req as Request & { user?: { email?: string; user_metadata?: { email?: string } } }).user;
+  return String(user?.email || user?.user_metadata?.email || '').trim().toLowerCase();
+}
+
+/** Same admin resolution as candidate/application routes (user object or normalized email). */
+function isAdminRequest(req: Request): boolean {
+  const user = (req as Request & { user?: unknown }).user;
+  const email = getAuthenticatedEmail(req);
+  return isUserAdmin(user || email || undefined);
+}
+
 function requireManager(req: Request, res: Response): boolean {
-  if (!isUserAdmin((req as Request & { user?: unknown }).user)) {
+  if (!isAdminRequest(req)) {
     res.status(403).json({ error: 'Manager access is required.' });
     return false;
   }
   return true;
-}
-
-function isAdminRequest(req: Request): boolean {
-  return isUserAdmin((req as Request & { user?: unknown }).user);
 }
 
 function serializeManagerApplication(application: ApplicationRow) {
@@ -88,11 +96,6 @@ interface ManagerClientRow {
     failed: Array<Record<string, string>>;
     pending: Array<Record<string, string>>;
   };
-}
-
-function getAuthenticatedEmail(req: Request): string {
-  const user = (req as Request & { user?: { email?: string; user_metadata?: { email?: string } } }).user;
-  return String(user?.email || user?.user_metadata?.email || '').trim().toLowerCase();
 }
 
 /**
@@ -195,6 +198,7 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
       .select('*, profiles!inner(applywizz_id, client_name)')
       .gte('created_at', startIso)
       .lte('created_at', endIso);
+    // Admins (see isUserAdmin in auth.ts): org-wide stats — no careerassociatemanager_id scoping.
     if (!isAdmin) {
       const caIds = await fetchLinkedCaIds(managerEmail);
       query = query.in('applywizz_id', caIds.length ? caIds : ['__no_linked_ca__']);

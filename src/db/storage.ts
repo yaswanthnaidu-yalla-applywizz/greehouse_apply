@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import { getProfile } from './profiles.js';
 import config from '../config/env.js';
 
 export const PROOFS_BUCKET = config.SUPABASE_STORAGE_BUCKET_PROOFS || 'proofs_web';
@@ -10,6 +11,8 @@ export const PROOFS_MAIL_BUCKET = 'proofs_mail';
 export const CSV_UPLOADS_BUCKET = 'csv_uploads';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEMO_RESUME_BUCKET_PATH = 'resumes/AWL-YASHANTH_resume.pdf';
+const RESUME_FETCH_TIMEOUT_MS = 60_000;
 
 export function webProofStoragePath(applicationId: string): string {
   return `proofs/${applicationId}_web.png`;
@@ -25,6 +28,11 @@ export function emailProofStoragePath(applicationId: string): string {
 
 export function isApplicationUuid(id: string): boolean {
   return UUID_RE.test(id);
+}
+
+export function isDemoResumeApplywizzId(applywizzId: string): boolean {
+  const id = (applywizzId || '').trim().toUpperCase();
+  return id === 'AWL-YASWANTH' || id === 'AWL-YASHANTH';
 }
 
 /**
@@ -71,7 +79,7 @@ export async function ensureBucketsExist(): Promise<void> {
 }
 
 /**
- * Uploads candidate master resume PDF to the resumes bucket or local resumes folder.
+ * Saves a resume PDF to the local resumes folder (dev / demo cache only).
  */
 export async function uploadResume(
   applywizzId: string,
@@ -79,7 +87,7 @@ export async function uploadResume(
   _mimeType: string = 'application/pdf'
 ): Promise<string> {
   const storagePath = `${applywizzId}_resume.pdf`;
-  const resumesDir = path.resolve(process.cwd(), 'resumes');
+  const resumesDir = path.resolve(process.cwd(), config.RESUMES_DIR || 'resumes');
   if (!fs.existsSync(resumesDir)) {
     fs.mkdirSync(resumesDir, { recursive: true });
   }
@@ -138,7 +146,6 @@ export async function uploadProof(
     } catch {}
   }
 
-  // Local filesystem fallback
   const proofDir = path.resolve(process.cwd(), 'output', 'proofs');
   if (!fs.existsSync(proofDir)) {
     fs.mkdirSync(proofDir, { recursive: true });
@@ -174,7 +181,6 @@ export async function uploadDryRunScreenshot(
     } catch {}
   }
 
-  // Local filesystem fallback
   const dryRunDir = path.resolve(process.cwd(), 'output', 'proofs_dry_run');
   if (!fs.existsSync(dryRunDir)) {
     fs.mkdirSync(dryRunDir, { recursive: true });
@@ -212,7 +218,6 @@ export async function uploadFailedScreenshot(
     } catch {}
   }
 
-  // Local filesystem fallback
   const failDir = path.resolve(process.cwd(), 'output', 'proofs_failed');
   if (!fs.existsSync(failDir)) {
     fs.mkdirSync(failDir, { recursive: true });
@@ -282,7 +287,6 @@ export async function uploadEmailProof(
     } catch {}
   }
 
-  // Local filesystem fallback
   const mailProofDir = path.resolve(process.cwd(), 'output', 'proofs_mail');
   if (!fs.existsSync(mailProofDir)) {
     fs.mkdirSync(mailProofDir, { recursive: true });
@@ -292,128 +296,140 @@ export async function uploadEmailProof(
   return `file://${localPath}`;
 }
 
-/**
- * Reads or downloads a resume file from Supabase Storage resumes bucket.
- */
-export async function downloadResumeFromSupabase(storagePath: string): Promise<Buffer | null> {
-  if (!isSupabaseConfigured() || !storagePath) return null;
+/** Demo-only: legacy Supabase `resumes` bucket object for AWL-YASWANTH. */
+async function downloadDemoResumeFromSupabaseBucket(): Promise<Buffer | null> {
+  if (!isSupabaseConfigured()) return null;
   try {
     const supabase = getDbClient();
-    const cleanPath = storagePath.replace(/^\/+/, '');
-    const pathsToTry = [
-      cleanPath,
-      cleanPath.replace(/^resumes\//, ''),
-      cleanPath.startsWith('resumes/') ? cleanPath : `resumes/${cleanPath}`,
-    ];
-    for (const p of pathsToTry) {
-      const { data, error } = await supabase.storage.from('resumes').download(p);
-      if (!error && data) {
-        const arrayBuf = await data.arrayBuffer();
-        return Buffer.from(arrayBuf);
-      }
+    const { data, error } = await supabase.storage.from('resumes').download(DEMO_RESUME_BUCKET_PATH);
+    if (!error && data) {
+      return Buffer.from(await data.arrayBuffer());
     }
   } catch (err: any) {
-    console.warn(`[Storage] ⚠️ Failed to download resume from Supabase Storage (${storagePath}): ${err.message}`);
+    console.warn(`[Storage] Demo resume bucket fetch failed: ${err.message}`);
+  }
+  return null;
+}
+
+function readLocalDemoResumeFile(): Buffer | null {
+  const candidates = [
+    path.resolve(process.cwd(), config.RESUMES_DIR || 'resumes', 'AWL-YASHANTH_resume.pdf'),
+    path.resolve(process.cwd(), config.RESUMES_DIR || 'resumes', 'my-resume.pdf'),
+  ];
+  for (const filePath of candidates) {
+    if (fs.existsSync(filePath)) {
+      try {
+        const stats = fs.statSync(filePath);
+        if (stats.size > 100) {
+          return fs.readFileSync(filePath);
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
+
+async function loadProfileResumeUrl(applywizzId: string): Promise<string | null> {
+  try {
+    const profile = await getProfile(applywizzId);
+    const url = profile?.resume_url?.trim();
+    if (url) return url;
+  } catch (err: any) {
+    console.warn(`[Storage] Profile resume_url lookup failed for ${applywizzId}: ${err.message}`);
   }
   return null;
 }
 
 /**
- * Gets a signed read URL (valid 24h) for a resume in Supabase Storage.
+ * Resolves a stored resume_url to an HTTP(S) download URL (ApplyWizz S3 base for relative keys).
  */
-export async function getSignedResumeUrl(storagePath: string, expiresIn: number = 86400): Promise<string> {
-  if (!isSupabaseConfigured() || !storagePath) return '';
-  try {
-    const supabase = getDbClient();
-    const cleanPath = storagePath.replace(/^\/+/, '');
-    const pathsToTry = [
-      cleanPath,
-      cleanPath.replace(/^resumes\//, ''),
-      cleanPath.startsWith('resumes/') ? cleanPath : `resumes/${cleanPath}`,
-    ];
-    for (const p of pathsToTry) {
-      const { data, error } = await supabase.storage.from('resumes').createSignedUrl(p, expiresIn);
-      if (!error && data?.signedUrl) {
-        return data.signedUrl;
-      }
-    }
-  } catch {}
-  return '';
+export function resolveResumeHttpUrl(resumeUrl: string): string {
+  const trimmed = resumeUrl.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  const base = (config.APPLYWIZZ_S3_BASE_URL || '').replace(/\/+$/, '');
+  const key = trimmed.replace(/^\/+/, '');
+  return `${base}/${key}`;
 }
 
 /**
- * Downloads candidate master resume on-demand to os.tmpdir() using Supabase Storage, resume_url or local cache.
- * Uses a short-lived cache in os.tmpdir() keyed by applywizz_id.
+ * HTTP URL for dashboard display from profile.resume_url.
+ */
+export async function getProfileResumeHttpUrl(applywizzId: string): Promise<string | null> {
+  const resumeUrl = await loadProfileResumeUrl(applywizzId);
+  if (resumeUrl) {
+    return resolveResumeHttpUrl(resumeUrl);
+  }
+  return null;
+}
+
+/**
+ * Fetches the master resume PDF bytes using profile.resume_url (on-demand HTTP).
+ * AWL-YASWANTH may fall back to the legacy Supabase resumes bucket or local demo file.
+ */
+export async function fetchResumePdfBuffer(applywizzId: string): Promise<Buffer> {
+  if (isDemoResumeApplywizzId(applywizzId)) {
+    const demoBuffer = await downloadDemoResumeFromSupabaseBucket();
+    if (demoBuffer && demoBuffer.length > 100) {
+      return demoBuffer;
+    }
+    const localDemo = readLocalDemoResumeFile();
+    if (localDemo && localDemo.length > 100) {
+      return localDemo;
+    }
+  }
+
+  const resumeUrl = await loadProfileResumeUrl(applywizzId);
+  if (!resumeUrl) {
+    throw new Error(`No resume_url on profile for ${applywizzId}`);
+  }
+
+  console.log('Resume fetched on-demand from profile.resume_url');
+
+  const httpUrl = resolveResumeHttpUrl(resumeUrl);
+  const response = await fetch(httpUrl, {
+    headers: { Accept: 'application/pdf,*/*', 'User-Agent': 'ApplyWizz-Greenhouse-Automation/1.0' },
+    signal: AbortSignal.timeout(RESUME_FETCH_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`Resume download failed HTTP ${response.status} (${httpUrl})`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length < 100) {
+    throw new Error('Downloaded resume PDF is empty or invalid');
+  }
+  return buffer;
+}
+
+/**
+ * Downloads candidate master resume to a unique temp file under os.tmpdir().
+ * Caller must delete the file after use.
  */
 export async function downloadResumeTempFile(applywizzId: string): Promise<string> {
-  const fileName = `${applywizzId}_resume.pdf`;
-  const tempFilePath = path.join(os.tmpdir(), fileName);
-
-  // 1. Check if valid resume already exists in temp
-  if (fs.existsSync(tempFilePath)) {
-    try {
-      const stats = fs.statSync(tempFilePath);
-      if (stats.size > 100) {
-        return tempFilePath;
-      }
-    } catch {}
-  }
-
-  // 2. Fetch directly from Supabase Storage (resumes bucket)
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('resume_url, resume_storage_path')
-        .or(`applywizz_id.eq.${applywizzId},applywizz_id.ilike.${applywizzId}`)
-        .maybeSingle();
-
-      const candidatePath =
-        profile?.resume_storage_path ||
-        profile?.resume_url ||
-        (applywizzId === 'AWL-YASWANTH' || applywizzId === 'AWL-YASHANTH'
-          ? 'resumes/AWL-YASHANTH_resume.pdf'
-          : `${applywizzId}_resume.pdf`);
-
-      const resumeBuffer = await downloadResumeFromSupabase(candidatePath);
-      if (resumeBuffer && resumeBuffer.length > 100) {
-        await fs.promises.writeFile(tempFilePath, resumeBuffer);
-        return tempFilePath;
-      }
-    } catch (err: any) {
-      console.warn(`[Storage] ⚠️ Supabase Storage resume fetch failed for ${applywizzId}: ${err.message}`);
-    }
-  }
-
-  // 3. Local resumes directory fallback (dev / offline)
-  const localFile = path.resolve(process.cwd(), 'resumes', fileName);
-  if (fs.existsSync(localFile)) {
-    try {
-      const stats = fs.statSync(localFile);
-      if (stats.size > 100) {
-        return localFile;
-      }
-    } catch {}
-  }
-
-  // Also check local my-resume.pdf or AWL-YASHANTH_resume.pdf fallback for demo candidate
-  if (applywizzId === 'AWL-YASWANTH' || applywizzId === 'AWL-YASHANTH') {
-    const demoCandidates = [
-      path.resolve(process.cwd(), 'resumes', 'AWL-YASHANTH_resume.pdf'),
-      path.resolve(process.cwd(), 'resumes', 'my-resume.pdf'),
-      path.resolve(process.cwd(), 'resumes', 'my-resume.pdf.pdf'),
-    ];
-    for (const d of demoCandidates) {
-      if (fs.existsSync(d)) {
-        try {
-          const stats = fs.statSync(d);
-          if (stats.size > 100) return d;
-        } catch {}
-      }
-    }
-  }
-
+  const buffer = await fetchResumePdfBuffer(applywizzId);
+  const tempFilePath = path.join(
+    os.tmpdir(),
+    `applywizz-${applywizzId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${process.pid}-${Date.now()}.pdf`
+  );
+  await fs.promises.writeFile(tempFilePath, buffer);
   return tempFilePath;
 }
 
+export function isManagedResumeTempFile(filePath: string): boolean {
+  const normalized = path.normalize(filePath);
+  const tmpRoot = path.normalize(os.tmpdir());
+  return normalized.startsWith(tmpRoot) && normalized.includes('applywizz-') && normalized.endsWith('.pdf');
+}
+
+export async function deleteResumeTempFile(filePath: string): Promise<void> {
+  if (!filePath || !isManagedResumeTempFile(filePath)) return;
+  try {
+    if (fs.existsSync(filePath)) {
+      await fs.promises.unlink(filePath);
+    }
+  } catch (err: any) {
+    console.warn(`[Storage] Failed to delete temp resume ${filePath}: ${err.message}`);
+  }
+}

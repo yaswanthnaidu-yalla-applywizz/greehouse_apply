@@ -8,8 +8,9 @@
  */
 
 import fs from 'fs';
+import path from 'path';
 import type { Page, Locator } from 'playwright';
-import { downloadResumeTempFile } from '../db/storage.js';
+import { downloadResumeTempFile, isDemoResumeApplywizzId } from '../db/storage.js';
 import { getUnmappedVisibleFields } from './cascadeDetector.js';
 import { AnswerResolver } from '../resolver/answerResolver.js';
 import { getProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
@@ -98,6 +99,97 @@ async function findElementLocator(
     }
   }
   return null;
+}
+
+const CUSTOM_SELECT_OPTION_LOCATOR =
+  '.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country), .select2-results__option:not(.iti__country)';
+
+type OptionTextMatcher = (optionText: string, answerText: string) => boolean;
+
+function exactOptionTextMatch(optionText: string, answerText: string): boolean {
+  const opt = optionText.trim();
+  const ans = answerText.trim();
+  return opt === ans || opt.toLowerCase() === ans.toLowerCase();
+}
+
+/**
+ * Resolves the type-ahead input (if any) and click target for React-Select / combobox controls.
+ */
+async function resolveComboboxControls(
+  control: Locator
+): Promise<{ searchInput: Locator | null; openTrigger: Locator }> {
+  const tagName = await control.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
+  const role = await control.getAttribute('role').catch(() => null);
+  const className = (await control.getAttribute('class').catch(() => '')) || '';
+
+  const nestedInput = control.locator('input[type="text"], input:not([type="hidden"]), .select__input').first();
+  if (tagName === 'INPUT' || className.includes('select__input') || role === 'combobox') {
+    return { searchInput: control, openTrigger: control };
+  }
+  if ((await nestedInput.count()) > 0) {
+    return { searchInput: nestedInput, openTrigger: control };
+  }
+
+  const container = control.locator('xpath=ancestor-or-self::*[contains(@class,"select__control") or contains(@class,"select-shell") or contains(@class,"css-control")][1]').first();
+  if ((await container.count()) > 0) {
+    const containerInput = container.locator('input[type="text"], input[role="combobox"], .select__input').first();
+    if ((await containerInput.count()) > 0) {
+      return { searchInput: containerInput, openTrigger: container };
+    }
+    return { searchInput: null, openTrigger: container };
+  }
+
+  return { searchInput: null, openTrigger: control };
+}
+
+async function clickDropdownOptionByMatch(
+  page: Page,
+  answerText: string,
+  matchOption: OptionTextMatcher
+): Promise<boolean> {
+  const options = page.locator(CUSTOM_SELECT_OPTION_LOCATOR);
+  const count = await options.count().catch(() => 0);
+  for (let i = 0; i < count; i++) {
+    const opt = options.nth(i);
+    const visible = await opt.isVisible().catch(() => false);
+    if (!visible) continue;
+    const text = (await opt.innerText().catch(() => '')).trim();
+    if (!text) continue;
+    if (matchOption(text, answerText)) {
+      await opt.scrollIntoViewIfNeeded().catch(() => {});
+      await opt.click({ force: true, timeout: 2500 });
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Searchable/combobox select: type into filter input when present, else open menu; then click option by text match.
+ */
+async function fillInteractiveSelectDropdown(
+  page: Page,
+  control: Locator,
+  answerText: string,
+  matchOption: OptionTextMatcher = exactOptionTextMatch
+): Promise<boolean> {
+  await control.scrollIntoViewIfNeeded().catch(() => {});
+  const { searchInput, openTrigger } = await resolveComboboxControls(control);
+
+  if (searchInput) {
+    await openTrigger.click({ force: true }).catch(() => {});
+    await searchInput.click({ force: true }).catch(() => {});
+    await searchInput.fill('').catch(() => {});
+    await searchInput.pressSequentially(answerText, { delay: 35 });
+    await page.waitForTimeout(500);
+  } else {
+    await openTrigger.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
+  const clicked = await clickDropdownOptionByMatch(page, answerText, matchOption);
+
+  return clicked;
 }
 
 function normalizeBooleanValue(value: string): 'Yes' | 'No' | null {
@@ -233,14 +325,18 @@ export async function fillSingleField(
           tempResumePath = await downloadResumeTempFile(applywizzId);
           tempFilesToClean.push(tempResumePath);
         } catch (dlErr: any) {
-          const localCandidates = [
-            `./resumes/${applywizzId}.pdf`,
-            `./resumes/${applywizzId}_resume.pdf`,
-            `./resumes/my-resume.pdf`,
-          ];
-          const foundLocal = localCandidates.find((p) => fs.existsSync(p));
-          if (foundLocal) {
-            tempResumePath = foundLocal;
+          if (isDemoResumeApplywizzId(applywizzId)) {
+            const localCandidates = [
+              path.resolve(process.cwd(), 'resumes', `${applywizzId}_resume.pdf`),
+              path.resolve(process.cwd(), 'resumes', 'AWL-YASHANTH_resume.pdf'),
+              path.resolve(process.cwd(), 'resumes', 'my-resume.pdf'),
+            ];
+            const foundLocal = localCandidates.find((p) => fs.existsSync(p));
+            if (foundLocal) {
+              tempResumePath = foundLocal;
+            } else {
+              throw new Error(`Could not obtain resume PDF: ${dlErr.message}`);
+            }
           } else {
             throw new Error(`Could not obtain resume PDF: ${dlErr.message}`);
           }
@@ -404,60 +500,17 @@ export async function fillSingleField(
         const className = (await found.locator.getAttribute('class').catch(() => '')) || '';
 
         if (tagName === 'INPUT' || tagName === 'DIV' || tagName === 'BUTTON' || role === 'combobox' || className.includes('select__input')) {
-          // Modern React-Select combobox input
-          await found.locator.scrollIntoViewIfNeeded().catch(() => {});
-          await found.locator.click({ force: true }).catch(() => {});
-          await page.waitForTimeout(150);
-
-          const typeQuery = isCountryCode ? targetCountryName : isSponsorship ? 'Yes' : selectValue;
-          await found.locator.pressSequentially(typeQuery, { delay: 35 });
-          await page.waitForTimeout(350);
-
-          const optionCandidates = page.locator(
-            isCountryCode
-              ? '.select__option, [id*="-option"], [role="option"]'
-              : '.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country)'
+          const typeQuery = isCountryCode ? targetCountryName : selectValue;
+          const countryMatcher: OptionTextMatcher = (optText) =>
+            new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
+          const selected = await fillInteractiveSelectDropdown(
+            page,
+            found.locator,
+            typeQuery,
+            isCountryCode ? countryMatcher : exactOptionTextMatch
           );
 
-          let matchedOpt = optionCandidates.first();
-          if (isCountryCode) {
-            matchedOpt = optionCandidates.filter({
-              hasText: new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i'),
-            }).first();
-          } else if (isSponsorship) {
-            matchedOpt = optionCandidates.filter({
-              hasText: /^yes\b/i,
-            }).first();
-            if ((await matchedOpt.count()) === 0) {
-              matchedOpt = optionCandidates.filter({
-                hasText: /yes/i,
-              }).first();
-            }
-          } else {
-            const escapedVal = selectValue.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-            // 1. Exact match
-            matchedOpt = optionCandidates.filter({
-              hasText: new RegExp(`^${escapedVal}$`, 'i'),
-            }).first();
-
-            // 2. Prefix match (e.g., "United States" matching "United States +1")
-            if ((await matchedOpt.count()) === 0) {
-              matchedOpt = optionCandidates.filter({
-                hasText: new RegExp(`^${escapedVal}`, 'i'),
-              }).first();
-            }
-
-            // 3. Substring / fuzzy match
-            if ((await matchedOpt.count()) === 0) {
-              matchedOpt = optionCandidates.filter({
-                hasText: new RegExp(escapedVal, 'i'),
-              }).first();
-            }
-          }
-
-          if ((await matchedOpt.count()) > 0) {
-            await matchedOpt.scrollIntoViewIfNeeded().catch(() => {});
-            await matchedOpt.click({ force: true, timeout: 2500 });
+          if (selected) {
             fillResult.success = true;
             if (isCountryCode) {
               console.log(
@@ -465,7 +518,7 @@ export async function fillSingleField(
               );
             } else if (isSponsorship) {
               console.log(
-                `[Submitter] Sponsorship field → selector: ${found.selector} → attempted click: Yes → result: selected`
+                `[Submitter] Sponsorship field → selector: ${found.selector} → attempted click: ${selectValue} → result: selected`
               );
             } else if (booleanValue) {
               console.log(
@@ -475,14 +528,12 @@ export async function fillSingleField(
           } else {
             await page.keyboard.press('Enter').catch(() => {});
             await page.keyboard.press('Tab').catch(() => {});
+            fillResult.success = false;
           }
 
-          // If this was hispanic_ethnicity, give DOM time to render conditional race field
           if (fieldId.includes('hispanic') || name.includes('hispanic')) {
             await page.waitForTimeout(500);
           }
-
-          fillResult.success = true;
         } else {
           // Native HTML <select> (supports Select2 hidden elements via force: true)
           let selected = false;
@@ -501,7 +552,11 @@ export async function fillSingleField(
           } else if (isSponsorship) {
             try {
               const optionsList = await found.locator.locator('option').allInnerTexts();
-              const matchOpt = optionsList.find((opt) => /^yes\b/i.test(opt.trim()) || opt.toLowerCase().includes('yes'));
+              const target = selectValue.trim().toLowerCase();
+              const matchOpt = optionsList.find((opt) => {
+                const o = opt.trim().toLowerCase();
+                return o === target || (target === 'yes' && /^yes\b/.test(o)) || (target === 'no' && /^no\b/.test(o));
+              });
               if (matchOpt) {
                 await found.locator.selectOption({ label: matchOpt.trim() }, { force: true, timeout: 2000 });
                 selected = true;
@@ -577,12 +632,8 @@ export async function fillSingleField(
 
         const count = await select2Trigger.count();
         if (count > 0) {
-          await select2Trigger.click();
-          await page.waitForTimeout(300);
-          const optLoc = page.locator(`.select2-results__option:not(.iti__country), [role="option"]:not(.iti__country)`).filter({ hasText: val }).first();
-          const optCount = await optLoc.count();
-          if (optCount > 0) {
-            await optLoc.click({ force: true });
+          const selected = await fillInteractiveSelectDropdown(page, select2Trigger, selectValue);
+          if (selected) {
             fillResult.success = true;
           } else {
             throw new Error(`Custom select option "${val}" not found`);
@@ -887,31 +938,9 @@ export async function fillSingleField(
           }).catch(() => {});
           fillResult.success = true;
         } else if (role === 'combobox' || (className && className.includes('select__input'))) {
-          // Element was misclassified as text but is actually a React-Select combobox
-          await found.locator.scrollIntoViewIfNeeded().catch(() => {});
-          await found.locator.click({ force: true }).catch(() => {});
-          await page.waitForTimeout(150);
-          await found.locator.pressSequentially(val, { delay: 35 });
-          await page.waitForTimeout(350);
-
-          const escapedVal = val.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-          const optionCandidates = page.locator('.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country)');
-
-          let matchedOpt = optionCandidates.filter({ hasText: new RegExp(`^${escapedVal}$`, 'i') }).first();
-          if ((await matchedOpt.count()) === 0) {
-            matchedOpt = optionCandidates.filter({ hasText: new RegExp(`^${escapedVal}`, 'i') }).first();
-          }
-          if ((await matchedOpt.count()) === 0) {
-            matchedOpt = optionCandidates.filter({ hasText: new RegExp(escapedVal, 'i') }).first();
-          }
-
-          if ((await matchedOpt.count()) > 0) {
-            await matchedOpt.click({ force: true, timeout: 2500 }).catch(() => {});
-          } else {
-            await page.keyboard.press('Enter').catch(() => {});
-            await page.keyboard.press('Tab').catch(() => {});
-          }
-          fillResult.success = true;
+          const booleanValue = normalizeBooleanValue(val);
+          const selectAnswer = booleanValue || val;
+          fillResult.success = await fillInteractiveSelectDropdown(page, found.locator, selectAnswer);
         } else {
           // Standard text input
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});

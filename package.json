@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "tsx src/index.ts",
     "start:sample": "tsx src/index.ts --candidate=AWL-31428 --maxJobs=10",
+    "demo:fixture-31428": "tsx scripts/syncDemoFixture31428.ts",
     "start:dashboard": "tsx src/server/index.ts",
     "dev": "tsx src/index.ts",
     "scan": "tsx src/scanner/runScan.ts",

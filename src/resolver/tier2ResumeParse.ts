@@ -6,7 +6,7 @@
 import fs from 'fs';
 import _pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { getProfile, updateParsedResume } from '../db/profiles.js';
-import { downloadResumeTempFile } from '../db/storage.js';
+import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
 import { normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 
@@ -155,8 +155,7 @@ function extractStructuredSections(rawText: string): ParsedResumeStructured {
 }
 
 /**
- * Retrieves the parsed resume from Supabase cache, or downloads from Supabase Storage and parses.
- * Never fetches from external URLs during resolution.
+ * Retrieves parsed resume from profile cache, or downloads via profile.resume_url and parses.
  */
 export async function getOrParseResume(applywizzId: string): Promise<ResumeParsedRow | null> {
   // 1. Check candidate profile in DB
@@ -174,7 +173,7 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
     console.warn(`[Tier 2] Profile resume lookup failed for ${applywizzId}: ${err.message}`);
   }
 
-  // 2. Download from local cache / on-demand remote URL and parse
+  // 2. Download from profile.resume_url and parse
   let tempPath: string | null = null;
   try {
     tempPath = await downloadResumeTempFile(applywizzId);
@@ -223,6 +222,10 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
   } catch (err: any) {
     console.warn(`[Tier 2] PDF parse failed for ${applywizzId}: ${err.message}`);
     return null;
+  } finally {
+    if (tempPath) {
+      await deleteResumeTempFile(tempPath);
+    }
   }
 }
 

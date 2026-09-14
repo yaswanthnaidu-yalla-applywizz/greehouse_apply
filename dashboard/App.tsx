@@ -27,6 +27,11 @@ import {
   mergeApplicationFromRealtimeRow,
   patchJobInCandidateDetail,
 } from '../src/dashboard/applicationRealtimeMerge.js';
+import {
+  filterJobsForCandidate,
+  isSameApplywizzId,
+  normalizeApplywizzId,
+} from '../src/dashboard/candidateQueueFilter.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -77,6 +82,11 @@ export const App: React.FC = () => {
   });
   const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
   const notifRef = useRef<HTMLDivElement>(null);
+  const selectedCandidateRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedCandidateRef.current = selectedCandidateId;
+  }, [selectedCandidateId]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -183,6 +193,13 @@ export const App: React.FC = () => {
   }, [currentUser]);
 
   const handleSignOut = () => {
+    const token = localStorage.getItem('applywizz_auth_token');
+    if (token) {
+      fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    }
     localStorage.removeItem('applywizz_auth_token');
     localStorage.removeItem('applywizz_auth_user');
     localStorage.removeItem('applywizz_wh_unreachable');
@@ -383,21 +400,31 @@ export const App: React.FC = () => {
 
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
-    console.log(`[Dashboard] Selected ${applywizzId} → fetching jobs assigned to this candidate only`);
+    const requestedId = normalizeApplywizzId(applywizzId);
+    console.log(`[Dashboard] Selected ${requestedId} → fetching jobs assigned to this candidate only`);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}`, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
         const detail: CandidateDetail = await res.json();
+        if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
+          return;
+        }
+
         const jobsRes = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs`, {
           headers: getAuthHeaders(),
         });
+
+        if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
+          return;
+        }
 
         if (jobsRes.status === 403) {
           console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} is not assigned to current CA`);
           setCandidateDetail({
             ...detail,
+            applywizzId: requestedId,
             jobs: [],
           });
           setSelectedJobUrl(null);
@@ -410,19 +437,20 @@ export const App: React.FC = () => {
         console.log(
           `[API] GET /api/candidates/${applywizzId}/jobs → filtering by applywizz_id=${applywizzId}`
         );
-        if (returnedApplywizzId && returnedApplywizzId !== applywizzId) {
+        if (returnedApplywizzId && !isSameApplywizzId(returnedApplywizzId, requestedId)) {
           console.error(
-            `[Dashboard] Candidate mismatch: viewing ${applywizzId}, jobs returned for ${returnedApplywizzId}`
+            `[Dashboard] Candidate mismatch: viewing ${requestedId}, jobs returned for ${returnedApplywizzId}`
           );
         }
 
-        const candidateJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
+        const rawJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
+        const candidateJobs = filterJobsForCandidate(rawJobs, requestedId);
         setCandidateDetail({
           ...detail,
+          applywizzId: requestedId,
           jobs: candidateJobs,
         });
 
-        // Auto-select first job if available
         if (candidateJobs.length > 0) {
           const firstJobUrl = candidateJobs[0].canonicalUrl || candidateJobs[0].rawUrl;
           setSelectedJobUrl(firstJobUrl);
@@ -442,22 +470,42 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (selectedCandidateId) {
-      fetchCandidateDetail(selectedCandidateId);
+    if (!selectedCandidateId) {
+      setCandidateDetail(null);
+      setSelectedJobUrl(null);
+      setApplication(null);
+      return;
     }
+    setCandidateDetail(null);
+    setSelectedJobUrl(null);
+    setApplication(null);
+    fetchCandidateDetail(selectedCandidateId);
   }, [selectedCandidateId, fetchCandidateDetail]);
 
   // 3. Fetch Resolved Form Answers for Active Job
   const fetchJobApplication = useCallback(async (applywizzId: string, jobUrl: string) => {
+    const requestedId = normalizeApplywizzId(applywizzId);
     setIsLoadingApplication(true);
     try {
       const encodedUrl = encodeURIComponent(jobUrl);
-      const res = await fetch(`${API_BASE_URL}/api/candidates/${applywizzId}/jobs/${encodedUrl}`, {
+      const res = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}`, {
         headers: getAuthHeaders(),
       });
 
+      if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
+        return;
+      }
+
       if (res.ok) {
         const appData = await res.json();
+        const appOwner = appData.applywizzId || appData.applywizz_id;
+        if (appOwner && !isSameApplywizzId(appOwner, requestedId)) {
+          console.warn(
+            `[Dashboard] Ignoring application for ${appOwner}; selected candidate is ${requestedId}`
+          );
+          setApplication(null);
+          return;
+        }
         setApplication(appData);
       } else {
         setApplication(null);
@@ -466,7 +514,9 @@ export const App: React.FC = () => {
       console.error(`Failed to fetch application for ${applywizzId} / ${jobUrl}:`, err);
       setApplication(null);
     } finally {
-      setIsLoadingApplication(false);
+      if (isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
+        setIsLoadingApplication(false);
+      }
     }
   }, []);
 
@@ -478,7 +528,12 @@ export const App: React.FC = () => {
 
   const handleRealtimeApplicationRow = useCallback(
     (row: Record<string, unknown>) => {
-      setApplication((prev: any) => mergeApplicationFromRealtimeRow(prev, row));
+      const selectedId = selectedCandidateRef.current;
+      const rowApplywizz = typeof row.applywizz_id === 'string' ? row.applywizz_id : '';
+      if (selectedId && rowApplywizz && !isSameApplywizzId(rowApplywizz, selectedId)) {
+        return;
+      }
+      setApplication((prev: any) => mergeApplicationFromRealtimeRow(prev, row, selectedId));
       setCandidateDetail((prev) => (prev ? patchJobInCandidateDetail(prev, row) : prev));
     },
     []
@@ -1059,6 +1114,7 @@ export const App: React.FC = () => {
                 {/* Right Top: Job Queue Tabs */}
                 <JobQueueView
                   candidate={candidateDetail}
+                  selectedApplywizzId={selectedCandidateId}
                   selectedJobUrl={selectedJobUrl}
                   onSelectJob={(url) => setSelectedJobUrl(url)}
                 />

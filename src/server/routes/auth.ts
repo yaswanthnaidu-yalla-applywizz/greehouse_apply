@@ -5,6 +5,7 @@
  * - POST /api/auth/verify-email: Checks email against authorized API and Supabase Auth.
  * - POST /api/auth/register: Registers new user in Supabase Auth if authorized.
  * - POST /api/auth/login: Authenticates user credentials via Supabase Auth.
+ * - POST /api/auth/logout: Records sign-out (server log only; token cleared client-side).
  * - GET  /api/auth/me: Validates access token and returns user info.
  */
 
@@ -25,10 +26,26 @@ const AUTHORIZED_EMAILS_API = config.AUTHORIZED_EMAILS_API || 'https://applywizz
  * Hardcoded allowlist of administrative emails explicitly permitted to sign up,
  * bypassing external CA management API dependencies.
  */
+/** Treat as admin in isUserAdmin() — full org access (manager dashboard, no CA filter). */
 export const ALWAYS_ALLOWED_EMAILS = [
   'yaswanthnaiduyalla@applywizz.ai',
   'yaswanhnaiduyalla@applywizz.ai',
 ];
+
+/** One-line login audit log (call only on successful sign-in). */
+export function logAuthLogin(email: string, isAdmin: boolean): void {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return;
+  const role = isAdmin ? 'ADMIN' : 'CA';
+  console.log(`[Auth] ✅ ${normalized} logged in → ${role}`);
+}
+
+/** One-line logout audit log (call from POST /api/auth/logout). */
+export function logAuthLogout(email: string): void {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return;
+  console.log(`[Auth] 👋 ${normalized} logged out`);
+}
 
 /**
  * Checks whether a given user object, session, or email belongs to an administrator.
@@ -54,10 +71,8 @@ export function isUserAdmin(userOrEmail?: any): boolean {
   const isAlwaysAllowedEmail = ALWAYS_ALLOWED_EMAILS.some(
     (allowedEmail) => allowedEmail.trim().toLowerCase() === normalized
   );
-  console.log(`[Auth] Email check: ${normalized} → found in admin list: ${isAlwaysAllowedEmail}`);
 
   if (isAlwaysAllowedEmail) {
-    console.log(`[Auth] ${normalized} → admin access granted`);
     return true;
   }
 
@@ -598,6 +613,8 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       }
     }
 
+    logAuthLogin(normalizedEmail, isAdmin);
+
     res.json({
       success: true,
       token: verifyData.access_token || tempToken,
@@ -746,6 +763,10 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
       }
     }
 
+    if (userEmail) {
+      logAuthLogin(userEmail, isAdmin);
+    }
+
     res.json({
       success: true,
       token: verifyData.access_token || token,
@@ -798,6 +819,38 @@ authRouter.post('/hydrate-admin', async (req: Request, res: Response): Promise<v
     res.json({ success: true, hydratedCount, date: dateStr });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Admin hydration failed.' });
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * Client-side session clear; server records a single logout audit line.
+ */
+authRouter.post('/logout', async (req: Request, res: Response): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or invalid Authorization header.' });
+    return;
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    if (!isSupabaseConfigured()) {
+      res.json({ success: true });
+      return;
+    }
+
+    const supabase = getDbClient();
+    const { data, error } = await supabase.auth.getUser(token);
+
+    if (!error && data?.user?.email) {
+      logAuthLogout(data.user.email);
+    }
+
+    res.json({ success: true });
+  } catch {
+    res.json({ success: true });
   }
 });
 

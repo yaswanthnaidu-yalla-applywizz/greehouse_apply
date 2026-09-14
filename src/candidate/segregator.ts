@@ -59,10 +59,15 @@ export function detectCsvFormat(headerKeys: string[]): CsvIngestFormat {
   const hasOldClient =
     normalized.has('client_name') ||
     headerKeys.some((k) => normalizeHeaderKey(k) === 'client_name');
-  const hasOldUrl = normalized.has('url');
+  const hasOldUrl =
+    normalized.has('url') ||
+    normalized.has('company_job_url') ||
+    normalized.has('job_url');
   const hasOldScore = normalized.has('score');
+  const hasClientLabel =
+    hasOldClient || normalized.has('lead_name');
 
-  if (hasOldApplywizz && hasOldClient && hasOldUrl && hasOldScore) {
+  if (hasOldApplywizz && hasClientLabel && hasOldUrl && hasOldScore) {
     return 'OLD';
   }
 
@@ -134,8 +139,18 @@ export function parseCsvJobRow(
   }
 
   const applywizzId = getColumnValue(row, 'Applywizz ID', 'applywizz_id', 'ApplywizzID').toUpperCase();
-  const clientName = getColumnValue(row, 'Client Name', 'client_name', 'ClientName');
-  const rawUrl = getColumnValue(row, 'url', 'URL', 'job_url');
+  const clientName = getColumnValue(
+    row,
+    'Client Name',
+    'client_name',
+    'ClientName',
+    'lead_name',
+    'Lead Name'
+  );
+  let rawUrl = getColumnValue(row, 'url', 'URL', 'job_url', 'Job URL');
+  if (!rawUrl) {
+    rawUrl = extractUrlFromCompanyJobUrl(getColumnValue(row, 'company_job_url', 'Company Job URL'));
+  }
   const date = getColumnValue(row, 'Date', 'date');
   const score = parseScore(getColumnValue(row, 'score', 'Score') || undefined);
   const scoredJobId = getColumnValue(row, 'scored_jobId', 'scored_job_id');
@@ -272,6 +287,8 @@ export async function segregateCandidatesByApplyWizzId(
   let csvFormat: CsvIngestFormat | null = null;
   let formatLogged = false;
   let skippedUnknownFormatRows = 0;
+  let skippedInvalidRows = 0;
+  let droppedScoreRows = 0;
 
   await new Promise<void>((resolve, reject) => {
     const stream = fs.createReadStream(csvPath);
@@ -304,14 +321,24 @@ export async function segregateCandidatesByApplyWizzId(
 
         const parsed = parseCsvJobRow(row, csvFormat);
         if (!parsed) {
-          console.error('[Segregator] Invalid row for detected format — skipping row');
+          skippedInvalidRows++;
+          if (skippedInvalidRows === 1) {
+            console.warn(
+              `[Segregator] Invalid row for detected format (${csvFormat}) — skipping; summary logged after CSV ingest completes.`
+            );
+          }
           return;
         }
 
         const { applywizzId, clientName, rawUrl, date, score, scoredJobId, status } = parsed;
 
         if (score < 20 || score > 60) {
-          console.log(`[Segregator] ❌ Dropped job score=${score} | candidate=${applywizzId} | job=${rawUrl}`);
+          droppedScoreRows++;
+          if (droppedScoreRows === 1) {
+            console.log(
+              `[Segregator] Dropping jobs outside dashboard score range 20–60 (summary after ingest).`
+            );
+          }
           return;
         }
 
@@ -352,6 +379,22 @@ export async function segregateCandidatesByApplyWizzId(
       })
       .on('end', () => resolve());
   });
+
+  if (skippedUnknownFormatRows > 0) {
+    console.warn(
+      `[Segregator] Skipped ${skippedUnknownFormatRows.toLocaleString()} row(s): unknown CSV format.`
+    );
+  }
+  if (skippedInvalidRows > 0) {
+    console.warn(
+      `[Segregator] Skipped ${skippedInvalidRows.toLocaleString()} row(s): missing applywizz id or job URL for format ${csvFormat ?? 'UNKNOWN'}.`
+    );
+  }
+  if (droppedScoreRows > 0) {
+    console.log(
+      `[Segregator] Dropped ${droppedScoreRows.toLocaleString()} row(s) with score outside 20–60.`
+    );
+  }
 
   console.log(
     `[Candidate Segregator] 📊 Ingested ${rowCount.toLocaleString()} rows. Segregated ${segmentsMap.size.toLocaleString()} unique candidates.`
