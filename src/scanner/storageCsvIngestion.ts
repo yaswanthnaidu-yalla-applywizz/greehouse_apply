@@ -18,7 +18,7 @@ import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
-import { CSV_UPLOADS_BUCKET, ensureBucketsExist } from '../db/storage.js';
+import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
 import { config } from '../config/env.js';
 
@@ -44,8 +44,33 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     };
   }
 
-  await ensureBucketsExist();
   const supabase = getDbClient();
+
+  // Bucket provisioning belongs to `npm run db:migrate`, not to ingestion. Listing the
+  // buckets here instead verifies the credentials can actually see the dropzone: a key
+  // without service_role privileges gets an empty list and no error, which would
+  // otherwise be indistinguishable from an empty dropzone.
+  const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
+  if (bucketsError) {
+    console.error(`[Storage CSV Ingestion] ❌ Could not list storage buckets: ${bucketsError.message}`);
+    return {
+      success: false,
+      processedCount: 0,
+      message: `Could not list Supabase Storage buckets: ${bucketsError.message}`,
+    };
+  }
+
+  if (!(buckets || []).some((b) => b.name === CSV_UPLOADS_BUCKET)) {
+    const visible = (buckets || []).map((b) => b.name).join(', ') || 'none';
+    console.error(
+      `[Storage CSV Ingestion] ❌ Bucket '${CSV_UPLOADS_BUCKET}' is not visible to these credentials (visible buckets: ${visible}). SUPABASE_SERVICE_KEY is likely an anon key rather than the service_role secret, or points at another project.`
+    );
+    return {
+      success: false,
+      processedCount: 0,
+      message: `Storage bucket '${CSV_UPLOADS_BUCKET}' is not visible to these Supabase credentials (visible buckets: ${visible}). Check that SUPABASE_SERVICE_KEY is the service_role secret for the right project.`,
+    };
+  }
 
   console.log(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
 

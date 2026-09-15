@@ -561,9 +561,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         finishedAt: new Date().toISOString(),
         processedCount: result.processedCount,
         processedFile: result.processedFile,
-        message: result.message,
+        // A failed run reports through `message`; surface it as an error so the
+        // dashboard does not show a misconfiguration as a calm "nothing to do".
+        message: result.success ? result.message : undefined,
+        error: result.success ? undefined : result.message,
       };
-      console.log(`[Admin] ✅ Storage CSV ingestion finished: ${result.message}`);
+      console.log(
+        `[Admin] ${result.success ? '✅' : '❌'} Storage CSV ingestion finished: ${result.message}`
+      );
     } catch (err: any) {
       const message = err.message || 'Storage ingestion failed';
       ingestRun = {
