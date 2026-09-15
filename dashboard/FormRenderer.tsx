@@ -268,9 +268,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
     console.log(`[Dashboard] Submit button clicked → triggers API (appId: ${appId})`);
     setIsSubmitting(true);
-    if (onStatusChange) {
-      onStatusChange('QUEUED');
-    }
     try {
       const res = await fetch(
         `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/submit`,

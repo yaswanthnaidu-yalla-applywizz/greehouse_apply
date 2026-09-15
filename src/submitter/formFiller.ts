@@ -242,23 +242,58 @@ async function resolveComboboxControls(
   return { searchInput: null, openTrigger: control };
 }
 
+async function comboboxDisplaysAnswer(
+  control: Locator,
+  answerText: string,
+  matchOption: OptionTextMatcher = fuzzyOptionTextMatch
+): Promise<boolean> {
+  const controlRoot = control
+    .locator('xpath=ancestor::div[contains(@class,"select__control")][1]')
+    .first();
+  if ((await controlRoot.count()) > 0) {
+    const single = (await controlRoot.locator('.select__single-value').innerText().catch(() => '')).trim();
+    if (single && matchOption(single, answerText)) return true;
+  }
+  const inputVal = (await control.inputValue().catch(() => '')).trim();
+  return Boolean(inputVal && matchOption(inputVal, answerText));
+}
+
+async function resolveSelectOptionScope(control: Locator): Promise<Locator | null> {
+  const fieldWrapper = control
+    .locator('xpath=ancestor::*[contains(@class,"field-wrapper")][1]')
+    .first();
+  if ((await fieldWrapper.count()) > 0) return fieldWrapper;
+  const shell = control
+    .locator('xpath=ancestor::*[contains(@class,"select-shell")][1]')
+    .first();
+  if ((await shell.count()) > 0) return shell;
+  return null;
+}
+
 async function clickDropdownOptionByMatch(
   page: Page,
   answerText: string,
-  matchOption: OptionTextMatcher
+  matchOption: OptionTextMatcher,
+  scope?: Locator | null
 ): Promise<boolean> {
-  const options = page.locator(CUSTOM_SELECT_OPTION_LOCATOR);
-  const count = await options.count().catch(() => 0);
-  for (let i = 0; i < count; i++) {
-    const opt = options.nth(i);
-    const visible = await opt.isVisible().catch(() => false);
-    if (!visible) continue;
-    const text = (await opt.innerText().catch(() => '')).trim();
-    if (!text) continue;
-    if (matchOption(text, answerText)) {
-      await opt.scrollIntoViewIfNeeded().catch(() => {});
-      await opt.click({ force: true, timeout: 2500 });
-      return true;
+  const roots: Locator[] = [];
+  if (scope && (await scope.count()) > 0) roots.push(scope);
+  roots.push(page);
+
+  for (const root of roots) {
+    const options = root.locator(CUSTOM_SELECT_OPTION_LOCATOR);
+    const count = await options.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const opt = options.nth(i);
+      const visible = await opt.isVisible().catch(() => false);
+      if (!visible) continue;
+      const text = (await opt.innerText().catch(() => '')).trim();
+      if (!text) continue;
+      if (matchOption(text, answerText)) {
+        await opt.scrollIntoViewIfNeeded().catch(() => {});
+        await opt.click({ force: true, timeout: 2500 });
+        return true;
+      }
     }
   }
   return false;
@@ -277,7 +312,10 @@ async function fillInteractiveSelectDropdown(
   const { searchInput, openTrigger } = await resolveComboboxControls(control);
 
   if (searchInput) {
-    await openTrigger.click({ force: true }).catch(() => {});
+    const sameOpenAndSearch = openTrigger === searchInput;
+    if (!sameOpenAndSearch) {
+      await openTrigger.click({ force: true }).catch(() => {});
+    }
     await searchInput.click({ force: true }).catch(() => {});
     await searchInput.fill('').catch(() => {});
     await searchInput.pressSequentially(answerText, { delay: 35 });
@@ -287,9 +325,38 @@ async function fillInteractiveSelectDropdown(
     await page.waitForTimeout(500);
   }
 
-  let clicked = await clickDropdownOptionByMatch(page, answerText, matchOption);
+  const optionScope = await resolveSelectOptionScope(control);
+  let clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
   if (!clicked) {
-    clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch);
+    clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
+  }
+  if (!clicked && searchInput) {
+    await searchInput.press('ArrowDown').catch(() => {});
+    await page.waitForTimeout(150);
+    clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
+  }
+
+  if (!clicked && optionScope) {
+    const toggle = optionScope
+      .locator('button[aria-label*="Toggle"], button.icon-button[aria-label*="flyout"]')
+      .first();
+    if ((await toggle.count()) > 0) {
+      await toggle.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(350);
+      clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
+      if (!clicked) {
+        clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, page);
+      }
+    }
+  }
+
+  if (clicked && searchInput) {
+    const inputTag = await searchInput
+      .evaluate((el: HTMLElement) => el.tagName.toUpperCase())
+      .catch(() => '');
+    if (inputTag === 'INPUT') {
+      clicked = await comboboxDisplaysAnswer(searchInput, answerText, matchOption);
+    }
   }
 
   return clicked;
@@ -668,7 +735,7 @@ export async function fillSingleField(
             found.locator,
             found.selector,
             typeQuery,
-            isCountryCode ? countryMatcher : exactOptionTextMatch
+            isCountryCode ? countryMatcher : isSponsorship || booleanValue ? fuzzyOptionTextMatch : exactOptionTextMatch
           );
 
           if (selected) {
@@ -683,9 +750,22 @@ export async function fillSingleField(
               );
             }
           } else {
-            await page.keyboard.press('Enter').catch(() => {});
-            await page.keyboard.press('Tab').catch(() => {});
+            // Do not press Enter on React-Select comboboxes — it clears the filter without selecting (see debug-d34e5e).
             fillResult.success = false;
+            if (isSponsorship) {
+              const fieldDump = await found.locator
+                .evaluate((el: HTMLElement) => {
+                  const root =
+                    el.closest('.field-wrapper') ||
+                    el.closest('.select-shell') ||
+                    el.parentElement;
+                  return (root?.outerHTML || el.outerHTML).slice(0, 5000);
+                })
+                .catch(() => '');
+              console.warn(
+                `[Submitter] Sponsorship combobox fill failed → selector: ${found.selector} → field HTML snippet:\n${fieldDump}`
+              );
+            }
           }
 
           if (fieldId.includes('hispanic') || name.includes('hispanic')) {
