@@ -1274,7 +1274,8 @@
         if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
           return [];
         }
-        return filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
+        const owned = filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
+        return excludeSkippedApplicationJobs(owned);
       }, [candidate, selectedApplywizzId]);
 
       const handleJobCardClick = (job) => {
@@ -2601,6 +2602,11 @@
         const owner = normalizeApplywizzId(job.applywizzId || job.applywizz_id);
         return !owner || owner === expected;
       });
+    }
+
+    function excludeSkippedApplicationJobs(jobs) {
+      if (!Array.isArray(jobs)) return [];
+      return jobs.filter((job) => (job.status || '').toUpperCase() !== 'SKIPPED');
     }
 
     function candidateDetailMatchesSelection(detail, selectedApplywizzId) {
