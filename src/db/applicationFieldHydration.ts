@@ -6,6 +6,9 @@
 import type { ApplicationRow } from './applications.js';
 import { findTemplateByJobUrl } from './templates.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Application Field Hydration');
 
 export function scannedFieldsToResolvedShells(fields: ScannedField[]): ResolvedField[] {
   return fields.map((f) => ({
@@ -46,7 +49,7 @@ export async function hydrateApplicationResolvedFields(
   const template = await findTemplateByJobUrl(app.job_url);
   const schema = template?.fields_schema;
   if (!template || !Array.isArray(schema) || schema.length === 0) {
-    console.log(
+    log.info(
       `[Hydrate] No fields_schema for job_url=${app.job_url} applywizz_id=${app.applywizz_id} ` +
         `(resolved_fields empty — scan/migrate templates or run resolve pipeline)`
     );
@@ -58,7 +61,7 @@ export async function hydrateApplicationResolvedFields(
   }
 
   const shells = scannedFieldsToResolvedShells(schema as ScannedField[]);
-  console.log(
+  log.info(
     `[Hydrate] fields_schema → resolved_fields applywizz_id=${app.applywizz_id} ` +
       `application_job_url=${app.job_url} template_job_url=${template.job_url} field_count=${shells.length}`
   );

@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step 1–8 logs + dashboard field filter)_
+_Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on `main`; apply migration 015; 0003/0005/0011 open until end of week)_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -23,7 +23,7 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 
 ### Database
 - [x] Full Supabase schema: 5 core tables + storage buckets
-- [x] 15 files in `src/db/migrations/` (001–014 + `latest_supabase_migration.sql`). **014 (`SKIPPED`) may still need apply** on Supabase. **013 (`EMAIL_UNVERIFIED`)** operator reported applied
+- [x] 16 files in `src/db/migrations/` (001–015 + `latest_supabase_migration.sql`). **015 (`audit_events` / `application_events`) needs apply** on Supabase. **014 (`SKIPPED`) may still need apply**. **013 (`EMAIL_UNVERIFIED`)** operator reported applied
 - [x] Idempotent upsert patterns throughout
 - [x] V1 → V2 migration runner (`db/migrate.ts`)
 
@@ -44,8 +44,11 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - [x] Dry-run / Approve & Submit / View Proof controls in dashboard
 
 ### V2.5 Dashboard & Ops (This Release)
-- [x] Manager `GET /api/manager/dashboard` — admins see org-wide rollups (no CA API scoping)
-- [x] Manager operator UI at **`/manager`** (Bearer token from operator login; not raw `/api/manager/dashboard`)
+- [x] Manager `GET /api/manager/dashboard` — expandable completed/pending/failed details; date + CA filters. **Team scoping off for now** (`MANAGER_TEAM_SCOPE_ENABLED = false`) because `careerassociatemanager_id` ↔ manager email mapping is unknown
+- [x] Manager UI at **`/manager`** (managers + dev). Secondary tabs: Operators, Activity, Reports (volume only)
+- [x] Admin dashboard at **`/admin`** — org overview, managers, operators, applications, audit, system status, **▶ Start** ingest
+- [x] Dev dashboard at **`/dev`** — health, runs, errors, queue, integrations, application debugger
+- [x] Login redirects by role (`homePath`); strict API isolation (`requireRole`)
 - [x] Auth audit logging + `POST /api/auth/logout`
 - [x] Bundled **AWL-31428** demo restored (`akshithaDemoFixtures.ts`); optional override via `npm run demo:fixture-31428`
 - [x] Admin demo job queue merges Supabase + artifact jobs (fixes 1-of-4 queue for Akshitha when DB has partial rows)
@@ -57,10 +60,11 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - [x] Removed stale one-off tests; `npm test` → `e2eIntegration.test.ts`
 - [x] **Duplicate-submission guards** — `IN_FLIGHT_STATUSES` check before the `APPLYING → QUEUED` rewrite in `PATCH /:id/status`, `inFlightApplicationIds` in `SubmitterPool`, and a `persist` flag on the dashboard's `handleStatusChange` so the 2s poll refreshes the display without writing back (see Known Bugs for the failure it fixes)
 - [x] **Dashboard `.tsx` tree typechecks clean and stays that way** — 35 pre-existing errors fixed, `dashboard/tsconfig.json` added at root-equivalent strictness, and `npm run typecheck` chained to `npm run typecheck:dashboard`
-- [x] **Admin ▶ Start button for CSV ingestion** — `POST /api/admin/trigger-ingest-from-storage` is now admin-gated (`403` for non-admins, `409` while a run is in flight) and returns `202` with the pipeline running in the background; new `GET /api/admin/ingest-status` reports `{running, processedFile, message, error}`. Dashboard header has an `isAdminSession()`-gated **▶ Start** button that polls status every 5s, shows a banner for running/finished/failed, and refreshes candidate data when the run ends
+- [x] **Admin ▶ Start button for CSV ingestion** — `POST /api/admin/trigger-ingest-from-storage` is admin-gated (`403` for non-admins, `409` while a run is in flight) and returns `202` with the pipeline running in the background; `GET /api/admin/ingest-status` reports `{running, processedFile, message, error}`. The **▶ Start** control is on `/admin`, not the operator header
 - [x] **Zoho OTP reader hardened** — verbose step-by-step logging across `zohoReader.ts` (navigation/login status, session cookies, search query, raw message list, per-email sender/subject/timestamp, active regex) and `zoho-connector.ts` (request URL, HTTP status, raw body before parsing, parsed message summary). New `isGreenhouseOtpEmail()` sender+subject+company gate runs before extraction; scan 3 → 15 rows; 10-min window; `parseZohoEmailTimestamp` unified with the confirmation path; `reason` field on failure. Verified live against AWL-31428 → `NgW4NT62`
 - [x] **Zoho OTP session reset** (`601d37d`) — `resetUiBeforeLookup` goto root + clear filter before each search; 0 user rows → one `page.reload()` retry
-- [x] **Operator dashboard title/favicon** (`b8b0276`) — title "Apply Wizz", `/full_logo.webp`
+- [x] **Zoho OTP step logs** (`8a44cf2`) — numbered `[Zoho] Step 1`–`8` + extra 5s user-list wait; dropped candidates `totalJobs` debug log
+- [x] **Operator dashboard title/favicon** (`b8b0276`) — title "Apply Wizz"; local uncommitted swap to square AW `/logo.webp` (replaces wide `/full_logo.webp`)
 - [x] **`EMAIL_UNVERIFIED` terminal status** — migration 013; poller after 10m timeout; dashboard badges + resubmit (`cf50a45`)
 - [x] **Supabase ingest credential resolution** — `supabaseKeyDiagnostics.ts`; prefer `service_role` JWT else `SUPABASE_SERVICE_ROLE_KEY` (incl. `sb_secret_`); normalize quoted/Bearer keys; ingest probes every key (`0d02593`); `GET /api/admin/supabase-storage-health` → `keyProbes`
 - [x] **Submission requeue hardening** — `EMAIL_PROOF_PENDING` in `IN_FLIGHT_STATUSES`; ignore PATCH `QUEUED` while in-flight; submit-response `persist: false`
@@ -68,10 +72,9 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - [x] **Form hydration from `fields_schema`** — empty `resolved_fields` filled from scanned templates (`applicationFieldHydration.ts`)
 - [x] **Tier 5 fail-closed + SMS skip** — LLM option mismatch / low confidence → `unresolved`; SMS/marketing opt-in always No at fill (`31b830e`)
 
-### Uncommitted (local — since `b8b0276`)
-- [ ] **`[Zoho] Step 1`–`8` logs** in `zohoReader.ts` plus 5s wait after user-list selector
-- [ ] **Dashboard field carousel** — identity + `unresolved`/`ai`/`manual`/`resume` only; submit still uses full `fields`
-- [ ] Removed `GET /api/candidates` totalJobs debug log in `src/server/index.ts`
+- [x] **Central logger** — `src/utils/logger.ts`; all `src/` `console.log`/`warn`/`error` → `createLogger`; `[ISO] [LEVEL] [MODULE] message`
+- [x] **AW app logo** — `dashboard/public/logo.webp` as favicon + header/auth/manager mark; `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
+- [x] **Role-based dashboards** — Admin `/admin`, Manager `/manager` (expandable client table + tabs), Dev `/dev`; RBAC redirects; migration 015. **Apply 015 on Supabase** or Activity/audit/debugger timelines stay empty
 
 ### Beyond-V2-Docs Features (Already Shipped)
 - [x] Zoho Mail OTP auto-extraction (`zohoReader.ts`, `zoho-connector.ts`) — was V3 in docs
@@ -89,9 +92,9 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 
 | Item | Status | Notes |
 |---|---|---|
-| Manager / COO analytics dashboard | Early build | `GET /dashboard` date-scoped client rollup; admins unfiltered across CAs |
+| Manager / COO analytics dashboard | On `main` | Client table home + Operators/Activity/Reports; team scoping off until CA-manager email map exists; apply migration 015 |
 | Resolution engine — semantic/fuzzy improvement | Investigating | Tier 2+3 miss rate; approach not yet decided |
-| Email proof / OTP reliability | Awaiting live verification | Reset+reload on `main` (`601d37d`); Step 1–8 logs uncommitted; 013 applied; no fresh Greenhouse OTP challenge yet |
+| Email proof / OTP reliability | Awaiting live verification | Reset+reload on `main` (`601d37d`); Step 1–8 logs on `main` (`8a44cf2`); 013 applied; no fresh Greenhouse OTP challenge yet |
 
 ---
 
@@ -108,7 +111,7 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 ---
 
 ## Known Bugs / Gotchas
-- **✅ FIXED — CSV uploads to Storage never started the pipeline:** there was no webhook, no Realtime listener, no DB trigger and no poller; `ingestCsvFromStorage` was reachable only via the one-shot `npm run ingest:storage` CLI and an admin route the dashboard never called. Now operator-driven via the **▶ Start** button. A Storage webhook was rejected as an option because `/api/admin/*` sits behind `requireAuth` and Supabase cannot mint an operator token
+- **✅ FIXED — CSV uploads to Storage never started the pipeline:** there was no webhook, no Realtime listener, no DB trigger and no poller; `ingestCsvFromStorage` was reachable only via the one-shot `npm run ingest:storage` CLI and an admin route the dashboard never called. Now admin-driven via the **▶ Start** button on `/admin`.
 - **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** anon/publishable keys get `[]` with no error from `listBuckets()` and `from(bucket).list()`. Ingest probes every configured key (`0d02593`), logs `jwt.role` + names, fails if all lists are empty. Local `service_role` JWT sees `test(Sheet1).csv`. **Railway still reports entries=0** — process keys are not a Storage-capable `service_role` JWT
 - **Gotcha — env vars set ≠ Storage can list:** `SUPABASE_SERVICE_KEY` = publishable and `SUPABASE_SERVICE_ROLE_KEY` = `sb_secret_` (or another anon) still yields empty lists. Need the legacy `eyJ…` `service_role` secret. Decode `role` from ingest `Probe` lines. Project ref: `dpwhgwdsfqzfwxlwvchp`
 - **Gotcha — ingest run state is in-process memory:** `ingest-status` is a closure variable in `createServer`, so a Railway restart mid-run reports `{running: false}` with no history — and the pipeline itself dies with the process. Only one run can be in flight per server instance
@@ -123,7 +126,7 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - **✅ FIXED — Zoho OTP leftover filter / empty user list:** a reused Playwright page kept the previous email in the filter. `resetUiBeforeLookup` now goto-root + clear; empty list retries once with `page.reload()` (`601d37d`). See observation 0010
 - **Zoho Reader login is effectively a no-op:** connector inbox access is server-side OAuth per mailbox, not session-based — login yields **0 cookies** and no POST request, yet mail reading works. The post-login success check resolves via the *fallback* filter-input selector, so a failed login is not detectable. `ZOHO_CONNECTOR_USER` in `.env` currently holds a password-shaped value rather than an email (check `.env` directly) and nothing rejects it
 - **`zoho_connected_profiles` missing:** migration 011 is not applied on the current Supabase instance (`Could not find the table 'public.zoho_connected_profiles'`)
-- **Manager API in browser:** Opening `/api/manager/dashboard` without `Authorization: Bearer` always returns 401 — use **`/manager`** after operator sign-in
+- **Manager API in browser:** Opening `/api/manager/dashboard` without `Authorization: Bearer` always returns 401 — sign in at `/`, then you are redirected to **`/manager`**
 - **Demo job scores:** Akshitha fixture jobs use scores 90–95; dashboard score filter (20–60) is bypassed for pinned demo IDs only
 - **E2E integration** (`npm test`): 28/32 checkpoints pass locally; Tier 1 “Email” resolution assertions fail while dry-run still fills email via `company_email` — investigate resolver profile/email mapping, not a dashboard blocker
 - Local dev defaults LLM to **Ollama** (`llama3.1:latest`) — will fail silently if Ollama isn't running; override with `LLM_PROVIDER=openrouter`

@@ -15,6 +15,9 @@
 
 import { runLiveSubmit } from './liveSubmit.js';
 import { getApplicationByCandidateAndJob, listApplications } from '../db/applications.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Run Live Submit Cli');
 
 export function parseSubmitArgs(args: string[]): {
   applicationId?: string;
@@ -51,9 +54,9 @@ export function parseSubmitArgs(args: string[]): {
 export async function main(): Promise<void> {
   const options = parseSubmitArgs(process.argv.slice(2));
 
-  console.log('================================================================');
-  console.log('  🚀 Greenhouse Live Submission Engine (V2)');
-  console.log('================================================================');
+  log.info('================================================================');
+  log.info('  🚀 Greenhouse Live Submission Engine (V2)');
+  log.info('================================================================');
 
   let targetAppId = options.applicationId;
 
@@ -69,18 +72,18 @@ export async function main(): Promise<void> {
     const readyApps = await listApplications({ status: 'READY_FOR_REVIEW' });
     if (readyApps.length > 0 && readyApps[0].id) {
       targetAppId = readyApps[0].id;
-      console.log(`ℹ️ No application specified. Defaulting to first READY_FOR_REVIEW app: ${targetAppId}`);
+      log.info(`ℹ️ No application specified. Defaulting to first READY_FOR_REVIEW app: ${targetAppId}`);
     } else {
-      console.error('❌ No application ID provided and no READY_FOR_REVIEW applications found.');
-      console.error('Usage: npx tsx src/submitter/runLiveSubmitCli.ts --applicationId=<uuid>');
+      log.error('❌ No application ID provided and no READY_FOR_REVIEW applications found.');
+      log.error('Usage: npx tsx src/submitter/runLiveSubmitCli.ts --applicationId=<uuid>');
       process.exit(1);
     }
   }
 
-  console.log(`• Target Application ID: ${targetAppId}`);
-  console.log(`• Mode:                  ${options.headless ? 'Headless' : 'Visible (Headful)'}`);
-  console.log(`• Timeout:               ${options.timeoutMs}ms`);
-  console.log('================================================================\n');
+  log.info(`• Target Application ID: ${targetAppId}`);
+  log.info(`• Mode:                  ${options.headless ? 'Headless' : 'Visible (Headful)'}`);
+  log.info(`• Timeout:               ${options.timeoutMs}ms`);
+  log.info('================================================================\n');
 
   try {
     const result = await runLiveSubmit(targetAppId, {
@@ -88,22 +91,22 @@ export async function main(): Promise<void> {
       timeoutMs: options.timeoutMs,
     });
 
-    console.log('\n================================================================');
-    console.log(`  Submission Result: ${result.status}`);
-    console.log('================================================================');
-    console.log(`• Application ID:  ${result.applicationId}`);
-    console.log(`• Status:          ${result.status}`);
-    console.log(`• Verified:        ${result.success ? '✅ Yes' : '❌ No'}`);
+    log.info('\n================================================================');
+    log.info(`  Submission Result: ${result.status}`);
+    log.info('================================================================');
+    log.info(`• Application ID:  ${result.applicationId}`);
+    log.info(`• Status:          ${result.status}`);
+    log.info(`• Verified:        ${result.success ? '✅ Yes' : '❌ No'}`);
     if (result.requiresOtp || result.requiresCaptcha) {
-      console.log(`• OTP/CAPTCHA:     ⚠️ Requires human intervention`);
+      log.info(`• OTP/CAPTCHA:     ⚠️ Requires human intervention`);
     }
     if (result.proofWebUrl) {
-      console.log(`• Proof Web URL:   ${result.proofWebUrl}`);
+      log.info(`• Proof Web URL:   ${result.proofWebUrl}`);
     }
     if (result.errorMessage) {
-      console.log(`• Error Message:   ${result.errorMessage}`);
+      log.info(`• Error Message:   ${result.errorMessage}`);
     }
-    console.log('================================================================');
+    log.info('================================================================');
 
     if (result.status === 'APPLIED') {
       process.exit(0);
@@ -111,7 +114,7 @@ export async function main(): Promise<void> {
       process.exit(1);
     }
   } catch (err: any) {
-    console.error(`\n❌ Submission execution error: ${err.message}`);
+    log.error(`\n❌ Submission execution error: ${err.message}`);
     process.exit(1);
   }
 }

@@ -12,6 +12,9 @@ import fs from 'fs';
 import path from 'path';
 import { getDbClient } from './client.js';
 import { ensureBucketsExist, uploadResume } from './storage.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Migrate');
 
 export interface MigrationResult {
   success: boolean;
@@ -27,7 +30,7 @@ export interface MigrationResult {
  * Runs the complete idempotent V2 database and storage migration.
  */
 export async function migrate(): Promise<MigrationResult> {
-  console.log('🚀 Starting V2 Supabase Foundation migration...');
+  log.info('🚀 Starting V2 Supabase Foundation migration...');
 
   const supabase = getDbClient();
   const tables = [
@@ -38,19 +41,19 @@ export async function migrate(): Promise<MigrationResult> {
   ];
 
   // 1. Ensure Storage Buckets exist
-  console.log('📦 Step 1: Initializing storage buckets...');
+  log.info('📦 Step 1: Initializing storage buckets...');
   await ensureBucketsExist();
 
   // 2. Verify database tables
-  console.log('🔍 Step 2: Verifying database tables...');
+  log.info('🔍 Step 2: Verifying database tables...');
   const verifiedTables: string[] = [];
 
   for (const table of tables) {
     const { error } = await supabase.from(table).select('id').limit(1);
     if (error) {
-      console.warn(`⚠️ Table check for '${table}': ${error.message}`);
+      log.warn(`⚠️ Table check for '${table}': ${error.message}`);
     } else {
-      console.log(`✅ Table '${table}' verified.`);
+      log.info(`✅ Table '${table}' verified.`);
       verifiedTables.push(table);
     }
   }
@@ -62,7 +65,7 @@ export async function migrate(): Promise<MigrationResult> {
   }
 
   // 3. Migrate output/scanned_jobs.json -> scanned_job_templates
-  console.log('📄 Step 3: Migrating scanned job templates...');
+  log.info('📄 Step 3: Migrating scanned job templates...');
   let templatesMigrated = 0;
   const scannedJobsPath = path.resolve(process.cwd(), 'output', 'scanned_jobs.json');
 
@@ -72,7 +75,7 @@ export async function migrate(): Promise<MigrationResult> {
       const scannedJobs = JSON.parse(rawData);
 
       if (Array.isArray(scannedJobs) && scannedJobs.length > 0) {
-        console.log(`Found ${scannedJobs.length} scanned jobs in ${scannedJobsPath}. Upserting...`);
+        log.info(`Found ${scannedJobs.length} scanned jobs in ${scannedJobsPath}. Upserting...`);
 
         const records = scannedJobs.map((job: any) => ({
           job_url: job.jobUrl,
@@ -93,28 +96,28 @@ export async function migrate(): Promise<MigrationResult> {
             .upsert(chunk, { onConflict: 'job_url' });
 
           if (error) {
-            console.error(`Error migrating scanned jobs chunk ${i}-${i + chunk.length}:`, error.message);
+            log.error(`Error migrating scanned jobs chunk ${i}-${i + chunk.length}:`, error.message);
           } else {
             templatesMigrated += chunk.length;
           }
         }
-        console.log(`✅ Successfully migrated/upserted ${templatesMigrated} scanned job templates.`);
+        log.info(`✅ Successfully migrated/upserted ${templatesMigrated} scanned job templates.`);
       }
     } catch (err: any) {
-      console.warn(`⚠️ Could not process scanned_jobs.json: ${err.message}`);
+      log.warn(`⚠️ Could not process scanned_jobs.json: ${err.message}`);
     }
   } else {
-    console.log(`ℹ️ ${scannedJobsPath} not found. Skipping template migration.`);
+    log.info(`ℹ️ ${scannedJobsPath} not found. Skipping template migration.`);
   }
 
   // 4. Migrate cache/profiles/*.json -> profiles
-  console.log('👤 Step 4: Migrating candidate profiles from cache...');
+  log.info('👤 Step 4: Migrating candidate profiles from cache...');
   let profilesMigrated = 0;
   const profilesDir = path.resolve(process.cwd(), 'cache', 'profiles');
 
   if (fs.existsSync(profilesDir)) {
     const files = fs.readdirSync(profilesDir).filter((f) => f.endsWith('.json'));
-    console.log(`Found ${files.length} candidate profile cache files in ${profilesDir}.`);
+    log.info(`Found ${files.length} candidate profile cache files in ${profilesDir}.`);
 
     const profileRecords: any[] = [];
     for (const file of files) {
@@ -145,7 +148,7 @@ export async function migrate(): Promise<MigrationResult> {
           });
         }
       } catch (err: any) {
-        console.warn(`⚠️ Failed to parse profile cache file ${file}: ${err.message}`);
+        log.warn(`⚠️ Failed to parse profile cache file ${file}: ${err.message}`);
       }
     }
 
@@ -158,24 +161,24 @@ export async function migrate(): Promise<MigrationResult> {
         .upsert(chunk, { onConflict: 'applywizz_id' });
 
       if (error) {
-        console.error(`Error migrating profiles chunk ${i}-${i + chunk.length}:`, error.message);
+        log.error(`Error migrating profiles chunk ${i}-${i + chunk.length}:`, error.message);
       } else {
         profilesMigrated += chunk.length;
       }
     }
-    console.log(`✅ Successfully migrated/upserted ${profilesMigrated} candidate profiles.`);
+    log.info(`✅ Successfully migrated/upserted ${profilesMigrated} candidate profiles.`);
   } else {
-    console.log(`ℹ️ ${profilesDir} not found. Skipping profile migration.`);
+    log.info(`ℹ️ ${profilesDir} not found. Skipping profile migration.`);
   }
 
   // 5. Upload local resume PDFs -> Supabase Storage resumes bucket
-  console.log('📑 Step 5: Uploading master resumes to Supabase Storage...');
+  log.info('📑 Step 5: Uploading master resumes to Supabase Storage...');
   let resumesUploaded = 0;
   const resumesDir = path.resolve(process.cwd(), 'resumes');
 
   if (fs.existsSync(resumesDir)) {
     const pdfFiles = fs.readdirSync(resumesDir).filter((f) => f.endsWith('.pdf'));
-    console.log(`Found ${pdfFiles.length} PDF resumes in ${resumesDir}. Uploading...`);
+    log.info(`Found ${pdfFiles.length} PDF resumes in ${resumesDir}. Uploading...`);
 
     for (const pdfFile of pdfFiles) {
       try {
@@ -196,16 +199,16 @@ export async function migrate(): Promise<MigrationResult> {
 
         resumesUploaded++;
       } catch (err: any) {
-        console.warn(`⚠️ Failed to upload resume ${pdfFile}: ${err.message}`);
+        log.warn(`⚠️ Failed to upload resume ${pdfFile}: ${err.message}`);
       }
     }
-    console.log(`✅ Successfully uploaded and linked ${resumesUploaded} resume PDFs.`);
+    log.info(`✅ Successfully uploaded and linked ${resumesUploaded} resume PDFs.`);
   } else {
-    console.log(`ℹ️ ${resumesDir} not found. Skipping resume uploads.`);
+    log.info(`ℹ️ ${resumesDir} not found. Skipping resume uploads.`);
   }
 
   const message = `Migration complete: ${verifiedTables.length} tables verified, ${templatesMigrated} templates migrated, ${profilesMigrated} profiles migrated, ${resumesUploaded} resumes uploaded.`;
-  console.log(`🎉 ${message}`);
+  log.info(`🎉 ${message}`);
 
   return {
     success: true,
@@ -222,11 +225,11 @@ export async function migrate(): Promise<MigrationResult> {
 if (process.argv[1] && process.argv[1].endsWith('migrate.ts')) {
   migrate()
     .then((result) => {
-      console.log('🎉 Migration runner completed successfully:', result.message);
+      log.info('🎉 Migration runner completed successfully:', result.message);
       process.exit(0);
     })
     .catch((err) => {
-      console.error('❌ Migration runner failed:', err);
+      log.error('❌ Migration runner failed:', err);
       process.exit(1);
     });
 }

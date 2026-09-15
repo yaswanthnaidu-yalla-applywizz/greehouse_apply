@@ -22,6 +22,9 @@ import type {
   ScannedFieldType,
   ScannedJobTemplate,
 } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Playwright Scanner');
 
 /**
  * Configuration options for initializing the PlaywrightScanner.
@@ -204,12 +207,12 @@ export class PlaywrightScanner {
    */
   public async scanUniqueUrls(urls: string[]): Promise<ScannedJobTemplate[]> {
     if (!urls || urls.length === 0) {
-      console.log('[Playwright Scanner] ⚠️ No URLs provided for scanning.');
+      log.info('[Playwright Scanner] ⚠️ No URLs provided for scanning.');
       return [];
     }
 
     const total = urls.length;
-    console.log(
+    log.info(
       `[Playwright Scanner] 🚀 Launching scanner pool: ${this.workerPoolSize} workers for ${total.toLocaleString()} unique URLs (Timeout: ${this.timeoutMs}ms, Jitter: ${this.minJitterMs}-${this.maxJitterMs}ms)...`
     );
 
@@ -262,7 +265,7 @@ export class PlaywrightScanner {
               }
 
               const statusIcon = template.isExpired ? '❌ [Expired/404]' : `✅ [${template.fields.length} fields]`;
-              console.log(
+              log.info(
                 `[Playwright Scanner] [${completedCount}/${total}] ${statusIcon} ${template.companyName ? `${template.companyName} — ` : ''}${template.jobTitle || 'Job'} (${targetUrl})`
               );
 
@@ -287,7 +290,7 @@ export class PlaywrightScanner {
       }
     }
 
-    console.log(`[Playwright Scanner] 🏁 Finished scanning ${completedCount}/${total} URLs.`);
+    log.info(`[Playwright Scanner] 🏁 Finished scanning ${completedCount}/${total} URLs.`);
     return results.filter(Boolean);
   }
 
@@ -544,7 +547,7 @@ export class PlaywrightScanner {
 
       return template;
     } catch (error: any) {
-      console.warn(`[Playwright Scanner] ⚠️ Error scanning ${url}: ${error.message}`);
+      log.warn(`[Playwright Scanner] ⚠️ Error scanning ${url}: ${error.message}`);
       template.isExpired = true;
       return template;
     }
@@ -665,7 +668,7 @@ export class PlaywrightScanner {
             };
 
             allFields.push(newField);
-            console.log(
+            log.info(
               `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
             );
           }

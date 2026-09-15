@@ -26,12 +26,17 @@ import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
-import { authRouter, isUserAdmin } from './routes/auth.js';
+import { authRouter, isUserAdmin, resolveRole } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { configRouter } from './routes/config.js';
 import { managerRouter } from './routes/manager.js';
+import { adminDashboardRouter } from './routes/adminDashboard.js';
+import { devDashboardRouter } from './routes/devDashboard.js';
 import { wsManager } from './ws.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
+import { requireRole, requireRoleIfAuthenticated } from './routes/requireRole.js';
+import { getIngestRun, registerQueueDaemon, setIngestRun } from './runtimeState.js';
+import { insertAuditEvent } from '../db/events.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
 import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
 import {
@@ -79,6 +84,9 @@ import type {
   CandidateSegment,
   ScannedJobTemplate,
 } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Server');
 
 const ACTIVE_CANDIDATES_LOG_INTERVAL_MS = 10 * 60 * 1000;
 const lastActiveCandidatesLogByCa = new Map<string, number>();
@@ -90,7 +98,7 @@ function logActiveCandidatesThrottled(caEmail: string, count: number): void {
   const last = lastActiveCandidatesLogByCa.get(key) ?? 0;
   if (now - last < ACTIVE_CANDIDATES_LOG_INTERVAL_MS) return;
   lastActiveCandidatesLogByCa.set(key, now);
-  console.log(`[Dashboard] Active candidates: ${count} assigned to ${key}`);
+  log.info(`[Dashboard] Active candidates: ${count} assigned to ${key}`);
 }
 
 /**
@@ -298,7 +306,7 @@ export function loadArtifacts(
     try {
       segments = JSON.parse(fs.readFileSync(segmentsPath, 'utf-8'));
     } catch (err: any) {
-      console.warn(`[Server] ⚠️ Failed to read ${segmentsPath}: ${err.message}`);
+      log.warn(`[Server] ⚠️ Failed to read ${segmentsPath}: ${err.message}`);
     }
   }
 
@@ -306,7 +314,7 @@ export function loadArtifacts(
     try {
       templates = JSON.parse(fs.readFileSync(templatesPath, 'utf-8'));
     } catch (err: any) {
-      console.warn(`[Server] ⚠️ Failed to read ${templatesPath}: ${err.message}`);
+      log.warn(`[Server] ⚠️ Failed to read ${templatesPath}: ${err.message}`);
     }
   }
 
@@ -314,7 +322,7 @@ export function loadArtifacts(
     try {
       applications = JSON.parse(fs.readFileSync(applicationsPath, 'utf-8'));
     } catch (err: any) {
-      console.warn(`[Server] ⚠️ Failed to read ${applicationsPath}: ${err.message}`);
+      log.warn(`[Server] ⚠️ Failed to read ${applicationsPath}: ${err.message}`);
     }
   }
 
@@ -365,21 +373,10 @@ export function loadArtifacts(
   rebuildLookupMaps();
 
   if (options.log) {
-    console.log(
+    log.info(
       `[Server] ✅ Artifacts loaded: ${artifactCache.candidateSegments.length} candidates, ${artifactCache.scannedJobs.length} templates, ${artifactCache.resolvedApplications.length} applications`
     );
   }
-}
-
-/** Outcome of the most recent operator-triggered storage CSV ingestion. */
-interface IngestRunState {
-  running: boolean;
-  startedAt?: string;
-  finishedAt?: string;
-  processedCount?: number;
-  processedFile?: string;
-  message?: string;
-  error?: string;
 }
 
 /**
@@ -391,9 +388,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   loadArtifacts(outputDir, { log: true });
   const app = express();
 
-  // State of the operator-triggered storage CSV ingestion run (one at a time).
-  let ingestRun: IngestRunState = { running: false };
-
   app.use(cors());
   app.use(express.json());
 
@@ -404,39 +398,73 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   }
   app.use('/resumes', express.static(resumesDir));
 
-  // Static directory for dashboard web assets
+  // Dashboard web assets (HTML guarded by role when Bearer token is sent)
   const publicDir = path.resolve(process.cwd(), 'dashboard/public');
+  const operatorIndexPath = path.join(publicDir, 'index.html');
   const managerHtmlPath = path.join(publicDir, 'manager.html');
-  app.get('/manager', (_req: Request, res: Response) => {
+  const adminHtmlPath = path.join(publicDir, 'admin.html');
+  const devHtmlPath = path.join(publicDir, 'dev.html');
+
+  app.get('/', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
+    if (fs.existsSync(operatorIndexPath)) {
+      res.sendFile(operatorIndexPath);
+      return;
+    }
+    res.status(404).send('Operator dashboard page not found.');
+  });
+
+  app.get('/admin', requireRoleIfAuthenticated('admin', 'dev'), (_req: Request, res: Response) => {
+    if (fs.existsSync(adminHtmlPath)) {
+      res.sendFile(adminHtmlPath);
+      return;
+    }
+    res.status(404).send('Admin dashboard page not found.');
+  });
+
+  app.get('/manager', requireRoleIfAuthenticated('manager', 'dev'), (_req: Request, res: Response) => {
     if (fs.existsSync(managerHtmlPath)) {
       res.sendFile(managerHtmlPath);
       return;
     }
     res.status(404).send('Manager dashboard page not found.');
   });
-  if (fs.existsSync(publicDir)) {
-    app.use(express.static(publicDir));
-  }
+
+  app.get('/dev', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
+    if (fs.existsSync(devHtmlPath)) {
+      res.sendFile(devHtmlPath);
+      return;
+    }
+    res.status(404).send('Developer dashboard page not found.');
+  });
+
+  // Favicon / logo / other public assets. index:false so '/' stays on the guarded HTML routes.
+  app.use(express.static(publicDir, { index: false }));
+
+  const operatorApiGuard = [requireAuth, requireRole('operator', 'dev')] as const;
+  const adminApiGuard = [requireAuth, requireRole('admin', 'dev')] as const;
+  const managerApiGuard = [requireAuth, requireRole('manager', 'dev')] as const;
+  const devApiGuard = [requireAuth, requireRole('dev')] as const;
 
   // Auth routes (public)
   app.use('/api/auth', authRouter);
 
   // Applications, field patch, dry-run, and submission routes (protected)
-  app.use('/api/applications', requireAuth, submissionsRouter);
-  app.use('/api/applications', requireAuth, applicationsRouter);
+  app.use('/api/applications', ...operatorApiGuard, submissionsRouter);
+  app.use('/api/applications', ...operatorApiGuard, applicationsRouter);
 
   // Real events notifications routes (protected)
-  app.use('/api/notifications', requireAuth, notificationsRouter);
+  app.use('/api/notifications', ...operatorApiGuard, notificationsRouter);
 
   // Dashboard client config (protected)
-  app.use('/api/config', requireAuth, configRouter);
+  app.use('/api/config', ...operatorApiGuard, configRouter);
 
-  // Manager dashboard routes (admin-only within the router)
-  app.use('/api/manager', requireAuth, managerRouter);
+  // Manager dashboard API
+  app.use('/api/manager', ...managerApiGuard, managerRouter);
 
-  // Protect candidates and admin namespaces
-  app.use('/api/candidates', requireAuth);
-  app.use('/api/admin', requireAuth);
+  // Operator candidate queue + admin namespace
+  app.use('/api/candidates', ...operatorApiGuard);
+  app.use('/api/admin', ...adminApiGuard);
+  app.use('/api/dev', ...devApiGuard, devDashboardRouter);
 
   /**
    * GET /api/health
@@ -460,7 +488,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * GET /api/stats
    * Returns aggregated dashboard metrics.
    */
-  app.get('/api/stats', async (req: Request, res: Response) => {
+  app.get('/api/stats', ...operatorApiGuard, async (req: Request, res: Response) => {
     let totalFields = 0;
     let supabaseCount = 0;
     let aiCount = 0;
@@ -484,7 +512,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     if (!isAdmin) {
       const targetDate = dateParam || getYesterdayIST();
       if (!userEmail) {
-        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
@@ -547,17 +575,25 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    if (ingestRun.running) {
+    if (getIngestRun().running) {
       res.status(409).json({
         error: 'Ingestion is already running.',
-        ...ingestRun,
+        ...getIngestRun(),
       });
       return;
     }
 
     const startedAt = new Date().toISOString();
-    ingestRun = { running: true, startedAt };
-    console.log(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
+    setIngestRun({ running: true, startedAt });
+    const actorEmail = getAuthenticatedCaEmail(req) || (req.user as { email?: string } | undefined)?.email || '';
+    void insertAuditEvent({
+      actorEmail,
+      actorRole: resolveRole(req.user || actorEmail),
+      action: 'ingest_start',
+      targetType: 'pipeline',
+      targetId: startedAt,
+    });
+    log.info(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
     res.status(202).json({ started: true, startedAt });
 
     try {
@@ -566,7 +602,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       if (result.processedCount > 0) {
         loadArtifacts(outputDir);
       }
-      ingestRun = {
+      setIngestRun({
         running: false,
         startedAt,
         finishedAt: new Date().toISOString(),
@@ -576,19 +612,19 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         // dashboard does not show a misconfiguration as a calm "nothing to do".
         message: result.success ? result.message : undefined,
         error: result.success ? undefined : result.message,
-      };
-      console.log(
+      });
+      log.info(
         `[Admin] ${result.success ? '✅' : '❌'} Storage CSV ingestion finished: ${result.message}`
       );
     } catch (err: any) {
       const message = err.message || 'Storage ingestion failed';
-      ingestRun = {
+      setIngestRun({
         running: false,
         startedAt,
         finishedAt: new Date().toISOString(),
         error: message,
-      };
-      console.error('[Admin] ❌ Storage CSV ingestion failed:', err);
+      });
+      log.error('[Admin] ❌ Storage CSV ingestion failed:', err);
     }
   });
 
@@ -601,7 +637,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
       return;
     }
-    res.json(ingestRun);
+    res.json(getIngestRun());
   });
 
   /**
@@ -649,6 +685,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     });
   });
 
+  app.use('/api/admin', adminDashboardRouter);
+
   /**
    * GET /api/candidates
    * Returns summary list of all segregated candidates with job counts and status for the selected IST date.
@@ -672,7 +710,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         try {
           await hydrateAdminProfilesFromWorkHistory(dateParam);
         } catch (hydrateErr: any) {
-          console.warn('[Server] Admin profile hydration on candidates list failed:', hydrateErr?.message);
+          log.warn('[Server] Admin profile hydration on candidates list failed:', hydrateErr?.message);
         }
         setCachedWorkHistory(
           ADMIN_WORK_HISTORY_CACHE_KEY,
@@ -709,7 +747,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       workHistoryRecords = cached.records;
       allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
     } else {
-      console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+      log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
       res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
       return;
     }
@@ -905,7 +943,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
@@ -1054,7 +1092,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const dashboardJobs = eligibleJobsWithStatus.filter((job) =>
       isDashboardJobScoreEligible(seg.applywizzId, job, isAdmin)
     );
-    console.log(
+    log.info(
       `[Dashboard] Filtered jobs: showed ${dashboardJobs.length}/${totalBeforeScoreFilter} (score 20–60 only).`
     );
 
@@ -1085,7 +1123,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
@@ -1119,7 +1157,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
       const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
       if (!allowedIds.has(applywizzId.toUpperCase())) {
-        console.warn(
+        log.warn(
           `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail}) → filtered to 0 jobs (candidate not assigned to CA on ${targetDate})`
         );
         res.status(403).json({
@@ -1136,7 +1174,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       allowAdminDemo: true,
     });
     if (!zohoGate.allowed) {
-      console.warn(
+      log.warn(
         `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) → Zoho gate blocked: ${zohoGate.error}`
       );
       res.status(403).json({ error: zohoGate.error, applywizzId, jobs: [] });
@@ -1155,7 +1193,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         .select('*')
         .eq('applywizz_id', applywizzId);
       if (error) {
-        console.error(`[API] Failed to fetch jobs for ${applywizzId}:`, error.message);
+        log.error(`[API] Failed to fetch jobs for ${applywizzId}:`, error.message);
         res.status(500).json({ error: error.message });
         return;
       }
@@ -1196,7 +1234,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       );
     }
 
-    console.log(
+    log.info(
       `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) ` +
         `source=candidate_applications_only dbRows=${dbRowCount} skippedCaAssignment=${skippedCaAssignment} ` +
         `afterCaFilter=${afterCaFilter} responseJobs=${jobs.length}`
@@ -1217,7 +1255,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
@@ -1283,7 +1321,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (!isAdmin) {
       if (!userEmail) {
-        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
@@ -1353,7 +1391,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           if (altData) supabaseRecord = altData;
         }
       } catch (err: any) {
-        console.warn(`[Server] Error querying Supabase for candidate application ${applywizzId}:`, err.message);
+        log.warn(`[Server] Error querying Supabase for candidate application ${applywizzId}:`, err.message);
       }
     }
 
@@ -1543,7 +1581,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   /**
    * Catch-all route serving the dashboard SPA index.html.
    */
-  app.get('*', (_req: Request, res: Response) => {
+  app.get('*', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
     const indexPath = path.resolve(process.cwd(), 'dashboard/public/index.html');
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
@@ -1582,20 +1620,20 @@ export function startServer(
 
   const server = app.listen(port, '0.0.0.0', () => {
     wsManager.init(server);
-    console.log('================================================================');
-    console.log(`  🟢 Greenhouse Operator REST API & Dashboard Live on 0.0.0.0:${port}`);
-    console.log('================================================================');
-    console.log(`• URL:                http://0.0.0.0:${port}`);
-    console.log(`• Candidate Stats:    /api/stats`);
-    console.log(`• Candidate List:     /api/candidates`);
-    console.log(`• Master Resumes:     /resumes/`);
-    console.log('================================================================\n');
+    log.info('================================================================');
+    log.info(`  🟢 Greenhouse Operator REST API & Dashboard Live on 0.0.0.0:${port}`);
+    log.info('================================================================');
+    log.info(`• URL:                http://0.0.0.0:${port}`);
+    log.info(`• Candidate Stats:    /api/stats`);
+    log.info(`• Candidate List:     /api/candidates`);
+    log.info(`• Master Resumes:     /resumes/`);
+    log.info('================================================================\n');
 
     logSupabaseCredentialIdentity('Server');
 
     if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
       zohoReader.init().catch((err: any) => {
-        console.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
+        log.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
       });
     }
 
@@ -1603,13 +1641,14 @@ export function startServer(
     let queueDaemon: SubmissionQueueDaemon | null = null;
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 2;
-      console.log(
+      log.info(
         `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, dequeue status=QUEUED)`
       );
       queueDaemon = new SubmissionQueueDaemon({ concurrency });
+      registerQueueDaemon(queueDaemon);
       queueDaemon.start();
     } else {
-      console.warn(
+      log.warn(
         '[Queue] ENABLE_QUEUE_WORKER is not "true" — POST /submit will set status=QUEUED but no in-process worker will run'
       );
     }
@@ -1619,7 +1658,7 @@ export function startServer(
     await zohoReader.cleanup().catch(() => {});
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       // Allow in-flight Playwright workers to finish
-      console.log('[Server] 🧹 Shutting down background queue daemon...');
+      log.info('[Server] 🧹 Shutting down background queue daemon...');
     }
   };
   process.once('SIGINT', cleanup);

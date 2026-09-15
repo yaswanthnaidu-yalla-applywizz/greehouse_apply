@@ -18,6 +18,9 @@ import type {
   ScannedField,
   ScannedJobTemplate,
 } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Generated Demo Fixtures');
 
 export const GENERATED_DEMO_APPLYWIZZ_ID = AKSHITHA_APPLYWIZZ_ID;
 export { AKSHITHA_APPLYWIZZ_ID };
@@ -47,7 +50,7 @@ export function readGeneratedDemoFixtures(): GeneratedDemoFixtureFile | null {
     return parsed;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[Demo Fixtures] Failed to read ${fixturePath}: ${message}`);
+    log.warn(`[Demo Fixtures] Failed to read ${fixturePath}: ${message}`);
     return null;
   }
 }

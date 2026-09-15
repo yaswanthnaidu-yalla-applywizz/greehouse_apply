@@ -22,6 +22,9 @@ import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
 import { config } from '../config/env.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Storage Csv Ingestion');
 
 export interface StorageIngestionResult {
   success: boolean;
@@ -69,7 +72,7 @@ export async function listPendingDropzoneCsvs(): Promise<{
     const listNames = (listed || []).map((f) => f.name).filter(Boolean);
     const line = `${candidate.source}: jwt.role=${diag.jwtRole ?? 'unknown'} keyShape=${diag.keyShape} urlRefMatch=${diag.urlRefMatch} entries=${listNames.length} names=${listNames.join(',') || '(none)'}${listError ? ` error=${listError.message}` : ''}`;
     probeLines.push(line);
-    console.log(`[Storage CSV Ingestion] Probe ${line}`);
+    log.info(`[Storage CSV Ingestion] Probe ${line}`);
 
     const fromList = (listed || [])
       .filter((f) => isPendingCsvObjectName(f.name || ''))
@@ -94,7 +97,7 @@ export async function listPendingDropzoneCsvs(): Promise<{
  */
 export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
   if (!isSupabaseConfigured()) {
-    console.warn('[Storage CSV Ingestion] ⚠️ Supabase is not configured. Ingestion skipped.');
+    log.warn('[Storage CSV Ingestion] ⚠️ Supabase is not configured. Ingestion skipped.');
     return {
       success: false,
       processedCount: 0,
@@ -104,23 +107,23 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
 
   const { url: supabaseUrl, serviceKey: rawServiceKey, serviceKeySource } = resolveSupabaseCredentials();
   const keyDiag = getSupabaseKeyDiagnostics(supabaseUrl, rawServiceKey);
-  console.log(
+  log.info(
     `[Storage CSV Ingestion] Credential identity (${serviceKeySource ?? 'unknown'}): ${keyDiag.summary}`
   );
   if (keyDiag.keyHadSurroundingWhitespace) {
-    console.warn(
+    log.warn(
       '[Storage CSV Ingestion] SUPABASE_SERVICE_KEY has leading/trailing whitespace — trim the value in Railway.'
     );
   }
 
-  console.log(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
+  log.info(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
 
   const { files: pendingCsvFiles, source, probeLines } = await listPendingDropzoneCsvs();
 
   if (pendingCsvFiles.length === 0) {
     const probe = probeLines.join(' | ') || '(no keys probed)';
     const hint = ` Source=${source}. ${probe}`;
-    console.log(`[Storage CSV Ingestion] ℹ️ No pending CSV files found in dropzone.${hint}`);
+    log.info(`[Storage CSV Ingestion] ℹ️ No pending CSV files found in dropzone.${hint}`);
     return {
       success: false,
       processedCount: 0,
@@ -130,7 +133,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
 
   const supabase = getDbClient();
   const targetFile = pendingCsvFiles[0];
-  console.log(
+  log.info(
     `[Storage CSV Ingestion] 📥 Found pending file via ${source}: "${targetFile.name}". Downloading...`
   );
 
@@ -140,7 +143,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     .download(targetFile.name);
 
   if (downloadError || !fileData) {
-    console.error(`[Storage CSV Ingestion] ❌ Download failed:`, downloadError?.message);
+    log.error(`[Storage CSV Ingestion] ❌ Download failed:`, downloadError?.message);
     throw new Error(`Failed to download ${targetFile.name}: ${downloadError?.message}`);
   }
 
@@ -151,7 +154,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
   const sanitizedName = path.basename(targetFile.name).replace(/[^a-zA-Z0-9._-]/g, '_');
   const tempFilePath = path.join(os.tmpdir(), `csv_dropzone_${Date.now()}_${sanitizedName}`);
   fs.writeFileSync(tempFilePath, buffer);
-  console.log(`[Storage CSV Ingestion] 💾 Saved temp CSV to: ${tempFilePath} (${(buffer.length / 1024).toFixed(1)} KB)`);
+  log.info(`[Storage CSV Ingestion] 💾 Saved temp CSV to: ${tempFilePath} (${(buffer.length / 1024).toFixed(1)} KB)`);
 
   let pipelineResult: PipelineResult | undefined;
   try {
@@ -161,7 +164,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
       concurrency: config.WORKER_POOL_SIZE || 1,
     });
 
-    console.log(`[Storage CSV Ingestion] ✅ Pipeline completed successfully for ${targetFile.name}.`);
+    log.info(`[Storage CSV Ingestion] ✅ Pipeline completed successfully for ${targetFile.name}.`);
 
     // Move processed CSV to archive folder in Supabase Storage
     const archiveDest = `archive/${Date.now()}_${sanitizedName}`;
@@ -170,9 +173,9 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
       .move(targetFile.name, archiveDest);
 
     if (moveError) {
-      console.warn(`[Storage CSV Ingestion] ⚠️ Warning: Could not move file to ${archiveDest}: ${moveError.message}`);
+      log.warn(`[Storage CSV Ingestion] ⚠️ Warning: Could not move file to ${archiveDest}: ${moveError.message}`);
     } else {
-      console.log(`[Storage CSV Ingestion] 📦 Archived storage file to: ${archiveDest}`);
+      log.info(`[Storage CSV Ingestion] 📦 Archived storage file to: ${archiveDest}`);
     }
 
     return {
@@ -188,10 +191,10 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     try {
       if (fs.existsSync(tempFilePath)) {
         fs.unlinkSync(tempFilePath);
-        console.log(`[Storage CSV Ingestion] 🧹 Cleaned up temp file: ${tempFilePath}`);
+        log.info(`[Storage CSV Ingestion] 🧹 Cleaned up temp file: ${tempFilePath}`);
       }
     } catch (cleanupErr: any) {
-      console.warn(`[Storage CSV Ingestion] ⚠️ Could not remove temp file: ${cleanupErr.message}`);
+      log.warn(`[Storage CSV Ingestion] ⚠️ Could not remove temp file: ${cleanupErr.message}`);
     }
   }
 }
@@ -200,14 +203,14 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 
 if (isMain) {
-  console.log('--- Starting Storage CSV Ingestion CLI ---');
+  log.info('--- Starting Storage CSV Ingestion CLI ---');
   ingestCsvFromStorage()
     .then((result) => {
-      console.log('Result:', JSON.stringify(result, null, 2));
+      log.info('Result:', JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
     })
     .catch((err) => {
-      console.error('Fatal ingestion error:', err);
+      log.error('Fatal ingestion error:', err);
       process.exit(1);
     });
 }

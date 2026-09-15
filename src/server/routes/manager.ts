@@ -1,23 +1,27 @@
 /**
  * Manager dashboard API.
- *
- * These endpoints are intentionally scoped to administrators.  Campus
- * ambassador filtering belongs to the candidate/operator routes; managers
- * need an unfiltered view of the application pipeline.
+ * Team scoping via careerassociatemanager_id is currently off
+ * (`MANAGER_TEAM_SCOPE_ENABLED` in clientDashboard.ts).
+ * Admins do not use these routes; they have /api/admin.
  */
 
 import { Router, type Request, type Response } from 'express';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
-  countApplicationsByStatus,
   getISTDateRangeUtc,
   listApplications,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
-import { config } from '../../config/env.js';
+import { insertAuditEvent, listApplicationEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
-import { isUserAdmin } from './auth.js';
+import { canAccessManagerDashboard, resolveRole } from './auth.js';
+import { fetchLinkedCaIds, loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
+import { displayNameMapForEmails, isActiveWithin, listAuthDirectory } from '../authDirectory.js';
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('Manager');
 
 export const managerRouter = Router();
 
@@ -37,23 +41,26 @@ const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
 ];
 
 function getAuthenticatedEmail(req: Request): string {
-  const user = (req as Request & { user?: { email?: string; user_metadata?: { email?: string } } }).user;
+  const user = (req as AuthenticatedRequest).user as { email?: string; user_metadata?: { email?: string } } | undefined;
   return String(user?.email || user?.user_metadata?.email || '').trim().toLowerCase();
 }
 
-/** Same admin resolution as candidate/application routes (user object or normalized email). */
-function isAdminRequest(req: Request): boolean {
-  const user = (req as Request & { user?: unknown }).user;
-  const email = getAuthenticatedEmail(req);
-  return isUserAdmin(user || email || undefined);
-}
-
 function requireManager(req: Request, res: Response): boolean {
-  if (!isAdminRequest(req)) {
+  const authReq = req as AuthenticatedRequest;
+  if (!canAccessManagerDashboard(authReq.user || getAuthenticatedEmail(req))) {
     res.status(403).json({ error: 'Manager access is required.' });
     return false;
   }
   return true;
+}
+
+function managerEmailForRequest(req: Request): string {
+  const self = getAuthenticatedEmail(req);
+  const role = resolveRole((req as AuthenticatedRequest).user || self);
+  const impersonate =
+    typeof req.query.managerEmail === 'string' ? req.query.managerEmail.trim().toLowerCase() : '';
+  if (role === 'dev' && impersonate) return impersonate;
+  return self;
 }
 
 function serializeManagerApplication(application: ApplicationRow) {
@@ -73,104 +80,30 @@ function parseLimit(value: unknown, fallback = 100): number {
   return Math.min(parsed, 500);
 }
 
-interface ManagerApplicationRow extends ApplicationRow {
-  profiles?: {
-    applywizz_id?: string | null;
-    client_name?: string | null;
-  } | null;
-}
-
-interface ManagerClientRow {
-  client: string;
-  applications: number;
-  completed: number;
-  pending: number;
-  failed: number;
-  waitingForEmail: number;
-  assignedTo: string;
-  completedApplications: Array<Record<string, string>>;
-  pendingApplications: Array<Record<string, string>>;
-  failedApplications: Array<Record<string, string>>;
-  expanded_details: {
-    completed: Array<Record<string, string>>;
-    failed: Array<Record<string, string>>;
-    pending: Array<Record<string, string>>;
-  };
-}
-
-/**
- * Resolves the CAs linked to the manager.  The response parser accepts both
- * the current array response and the object wrappers used by older API
- * deployments.
- */
-async function fetchLinkedCaIds(managerEmail: string): Promise<string[]> {
-  const configuredUrl = new URL(config.APPLYWIZZ_API_URL);
-  configuredUrl.search = '';
-  configuredUrl.searchParams.set('careerassociatemanager_id', managerEmail);
-
-  const response = await fetch(configuredUrl, {
-    headers: { Accept: 'application/json', 'User-Agent': 'ApplyWizz-Greenhouse-Automation/1.0' },
-  });
-  if (!response.ok) {
-    throw new Error(`ApplyWizz API returned HTTP ${response.status}`);
+async function scopedApplywizzIds(req: Request): Promise<{
+  ids: string[] | null;
+  warning?: string;
+  managerEmail: string;
+}> {
+  const managerEmail = managerEmailForRequest(req);
+  if (!MANAGER_TEAM_SCOPE_ENABLED) {
+    return { ids: null, managerEmail };
   }
-
-  const payload: unknown = await response.json();
-  const root = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-  const candidates = Array.isArray(payload)
-    ? payload
-    : Array.isArray(root.candidates)
-      ? root.candidates
-      : Array.isArray(root.clients)
-        ? root.clients
-        : Array.isArray(root.data)
-          ? root.data
-          : [];
-
-  const ids = candidates.flatMap((candidate) => {
-    if (typeof candidate === 'string') return [candidate];
-    if (!candidate || typeof candidate !== 'object') return [];
-    const row = candidate as Record<string, unknown>;
-    const id = row.applywizz_id ?? row.applywizzId ?? row.client_id ?? row.clientId;
-    return typeof id === 'string' && id.trim() ? [id.trim()] : [];
-  });
-  return Array.from(new Set(ids));
+  const linked = await fetchLinkedCaIds(managerEmail);
+  return { ...linked, managerEmail };
 }
 
-function clientName(row: ManagerApplicationRow): string {
-  return row.profiles?.client_name?.trim() || row.applywizz_id;
+function inScope(application: Pick<ApplicationRow, 'applywizz_id'>, ids: string[] | null): boolean {
+  if (ids === null) return true;
+  const idSet = new Set(ids.map((id) => id.trim().toUpperCase()));
+  return idSet.has(application.applywizz_id.trim().toUpperCase());
 }
 
-function assignedCaName(row: ManagerApplicationRow): string {
-  return (row.assigned_ca_email || '').trim();
-}
-
-function detailFor(row: ManagerApplicationRow, includeProofs: boolean): Record<string, string> {
-  const detail: Record<string, string> = { job_url: row.job_url };
-  if (includeProofs) {
-    detail.proof_web_url = row.proof_web_url || '';
-    detail.proof_email_url = row.proof_email_url || '';
-  } else if (row.status === 'FAILED' && row.error_message) {
-    detail.error_message = row.error_message;
-  }
-  if (row.status === 'FAILED') detail.error_message = row.error_message || '';
-  return detail;
-}
-
-function isWaitingForEmail(row: ManagerApplicationRow): boolean {
-  return row.status === 'EMAIL_PROOF_PENDING' || row.status === 'OTP_REQUIRED';
-}
-
-/**
- * GET /api/manager/dashboard?date=YYYY-MM-DD&ca=<name|all>
- * Returns client-level application metrics for the authenticated manager.
- */
 managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
-  const isAdmin = isAdminRequest(req);
-  const managerEmail = getAuthenticatedEmail(req);
-  if (!isAdmin && !managerEmail) {
+  const managerEmail = managerEmailForRequest(req);
+  if (!managerEmail) {
     res.status(401).json({ error: 'Authenticated manager email is required.' });
     return;
   }
@@ -180,115 +113,203 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
     res.status(400).json({ error: 'date must use YYYY-MM-DD format.' });
     return;
   }
-  const date = requestedDate || getISTDateString();
   const requestedCa = typeof req.query.ca === 'string' ? req.query.ca.trim() : 'all';
-  if (!requestedCa || requestedCa.toLowerCase() === 'all') {
-    // "all" is the default and is handled below without a client filter.
-  }
 
   try {
-    if (!isSupabaseConfigured()) {
-      res.status(503).json({ error: 'Manager dashboard requires Supabase.' });
-      return;
-    }
-
-    const { startIso, endIso } = getISTDateRangeUtc(date);
-    let query = getDbClient()
-      .from('candidate_applications')
-      .select('*, profiles!inner(applywizz_id, client_name)')
-      .gte('created_at', startIso)
-      .lte('created_at', endIso);
-    // Admins (see isUserAdmin in auth.ts): org-wide stats — no careerassociatemanager_id scoping.
-    if (!isAdmin) {
-      const caIds = await fetchLinkedCaIds(managerEmail);
-      query = query.in('applywizz_id', caIds.length ? caIds : ['__no_linked_ca__']);
-    }
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const applications = (data || []) as ManagerApplicationRow[];
-    const filtered = isAdmin || requestedCa.toLowerCase() === 'all'
-      ? applications
-      : applications.filter(
-          (row) => assignedCaName(row).toLowerCase() === requestedCa.toLowerCase()
-        );
-    const grouped = new Map<string, ManagerClientRow>();
-
-    for (const application of filtered) {
-      const name = clientName(application);
-      const row = grouped.get(name) || {
-        client: name,
-        applications: 0,
-        completed: 0,
-        pending: 0,
-        failed: 0,
-        waitingForEmail: 0,
-        assignedTo: assignedCaName(application) || '—',
-        completedApplications: [],
-        pendingApplications: [],
-        failedApplications: [],
-        expanded_details: { completed: [], failed: [], pending: [] },
-      };
-      row.applications += 1;
-      row.assignedTo = assignedCaName(application) || row.assignedTo;
-      if (application.status === 'APPLIED') {
-        row.completed += 1;
-        const detail = detailFor(application, true);
-        row.completedApplications.push(detail);
-        row.expanded_details.completed.push(detail);
-      } else if (application.status === 'FAILED' || application.status === 'CAPTCHA_TIMEOUT') {
-        row.failed += 1;
-        const detail = detailFor(application, false);
-        row.failedApplications.push(detail);
-        row.expanded_details.failed.push(detail);
-      } else {
-        row.pending += 1;
-        const detail = { job_url: application.job_url };
-        row.pendingApplications.push(detail);
-        row.expanded_details.pending.push(detail);
-      }
-      if (isWaitingForEmail(application)) row.waitingForEmail += 1;
-      grouped.set(name, row);
-    }
-
-    const rows = Array.from(grouped.values());
-    const totals = rows.reduce(
-      (total, row) => ({
-        applications: total.applications + row.applications,
-        applied: total.applied + row.completed,
-        failed: total.failed + row.failed,
-        pending: total.pending + row.pending,
-        waiting_for_email: total.waiting_for_email + row.waitingForEmail,
-      }),
-      { applications: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 }
-    );
-
-    res.json({
-      date,
-      ca: isAdmin || requestedCa.toLowerCase() === 'all' ? 'all' : requestedCa,
-      rows,
-      clients: rows.map((row) => row.client),
-      totals,
+    const payload = await loadClientDashboard({
+      managerEmail,
+      date: requestedDate,
+      ca: requestedCa,
     });
+    res.json(payload);
   } catch (error) {
-    console.error('[Manager Router] Failed to load dashboard:', error);
+    log.error('[Manager Router] Failed to load dashboard:', error);
     res.status(502).json({ error: 'Unable to load manager dashboard.' });
   }
 });
 
-/**
- * GET /api/manager/overview
- * Returns aggregate pipeline metrics for the manager dashboard.
- */
+managerRouter.get('/operators', async (req: Request, res: Response): Promise<void> => {
+  if (!requireManager(req, res)) return;
+  const requestedDate = typeof req.query.date === 'string' ? req.query.date : undefined;
+  if (requestedDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+    res.status(400).json({ error: 'date must use YYYY-MM-DD format.' });
+    return;
+  }
+  const date = requestedDate || getISTDateString();
+
+  try {
+    const dashboard = await loadClientDashboard({
+      managerEmail: managerEmailForRequest(req),
+      date,
+    });
+    const directory = await listAuthDirectory();
+    const byEmail = new Map(directory.map((user) => [user.email, user]));
+    const inFlight = new Set(
+      (await listApplications())
+        .filter((row) => row.status === 'QUEUED' || row.status === 'APPLYING')
+        .map((row) => (row.assigned_ca_email || '').trim().toLowerCase())
+    );
+
+    const operators = new Map<
+      string,
+      { email: string; name: string; applications: number; completed: number; pending: number; failed: number }
+    >();
+    for (const row of dashboard.rows) {
+      const email = row.assignedToEmail || '';
+      if (!email) continue;
+      const current = operators.get(email) || {
+        email,
+        name: row.assignedTo,
+        applications: 0,
+        completed: 0,
+        pending: 0,
+        failed: 0,
+      };
+      current.applications += row.applications;
+      current.completed += row.completed;
+      current.pending += row.pending;
+      current.failed += row.failed;
+      operators.set(email, current);
+    }
+
+    const items = Array.from(operators.values()).map((operator) => {
+      const user = byEmail.get(operator.email);
+      const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
+      return {
+        email: operator.email,
+        name: operator.name,
+        status: active ? 'active' : 'inactive',
+        applications: operator.applications,
+        completed: operator.completed,
+        pending: operator.pending,
+        failed: operator.failed,
+        lastSignInAt: user?.lastSignInAt || null,
+        workload: operator.pending,
+      };
+    });
+
+    res.json({
+      date,
+      operators: items,
+      totals: {
+        assigned: items.length,
+        active: items.filter((item) => item.status === 'active').length,
+        inactive: items.filter((item) => item.status === 'inactive').length,
+      },
+      warning: dashboard.warning,
+    });
+  } catch (error) {
+    log.error('[Manager Router] Failed to load operators:', error);
+    res.status(500).json({ error: 'Unable to load manager operators.' });
+  }
+});
+
+managerRouter.get('/activity', async (req: Request, res: Response): Promise<void> => {
+  if (!requireManager(req, res)) return;
+  const limit = parseLimit(req.query.limit, 100);
+  try {
+    const scoped = await scopedApplywizzIds(req);
+    if (scoped.ids && scoped.ids.length === 0) {
+      res.json({ events: [], warning: scoped.warning || 'No clients linked to this manager.' });
+      return;
+    }
+    const listed = await listApplicationEvents({
+      applywizzIds: scoped.ids || undefined,
+      limit,
+    });
+    res.json(listed);
+  } catch (error) {
+    log.error('[Manager Router] Failed to load activity:', error);
+    res.status(500).json({ error: 'Unable to load team activity.' });
+  }
+});
+
+managerRouter.get('/reports', async (req: Request, res: Response): Promise<void> => {
+  if (!requireManager(req, res)) return;
+  const range = typeof req.query.range === 'string' ? req.query.range.trim().toLowerCase() : 'daily';
+  if (!['daily', 'weekly', 'monthly'].includes(range)) {
+    res.status(400).json({ error: 'range must be daily, weekly, or monthly.' });
+    return;
+  }
+
+  try {
+    const scoped = await scopedApplywizzIds(req);
+    if (!isSupabaseConfigured() || (scoped.ids && scoped.ids.length === 0)) {
+      res.json({ range, buckets: [], perOperator: [], warning: scoped.warning });
+      return;
+    }
+
+    const dayCount = range === 'monthly' ? 180 : range === 'weekly' ? 56 : 14;
+    const end = getISTDateString();
+    const startDate = new Date(`${end}T00:00:00+05:30`);
+    startDate.setDate(startDate.getDate() - (dayCount - 1));
+    const start = startDate.toISOString().slice(0, 10);
+    const { startIso } = getISTDateRangeUtc(start);
+    const { endIso } = getISTDateRangeUtc(end);
+
+    let query = getDbClient()
+      .from('candidate_applications')
+      .select('created_at, assigned_ca_email, applywizz_id')
+      .gte('created_at', startIso)
+      .lte('created_at', endIso);
+    if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const rows = data || [];
+    const bucketMap = new Map<string, number>();
+    const operatorMap = new Map<string, number>();
+    for (const row of rows) {
+      const created = row.created_at ? new Date(row.created_at) : null;
+      if (!created) continue;
+      const ist = new Date(created.getTime() + 5.5 * 60 * 60 * 1000);
+      let key = ist.toISOString().slice(0, 10);
+      if (range === 'weekly') {
+        const week = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
+        const day = week.getUTCDay() || 7;
+        week.setUTCDate(week.getUTCDate() - day + 1);
+        key = week.toISOString().slice(0, 10);
+      } else if (range === 'monthly') {
+        key = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
+      }
+      bucketMap.set(key, (bucketMap.get(key) || 0) + 1);
+      const email = String(row.assigned_ca_email || '').trim().toLowerCase();
+      if (email) operatorMap.set(email, (operatorMap.get(email) || 0) + 1);
+    }
+
+    const names = await displayNameMapForEmails(Array.from(operatorMap.keys()));
+    res.json({
+      range,
+      start,
+      end,
+      buckets: Array.from(bucketMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, applications]) => ({ date, applications })),
+      perOperator: Array.from(operatorMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([email, applications]) => ({
+          email,
+          name: names.get(email) || email.split('@')[0],
+          applications,
+        })),
+      warning: scoped.warning,
+    });
+  } catch (error) {
+    log.error('[Manager Router] Failed to load reports:', error);
+    res.status(500).json({ error: 'Unable to load manager reports.' });
+  }
+});
+
 managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
   try {
-    const applications = await listApplications();
-    const statuses = await Promise.all(
-      APPLICATION_STATUSES.map(async (status) => [status, await countApplicationsByStatus(status)] as const)
-    );
-    const statusCounts = Object.fromEntries(statuses);
+    const scoped = await scopedApplywizzIds(req);
+    const applications = (await listApplications()).filter((application) => inScope(application, scoped.ids));
+    const statusCounts: Record<string, number> = {};
+    for (const status of APPLICATION_STATUSES) {
+      statusCounts[status] = applications.filter((application) => application.status === status).length;
+    }
     const candidateIds = new Set(applications.map((application) => application.applywizz_id));
 
     res.json({
@@ -304,18 +325,15 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
         applied: statusCounts.APPLIED ?? 0,
         failed: statusCounts.FAILED ?? 0,
       },
+      warning: scoped.warning,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('[Manager Router] Failed to load overview:', error);
+    log.error('[Manager Router] Failed to load overview:', error);
     res.status(500).json({ error: 'Unable to load manager overview.' });
   }
 });
 
-/**
- * GET /api/manager/applications
- * Lists applications with optional status/candidate filters and pagination.
- */
 managerRouter.get('/applications', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
@@ -335,10 +353,15 @@ managerRouter.get('/applications', async (req: Request, res: Response): Promise<
   const offset = Math.max(0, Number.parseInt(String(req.query.offset || '0'), 10) || 0);
 
   try {
-    const applications = await listApplications({
+    const scoped = await scopedApplywizzIds(req);
+    if (applywizzId && scoped.ids && !inScope({ applywizz_id: applywizzId }, scoped.ids)) {
+      res.json({ applications: [], total: 0, limit, offset, warning: 'Candidate is not on this manager team.' });
+      return;
+    }
+    const applications = (await listApplications({
       status: status as ApplicationStatus | undefined,
       applywizzId,
-    });
+    })).filter((application) => inScope(application, scoped.ids));
     const page = applications.slice(offset, offset + limit).map(serializeManagerApplication);
 
     res.json({
@@ -346,56 +369,60 @@ managerRouter.get('/applications', async (req: Request, res: Response): Promise<
       total: applications.length,
       limit,
       offset,
+      warning: scoped.warning,
     });
   } catch (error) {
-    console.error('[Manager Router] Failed to list applications:', error);
+    log.error('[Manager Router] Failed to list applications:', error);
     res.status(500).json({ error: 'Unable to load manager applications.' });
   }
 });
 
-/**
- * GET /api/manager/queue
- * Returns the submission queue in its existing database ordering.
- */
 managerRouter.get('/queue', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
   try {
+    const scoped = await scopedApplywizzIds(req);
+    const filter = (rows: ApplicationRow[]) =>
+      rows.filter((row) => inScope(row, scoped.ids)).map(serializeManagerApplication);
     const [queued, applying, otpRequired] = await Promise.all([
       listApplications({ status: 'QUEUED' }),
       listApplications({ status: 'APPLYING' }),
       listApplications({ status: 'OTP_REQUIRED' }),
     ]);
     res.json({
-      queued: queued.map(serializeManagerApplication),
-      applying: applying.map(serializeManagerApplication),
-      otpRequired: otpRequired.map(serializeManagerApplication),
+      queued: filter(queued),
+      applying: filter(applying),
+      otpRequired: filter(otpRequired),
+      warning: scoped.warning,
     });
   } catch (error) {
-    console.error('[Manager Router] Failed to load queue:', error);
+    log.error('[Manager Router] Failed to load queue:', error);
     res.status(500).json({ error: 'Unable to load manager queue.' });
   }
 });
 
-/**
- * GET /api/manager/candidates
- * Lists candidate directory rows.  Profiles remain the source of identity data.
- */
 managerRouter.get('/candidates', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
   try {
+    const scoped = await scopedApplywizzIds(req);
+    if (scoped.ids && scoped.ids.length === 0) {
+      res.json({ candidates: [], warning: scoped.warning || 'No clients linked to this manager.' });
+      return;
+    }
     if (isSupabaseConfigured()) {
-      const { data, error } = await getDbClient()
+      let query = getDbClient()
         .from('profiles')
         .select('applywizz_id, client_name, company_email, country, location, zoho_connected, updated_at')
         .order('client_name', { ascending: true });
+      if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
+      const { data, error } = await query;
       if (error) throw error;
-      res.json({ candidates: data ?? [] });
+      res.json({ candidates: data ?? [], warning: scoped.warning });
       return;
     }
 
-    const applications = await listApplications();
+    const applications = (await listApplications()).filter((application) => inScope(application, scoped.ids));
     const candidates = Array.from(
       new Map(
         applications.map((application) => [
@@ -404,17 +431,13 @@ managerRouter.get('/candidates', async (req: Request, res: Response): Promise<vo
         ])
       ).entries()
     ).map(([, candidate]) => candidate);
-    res.json({ candidates });
+    res.json({ candidates, warning: scoped.warning });
   } catch (error) {
-    console.error('[Manager Router] Failed to load candidates:', error);
+    log.error('[Manager Router] Failed to load candidates:', error);
     res.status(500).json({ error: 'Unable to load manager candidates.' });
   }
 });
 
-/**
- * PATCH /api/manager/applications/:id/assignment
- * Assigns an application to a CA without changing its lifecycle status.
- */
 managerRouter.patch('/applications/:id/assignment', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
@@ -433,20 +456,42 @@ managerRouter.patch('/applications/:id/assignment', async (req: Request, res: Re
       res.status(503).json({ error: 'Application assignment requires Supabase.' });
       return;
     }
+    const scoped = await scopedApplywizzIds(req);
+    const applicationId = String(req.params.id);
+    const { data: existing, error: existingError } = await getDbClient()
+      .from('candidate_applications')
+      .select('*')
+      .eq('id', applicationId)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (!existing) {
+      res.status(404).json({ error: `Application '${applicationId}' not found.` });
+      return;
+    }
+    if (scoped.ids && !inScope(existing as ApplicationRow, scoped.ids)) {
+      res.status(403).json({ error: 'Application is not on this manager team.' });
+      return;
+    }
+
+    const nextEmail = typeof assignedCaEmail === 'string' ? assignedCaEmail.trim() || null : null;
     const { data, error } = await getDbClient()
       .from('candidate_applications')
-      .update({ assigned_ca_email: typeof assignedCaEmail === 'string' ? assignedCaEmail.trim() || null : null })
-      .eq('id', req.params.id)
+      .update({ assigned_ca_email: nextEmail })
+      .eq('id', applicationId)
       .select('*')
       .maybeSingle();
     if (error) throw error;
-    if (!data) {
-      res.status(404).json({ error: `Application '${req.params.id}' not found.` });
-      return;
-    }
+    void insertAuditEvent({
+      actorEmail: getAuthenticatedEmail(req),
+      actorRole: resolveRole((req as AuthenticatedRequest).user),
+      action: 'assignment_patch',
+      targetType: 'application',
+      targetId: applicationId,
+      metadata: { assigned_ca_email: nextEmail, previous: existing.assigned_ca_email || null },
+    });
     res.json({ application: serializeManagerApplication(data as ApplicationRow) });
   } catch (error) {
-    console.error('[Manager Router] Failed to update assignment:', error);
+    log.error('[Manager Router] Failed to update assignment:', error);
     res.status(500).json({ error: 'Unable to update application assignment.' });
   }
 });

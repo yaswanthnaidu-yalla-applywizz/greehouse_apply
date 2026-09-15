@@ -6,6 +6,9 @@
  */
 
 import { config } from '../config/env.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Azure Email');
 
 interface SendOtpEmailOptions {
   to: string;
@@ -206,14 +209,14 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error(`[AzureEmail] Failed to send email to ${to}: HTTP ${res.status} - ${errText}`);
+    log.error(`[AzureEmail] Failed to send email to ${to}: HTTP ${res.status} - ${errText}`);
     return {
       success: false,
       error: `Failed to send email: HTTP ${res.status} - ${errText}`,
     };
   }
 
-  console.log(`[AzureEmail] Successfully dispatched email to ${to} (Sender: ${senderEmail})`);
+  log.info(`[AzureEmail] Successfully dispatched email to ${to} (Sender: ${senderEmail})`);
   return { success: true };
 }
 

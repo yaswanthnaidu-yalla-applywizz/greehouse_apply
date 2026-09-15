@@ -16,6 +16,9 @@ import { config } from '../config/env.js';
 import { readAndDeduplicateUrls } from './csvDeduplicator.js';
 import { PlaywrightScanner } from './playwrightScanner.js';
 import { exportScannedJobs } from './exportScannedJobs.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Run Scan');
 
 /**
  * Parses command-line arguments into structured runner options.
@@ -57,18 +60,18 @@ export function parseCliArgs(args: string[]): {
 export async function main(): Promise<void> {
   const { inputPath, limit, workers, outputDir } = parseCliArgs(process.argv.slice(2));
 
-  console.log('================================================================');
-  console.log('  Branch 1: Greenhouse Unique Link Scanner');
-  console.log('================================================================');
-  console.log(`• Input CSV:   ${inputPath}`);
-  console.log(`• Output Dir:  ${outputDir}`);
-  console.log(`• Workers:     ${workers}`);
-  console.log(`• Limit:       ${limit ? limit : 'All'}`);
-  console.log('================================================================\n');
+  log.info('================================================================');
+  log.info('  Branch 1: Greenhouse Unique Link Scanner');
+  log.info('================================================================');
+  log.info(`• Input CSV:   ${inputPath}`);
+  log.info(`• Output Dir:  ${outputDir}`);
+  log.info(`• Workers:     ${workers}`);
+  log.info(`• Limit:       ${limit ? limit : 'All'}`);
+  log.info('================================================================\n');
 
   if (!fs.existsSync(inputPath)) {
-    console.warn(`[Runner] ⚠️ Input CSV file not found at: "${inputPath}".`);
-    console.warn('[Runner] Please verify the CSV path in .env (INPUT_CSV_PATH) or pass --input="<path>".');
+    log.warn(`[Runner] ⚠️ Input CSV file not found at: "${inputPath}".`);
+    log.warn('[Runner] Please verify the CSV path in .env (INPUT_CSV_PATH) or pass --input="<path>".');
     return;
   }
 
@@ -78,7 +81,7 @@ export async function main(): Promise<void> {
     // 1. Read & Deduplicate URLs
     const uniqueUrls = await readAndDeduplicateUrls(inputPath, { limit });
     if (uniqueUrls.length === 0) {
-      console.log('[Runner] ⚠️ No valid Greenhouse URLs found to scan.');
+      log.info('[Runner] ⚠️ No valid Greenhouse URLs found to scan.');
       return;
     }
 
@@ -95,19 +98,19 @@ export async function main(): Promise<void> {
     const activeJobs = scannedTemplates.filter((t) => !t.isExpired).length;
     const expiredJobs = scannedTemplates.filter((t) => t.isExpired).length;
 
-    console.log('\n================================================================');
-    console.log('  Branch 1 Scanner Run Completed');
-    console.log('================================================================');
-    console.log(`• Elapsed Time:    ${elapsedSec}s`);
-    console.log(`• Total Scanned:   ${scannedTemplates.length}`);
-    console.log(`• Active Jobs:     ${activeJobs}`);
-    console.log(`• Expired/404:     ${expiredJobs}`);
-    console.log(`• Field CSV Rows:  ${exportResult.totalFieldRows}`);
-    console.log(`• Output JSON:     ${exportResult.jsonPath}`);
-    console.log(`• Output CSV:      ${exportResult.csvPath}`);
-    console.log('================================================================');
+    log.info('\n================================================================');
+    log.info('  Branch 1 Scanner Run Completed');
+    log.info('================================================================');
+    log.info(`• Elapsed Time:    ${elapsedSec}s`);
+    log.info(`• Total Scanned:   ${scannedTemplates.length}`);
+    log.info(`• Active Jobs:     ${activeJobs}`);
+    log.info(`• Expired/404:     ${expiredJobs}`);
+    log.info(`• Field CSV Rows:  ${exportResult.totalFieldRows}`);
+    log.info(`• Output JSON:     ${exportResult.jsonPath}`);
+    log.info(`• Output CSV:      ${exportResult.csvPath}`);
+    log.info('================================================================');
   } catch (error: any) {
-    console.error(`[Runner] ❌ Error during scan execution: ${error.message}`);
+    log.error(`[Runner] ❌ Error during scan execution: ${error.message}`);
     process.exitCode = 1;
   }
 }

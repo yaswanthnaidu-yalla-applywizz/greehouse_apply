@@ -17,100 +17,123 @@ import { checkOtpCooldown, generateAndStoreOtp, verifyStoredOtp } from '../../se
 import { fetchAllowedCandidates, getYesterdayIST } from '../../services/workHistoryClient.js';
 import { hydrateAdminProfilesFromWorkHistory } from '../../services/adminProfileHydrate.js';
 import { setCachedWorkHistory } from '../workHistoryCache.js';
+import { createLogger } from '../../utils/logger.js';
+import { insertAuditEvent } from '../../db/events.js';
+
+const log = createLogger('Auth');
 
 export const authRouter = Router();
 
 const AUTHORIZED_EMAILS_API = config.AUTHORIZED_EMAILS_API || 'https://applywizz-ca-management.vercel.app/api/ca/emails';
 
-/**
- * Hardcoded allowlist of administrative emails explicitly permitted to sign up,
- * bypassing external CA management API dependencies.
- */
-/** Treat as admin in isUserAdmin() — full org access (manager dashboard, no CA filter). */
-export const ALWAYS_ALLOWED_EMAILS = [
-  'yaswanthnaiduyalla@applywizz.ai',
-  'yaswanhnaiduyalla@applywizz.ai',
-];
+export type AppRole = 'dev' | 'admin' | 'manager' | 'operator';
+
+/** Email → role. Case-insensitive. Operators are any other signed-up email (not listed). */
+const ROLE_BY_EMAIL: Record<string, Exclude<AppRole, 'operator'>> = {
+  'yaswanthnaiduyalla@applywizz.ai': 'dev',
+  'ramakrishna@applywizz.ai': 'admin',
+  'anushabandreddy@applywizz.ai': 'admin',
+  'balaji@applywizz.ai': 'manager',
+  'ramakrishnaa.tejavath@applywizz.ai': 'manager',
+};
+
+/** Privileged emails that may sign up without the CA emails API. */
+export const ALWAYS_ALLOWED_EMAILS = Object.keys(ROLE_BY_EMAIL);
+
+export function normalizeAuthEmail(email?: string | null): string {
+  return (email || '').trim().toLowerCase();
+}
+
+export function emailFromUserOrEmail(userOrEmail?: any): string {
+  if (!userOrEmail) return '';
+  if (typeof userOrEmail === 'string') return normalizeAuthEmail(userOrEmail);
+  return normalizeAuthEmail(
+    userOrEmail.email || userOrEmail.user_metadata?.email || ''
+  );
+}
+
+/** Single source of truth for dashboard roles — email map only, no DB. */
+export function resolveRoleFromEmail(email?: string | null): AppRole {
+  const normalized = normalizeAuthEmail(email);
+  if (!normalized) return 'operator';
+  return ROLE_BY_EMAIL[normalized] || 'operator';
+}
+
+export function resolveRole(userOrEmail?: any): AppRole {
+  return resolveRoleFromEmail(emailFromUserOrEmail(userOrEmail));
+}
+
+export function attachResolvedRole<T extends Record<string, any>>(user: T, email?: string | null): T & { role: AppRole } {
+  const role = resolveRoleFromEmail(email || emailFromUserOrEmail(user));
+  return { ...user, role };
+}
+
+export function homePathForRole(role: AppRole): string {
+  if (role === 'dev') return '/dev';
+  if (role === 'admin') return '/admin';
+  if (role === 'manager') return '/manager';
+  return '/';
+}
+
+export function emailsForRole(role: Exclude<AppRole, 'operator'>): string[] {
+  return Object.entries(ROLE_BY_EMAIL)
+    .filter(([, mapped]) => mapped === role)
+    .map(([email]) => email);
+}
+
+/** Org-wide operator access (ingest, hydrate, no CA filter). Missing email is never admin. */
+export function isUserAdmin(userOrEmail?: any): boolean {
+  const email = emailFromUserOrEmail(userOrEmail);
+  if (!email) return false;
+  const role = resolveRoleFromEmail(email);
+  return role === 'dev' || role === 'admin';
+}
+
+/** Manager dashboard: managers and dev only. Missing email is never a manager. */
+export function canAccessManagerDashboard(userOrEmail?: any): boolean {
+  const email = emailFromUserOrEmail(userOrEmail);
+  if (!email) return false;
+  const role = resolveRoleFromEmail(email);
+  return role === 'dev' || role === 'manager';
+}
 
 /** One-line login audit log (call only on successful sign-in). */
-export function logAuthLogin(email: string, isAdmin: boolean): void {
-  const normalized = email.trim().toLowerCase();
+export function logAuthLogin(email: string, role: AppRole): void {
+  const normalized = normalizeAuthEmail(email);
   if (!normalized) return;
-  const role = isAdmin ? 'ADMIN' : 'CA';
-  console.log(`[Auth] ✅ ${normalized} logged in → ${role}`);
+  log.info(`[Auth] ✅ ${normalized} logged in → ${role.toUpperCase()}`);
 }
 
 /** One-line logout audit log (call from POST /api/auth/logout). */
 export function logAuthLogout(email: string): void {
   const normalized = email.trim().toLowerCase();
   if (!normalized) return;
-  console.log(`[Auth] 👋 ${normalized} logged out`);
+  log.info(`[Auth] 👋 ${normalized} logged out`);
 }
 
-/**
- * Checks whether a given user object, session, or email belongs to an administrator.
- */
-export function isUserAdmin(userOrEmail?: any): boolean {
-  if (!userOrEmail) return true; // Offline / test / dev bypass without email
-
-  let email = '';
-  let role = '';
-
-  if (typeof userOrEmail === 'string') {
-    email = userOrEmail;
-  } else if (typeof userOrEmail === 'object') {
-    email = userOrEmail.email || userOrEmail.user_metadata?.email || '';
-    role = userOrEmail.role || userOrEmail.app_metadata?.role || userOrEmail.user_metadata?.role || '';
-  }
-
-  if (role === 'admin') return true;
-
-  const normalized = email.trim().toLowerCase();
-  if (!normalized) return true; // Unauthenticated / dev requests default to admin
-
-  const isAlwaysAllowedEmail = ALWAYS_ALLOWED_EMAILS.some(
-    (allowedEmail) => allowedEmail.trim().toLowerCase() === normalized
-  );
-
-  if (isAlwaysAllowedEmail) {
-    return true;
-  }
-
-  const envAllowed = (config.ALLOWED_SIGNUP_EMAILS || '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  if (envAllowed.includes(normalized)) {
-    return true;
-  }
-
-  if (process.env.ADMIN_EMAILS) {
-    const envAdmins = process.env.ADMIN_EMAILS.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
-    if (envAdmins.includes(normalized)) {
-      return true;
+async function persistRoleClaim(userId: string | undefined, role: AppRole): Promise<void> {
+  if (!userId) return;
+  try {
+    const supabase = getDbClient();
+    const { error } = await supabase.auth.admin.updateUserById(userId, {
+      app_metadata: { role },
+    });
+    if (error) {
+      log.warn(`[Auth] Could not embed role claim: ${error.message}`);
     }
+  } catch (err: any) {
+    log.warn(`[Auth] Could not embed role claim: ${err?.message}`);
   }
-
-  // Common administrator email patterns
-  if (
-    normalized.startsWith('yaswanth') ||
-    normalized.startsWith('admin@') ||
-    normalized.startsWith('operator@')
-  ) {
-    return true;
-  }
-
-  return false;
 }
 
 /**
  * Checks whether an email is permitted to register.
- * Returns true if the email is in the admin allowlist, ALLOWED_SIGNUP_EMAILS env variable,
+ * Returns true if the email is in the role map, ALLOWED_SIGNUP_EMAILS env variable,
  * or returned by the CA management authorized emails API.
  */
 export function isEmailAuthorized(email: string, authorizedList: string[]): boolean {
   const normalized = email.trim().toLowerCase();
-  if (isUserAdmin(normalized)) {
+  if (resolveRoleFromEmail(normalized) !== 'operator') {
     return true;
   }
   const envAllowed = (config.ALLOWED_SIGNUP_EMAILS || '')
@@ -153,7 +176,7 @@ async function fetchAuthorizedEmails(): Promise<string[]> {
 
     return emails.map((e) => e.trim().toLowerCase());
   } catch (err: any) {
-    console.error(`[Auth] Error fetching authorized emails:`, err.message);
+    log.error(`[Auth] Error fetching authorized emails:`, err.message);
     throw err;
   }
 }
@@ -182,7 +205,7 @@ authRouter.post('/verify-email', async (req: Request, res: Response): Promise<vo
     try {
       authorizedEmails = await fetchAuthorizedEmails();
     } catch (apiErr: any) {
-      console.warn(`[Auth] ⚠️ CA Emails API query failed: ${apiErr.message}`);
+      log.warn(`[Auth] ⚠️ CA Emails API query failed: ${apiErr.message}`);
     }
 
     const isAuthorized = isEmailAuthorized(normalizedEmail, authorizedEmails);
@@ -196,7 +219,7 @@ authRouter.post('/verify-email', async (req: Request, res: Response): Promise<vo
     const supabase = getDbClient();
     const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
     if (listError) {
-      console.error('[Auth] Failed to check existing auth users:', listError.message);
+      log.error('[Auth] Failed to check existing auth users:', listError.message);
       res.status(500).json({ error: 'Failed to verify existing accounts.' });
       return;
     }
@@ -251,7 +274,7 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
     try {
       authorizedEmails = await fetchAuthorizedEmails();
     } catch (apiErr: any) {
-      console.warn(`[Auth] ⚠️ CA Emails API query failed: ${apiErr.message}`);
+      log.warn(`[Auth] ⚠️ CA Emails API query failed: ${apiErr.message}`);
     }
 
     if (!isEmailAuthorized(normalizedEmail, authorizedEmails)) {
@@ -263,7 +286,7 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
     const supabase = getDbClient();
     const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
     if (listError) {
-      console.error('[Auth] Failed to check existing accounts:', listError.message);
+      log.error('[Auth] Failed to check existing accounts:', listError.message);
       res.status(500).json({ error: 'Failed to verify existing accounts.' });
       return;
     }
@@ -282,7 +305,7 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
         res.status(409).json({ error: 'Account already exists, please sign in.' });
         return;
       }
-      console.log(`[Auth] User ${normalizedEmail} has unverified MFA setup. Permitting signup OTP to complete enrollment.`);
+      log.info(`[Auth] User ${normalizedEmail} has unverified MFA setup. Permitting signup OTP to complete enrollment.`);
     }
 
     // 3. Check rate-limit cooldown
@@ -315,7 +338,7 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
       message: `Verification code sent to ${normalizedEmail}.`,
     });
   } catch (err: any) {
-    console.error('[Auth] Error sending signup OTP:', err.message);
+    log.error('[Auth] Error sending signup OTP:', err.message);
     res.status(500).json({ error: err.message || 'Failed to send verification code.' });
   }
 });
@@ -361,6 +384,13 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
         return;
       }
       user = newUser.user;
+      void insertAuditEvent({
+        actorEmail: normalizedEmail,
+        actorRole: resolveRoleFromEmail(normalizedEmail),
+        action: 'signup',
+        targetType: 'user',
+        targetId: user.id,
+      });
     }
 
     // 3. Generate authenticated session via magiclink on backend
@@ -398,7 +428,7 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
         }
       }
     } catch (cleanupErr: any) {
-      console.warn('[Auth] Stale unverified factor cleanup skipped:', cleanupErr?.message);
+      log.warn('[Auth] Stale unverified factor cleanup skipped:', cleanupErr?.message);
     }
 
     // 4. Enroll Microsoft Authenticator (TOTP)
@@ -453,7 +483,7 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
       user: sessionData.user || user,
     });
   } catch (err: any) {
-    console.error('[Auth] verify-signup-otp error:', err.message);
+    log.error('[Auth] verify-signup-otp error:', err.message);
     res.status(500).json({ error: err.message || 'Verification failed.' });
   }
 });
@@ -598,7 +628,8 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     // Fetch work-history for CA filtering (skip for admins)
     let allowedCandidateIds: string[] = [];
     let workHistoryUnreachable = false;
-    const isAdmin = isUserAdmin(normalizedEmail);
+    const role = resolveRoleFromEmail(normalizedEmail);
+    const isAdmin = role === 'dev' || role === 'admin';
 
     if (!isAdmin && normalizedEmail) {
       const whResult = await fetchAllowedCandidates(normalizedEmail);
@@ -609,25 +640,34 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       try {
         await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
       } catch (hydrateErr: any) {
-        console.warn('[Auth] Admin profile hydration on login failed:', hydrateErr?.message);
+        log.warn('[Auth] Admin profile hydration on login failed:', hydrateErr?.message);
       }
     }
 
-    logAuthLogin(normalizedEmail, isAdmin);
+    await persistRoleClaim(user.id, role);
+    logAuthLogin(normalizedEmail, role);
+    void insertAuditEvent({
+      actorEmail: normalizedEmail,
+      actorRole: role,
+      action: 'login',
+      targetType: 'user',
+      targetId: user.id,
+    });
+
+    const sessionUser = attachResolvedRole(verifyData.user || { id: user.id, email: user.email }, normalizedEmail);
 
     res.json({
       success: true,
       token: verifyData.access_token || tempToken,
-      user: verifyData.user || {
-        id: user.id,
-        email: user.email,
-      },
+      user: sessionUser,
+      role,
+      homePath: homePathForRole(role),
       allowedCandidateIds,
       workHistoryUnreachable,
       isAdmin,
     });
   } catch (err: any) {
-    console.error('[Auth] Login error:', err.message);
+    log.error('[Auth] Login error:', err.message);
     res.status(500).json({ error: err.message || 'Sign in failed.' });
   }
 });
@@ -748,7 +788,8 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
     const userEmail = (verifyData.user?.email || '').trim().toLowerCase();
     let allowedCandidateIds: string[] = [];
     let workHistoryUnreachable = false;
-    const isAdmin = isUserAdmin(verifyData.user || userEmail);
+    const role = resolveRoleFromEmail(userEmail);
+    const isAdmin = role === 'dev' || role === 'admin';
 
     if (userEmail && !isAdmin) {
       const whResult = await fetchAllowedCandidates(userEmail);
@@ -759,18 +800,28 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
       try {
         await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
       } catch (hydrateErr: any) {
-        console.warn('[Auth] Admin profile hydration on MFA verify failed:', hydrateErr?.message);
+        log.warn('[Auth] Admin profile hydration on MFA verify failed:', hydrateErr?.message);
       }
     }
 
     if (userEmail) {
-      logAuthLogin(userEmail, isAdmin);
+      await persistRoleClaim(verifyData.user?.id, role);
+      logAuthLogin(userEmail, role);
+      void insertAuditEvent({
+        actorEmail: userEmail,
+        actorRole: role,
+        action: 'login',
+        targetType: 'user',
+        targetId: verifyData.user?.id,
+      });
     }
 
     res.json({
       success: true,
       token: verifyData.access_token || token,
-      user: verifyData.user,
+      user: attachResolvedRole(verifyData.user || { email: userEmail }, userEmail),
+      role,
+      homePath: homePathForRole(role),
       allowedCandidateIds,
       workHistoryUnreachable,
       isAdmin,
@@ -846,6 +897,13 @@ authRouter.post('/logout', async (req: Request, res: Response): Promise<void> =>
 
     if (!error && data?.user?.email) {
       logAuthLogout(data.user.email);
+      void insertAuditEvent({
+        actorEmail: data.user.email,
+        actorRole: resolveRoleFromEmail(data.user.email),
+        action: 'logout',
+        targetType: 'user',
+        targetId: data.user.id,
+      });
     }
 
     res.json({ success: true });
@@ -881,12 +939,17 @@ authRouter.get('/me', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const role = resolveRoleFromEmail(data.user.email);
     res.json({
       valid: true,
       user: {
         id: data.user.id,
         email: data.user.email,
+        role,
       },
+      role,
+      homePath: homePathForRole(role),
+      isAdmin: role === 'dev' || role === 'admin',
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Token verification failed.' });

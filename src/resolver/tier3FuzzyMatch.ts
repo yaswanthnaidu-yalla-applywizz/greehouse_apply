@@ -7,6 +7,9 @@ import Fuse from 'fuse.js';
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Tier3Fuzzy Match');
 
 /**
  * Matches target value to the closest matching option in dropdown or radio group.
@@ -114,7 +117,7 @@ export async function resolveTier3(
       };
     }
   } catch (err: any) {
-    console.warn(`[Tier 3] Fuzzy match error for ${applywizzId}: ${err.message}`);
+    log.warn(`[Tier 3] Fuzzy match error for ${applywizzId}: ${err.message}`);
   }
 
   return null;

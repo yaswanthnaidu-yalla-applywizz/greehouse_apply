@@ -14,6 +14,9 @@
 
 import { config } from '../config/env.js';
 import { V1Pipeline } from './pipeline.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Run Pipeline');
 
 /**
  * Parses command-line arguments for the pipeline runner.
@@ -74,7 +77,7 @@ export async function main(): Promise<void> {
       process.exitCode = 1;
     }
   } catch (err: any) {
-    console.error(`[Pipeline Runner] ❌ Fatal error executing pipeline: ${err.message}`);
+    log.error(`[Pipeline Runner] ❌ Fatal error executing pipeline: ${err.message}`);
     process.exitCode = 1;
   }
 }

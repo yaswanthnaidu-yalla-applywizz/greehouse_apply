@@ -40,6 +40,9 @@ import {
   emailProofStoragePath,
   isApplicationUuid,
 } from '../../db/storage.js';
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('Submissions');
 
 export const submissionsRouter = Router();
 
@@ -83,7 +86,7 @@ const SUBMIT_SELECTORS = [
 
 async function closePausedSession(applicationId: string): Promise<void> {
   await clearPausedSession(applicationId);
-  console.log(`[Submissions Router] 🧹 Cleaned up paused session for application ${applicationId}`);
+  log.info(`[Submissions Router] 🧹 Cleaned up paused session for application ${applicationId}`);
 }
 
 /**
@@ -94,7 +97,7 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
   const rawId = req.params.id;
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
   const userEmail = (req as any).user?.email || req.body?.assignedCaEmail || 'anonymous';
-  console.log(`[Submissions Router] 🎬 POST /api/applications/${appId}/dry-run requested by ${userEmail}`);
+  log.info(`[Submissions Router] 🎬 POST /api/applications/${appId}/dry-run requested by ${userEmail}`);
 
   if (!(await ensureZohoConnectedForApplication(req, res, appId))) {
     return;
@@ -108,7 +111,7 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
     });
 
     if (result.success) {
-      console.log(`[Submissions Router] ✅ Dry-run succeeded for ${appId} (screenshot: ${result.screenshotUrl})`);
+      log.info(`[Submissions Router] ✅ Dry-run succeeded for ${appId} (screenshot: ${result.screenshotUrl})`);
       res.status(200).json({
         success: true,
         applicationId: result.applicationId,
@@ -116,7 +119,7 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
         summary: result.summary,
       });
     } else {
-      console.error(`[Submissions Router] ❌ Dry-run failed for ${appId}: ${result.error}`);
+      log.error(`[Submissions Router] ❌ Dry-run failed for ${appId}: ${result.error}`);
       res.status(500).json({
         success: false,
         applicationId: result.applicationId,
@@ -125,7 +128,7 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
       });
     }
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ Dry-run route error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ Dry-run route error for ${appId}:`, err);
     res.status(500).json({
       success: false,
       error: err.message,
@@ -142,7 +145,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
   const isSync = req.query.sync === 'true' || req.body?.sync === true;
   const userEmail = (req as any).user?.email || req.body?.assignedCaEmail || undefined;
-  console.log(
+  log.info(
     `[Submissions Router] 🚀 POST /api/applications/${appId}/submit requested by ${userEmail || 'anonymous'} (isSync: ${isSync}, jobUrl: ${req.body?.jobUrl || 'auto'})`
   );
 
@@ -152,18 +155,18 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
 
   // Asynchronous queue insertion (default production flow - Phase V2-4c)
   if (!isSync) {
-    console.log(`[API] Submit endpoint received → setting status to: QUEUED`);
+    log.info(`[API] Submit endpoint received → setting status to: QUEUED`);
     try {
       const { submissionOrder, application } = await enqueueApplication(appId, {
         assignedCaEmail: userEmail,
         jobUrl: req.body?.jobUrl,
       });
 
-      console.log(`[API] Submit clicked → status = QUEUED (ready for queue daemon)`);
-      console.log(
+      log.info(`[API] Submit clicked → status = QUEUED (ready for queue daemon)`);
+      log.info(
         `[Submissions Router] 📥 Application ${application.id || appId} queued (submission_order: ${submissionOrder}, ca: ${userEmail || 'none'})`
       );
-      console.log(
+      log.info(
         `[API] Status → QUEUED (application ${application.id || appId}, submission_order=${submissionOrder})`
       );
 
@@ -176,7 +179,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
       return;
     } catch (err: any) {
-      console.error(`[Submissions Router] ❌ Enqueue error for ${appId}:`, err);
+      log.error(`[Submissions Router] ❌ Enqueue error for ${appId}:`, err);
       res.status(500).json({
         success: false,
         status: 'FAILED',
@@ -249,7 +252,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
     }
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
     await updateStatus(appId, 'FAILED', {
       error_message: err.message || 'Unexpected submit route error',
       job_url: req.body?.jobUrl,
@@ -309,7 +312,7 @@ submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Re
       page = await context.newPage();
       const targetUrl = application.job_url;
 
-      console.log(
+      log.info(
         `[Submissions Router] 🌐 Opening headful CAPTCHA browser for ${application.applywizz_id} → ${targetUrl}`
       );
       await page.goto(targetUrl, {
@@ -359,7 +362,7 @@ submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Re
       throw innerErr;
     }
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ Open CAPTCHA session route error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ Open CAPTCHA session route error for ${appId}:`, err);
     res.status(500).json({
       success: false,
       error: err.message,
@@ -434,7 +437,7 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
       proofFailedCapturedAt: result.proofFailedCapturedAt,
     });
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ Submit OTP route error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ Submit OTP route error for ${appId}:`, err);
 
     const isMissingSession = /no paused.*session/i.test(err.message || '');
     if (isMissingSession) {
@@ -489,7 +492,7 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
     const { page } = resolvedSession.session;
     const sessionKey = resolvedSession.canonicalKey;
 
-    console.log(`[Submissions Router] ▶️ Resuming submission for application ${sessionKey}...`);
+    log.info(`[Submissions Router] ▶️ Resuming submission for application ${sessionKey}...`);
 
     if (application.id) {
       await updateStatus(application.id, 'APPLYING');
@@ -501,7 +504,7 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
       if ((await btn.count()) > 0 && (await btn.isVisible())) {
         await btn.click({ timeout: 5000 });
         submitClicked = true;
-        console.log(`[Submissions Router] 🖱️ Clicked submit button (${sel})`);
+        log.info(`[Submissions Router] 🖱️ Clicked submit button (${sel})`);
         break;
       }
     }
@@ -535,7 +538,7 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
     const verification = await verifySubmissionSignals(page, timeoutMs);
 
     if (verification.verified) {
-      console.log(`[Submissions Router] ✅ Confirmation verified via signal: ${verification.signal}`);
+      log.info(`[Submissions Router] ✅ Confirmation verified via signal: ${verification.signal}`);
 
       const proofResult = await captureWebProof(page, application);
 
@@ -557,7 +560,7 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
 
     const errorMsg =
       verification.error || 'Submission confirmation signals not detected within 30 seconds.';
-    console.warn(`[Submissions Router] ❌ Verification failed: ${errorMsg}`);
+    log.warn(`[Submissions Router] ❌ Verification failed: ${errorMsg}`);
 
     let failedProof: any = null;
     if (page && !page.isClosed()) {
@@ -584,7 +587,7 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
       proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
     });
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ Resume route error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ Resume route error for ${appId}:`, err);
 
     let errProof: any = null;
     try {
@@ -675,7 +678,7 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
       return;
     }
 
-    console.log(`[Submissions Router] 📧 Manual email proof capture triggered for ${appId}`);
+    log.info(`[Submissions Router] 📧 Manual email proof capture triggered for ${appId}`);
     const emailJson = await captureAndSaveEmailProof(app, {
       timeoutMs: req.body?.timeoutMs ?? 45000,
       isManual: true,
@@ -712,7 +715,7 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
       });
     }
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ Capture email proof error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ Capture email proof error for ${appId}:`, err);
     res.status(500).json({
       success: false,
       error: err.message || 'Failed to capture email proof.',
@@ -772,7 +775,7 @@ submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Pro
       applicationId: app.id,
     });
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ proof-url error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ proof-url error for ${appId}:`, err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -815,7 +818,7 @@ submissionsRouter.get('/:id/proof', async (req: Request, res: Response): Promise
       emailProofAttemptedAt: app.email_proof_attempted_at,
     });
   } catch (err: any) {
-    console.error(`[Submissions Router] ❌ Proof route error for ${appId}:`, err);
+    log.error(`[Submissions Router] ❌ Proof route error for ${appId}:`, err);
     res.status(500).json({ error: err.message });
   }
 });

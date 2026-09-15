@@ -32,6 +32,9 @@ import {
   getYesterdayIST,
 } from '../../services/workHistoryClient.js';
 import type { ResolvedField } from '../../types/index.js';
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('Applications');
 
 export const applicationsRouter = Router();
 
@@ -177,16 +180,16 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
         source: 'manual',
         confidence: 1.0,
       });
-      console.log(
+      log.info(
         `[Applications Router] ✍️ Saved manual edit to candidate_qa_bank: candidate=${targetApplywizzId}, field=${updatedField.label}`
       );
     } catch (qaErr: any) {
-      console.warn(`[Applications Router] ⚠️ QA bank upsert warning: ${qaErr.message}`);
+      log.warn(`[Applications Router] ⚠️ QA bank upsert warning: ${qaErr.message}`);
     }
 
     res.json(updatedField);
   } catch (err: any) {
-    console.error('[Applications Router] ❌ Unexpected error:', err);
+    log.error('[Applications Router] ❌ Unexpected error:', err);
     res.status(500).json({ error: `Server error: ${err.message}` });
   }
 });
@@ -272,20 +275,20 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       if (IN_FLIGHT_STATUSES.has(currentStatus)) {
         // The dashboard echoes the status it polled, which would otherwise requeue a
         // submission a worker is still running (duplicate submissions).
-        console.log(
+        log.info(
           `[API] Skipping requeue for ${targetAppId} — already in flight (${currentStatus})`
         );
         effectiveStatus = currentStatus;
       } else if (status === 'APPLYING') {
-        console.log(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
+        log.info(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
         effectiveStatus = 'QUEUED';
       } else {
         // Direct PATCH with QUEUED outside submit endpoint: preserve currentStatus unless operator re-submits
-        console.log(`[API] Direct PATCH with status=QUEUED ignored for ${targetAppId} (use /submit)`);
+        log.info(`[API] Direct PATCH with status=QUEUED ignored for ${targetAppId} (use /submit)`);
         effectiveStatus = currentStatus || 'READY_FOR_REVIEW';
       }
     }
-    console.log(`[API] Status → ${effectiveStatus} (PATCH /applications/${appId})`);
+    log.info(`[API] Status → ${effectiveStatus} (PATCH /applications/${appId})`);
 
     const statusChanged = await updateStatus(targetAppId, effectiveStatus, {
       proof_web_url: resolvedProofWebUrl,
@@ -383,7 +386,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       ...serializedDto,
     });
   } catch (err: any) {
-    console.error(`[Applications Router] ❌ Failed to update status for ${appId}:`, err);
+    log.error(`[Applications Router] ❌ Failed to update status for ${appId}:`, err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -420,7 +423,7 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
     const fieldsToSave = resolved_fields || application?.resolved_fields || application?.resolvedFields || [];
     let newStatus = (status || application?.status || 'READY_FOR_REVIEW') as ApplicationStatus;
     if (newStatus === 'APPLYING') {
-      console.log(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
+      log.info(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
       newStatus = 'QUEUED';
     }
 
@@ -455,7 +458,7 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
       application: saved,
     });
   } catch (err: any) {
-    console.error(`[Applications Router] ❌ Failed to approve application ${appId}:`, err);
+    log.error(`[Applications Router] ❌ Failed to approve application ${appId}:`, err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -469,7 +472,7 @@ applicationsRouter.get('/notifications', async (_req: Request, res: Response): P
     const notifications = await getRecentNotifications(40);
     res.json(notifications);
   } catch (err: any) {
-    console.error('[Applications Router] Failed to get notifications:', err);
+    log.error('[Applications Router] Failed to get notifications:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch notifications' });
   }
 });
@@ -495,7 +498,7 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let allowedIds: Set<string> | null = null;
     if (!isAdmin) {
       if (!userEmail) {
-        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
@@ -527,7 +530,7 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
       allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
 
       if (applywizzId && !allowedIds.has(applywizzId.toUpperCase())) {
-        console.warn(
+        log.warn(
           `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA on ${targetDate})`
         );
         res.status(403).json({
@@ -561,12 +564,12 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     }
 
     const logCandidate = applywizzId ? ` candidate=${applywizzId}` : '';
-    console.log(
+    log.info(
       `[API] GET /api/applications (ca_email=${userEmail || 'admin'}${logCandidate}) → filtered to ${applications.length} applications`
     );
     res.json({ applications });
   } catch (err: any) {
-    console.error('[Applications Router] Failed to fetch applications:', err);
+    log.error('[Applications Router] Failed to fetch applications:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -630,7 +633,7 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
       })
     );
   } catch (err: any) {
-    console.error(`[Applications Router] ❌ Error fetching application ${appId}:`, err);
+    log.error(`[Applications Router] ❌ Error fetching application ${appId}:`, err);
     res.status(500).json({ error: err.message });
   }
 });

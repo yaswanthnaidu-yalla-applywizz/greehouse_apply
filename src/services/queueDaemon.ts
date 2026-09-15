@@ -1,5 +1,8 @@
 import { listApplications, updateStatus, type ApplicationRow } from '../db/applications.js';
 import { runLiveSubmit } from '../submitter/liveSubmit.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Queue Daemon');
 
 export interface QueueWorker {
   id: number;
@@ -52,7 +55,7 @@ export class QueueDaemon {
     }));
 
     if (applications.length > 0) {
-      console.log(
+      log.info(
         `[Queue] Fetched ${applications.length} applications waiting for submission (status=QUEUED)`
       );
     }
@@ -62,14 +65,14 @@ export class QueueDaemon {
       worker.applications.push(application);
       this.assignedApplicationIds.add(this.applicationKey(application));
       const appRef = application.id || application.applywizz_id;
-      console.log(`[Submitter] Worker ${worker.id} assigned app-${appRef}`);
+      log.info(`[Submitter] Worker ${worker.id} assigned app-${appRef}`);
     });
 
     this.activeWorkers = Math.min(
       this.workerCount,
       workers.filter((worker) => worker.applications.length > 0).length
     );
-    console.log(`[Queue] ${this.activeWorkers} workers busy, ${this.workerCount - this.activeWorkers} idle.`);
+    log.info(`[Queue] ${this.activeWorkers} workers busy, ${this.workerCount - this.activeWorkers} idle.`);
 
     await Promise.all(
       workers.map(async (worker) => {
@@ -80,7 +83,7 @@ export class QueueDaemon {
           }
         } finally {
           this.activeWorkers = Math.max(0, this.activeWorkers - 1);
-          console.log(
+          log.info(
             `[Queue] Worker ${worker.id} released | ${this.activeWorkers} workers busy, ${this.workerCount - this.activeWorkers} idle.`
           );
         }
@@ -110,7 +113,7 @@ export class QueueDaemon {
       await this.runOnce();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[Queue] Failed to assign approved applications: ${message}`);
+      log.error(`[Queue] Failed to assign approved applications: ${message}`);
     }
     if (this.running) {
       this.timer = setTimeout(() => void this.poll(), this.pollIntervalMs);
@@ -132,8 +135,8 @@ export class QueueDaemon {
       await updateStatus(appId, 'APPLYING', {
         job_url: application.job_url,
       });
-      console.log(`[Submitter] Worker ${workerId} submitting app-${appId} → status=APPLYING`);
-      console.log(`[API] Status → APPLYING (application ${appId}, submitter executing)`);
+      log.info(`[Submitter] Worker ${workerId} submitting app-${appId} → status=APPLYING`);
+      log.info(`[API] Status → APPLYING (application ${appId}, submitter executing)`);
 
       const result = await runLiveSubmit(appId, {
         headless: true,
@@ -146,7 +149,7 @@ export class QueueDaemon {
           proof_captured_at: result.proofCapturedAt || null,
           job_url: application.job_url,
         });
-        console.log(`[API] Status → APPLIED (application ${appId})`);
+        log.info(`[API] Status → APPLIED (application ${appId})`);
       } else if (result.status === 'FAILED') {
         await updateStatus(application.id || application.applywizz_id, 'FAILED', {
           proof_failed_url: result.proofFailedUrl || null,
@@ -161,7 +164,7 @@ export class QueueDaemon {
         error_message: message,
         job_url: application.job_url,
       });
-      console.error(
+      log.error(
         `[Queue] Worker ${workerId} failed ${application.applywizz_id} ${application.id || application.job_url}: ${message}`
       );
     }

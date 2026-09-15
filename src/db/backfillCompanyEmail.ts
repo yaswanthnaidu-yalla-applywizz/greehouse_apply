@@ -14,6 +14,9 @@
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { getDbClient, isSupabaseConfigured } from './client.js';
 import { extractCompanyEmailFromPayload, isCompanyEmailDomain } from './profiles.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Backfill Company Email');
 
 export interface BackfillResult {
   total: number;
@@ -57,13 +60,13 @@ export async function backfillCompanyEmail(options: {
   const supabase = getDbClient();
   const client = new ApplyWizzClient();
 
-  console.log('================================================================');
-  console.log('  Company Email Backfill');
-  console.log('================================================================');
-  console.log(`• Dry run:       ${dryRun}`);
-  console.log(`• Fetch missing: ${fetchMissing} (ApplyWizz API — one-time only)`);
-  if (limit) console.log(`• Limit:         ${limit}`);
-  console.log('');
+  log.info('================================================================');
+  log.info('  Company Email Backfill');
+  log.info('================================================================');
+  log.info(`• Dry run:       ${dryRun}`);
+  log.info(`• Fetch missing: ${fetchMissing} (ApplyWizz API — one-time only)`);
+  if (limit) log.info(`• Limit:         ${limit}`);
+  log.info('');
 
   // Verify column exists
   const { error: probeError } = await supabase
@@ -110,7 +113,7 @@ export async function backfillCompanyEmail(options: {
 
     if (!companyEmail && fetchMissing) {
       try {
-        console.log(`[Backfill] 🌐 Fetching ${id} from ApplyWizz API...`);
+        log.info(`[Backfill] 🌐 Fetching ${id} from ApplyWizz API...`);
         const { profile, raw } = await client.fetchCandidateProfileWithRaw(id, true);
         companyEmail = extractCompanyEmailFromPayload(raw, profile.email);
         rawPayload = {
@@ -121,7 +124,7 @@ export async function backfillCompanyEmail(options: {
         result.fromApi++;
         await sleep(300);
       } catch (err: any) {
-        console.warn(`[Backfill] ⚠️ API fetch failed for ${id}: ${err.message}`);
+        log.warn(`[Backfill] ⚠️ API fetch failed for ${id}: ${err.message}`);
       }
     } else if (companyEmail) {
       result.fromPayload++;
@@ -129,7 +132,7 @@ export async function backfillCompanyEmail(options: {
 
     if (!companyEmail || !isCompanyEmailDomain(companyEmail)) {
       result.stillMissing++;
-      console.warn(`[Backfill] ❌ No valid @applywizard.ai company email for ${id} (${row.client_name})`);
+      log.warn(`[Backfill] ❌ No valid @applywizard.ai company email for ${id} (${row.client_name})`);
       if (!dryRun && row.company_email && !isCompanyEmailDomain(row.company_email)) {
         await supabase
           .from('profiles')
@@ -139,7 +142,7 @@ export async function backfillCompanyEmail(options: {
       continue;
     }
 
-    console.log(`[Backfill] ✅ ${id} → ${companyEmail}`);
+    log.info(`[Backfill] ✅ ${id} → ${companyEmail}`);
 
     if (!dryRun) {
       const updatePayload: Record<string, unknown> = {
@@ -158,7 +161,7 @@ export async function backfillCompanyEmail(options: {
         .eq('applywizz_id', id);
 
       if (updateError) {
-        console.warn(`[Backfill] ⚠️ Update failed for ${id}: ${updateError.message}`);
+        log.warn(`[Backfill] ⚠️ Update failed for ${id}: ${updateError.message}`);
       } else {
         result.updated++;
       }
@@ -167,16 +170,16 @@ export async function backfillCompanyEmail(options: {
     }
   }
 
-  console.log('\n================================================================');
-  console.log('  Backfill Summary');
-  console.log('================================================================');
-  console.log(`• Total profiles:    ${result.total}`);
-  console.log(`• Already had email: ${result.alreadySet}`);
-  console.log(`• From raw payload:  ${result.fromPayload}`);
-  console.log(`• From ApplyWizz API:${result.fromApi}`);
-  console.log(`• Updated:           ${result.updated}${dryRun ? ' (dry-run)' : ''}`);
-  console.log(`• Still missing:     ${result.stillMissing}`);
-  console.log('================================================================');
+  log.info('\n================================================================');
+  log.info('  Backfill Summary');
+  log.info('================================================================');
+  log.info(`• Total profiles:    ${result.total}`);
+  log.info(`• Already had email: ${result.alreadySet}`);
+  log.info(`• From raw payload:  ${result.fromPayload}`);
+  log.info(`• From ApplyWizz API:${result.fromApi}`);
+  log.info(`• Updated:           ${result.updated}${dryRun ? ' (dry-run)' : ''}`);
+  log.info(`• Still missing:     ${result.stillMissing}`);
+  log.info('================================================================');
 
   return result;
 }
@@ -186,7 +189,7 @@ if (process.argv[1]?.includes('backfillCompanyEmail')) {
   backfillCompanyEmail(opts)
     .then(() => process.exit(0))
     .catch((err) => {
-      console.error('❌ Backfill failed:', err.message);
+      log.error('❌ Backfill failed:', err.message);
       process.exit(1);
     });
 }

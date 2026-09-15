@@ -16,6 +16,9 @@ import path from 'path';
 import { config } from '../config/env.js';
 import { AnswerResolver, exportResolvedApplications, resolutionSourceKey } from './answerResolver.js';
 import type { CandidateSegment, ScannedJobTemplate } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Run Resolver');
 
 /**
  * Parses CLI arguments for the resolver runner.
@@ -55,26 +58,26 @@ export function parseResolverArgs(args: string[]): {
 export async function main(): Promise<void> {
   const { candidatesPath, scannedPath, outputDir, verbose } = parseResolverArgs(process.argv.slice(2));
 
-  console.log('================================================================');
-  console.log('  Answer Resolution Engine (Supabase → Resume → LLM)');
-  console.log('================================================================');
-  console.log(`• Candidates File: ${candidatesPath}`);
-  console.log(`• Scanned Jobs:    ${scannedPath}`);
-  console.log(`• Output Dir:      ${outputDir}`);
-  console.log(`• Verbose Mode:    ${verbose ? 'Enabled (Detailed Telemetry)' : 'Disabled'}`);
-  console.log(`• LLM Provider:    ${config.LLM_PROVIDER}`);
-  console.log(`• LLM Key Ready:   ${config.ACTIVE_LLM_API_KEY ? 'Yes' : 'No (fallback mode)'}`);
-  console.log('================================================================\n');
+  log.info('================================================================');
+  log.info('  Answer Resolution Engine (Supabase → Resume → LLM)');
+  log.info('================================================================');
+  log.info(`• Candidates File: ${candidatesPath}`);
+  log.info(`• Scanned Jobs:    ${scannedPath}`);
+  log.info(`• Output Dir:      ${outputDir}`);
+  log.info(`• Verbose Mode:    ${verbose ? 'Enabled (Detailed Telemetry)' : 'Disabled'}`);
+  log.info(`• LLM Provider:    ${config.LLM_PROVIDER}`);
+  log.info(`• LLM Key Ready:   ${config.ACTIVE_LLM_API_KEY ? 'Yes' : 'No (fallback mode)'}`);
+  log.info('================================================================\n');
 
   if (!fs.existsSync(candidatesPath)) {
-    console.warn(`[Resolver Runner] ⚠️ Candidate segments file not found at: "${candidatesPath}".`);
-    console.warn('[Resolver Runner] Please run "npm run sync:candidates" first to generate candidate segments.');
+    log.warn(`[Resolver Runner] ⚠️ Candidate segments file not found at: "${candidatesPath}".`);
+    log.warn('[Resolver Runner] Please run "npm run sync:candidates" first to generate candidate segments.');
     return;
   }
 
   if (!fs.existsSync(scannedPath)) {
-    console.warn(`[Resolver Runner] ⚠️ Scanned jobs file not found at: "${scannedPath}".`);
-    console.warn('[Resolver Runner] Please run "npm run scan" first to scan Greenhouse form structures.');
+    log.warn(`[Resolver Runner] ⚠️ Scanned jobs file not found at: "${scannedPath}".`);
+    log.warn('[Resolver Runner] Please run "npm run scan" first to scan Greenhouse form structures.');
     return;
   }
 
@@ -116,25 +119,25 @@ export async function main(): Promise<void> {
 
     const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    console.log('\n================================================================');
-    console.log('  Answer Resolution Completed (Supabase → Resume → LLM)');
-    console.log('================================================================');
-    console.log(`• Elapsed Time:           ${elapsedSec}s`);
-    console.log(`• Applications Ready:     ${resolvedApps.length}`);
-    console.log(`• Total Fields Populated: ${totalFields}`);
-    console.log(`  - 🟢 Supabase:  ${supabaseCount} (${totalFields ? ((supabaseCount / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🔵 Resume:    ${resumeCount} (${totalFields ? ((resumeCount / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🤖 LLM:       ${llmCount} (${totalFields ? ((llmCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    log.info('\n================================================================');
+    log.info('  Answer Resolution Completed (Supabase → Resume → LLM)');
+    log.info('================================================================');
+    log.info(`• Elapsed Time:           ${elapsedSec}s`);
+    log.info(`• Applications Ready:     ${resolvedApps.length}`);
+    log.info(`• Total Fields Populated: ${totalFields}`);
+    log.info(`  - 🟢 Supabase:  ${supabaseCount} (${totalFields ? ((supabaseCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    log.info(`  - 🔵 Resume:    ${resumeCount} (${totalFields ? ((resumeCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    log.info(`  - 🤖 LLM:       ${llmCount} (${totalFields ? ((llmCount / totalFields) * 100).toFixed(1) : 0}%)`);
     if (manualCount > 0) {
-      console.log(`  - 🟡 Manual Overrides:        ${manualCount} (${totalFields ? ((manualCount / totalFields) * 100).toFixed(1) : 0}%)`);
+      log.info(`  - 🟡 Manual Overrides:        ${manualCount} (${totalFields ? ((manualCount / totalFields) * 100).toFixed(1) : 0}%)`);
     }
     if (unresolvedCount > 0) {
-      console.log(`  - 🔴 Unresolved Fields:       ${unresolvedCount} (${totalFields ? ((unresolvedCount / totalFields) * 100).toFixed(1) : 0}%)`);
+      log.info(`  - 🔴 Unresolved Fields:       ${unresolvedCount} (${totalFields ? ((unresolvedCount / totalFields) * 100).toFixed(1) : 0}%)`);
     }
-    console.log(`• Output JSON:            ${outputPath}`);
-    console.log('================================================================');
+    log.info(`• Output JSON:            ${outputPath}`);
+    log.info('================================================================');
   } catch (err: any) {
-    console.error(`[Resolver Runner] ❌ Error during answer resolution: ${err.message}`);
+    log.error(`[Resolver Runner] ❌ Error during answer resolution: ${err.message}`);
     process.exitCode = 1;
   }
 }

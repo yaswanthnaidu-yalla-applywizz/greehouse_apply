@@ -22,6 +22,9 @@ import type {
   CandidateWorkExperience,
   CandidateDemographics,
 } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Applywizz Client');
 
 /**
  * Options configuring the ApplyWizzClient instance.
@@ -194,7 +197,7 @@ export class ApplyWizzClient {
           return { profile: enforceCandidateDefaults(cached as ApplyWizzCandidateProfile), raw: {} };
         }
       } catch (err: any) {
-        console.warn(`[ApplyWizz Client] ⚠️ Corrupt cache for ${cleanId}, re-fetching: ${err.message}`);
+        log.warn(`[ApplyWizz Client] ⚠️ Corrupt cache for ${cleanId}, re-fetching: ${err.message}`);
       }
     }
 
@@ -248,7 +251,7 @@ export class ApplyWizzClient {
 
         if (attempt < this.maxRetries && (isRateLimitOrServer || isNetwork)) {
           const delayMs = Math.floor(1000 * Math.pow(2, attempt) + Math.random() * 500);
-          console.warn(
+          log.warn(
             `[ApplyWizz Client] ⏳ Attempt ${attempt}/${this.maxRetries} failed for ${cleanId} (${err.message}). Retrying in ${delayMs}ms...`
           );
           await sleep(delayMs);
@@ -319,7 +322,7 @@ export class ApplyWizzClient {
       }
     }
 
-    console.warn(
+    log.warn(
       `[ApplyWizz Client] ⚠️ Failed to download resume for ${cleanId} from ${resumeUrl}: ${lastError?.message}`
     );
     return destinationPath;

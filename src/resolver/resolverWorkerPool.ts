@@ -12,6 +12,9 @@ import { resolveTier2 } from './tier2ResumeParse.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveBatchLlmFields, type UnresolvedFieldGroup } from './batchLlmResolver.js';
 import type { ResolvedField, ScannedField, ScannedFieldType } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Resolver Worker Pool');
 
 export interface ResolverWorker {
   id: number;
@@ -73,14 +76,14 @@ export class ResolverWorkerPool {
     await Promise.all(workers.map(async (worker) => {
       if (worker.applications.length === 0) return;
       busy++;
-      console.log(`[Resolver] ${this.workerCount - busy} idle, ${busy} busy.`);
+      log.info(`[Resolver] ${this.workerCount - busy} idle, ${busy} busy.`);
       try {
         for (const application of worker.applications) {
           await this.resolveApplication(application, worker.id);
         }
       } finally {
         busy--;
-        console.log(`[Resolver] Worker ${worker.id} released | ${this.workerCount - busy} idle, ${busy} busy.`);
+        log.info(`[Resolver] Worker ${worker.id} released | ${this.workerCount - busy} idle, ${busy} busy.`);
       }
     }));
 
@@ -97,7 +100,7 @@ export class ResolverWorkerPool {
       const schema = template?.fields_schema;
       if (Array.isArray(schema) && schema.length > 0) {
         existing = schema;
-        console.log(
+        log.info(
           `[Resolver] Loaded ${schema.length} fields from fields_schema for ${application.applywizz_id} ${application.job_url}`
         );
       }
@@ -114,7 +117,7 @@ export class ResolverWorkerPool {
       else pending.push(field);
     }
 
-    console.log(
+    log.info(
       `[Resolver] Worker ${workerId} resolving ${application.applywizz_id} ${application.id || application.job_url} ` +
       `(Tier 1-4 complete, ${pending.length} questions pending LLM) | ` +
       `${this.workerCount - 1} idle, 1 busy.`

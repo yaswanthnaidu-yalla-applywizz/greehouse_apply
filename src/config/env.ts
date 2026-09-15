@@ -7,6 +7,9 @@
 
 import dotenv from 'dotenv';
 import { z } from 'zod';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Env');
 
 // Load variables from .env file into process.env
 dotenv.config();
@@ -163,7 +166,7 @@ const parseResult = envSchema.safeParse(process.env);
 
 if (!parseResult.success) {
   const errorDetails = JSON.stringify(parseResult.error.format(), null, 2);
-  console.error('❌ Environment configuration validation failed:\n', errorDetails);
+  log.error('❌ Environment configuration validation failed:\n', errorDetails);
   throw new Error(`Invalid environment configuration: ${errorDetails}`);
 }
 

@@ -10,6 +10,9 @@ import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } fr
 import { emailProofPoller } from './emailProofPoller.js';
 import { updateStatus, getApplication, type ApplicationRow } from '../db/applications.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Captcha Resume');
 
 export interface ActiveSubmissionSession {
   applicationId: string;
@@ -37,7 +40,7 @@ export function hasActiveSubmissionSession(applicationId: string): boolean {
  */
 export function registerSubmissionSession(session: ActiveSubmissionSession): void {
   activeSubmissions.set(session.applicationId, session);
-  console.log(`[Captcha Resume] ⏸️ Registered paused session for application ${session.applicationId}`);
+  log.info(`[Captcha Resume] ⏸️ Registered paused session for application ${session.applicationId}`);
 }
 
 /**
@@ -52,7 +55,7 @@ export async function closeSubmissionSession(applicationId: string): Promise<voi
       await session.browser.close().catch(() => {});
     } finally {
       activeSubmissions.delete(applicationId);
-      console.log(`[Captcha Resume] 🧹 Cleaned up session for application ${applicationId}`);
+      log.info(`[Captcha Resume] 🧹 Cleaned up session for application ${applicationId}`);
     }
   }
 }
@@ -82,7 +85,7 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
 
   const { page, application } = session;
 
-  console.log(`[Captcha Resume] ▶️ Resuming submission for application ${applicationId}...`);
+  log.info(`[Captcha Resume] ▶️ Resuming submission for application ${applicationId}...`);
 
   try {
     // 1. Update status to APPLYING
@@ -107,7 +110,7 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       if ((await btn.count()) > 0 && (await btn.isVisible())) {
         await btn.click({ timeout: 5000 });
         clicked = true;
-        console.log(`[Captcha Resume] 🖱️ Clicked submit button (${sel})`);
+        log.info(`[Captcha Resume] 🖱️ Clicked submit button (${sel})`);
         break;
       }
     }
@@ -120,7 +123,7 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
     const verification = await verifySubmissionSignals(page, 30000);
 
     if (verification.verified) {
-      console.log(`[Captcha Resume] ✅ Confirmation verified via signal: ${verification.signal}`);
+      log.info(`[Captcha Resume] ✅ Confirmation verified via signal: ${verification.signal}`);
 
       // 4. Capture full-page proof screenshot & upload to Supabase Storage
       const proofResult = await captureWebProof(page, application);
@@ -136,13 +139,13 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       await closeSubmissionSession(applicationId);
 
       // Attempt immediate confirmation email verification (up to 15s)
-      console.log(`[Captcha Resume] 📧 Checking for immediate confirmation email after CAPTCHA resume...`);
+      log.info(`[Captcha Resume] 📧 Checking for immediate confirmation email after CAPTCHA resume...`);
       const emailProof = await captureAndSaveEmailProof(application, {
         timeoutMs: 15000,
       }).catch(() => null);
 
       if (emailProof) {
-        console.log(`[Captcha Resume] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
+        log.info(`[Captcha Resume] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
         await updateStatus(targetAppId, 'APPLIED', {
           proof_web_url: proofResult.proofWebUrl,
           proof_captured_at: proofResult.proofCapturedAt,
@@ -162,7 +165,7 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       }
 
       // Zero matches on immediate check: transition to EMAIL_PROOF_PENDING & start 30s background retry
-      console.log(
+      log.info(
         `[Captcha Resume] ⏳ Confirmation email not found immediately. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
       );
       const appForPoller: ApplicationRow = {
@@ -186,9 +189,9 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       const isTimeout = /time.*out/i.test(verification.error || '');
       const errorMsg = verification.error || 'Timeout: Submission verification timed out.';
       if (isTimeout) {
-        console.warn(`[Captcha Resume] ⏱️ Timeout: ${errorMsg}`);
+        log.warn(`[Captcha Resume] ⏱️ Timeout: ${errorMsg}`);
       } else {
-        console.warn(`[Captcha Resume] ❌ Verification failed: ${errorMsg}`);
+        log.warn(`[Captcha Resume] ❌ Verification failed: ${errorMsg}`);
       }
 
       let failedProof: any = null;
@@ -217,7 +220,7 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       };
     }
   } catch (err: any) {
-    console.error(`[Captcha Resume] ❌ Error during submission resumption:`, err);
+    log.error(`[Captcha Resume] ❌ Error during submission resumption:`, err);
 
     let errProof: any = null;
     if (page && !page.isClosed()) {

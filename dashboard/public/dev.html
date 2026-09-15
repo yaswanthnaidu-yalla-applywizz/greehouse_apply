@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/webp" href="/logo.webp">
+  <title>Apply Wizz — Dev</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="/roleAccess.js"></script>
+</head>
+<body class="bg-[#FFF5EB] text-[#1A1A2E]">
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    function DevSwitcher({ current }) {
+      const links = [
+        { href: '/dev', label: 'Dev' },
+        { href: '/admin', label: 'Admin' },
+        { href: '/manager', label: 'Manager' },
+        { href: '/', label: 'Operator' },
+      ];
+      return (
+        <nav className="flex flex-wrap items-center gap-1 bg-white border-2 border-[#1A1A2E] rounded p-1">
+          {links.map((link) => (
+            <a key={link.href} href={link.href} className={`px-2 py-1 text-xs font-bold rounded ${current === link.href ? 'bg-[#E88474] text-white' : 'hover:bg-[#FAF4EB]'}`}>{link.label}</a>
+          ))}
+        </nav>
+      );
+    }
+
+    function lightClass(status) {
+      if (status === 'ok') return 'bg-[#9AC89A]';
+      if (status === 'degraded') return 'bg-[#F4D66B]';
+      if (status === 'not_configured') return 'bg-[#E2E8F0]';
+      return 'bg-[#FECACA]';
+    }
+
+    function DevApp() {
+      const access = ApplyWizzRoles.enforcePageAccess(['dev']);
+      const token = localStorage.getItem('applywizz_auth_token');
+      const [tab, setTab] = useState('system');
+      const [date, setDate] = useState(ApplyWizzRoles.getTodayIST);
+      const [health, setHealth] = useState(null);
+      const [runs, setRuns] = useState([]);
+      const [runStatus, setRunStatus] = useState('');
+      const [errors, setErrors] = useState([]);
+      const [queue, setQueue] = useState(null);
+      const [integrations, setIntegrations] = useState([]);
+      const [debugId, setDebugId] = useState('');
+      const [debug, setDebug] = useState(null);
+      const [error, setError] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      const loadJson = async (url) => {
+        const res = await fetch(url, { headers: ApplyWizzRoles.getAuthHeaders() });
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.error || 'Request failed');
+        return payload;
+      };
+
+      const refresh = useCallback(async () => {
+        if (!token) return;
+        setLoading(true);
+        setError('');
+        try {
+          if (tab === 'system') setHealth(await loadJson('/api/dev/health'));
+          if (tab === 'runs') {
+            const params = new URLSearchParams({ date, limit: '100' });
+            if (runStatus) params.set('status', runStatus);
+            const payload = await loadJson(`/api/dev/runs?${params}`);
+            setRuns(payload.runs || []);
+          }
+          if (tab === 'errors') {
+            const payload = await loadJson(`/api/dev/errors?date=${encodeURIComponent(date)}`);
+            setErrors(payload.errors || []);
+          }
+          if (tab === 'queue') setQueue(await loadJson('/api/dev/queue'));
+          if (tab === 'integrations') {
+            const payload = await loadJson('/api/dev/integrations');
+            setIntegrations(payload.integrations || []);
+          }
+        } catch (e) {
+          setError(e.message || 'Load failed');
+        } finally {
+          setLoading(false);
+        }
+      }, [tab, date, token, runStatus]);
+
+      useEffect(() => { refresh(); }, [refresh]);
+
+      const openDebugger = async (id) => {
+        const target = (id || debugId).trim();
+        if (!target) return;
+        setTab('debugger');
+        setDebugId(target);
+        setLoading(true);
+        try {
+          setDebug(await loadJson(`/api/dev/applications/${encodeURIComponent(target)}`));
+        } catch (e) {
+          setError(e.message || 'Debugger load failed');
+          setDebug(null);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      if (!token || access.reason === 'anon') {
+        return (
+          <main className="min-h-screen flex items-center justify-center p-6">
+            <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6 shadow-[4px_4px_0_#1A1A2E]">
+              <h1 className="text-xl font-black mb-2">Developer dashboard</h1>
+              <a href="/" className="inline-block bg-[#E88474] border-2 border-[#1A1A2E] px-4 py-2 text-sm font-bold rounded">Sign in</a>
+            </div>
+          </main>
+        );
+      }
+
+      const tabs = ['system', 'runs', 'errors', 'queue', 'integrations', 'debugger'];
+      const app = debug?.application;
+
+      return (
+        <main className="min-h-screen p-4 md:p-8 font-sans">
+          <div className="max-w-7xl mx-auto">
+            <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6">
+              <div className="flex items-center gap-3">
+                <img src="/logo.webp" alt="ApplyWizz" className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] object-cover bg-black" />
+                <div>
+                  <p className="text-xs font-mono font-bold uppercase tracking-widest text-[#64748B]">ApplyWizz / Internals</p>
+                  <h1 className="text-3xl font-black">Developer dashboard</h1>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 items-end">
+                <DevSwitcher current="/dev" />
+                <label className="text-xs font-bold uppercase">Date
+                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
+                </label>
+                <button type="button" onClick={refresh} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
+              </div>
+            </header>
+            <nav className="flex flex-wrap gap-2 mb-6">
+              {tabs.map((id) => (
+                <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${tab === id ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{id}</button>
+              ))}
+            </nav>
+            {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
+            {loading && <p className="text-xs font-mono font-bold mb-4">Loading…</p>}
+
+            {tab === 'system' && health && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {(health.probes || []).map((probe) => (
+                    <div key={probe.name} className={`border-2 border-[#1A1A2E] rounded p-4 ${lightClass(probe.status)}`}>
+                      <p className="text-xs font-bold uppercase">{probe.name}</p>
+                      <p className="text-lg font-black uppercase">{probe.status}</p>
+                      <p className="text-[11px] mt-1 break-words">{probe.detail}</p>
+                      {probe.responseMs != null && <p className="text-[10px] font-mono mt-1">{probe.responseMs}ms</p>}
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 text-xs space-y-1">
+                  <p>Queued {health.queue.queued} · Applying {health.queue.applying} · Stuck {health.queue.stuck} · Applied {health.queue.applied}</p>
+                  <p>Workers running: {String(health.workers.running)} · in flight {health.workers.inFlightCount} · idle {health.workers.idleCount}</p>
+                  <p>Ingest: {health.ingest?.running ? 'running' : health.ingest?.error || health.ingest?.message || 'idle'}</p>
+                </div>
+              </div>
+            )}
+
+            {tab === 'runs' && (
+              <div className="space-y-3">
+                <input value={runStatus} onChange={(e) => setRunStatus(e.target.value)} placeholder="Status filter" className="border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm" />
+                <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
+                  <table className="w-full min-w-[900px] text-left text-xs">
+                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr>{['ID', 'Job', 'Company', 'Operator', 'Status', 'Duration', 'Updated'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {runs.map((row) => (
+                        <tr key={row.id} className="border-b border-[#1A1A2E]/20">
+                          <td className="p-3"><button type="button" className="font-mono underline" onClick={() => openDebugger(row.id)}>{row.id?.slice(0, 8)}</button></td>
+                          <td className="p-3"><a className="underline break-all" href={row.jobUrl} target="_blank" rel="noopener noreferrer">{row.jobTitle || row.jobUrl}</a></td>
+                          <td className="p-3">{row.companyName || '—'}</td>
+                          <td className="p-3 font-mono">{row.operator || '—'}</td>
+                          <td className="p-3 font-bold">{row.status}</td>
+                          <td className="p-3 font-mono">{row.durationMs != null ? `${Math.round(row.durationMs / 1000)}s` : '—'}</td>
+                          <td className="p-3 font-mono">{row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {tab === 'errors' && (
+              <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
+                <table className="w-full min-w-[800px] text-left text-xs">
+                  <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr>{['Type', 'Message', 'Count', 'First', 'Last', 'Apps'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {errors.map((row, i) => (
+                      <tr key={i} className="border-b border-[#1A1A2E]/20 align-top">
+                        <td className="p-3 font-bold">{row.errorType}</td>
+                        <td className="p-3 max-w-md break-words">{row.message}</td>
+                        <td className="p-3 font-mono">{row.count}</td>
+                        <td className="p-3 font-mono">{new Date(row.first).toLocaleString()}</td>
+                        <td className="p-3 font-mono">{new Date(row.last).toLocaleString()}</td>
+                        <td className="p-3 font-mono">{(row.applicationIds || []).slice(0, 3).map((id) => (
+                          <button key={id} type="button" className="underline mr-2" onClick={() => openDebugger(id)}>{id.slice(0, 8)}</button>
+                        ))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {!errors.length && <p className="p-6 text-center text-[#64748B]">No failed applications for this date.</p>}
+              </div>
+            )}
+
+            {tab === 'queue' && queue && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[['Queued', queue.queue.queued], ['Applying', queue.queue.applying], ['Stuck', queue.queue.stuck], ['In flight', queue.workers.inFlightCount]].map(([label, val]) => (
+                    <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4"><p className="text-xs font-bold uppercase">{label}</p><p className="text-2xl font-black">{val ?? 0}</p></div>
+                  ))}
+                </div>
+                <p className="text-xs font-mono">Workers running={String(queue.workers.running)} idle={queue.workers.idleCount} lanes={JSON.stringify(queue.workers.laneLengths)}</p>
+                <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 text-xs">
+                  <p className="font-black uppercase mb-2">Running</p>
+                  {(queue.running || []).map((row) => <p key={row.id} className="font-mono">{row.id} · {row.applywizzId} · {row.status}</p>)}
+                  <p className="font-black uppercase mt-4 mb-2">Pending</p>
+                  {(queue.pending || []).map((row) => <p key={row.id} className="font-mono">{row.id} · {row.applywizzId} · {row.status}</p>)}
+                </div>
+              </div>
+            )}
+
+            {tab === 'integrations' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {integrations.map((probe) => (
+                  <div key={probe.name} className={`border-2 border-[#1A1A2E] rounded p-4 ${lightClass(probe.status)}`}>
+                    <p className="text-xs font-bold uppercase">{probe.name}</p>
+                    <p className="text-lg font-black uppercase">{probe.status}</p>
+                    <p className="text-xs mt-2 break-words">{probe.detail}</p>
+                    {probe.responseMs != null && <p className="text-[10px] font-mono mt-1">{probe.responseMs}ms</p>}
+                    {probe.lastError && <p className="text-[11px] mt-1">{probe.lastError}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {tab === 'debugger' && (
+              <div className="space-y-4">
+                <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); openDebugger(debugId); }}>
+                  <input value={debugId} onChange={(e) => setDebugId(e.target.value)} placeholder="Application ID" className="border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono flex-1" />
+                  <button type="submit" className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-1.5 text-xs font-bold rounded">Open</button>
+                </form>
+                {app && (
+                  <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 text-xs space-y-2">
+                    <p><span className="font-black">ID</span> {app.id}</p>
+                    <p><span className="font-black">Status</span> {app.status}</p>
+                    <p><span className="font-black">Client</span> {app.applywizz_id}</p>
+                    <p><span className="font-black">Operator</span> {app.operatorName || app.assigned_ca_email || '—'}</p>
+                    <p><span className="font-black">Manager</span> {app.managerEmail || '—'}</p>
+                    <p><span className="font-black">Job</span> <a className="underline break-all" href={app.job_url} target="_blank" rel="noopener noreferrer">{app.job_title || app.job_url}</a></p>
+                    <p><span className="font-black">Company</span> {app.company_name || '—'}</p>
+                    {app.error_message && <p className="text-[#991B1B]"><span className="font-black">Error</span> {app.error_message}</p>}
+                    <p>
+                      {app.proof_web_url ? <a className="underline font-bold mr-3" href={app.proof_web_url} target="_blank" rel="noopener noreferrer">Web proof</a> : <span className="text-[#64748B] mr-3">Web proof unavailable</span>}
+                      {app.proof_email_url ? <a className="underline font-bold" href={app.proof_email_url} target="_blank" rel="noopener noreferrer">Email screenshot</a> : <span className="text-[#64748B]">Email screenshot unavailable</span>}
+                    </p>
+                    {app.proof_email_json && (
+                      <pre className="bg-[#FAF4EB] border border-[#1A1A2E] p-3 overflow-auto max-h-48 whitespace-pre-wrap">{JSON.stringify(app.proof_email_json, null, 2)}</pre>
+                    )}
+                    <h3 className="font-black uppercase pt-2">Timeline</h3>
+                    {(debug.events || []).length === 0 && <p className="text-[#64748B]">{debug.warning || 'No application_events yet. Status changes will appear after migration 015.'}</p>}
+                    {(debug.events || []).map((event) => (
+                      <p key={event.id} className="font-mono">{event.from_status || '—'} → {event.to_status} · {new Date(event.created_at).toLocaleString()}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </main>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<DevApp />);
+  </script>
+</body>
+</html>

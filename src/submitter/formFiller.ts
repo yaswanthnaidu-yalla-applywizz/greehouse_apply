@@ -22,6 +22,9 @@ import type {
   CandidateJobApplication,
 } from '../types/index.js';
 import type { ApplicationRow } from '../db/applications.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Form Filler');
 
 export interface FormFillerOptions {
   /** Minimum delay in milliseconds between field fills (default: 300) */
@@ -377,7 +380,7 @@ async function fillSearchableSelectInput(
 ): Promise<boolean> {
   const selected = await fillInteractiveSelectDropdown(page, control, answerText, matchOption);
   if (selected) {
-    console.log(
+    log.info(
       `[Submitter] Populated via searchable select input → selector: ${selector} → value: ${answerText}`
     );
   }
@@ -440,7 +443,7 @@ function toConsentSmsNoResolvedField(
 }
 
 function applyConsentSmsMarketingNo(field: ResolvedField): ResolvedField {
-  console.log(`[Form Filler] Consent/SMS field auto-answered No: ${field.label}`);
+  log.info(`[Form Filler] Consent/SMS field auto-answered No: ${field.label}`);
   return {
     ...field,
     value: 'No',
@@ -463,9 +466,9 @@ async function debugDumpPageInputs(page: Page): Promise<void> {
       }))
     )
     .catch(() => [] as Array<{ id: string; role: string; type: string; ariaExpanded: string | null; cls: string }>);
-  console.log(`[Sponsorship DEBUG] ${inputs.length} input elements on page:`);
+  log.info(`[Sponsorship DEBUG] ${inputs.length} input elements on page:`);
   for (const i of inputs) {
-    console.log(
+    log.info(
       `  - id=${i.id} role=${i.role} type=${i.type} aria-expanded=${i.ariaExpanded} class=${i.cls}`
     );
   }
@@ -479,7 +482,7 @@ async function debugDumpPageInputs(page: Page): Promise<void> {
 async function debugSponsorshipComboboxSequence(page: Page, answerText: string): Promise<boolean> {
   const comboboxes = page.locator('[role="combobox"]');
   const count = await comboboxes.count().catch(() => 0);
-  console.log(`[Sponsorship DEBUG] Found ${count} [role="combobox"] element(s) on page`);
+  log.info(`[Sponsorship DEBUG] Found ${count} [role="combobox"] element(s) on page`);
   if (count === 0) return false;
 
   let target = comboboxes.first();
@@ -493,22 +496,22 @@ async function debugSponsorshipComboboxSequence(page: Page, answerText: string):
           return (root?.textContent || '').trim();
         })
         .catch(() => '');
-      console.log(`[Sponsorship DEBUG] combobox[${i}] nearest label text: "${labelText.slice(0, 100)}"`);
+      log.info(`[Sponsorship DEBUG] combobox[${i}] nearest label text: "${labelText.slice(0, 100)}"`);
       if (/sponsor/i.test(labelText)) {
         target = cb;
-        console.log(`[Sponsorship DEBUG] → selected combobox[${i}] (label contains "sponsor")`);
+        log.info(`[Sponsorship DEBUG] → selected combobox[${i}] (label contains "sponsor")`);
         break;
       }
     }
   }
 
   const targetId = await target.getAttribute('id').catch(() => null);
-  console.log(`[Sponsorship DEBUG] Attempting sequence on combobox id=${targetId ?? '(none)'}`);
+  log.info(`[Sponsorship DEBUG] Attempting sequence on combobox id=${targetId ?? '(none)'}`);
   await target.click({ timeout: 3000 }).catch((e) => {
-    console.log(`[Sponsorship DEBUG] click failed: ${e.message}`);
+    log.info(`[Sponsorship DEBUG] click failed: ${e.message}`);
   });
   await target.pressSequentially(answerText, { delay: 40 }).catch((e) => {
-    console.log(`[Sponsorship DEBUG] type failed: ${e.message}`);
+    log.info(`[Sponsorship DEBUG] type failed: ${e.message}`);
   });
 
   const option = page
@@ -518,14 +521,14 @@ async function debugSponsorshipComboboxSequence(page: Page, answerText: string):
     await option.waitFor({ state: 'visible', timeout: 4000 });
   } catch {
     const visibleOptions = await page.locator('[role="option"]').allInnerTexts().catch(() => []);
-    console.log(
+    log.info(
       `[Sponsorship DEBUG] No [role="option"] matching "${answerText}" appeared; options seen: ${JSON.stringify(visibleOptions)}`
     );
     return false;
   }
   const optText = (await option.innerText().catch(() => '')).trim();
   await option.click({ timeout: 3000 });
-  console.log(`[Sponsorship DEBUG] Clicked option "${optText}" ✅`);
+  log.info(`[Sponsorship DEBUG] Clicked option "${optText}" ✅`);
   return true;
 }
 
@@ -540,7 +543,7 @@ async function clickBooleanOption(
     try {
       await locator.scrollIntoViewIfNeeded({ timeout: 2000 });
       await locator.click({ force: true, timeout: 3000 });
-      console.log(
+      log.info(
         `[Submitter] Boolean field "${fieldName}" → selector: ${selector} → clicked ✅ (${value})`
       );
       return;
@@ -582,7 +585,7 @@ export async function fillSingleField(
 
   // 0. Cover Letter Prohibition - NEVER fill or upload cover letters per policy
   if (/cover\s*letter|cover_letter/i.test(`${name} ${fieldId} ${label}`)) {
-    console.log(`[Form Filler] ⏭️ Skipping cover letter field "${label}" (${name}) per policy.`);
+    log.info(`[Form Filler] ⏭️ Skipping cover letter field "${label}" (${name}) per policy.`);
     fillResult.success = true;
     fillResult.valuePopulated = '';
     return fillResult;
@@ -605,7 +608,7 @@ export async function fillSingleField(
       // Policy: The bot ONLY fills resume file upload. Never fill or attach cover letters.
       const isResume = fieldId === 'resume' || name.toLowerCase().includes('resume') || /resume|cv\b/i.test(label);
       if (!isResume || /cover/i.test(`${name} ${fieldId} ${label}`)) {
-        console.log(`[Form Filler] ⏭️ Skipping non-resume / cover letter file upload ("${label}").`);
+        log.info(`[Form Filler] ⏭️ Skipping non-resume / cover letter file upload ("${label}").`);
         fillResult.success = true;
         fillResult.valuePopulated = '';
         return fillResult;
@@ -658,7 +661,7 @@ export async function fillSingleField(
       await found.locator.setInputFiles(tempResumePath, { timeout: timeoutMs });
       fillResult.valuePopulated = tempResumePath;
       fillResult.success = true;
-      console.log(`[Form Filler] ✅ Uploaded resume for ${applywizzId}`);
+      log.info(`[Form Filler] ✅ Uploaded resume for ${applywizzId}`);
     } else if (rawType === 'textarea') {
       // ==========================================
       // Textarea
@@ -751,7 +754,7 @@ export async function fillSingleField(
           }
           if (radioClicked) {
             fillResult.success = true;
-            console.log(
+            log.info(
               `[Submitter] Sponsorship field → selector: ${radioSelectorUsed || 'radio[name=' + name + ']'} → attempted click: Yes → result: selected`
             );
             return fillResult;
@@ -789,7 +792,7 @@ export async function fillSingleField(
 
       if (isSponsorship) {
         await debugDumpPageInputs(page);
-        console.log(
+        log.info(
           `[Sponsorship DEBUG] Question: "${label}" → attempting selectors: ${JSON.stringify(selectSelectors)}`
         );
       }
@@ -874,11 +877,11 @@ export async function fillSingleField(
           if (selected) {
             fillResult.success = true;
             if (isCountryCode) {
-              console.log(
+              log.info(
                 `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
               );
             } else if (booleanValue && !isSponsorship) {
-              console.log(
+              log.info(
                 `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → clicked ✅`
               );
             }
@@ -895,7 +898,7 @@ export async function fillSingleField(
                   return (root?.outerHTML || el.outerHTML).slice(0, 5000);
                 })
                 .catch(() => '');
-              console.warn(
+              log.warn(
                 `[Submitter] Sponsorship combobox fill failed → selector: ${found.selector} → field HTML snippet:\n${fieldDump}`
               );
               const debugFilled = await debugSponsorshipComboboxSequence(page, selectValue);
@@ -980,15 +983,15 @@ export async function fillSingleField(
           if (selected) {
             fillResult.success = true;
             if (isCountryCode) {
-              console.log(
+              log.info(
                 `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
               );
             } else if (isSponsorship) {
-              console.log(
+              log.info(
                 `[Submitter] Sponsorship field → selector: ${found.selector} → attempted click: Yes → result: selected`
               );
             } else if (booleanValue) {
-              console.log(
+              log.info(
                 `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → selected ✅`
               );
             }
@@ -998,7 +1001,7 @@ export async function fillSingleField(
         }
       } else {
         if (isSponsorship) {
-          console.log(`[Sponsorship DEBUG] No selector matched — trying [role="combobox"] sequence directly`);
+          log.info(`[Sponsorship DEBUG] No selector matched — trying [role="combobox"] sequence directly`);
           const debugFilled = await debugSponsorshipComboboxSequence(page, selectValue);
           if (debugFilled) {
             fillResult.success = true;
@@ -1081,7 +1084,7 @@ export async function fillSingleField(
             if (isSponsorship) {
               await radio.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
               await radio.click({ force: true, timeout: 3000 });
-              console.log(
+              log.info(
                 `[Submitter] Sponsorship field → selector: ${optionSelector} → attempted click: Yes → result: selected`
               );
             } else if (booleanValue) {
@@ -1104,7 +1107,7 @@ export async function fillSingleField(
           if (isSponsorship) {
             await labelLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
             await labelLoc.click({ force: true });
-            console.log(
+            log.info(
               `[Submitter] Sponsorship field → selector: label:has-text("Yes") → attempted click: Yes → result: selected`
             );
           } else if (booleanValue) {
@@ -1120,7 +1123,7 @@ export async function fillSingleField(
         fillResult.success = true;
       } else {
         if (isSponsorship) {
-          console.log(
+          log.info(
             `[Submitter] Sponsorship field → selector: input[type="radio"][name="${escapeAttr(name)}"] → attempted click: Yes → result: NOT SELECTED`
           );
         }
@@ -1146,14 +1149,14 @@ export async function fillSingleField(
         const found = await findElementLocator(page, checkboxSelectors, timeoutMs);
         if (found) {
           const checkboxSelector = found.selector || checkboxSelectors[0];
-          console.log(
+          log.info(
             `[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → value: Yes`
           );
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
           await found.locator.check({ force: true, timeout: 3000 }).catch(async () => {
             await clickBooleanOption(found.locator, fieldId, checkboxSelector, 'Yes');
           });
-          console.log(`[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → clicked ✅`);
+          log.info(`[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → clicked ✅`);
           fillResult.success = true;
         } else {
           const labelLoc = page.locator(`label:has-text("${label}")`).first();
@@ -1354,7 +1357,7 @@ export async function fillSingleField(
             /email/i.test(name) ||
             /email/i.test(fieldId);
           if (isEmailField) {
-            console.log(`[Form Filler] 📧 Email field filled with company email: ${val} (source: company_email)`);
+            log.info(`[Form Filler] 📧 Email field filled with company email: ${val} (source: company_email)`);
           }
 
           const isPhoneField =
@@ -1403,7 +1406,7 @@ export async function fillSingleField(
                 const alreadyMatches = combinedStatus.includes('united states') || combinedStatus.includes('+1');
 
                 if (!alreadyMatches) {
-                  console.log(`[Form Filler] 📞 Setting intl-tel-input country to United States (+1)`);
+                  log.info(`[Form Filler] 📞 Setting intl-tel-input country to United States (+1)`);
                   await flagBtn.click({ timeout: 2000 }).catch(() => {});
                   await page.waitForTimeout(200);
 
@@ -1434,14 +1437,14 @@ export async function fillSingleField(
                 }).catch(() => false);
 
                 if (!isSelected) {
-                  console.log(`[Form Filler] 📞 Setting phone country dropdown to United States (+1)`);
+                  log.info(`[Form Filler] 📞 Setting phone country dropdown to United States (+1)`);
                   const tagName = await countryDrop.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'INPUT');
                   if (tagName === 'SELECT') {
                     const opts = await countryDrop.locator('option').allInnerTexts().catch(() => []);
                     const matchOpt = opts.find((o) => o.includes(targetCountry) || o.includes(targetDial));
                     if (matchOpt) {
                       await countryDrop.selectOption({ label: matchOpt.trim() }, { force: true }).catch(() => {});
-                      console.log(
+                      log.info(
                         `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
                       );
                     }
@@ -1457,7 +1460,7 @@ export async function fillSingleField(
                     if ((await opt.count()) > 0) {
                       await opt.scrollIntoViewIfNeeded().catch(() => {});
                       await opt.click({ force: true, timeout: 2000 }).catch(() => {});
-                      console.log(
+                      log.info(
                         `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
                       );
                     } else {
@@ -1468,7 +1471,7 @@ export async function fillSingleField(
                 }
               }
             } catch (itiErr: any) {
-              console.warn(`[Form Filler] ⚠️ intl-tel-input notice: ${itiErr.message}`);
+              log.warn(`[Form Filler] ⚠️ intl-tel-input notice: ${itiErr.message}`);
             }
           }
         }
@@ -1480,16 +1483,16 @@ export async function fillSingleField(
     fillResult.success = false;
     fillResult.error = fieldErr.message;
     if (isCountryCode) {
-      console.log(
+      log.info(
         `[Submitter] Country code field → selector: ${fieldId} → attempted value: ${val} → result: NOT FILLED`
       );
     }
     if (isSponsorship) {
-      console.log(
+      log.info(
         `[Submitter] Sponsorship field → selector: ${fieldId} → attempted click: Yes → result: NOT SELECTED`
       );
     }
-    console.warn(`[Form Filler] ⚠️ Could not populate field "${label}" (${name}): ${fieldErr.message}`);
+    log.warn(`[Form Filler] ⚠️ Could not populate field "${label}" (${name}): ${fieldErr.message}`);
   }
 
   return fillResult;
@@ -1524,7 +1527,7 @@ export async function fillForm(
   const rawFields = appObj.resolved_fields || appObj.resolvedFields || [];
   const fields: ResolvedField[] = Array.isArray(rawFields) ? [...rawFields] : [];
 
-  console.log(
+  log.info(
     `[Form Filler] 📝 Populating ${fields.length} initial resolved fields for candidate ${applywizzId} on ${jobUrl}...`
   );
 
@@ -1536,7 +1539,7 @@ export async function fillForm(
     await page.waitForSelector('form#application_form, form#app_form, form', {
       timeout: timeoutMs,
     }).catch(() => {
-      console.warn('[Form Filler] ⚠️ Form element not found immediately, proceeding with page-wide selectors.');
+      log.warn('[Form Filler] ⚠️ Form element not found immediately, proceeding with page-wide selectors.');
     });
 
     // 2. Populate initial queue of resolved fields
@@ -1576,7 +1579,7 @@ export async function fillForm(
         break; // No new unmapped visible fields
       }
 
-      console.log(
+      log.info(
         `[Form Filler] 🔄 Cascade Cycle ${cascadeCycle}: Detected ${unmappedFields.length} newly visible unmapped field(s)...`
       );
 
@@ -1591,7 +1594,7 @@ export async function fillForm(
       for (const unmappedField of unmappedFields) {
         let resolved: ResolvedField;
         if (isConsentSmsMarketingField(unmappedField.label || '')) {
-          console.log(`[Form Filler] Consent/SMS field auto-answered No: ${unmappedField.label}`);
+          log.info(`[Form Filler] Consent/SMS field auto-answered No: ${unmappedField.label}`);
           resolved = toConsentSmsNoResolvedField(unmappedField);
         } else {
           resolved = await resolver.resolveField(applywizzId, unmappedField, {
@@ -1605,7 +1608,7 @@ export async function fillForm(
           });
         }
 
-        console.log(
+        log.info(
           `[Form Filler] 💡 Resolved dynamic field "${resolved.label}" (${resolved.fieldId}) -> "${resolved.value}" [Tier ${resolved.resolvedByTier ?? 'None'}]`
         );
 
@@ -1650,7 +1653,7 @@ export async function fillForm(
             fName = firstLine.split(/\s+/)[0];
           }
           if (fName) {
-            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty First Name with "${fName}"`);
+            log.info(`[Form Filler] 🛡️ Safety Sweep: Populating empty First Name with "${fName}"`);
             await firstNameLoc.fill(fName);
             await firstNameLoc.evaluate((el: HTMLInputElement) => {
               el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1684,7 +1687,7 @@ export async function fillForm(
             lName = parts.slice(1).join(' ') || parts[0];
           }
           if (lName) {
-            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty Last Name with "${lName}"`);
+            log.info(`[Form Filler] 🛡️ Safety Sweep: Populating empty Last Name with "${lName}"`);
             await lastNameLoc.fill(lName);
             await lastNameLoc.evaluate((el: HTMLInputElement) => {
               el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1711,13 +1714,13 @@ export async function fillForm(
             ? profile.company_email.trim()
             : (profile ? getCompanyEmail(profile) : null);
           if (compEmail) {
-            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty Email with company email "${compEmail}"`);
+            log.info(`[Form Filler] 🛡️ Safety Sweep: Populating empty Email with company email "${compEmail}"`);
             await emailLoc.fill(compEmail);
             await emailLoc.evaluate((el: HTMLInputElement) => {
               el.dispatchEvent(new Event('input', { bubbles: true }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
             }).catch(() => {});
-            console.log(`[Form Filler] 📧 Email field filled with company email: ${compEmail} (source: company_email)`);
+            log.info(`[Form Filler] 📧 Email field filled with company email: ${compEmail} (source: company_email)`);
             results.push({
               fieldId: 'email',
               name: 'email',
@@ -1738,7 +1741,7 @@ export async function fillForm(
           let phoneVal = profile?.phone || '';
           if (phoneVal) {
             phoneVal = phoneVal.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
-            console.log(`[Form Filler] 🛡️ Safety Sweep: Populating empty Phone with "${phoneVal}"`);
+            log.info(`[Form Filler] 🛡️ Safety Sweep: Populating empty Phone with "${phoneVal}"`);
             await phoneLoc.fill(phoneVal);
             await phoneLoc.evaluate((el: HTMLInputElement) => {
               el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1756,7 +1759,7 @@ export async function fillForm(
         }
       }
     } catch (sweepErr: any) {
-      console.warn(`[Form Filler] ⚠️ Safety sweep notice: ${sweepErr.message}`);
+      log.warn(`[Form Filler] ⚠️ Safety sweep notice: ${sweepErr.message}`);
     }
   } finally {
     // Guaranteed cleanup of downloaded temporary resume PDFs
@@ -1764,10 +1767,10 @@ export async function fillForm(
       try {
         if (fs.existsSync(tempPath)) {
           await fs.promises.unlink(tempPath);
-          console.log(`[Form Filler] 🧹 Cleaned up temporary resume file: ${tempPath}`);
+          log.info(`[Form Filler] 🧹 Cleaned up temporary resume file: ${tempPath}`);
         }
       } catch (cleanErr: any) {
-        console.warn(`[Form Filler] ⚠️ Failed to unlink temp file ${tempPath}: ${cleanErr.message}`);
+        log.warn(`[Form Filler] ⚠️ Failed to unlink temp file ${tempPath}: ${cleanErr.message}`);
       }
     }
   }
@@ -1775,7 +1778,7 @@ export async function fillForm(
   const filledFields = results.filter((r) => r.success).length;
   const failedFields = results.filter((r) => !r.success).length;
 
-  console.log(
+  log.info(
     `[Form Filler] 🏁 Finished filling form: ${filledFields}/${results.length} successful, ${failedFields} failed.`
   );
 

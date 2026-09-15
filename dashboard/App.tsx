@@ -89,6 +89,14 @@ export const App: React.FC = () => {
   }, [selectedCandidateId]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!localStorage.getItem('applywizz_auth_token')) return;
+    const stored = (localStorage.getItem('applywizz_role') || '').trim().toLowerCase();
+    if (stored === 'manager') window.location.replace('/manager');
+    else if (stored === 'admin') window.location.replace('/admin');
+  }, []);
+
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
         setIsNotifOpen(false);
@@ -160,15 +168,17 @@ export const App: React.FC = () => {
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
+  const sessionRole = (): string => {
+    if (typeof window === 'undefined') return 'operator';
+    const stored = (localStorage.getItem('applywizz_role') || currentUser?.role || '').trim().toLowerCase();
+    if (stored === 'dev' || stored === 'admin' || stored === 'manager' || stored === 'operator') return stored;
+    if (localStorage.getItem('applywizz_is_admin') === 'true') return 'admin';
+    return 'operator';
+  };
+
   const isAdminSession = (): boolean => {
-    if (typeof window === 'undefined') return false;
-    if (localStorage.getItem('applywizz_is_admin') === 'true') return true;
-    const email = (currentUser?.email || '').trim().toLowerCase();
-    return (
-      ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(email) ||
-      email.startsWith('yaswanth') ||
-      email.startsWith('admin@')
-    );
+    const role = sessionRole();
+    return role === 'dev' || role === 'admin';
   };
 
   const ensureAdminHydrated = useCallback(async (dateStr: string): Promise<void> => {
@@ -204,6 +214,7 @@ export const App: React.FC = () => {
     localStorage.removeItem('applywizz_auth_user');
     localStorage.removeItem('applywizz_wh_unreachable');
     localStorage.removeItem('applywizz_is_admin');
+    localStorage.removeItem('applywizz_role');
     setWorkHistoryUnreachable(false);
     setWorkHistoryBannerDismissed(false);
     setNoCandidatesMessage(null);
@@ -267,13 +278,7 @@ export const App: React.FC = () => {
     if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const userEmail = (currentUser?.email || '').trim().toLowerCase();
-      const isAdminUser = Boolean(
-        ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(userEmail) ||
-        userEmail.startsWith('yaswanth') ||
-        userEmail.startsWith('admin@') ||
-        (typeof localStorage !== 'undefined' && localStorage.getItem('applywizz_is_admin') === 'true')
-      );
+      const isAdminUser = isAdminSession();
       if (isAdminUser) {
         try {
           await fetch(`${API_BASE_URL}/api/admin/refresh-artifacts`, {
@@ -694,9 +699,11 @@ export const App: React.FC = () => {
         {/* Left: Brand Logo & Navigation Links */}
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-sm border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
-              AW
-            </div>
+            <img
+              src="/logo.webp"
+              alt="ApplyWizz"
+              className="w-8 h-8 rounded-md border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black"
+            />
             <div>
               <span className="text-sm font-black tracking-tight text-[#1A1A2E] uppercase">
                 ApplyWizz

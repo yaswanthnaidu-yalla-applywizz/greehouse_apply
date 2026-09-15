@@ -8,6 +8,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import config from '../config/env.js';
 import { getSupabaseKeyDiagnostics } from './supabaseKeyDiagnostics.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Client');
 
 let supabaseClientInstance: SupabaseClient | null = null;
 
@@ -154,21 +157,21 @@ export function isSupabaseConfigured(): boolean {
 /** One-line safe identity log for Railway (never prints the secret). */
 export function logSupabaseCredentialIdentity(context = 'Supabase'): void {
   if (!isSupabaseConfigured()) {
-    console.warn(`[${context}] Supabase not configured (missing URL or service key).`);
+    log.warn(`[${context}] Supabase not configured (missing URL or service key).`);
     return;
   }
   const { url, serviceKey, serviceKeySource } = resolveSupabaseCredentials();
   const diag = getSupabaseKeyDiagnostics(url, serviceKey);
-  console.log(
+  log.info(
     `[${context}] Credential identity (${serviceKeySource ?? 'unknown env'}): ${diag.summary}`
   );
   if (diag.jwtRole && diag.jwtRole !== 'service_role') {
-    console.warn(
+    log.warn(
       `[${context}] ⚠️ JWT role is "${diag.jwtRole}", not service_role — Storage listBuckets() will look empty. Set SUPABASE_SERVICE_KEY to the legacy service_role secret (eyJ…), or put it in SUPABASE_SERVICE_ROLE_KEY.`
     );
   }
   if (serviceKeySource === 'SUPABASE_SERVICE_ROLE_KEY' && diag.jwtRole === 'service_role') {
-    console.log(
+    log.info(
       `[${context}] DB/Storage using SUPABASE_SERVICE_ROLE_KEY (anon/publishable in SUPABASE_SERVICE_KEY is OK).`
     );
   }

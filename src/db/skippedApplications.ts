@@ -5,6 +5,9 @@
 import config from '../config/env.js';
 import { upsertApplication } from './applications.js';
 import type { ScannedJobTemplate } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Skipped Applications');
 
 export function isOverQuestionCap(fieldCount: number): boolean {
   return fieldCount >= config.MAX_JOB_QUESTIONS;
@@ -29,7 +32,7 @@ export async function upsertSkippedOverQuestionCap(
     resolved_fields: [],
     error_message: `Skipped: ${questionCount} form fields (dashboard cap allows ${maxAllowed} or fewer; MAX_JOB_QUESTIONS=${config.MAX_JOB_QUESTIONS})`,
   });
-  console.log(
+  log.info(
     `[Answer Resolver] ⏭️ SKIPPED ${applywizzId} ${persistJobUrl} — ${questionCount} fields (>= ${config.MAX_JOB_QUESTIONS})`
   );
 }

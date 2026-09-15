@@ -30,6 +30,9 @@ import type {
   ScannedField,
   ScannedJobTemplate,
 } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Answer Resolver');
 
 /**
  * Returns a human-readable resolution source label for logging.
@@ -204,7 +207,7 @@ export class AnswerResolver {
     }
 
     const resolvedFields: ResolvedField[] = [];
-    console.log(`\n[Answer Resolver] 👤 Resolving [${candidateName}] for "${template.jobTitle}" at "${template.companyName}" (${template.fields.length} questions)...`);
+    log.info(`\n[Answer Resolver] 👤 Resolving [${candidateName}] for "${template.jobTitle}" at "${template.companyName}" (${template.fields.length} questions)...`);
 
     for (const field of template.fields) {
       const resolved = await this.resolveField(applywizzId, field, {
@@ -218,7 +221,7 @@ export class AnswerResolver {
       const preview = resolved.value
         ? (resolved.value.length > 35 ? resolved.value.slice(0, 32) + '...' : resolved.value)
         : '<blank>';
-      console.log(`  • [${formatResolutionSource(resolved)}] "${field.label}" ➔ "${preview}"`);
+      log.info(`  • [${formatResolutionSource(resolved)}] "${field.label}" ➔ "${preview}"`);
     }
 
     return {
@@ -251,7 +254,7 @@ export class AnswerResolver {
       totalPairs += seg.jobs.length;
     }
 
-    console.log(
+    log.info(
       `[Answer Resolver] 🚀 Resolving answers across ${segments.length} candidates and ${totalPairs} job assignments (Supabase → Resume → LLM)...`
     );
 
@@ -293,7 +296,7 @@ export class AnswerResolver {
           try {
             await upsertSkippedOverQuestionCap(seg.applywizzId, persistJobUrl, template, questionCount);
           } catch (dbErr: any) {
-            console.warn(
+            log.warn(
               `[Answer Resolver] ⚠️ Could not upsert SKIPPED candidate_applications for ${seg.applywizzId} ${persistJobUrl}: ${dbErr.message}`
             );
           }
@@ -314,7 +317,7 @@ export class AnswerResolver {
             resolved_fields: app.resolvedFields,
           });
         } catch (dbErr: any) {
-          console.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
+          log.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
         }
 
         const counts = { supabase: 0, resume: 0, llm: 0, unresolved: 0, other: 0 };
@@ -322,7 +325,7 @@ export class AnswerResolver {
           counts[resolutionSourceKey(f)]++;
         }
 
-        console.log(
+        log.info(
           `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [Supabase:${counts.supabase} Resume:${counts.resume} LLM:${counts.llm} Unresolved:${counts.unresolved}]`
         );
       }

@@ -16,6 +16,9 @@
 
 import { config } from '../config/env.js';
 import type { EmailProofJson } from '../db/applications.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Zoho Connector');
 
 export interface ZohoEmailQueryOptions {
   candidateEmail: string;
@@ -157,7 +160,7 @@ export async function queryZohoConfirmationEmail(
   const normCompany = normalizeCompanyName(companyName);
   const companyLower = companyName.toLowerCase();
 
-  console.log(
+  log.info(
     `[Zoho Connector] 🔍 Querying inbox for ${candidateEmail} | Window: [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] | Company: "${companyName}" (Email: "${companyEmail || 'none'}")`
   );
 
@@ -168,7 +171,7 @@ export async function queryZohoConfirmationEmail(
 
     // This REST path carries no client-side credentials: the connector holds Zoho OAuth
     // tokens per mailbox, so a "Mailbox not connected" 400 means the mailbox needs linking.
-    console.log(`[Zoho Connector] 🌐 GET ${inboxUrl} (no auth header — server-side mailbox OAuth)`);
+    log.info(`[Zoho Connector] 🌐 GET ${inboxUrl} (no auth header — server-side mailbox OAuth)`);
 
     const res = await fetch(inboxUrl, {
       method: 'GET',
@@ -176,7 +179,7 @@ export async function queryZohoConfirmationEmail(
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
 
-    console.log(
+    log.info(
       `[Zoho Connector] 🌐 Inbox response: HTTP ${res.status} ${res.statusText} | content-type: ${
         res.headers.get('content-type') || 'unknown'
       }`
@@ -184,13 +187,13 @@ export async function queryZohoConfirmationEmail(
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.error(`[Zoho Connector] ❌ Raw error body: ${errText.slice(0, 500)}`);
+      log.error(`[Zoho Connector] ❌ Raw error body: ${errText.slice(0, 500)}`);
       throw new Error(`Zoho connector returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
     }
 
     // Log the raw payload before parsing so malformed/unexpected shapes are visible
     const rawBody = await res.text();
-    console.log(`[Zoho Connector] 📥 Raw inbox response (${rawBody.length} chars): ${rawBody.slice(0, 1500)}`);
+    log.info(`[Zoho Connector] 📥 Raw inbox response (${rawBody.length} chars): ${rawBody.slice(0, 1500)}`);
 
     let data: RawZohoInboxResponse;
     try {
@@ -202,14 +205,14 @@ export async function queryZohoConfirmationEmail(
     const messages = data.messages || [];
     const accountId = data.accountId;
 
-    console.log(
+    log.info(
       `[Zoho Connector] 📬 Parsed ${messages.length} emails (count=${data.count ?? 'n/a'}, totalMatched=${
         data.totalMatched ?? 'n/a'
       }, accountId=${accountId || 'none'}, folderId=${data.folder?.folderId || 'none'})`
     );
     messages.forEach((m, i) => {
       const ms = Number(m.receivedTime);
-      console.log(
+      log.info(
         `[Zoho Connector] 📧 [${i + 1}/${messages.length}] from="${m.from || ''}" | subject="${
           m.subject || ''
         }" | receivedAt=${Number.isNaN(ms) || ms <= 0 ? `UNPARSEABLE(${m.receivedTime})` : new Date(ms).toISOString()}`
@@ -217,7 +220,7 @@ export async function queryZohoConfirmationEmail(
     });
 
     if (!messages.length) {
-      console.log(`[Zoho Connector] ℹ️ Inbox is empty for ${candidateEmail}. Zero matches.`);
+      log.info(`[Zoho Connector] ℹ️ Inbox is empty for ${candidateEmail}. Zero matches.`);
       return {
         success: false,
         matched: false,
@@ -247,7 +250,7 @@ export async function queryZohoConfirmationEmail(
 
       // 1. Never accept OTP / security-code mail as proof
       if (OTP_SUBJECT_PATTERN.test(subject)) {
-        console.log(`[Zoho Connector] 🚫 Rejected email (OTP/security code): ${msg.subject || ''}`);
+        log.info(`[Zoho Connector] 🚫 Rejected email (OTP/security code): ${msg.subject || ''}`);
         continue;
       }
 
@@ -291,7 +294,7 @@ export async function queryZohoConfirmationEmail(
 
     // Zero-match case handled gracefully
     if (!matchingMsg) {
-      console.log(
+      log.info(
         `[Zoho Connector] ⚠️ Zero confirmation matches for ${candidateEmail} among ${messages.length} messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
       );
       return {
@@ -336,7 +339,7 @@ export async function queryZohoConfirmationEmail(
           }
         }
       } catch (err: any) {
-        console.warn(`[Zoho Connector] ⚠️ Failed to fetch full message body: ${err.message}`);
+        log.warn(`[Zoho Connector] ⚠️ Failed to fetch full message body: ${err.message}`);
       }
     }
 
@@ -346,7 +349,7 @@ export async function queryZohoConfirmationEmail(
 
     const receivedAtIso = new Date(matchingReceivedMs).toISOString();
 
-    console.log(
+    log.info(
       `[Zoho Connector] 🎉 Proof email captured: ${fullSubject} from ${fullFrom} at ${receivedAtIso}`
     );
 
@@ -367,7 +370,7 @@ export async function queryZohoConfirmationEmail(
       window: { minTimeIso, maxTimeIso, submissionTimeIso },
     };
   } catch (err: any) {
-    console.error(`[Zoho Connector] ❌ Error querying Zoho Mail for ${candidateEmail}: ${err.message}`);
+    log.error(`[Zoho Connector] ❌ Error querying Zoho Mail for ${candidateEmail}: ${err.message}`);
     return {
       success: false,
       matched: false,

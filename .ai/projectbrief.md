@@ -5,7 +5,9 @@ Internal bulk job-application automation platform. Operators upload a CSV of can
 
 ## Target Users
 - **Operators** — primary users; review/approve/submit applications via dashboard
-- **Managers / COO** — analytics dashboard (in progress); need visibility into throughput, success rates, candidate statuses
+- **Managers / COO** — client table at `/manager` (all clients until CA-manager mapping is known); date filter, expandable proofs
+- **Admins** — org ops at `/admin` including CSV ingest Start
+- **Developers** — technical dashboard at `/dev`
 
 ## Core Problem Solved
 Manually applying to hundreds of Greenhouse ATS postings per candidate is operationally unscalable. This system automates scanning form structure, resolving per-candidate answers, and submitting — with operator oversight at the review gate.

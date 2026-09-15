@@ -14,6 +14,9 @@ import {
 } from '../db/applications.js';
 import { wsManager } from '../server/ws.js';
 import { runLiveSubmit, type LiveSubmitResult } from './liveSubmit.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Submitter Pool');
 
 export interface SubmitterPoolOptions {
   pollIntervalMs?: number;
@@ -53,12 +56,32 @@ export class SubmitterPool {
     this.isRunning = false;
   }
 
+  public getSnapshot(): {
+    running: boolean;
+    workerCount: number;
+    idleCount: number;
+    pendingAssignments: number;
+    inFlightCount: number;
+    inFlightIds: string[];
+    laneLengths: number[];
+  } {
+    return {
+      running: this.isRunning,
+      workerCount: 3,
+      idleCount: this.getIdleCount(),
+      pendingAssignments: this.pendingAssignments,
+      inFlightCount: this.inFlightApplicationIds.size,
+      inFlightIds: Array.from(this.inFlightApplicationIds),
+      laneLengths: this.lanes.map((lane) => lane.length),
+    };
+  }
+
   public async enqueue(application: ApplicationRow): Promise<LiveSubmitResult> {
     const workerIndex = this.nextWorkerIndex;
     this.nextWorkerIndex = (this.nextWorkerIndex + 1) % 3;
     this.pendingAssignments += 1;
     const appRef = application.id || application.applywizz_id;
-    console.log(
+    log.info(
       `[Submitter] Worker ${workerIndex + 1} assigned app-${appRef} | ${this.getIdleCount()} idle.`
     );
 
@@ -74,20 +97,20 @@ export class SubmitterPool {
         if (application) {
           const appRef = application.id || application.applywizz_id;
           if (this.inFlightApplicationIds.has(appRef)) {
-            console.warn(
+            log.warn(
               `[Queue] Skipping app-${appRef} — already in flight on another worker (duplicate dequeue).`
             );
           } else {
-            console.log(`[Queue] Dequeued app-${appRef} for submitter pool`);
+            log.info(`[Queue] Dequeued app-${appRef} for submitter pool`);
             this.inFlightApplicationIds.add(appRef);
             void this.enqueue(application).catch((error: Error) => {
-              console.error(`[Submitter] Queue assignment failed: ${error.message}`);
+              log.error(`[Submitter] Queue assignment failed: ${error.message}`);
             });
           }
           continue;
         }
       } catch (error) {
-        console.error(`[Submitter] Queue acquisition failed: ${(error as Error).message}`);
+        log.error(`[Submitter] Queue acquisition failed: ${(error as Error).message}`);
       }
       await this.sleep(this.pollIntervalMs);
     }
@@ -108,8 +131,8 @@ export class SubmitterPool {
         await updateStatus(applicationId, 'APPLYING', {
           job_url: application.job_url,
         });
-        console.log(`[Submitter] Worker ${workerNumber} submitting app-${applicationId} → status=APPLYING`);
-        console.log(`[API] Status → APPLYING (application ${applicationId}, submitter executing)`);
+        log.info(`[Submitter] Worker ${workerNumber} submitting app-${applicationId} → status=APPLYING`);
+        log.info(`[API] Status → APPLYING (application ${applicationId}, submitter executing)`);
         await logQueueStatusChange(applicationId, 'QUEUED', 'APPLYING');
 
         const result = await runLiveSubmit(applicationId, {
@@ -118,7 +141,7 @@ export class SubmitterPool {
         });
         work.resolve(result);
         if (result.status === 'APPLIED') {
-          console.log(`[API] Status → APPLIED (application ${applicationId})`);
+          log.info(`[API] Status → APPLIED (application ${applicationId})`);
           await logQueueStatusChange(applicationId, 'APPLYING', 'APPLIED');
         } else if (result.status === 'FAILED') {
           await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
@@ -132,7 +155,7 @@ export class SubmitterPool {
             job_url: application.job_url,
           });
         } catch (statusError) {
-          console.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
+          log.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
         }
         await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
         this.emitFailure(application, message);
@@ -140,7 +163,7 @@ export class SubmitterPool {
       } finally {
         this.inFlightApplicationIds.delete(applicationId);
         this.pendingAssignments -= 1;
-        console.log(`[Submitter] Worker ${workerNumber} released ${applicationId} | ${this.getIdleCount()} idle.`);
+        log.info(`[Submitter] Worker ${workerNumber} released ${applicationId} | ${this.getIdleCount()} idle.`);
       }
     }
   }

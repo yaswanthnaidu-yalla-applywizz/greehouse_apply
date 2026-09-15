@@ -14,6 +14,9 @@
 import fs from 'fs';
 import { config } from '../config/env.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from './segregator.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Run Candidate Sync');
 
 /**
  * Parses command-line arguments into structured candidate sync options.
@@ -55,19 +58,19 @@ export function parseSyncArgs(args: string[]): {
 export async function main(): Promise<void> {
   const { inputPath, limit, concurrency, outputDir } = parseSyncArgs(process.argv.slice(2));
 
-  console.log('================================================================');
-  console.log('  Branch 2: ApplyWizz Candidate Segregator & Profile Sync');
-  console.log('================================================================');
-  console.log(`• Input CSV:     ${inputPath}`);
-  console.log(`• Output Dir:    ${outputDir}`);
-  console.log(`• Concurrency:   ${concurrency}`);
-  console.log(`• Limit:         ${limit ? `${limit} candidates` : 'All'}`);
-  console.log(`• ApplyWizz API: ${config.APPLYWIZZ_API_URL}`);
-  console.log('================================================================\n');
+  log.info('================================================================');
+  log.info('  Branch 2: ApplyWizz Candidate Segregator & Profile Sync');
+  log.info('================================================================');
+  log.info(`• Input CSV:     ${inputPath}`);
+  log.info(`• Output Dir:    ${outputDir}`);
+  log.info(`• Concurrency:   ${concurrency}`);
+  log.info(`• Limit:         ${limit ? `${limit} candidates` : 'All'}`);
+  log.info(`• ApplyWizz API: ${config.APPLYWIZZ_API_URL}`);
+  log.info('================================================================\n');
 
   if (!fs.existsSync(inputPath)) {
-    console.warn(`[Candidate Sync Runner] ⚠️ Input CSV file not found at: "${inputPath}".`);
-    console.warn('[Candidate Sync Runner] Please verify the CSV path in .env (INPUT_CSV_PATH) or pass --input="<path>".');
+    log.warn(`[Candidate Sync Runner] ⚠️ Input CSV file not found at: "${inputPath}".`);
+    log.warn('[Candidate Sync Runner] Please verify the CSV path in .env (INPUT_CSV_PATH) or pass --input="<path>".');
     return;
   }
 
@@ -99,18 +102,18 @@ export async function main(): Promise<void> {
 
     const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
 
-    console.log('\n================================================================');
-    console.log('  Branch 2 Candidate Sync Completed');
-    console.log('================================================================');
-    console.log(`• Elapsed Time:         ${elapsedSec}s`);
-    console.log(`• Unique Candidates:    ${segments.size}`);
-    console.log(`• Profiles Synced:      ${syncedProfilesCount}/${segments.size}`);
-    console.log(`• Resumes Downloaded:   ${downloadedResumesCount}`);
-    console.log(`• Total Job Mappings:   ${totalJobAssignments}`);
-    console.log(`• Output Segments File: ${outputPath}`);
-    console.log('================================================================');
+    log.info('\n================================================================');
+    log.info('  Branch 2 Candidate Sync Completed');
+    log.info('================================================================');
+    log.info(`• Elapsed Time:         ${elapsedSec}s`);
+    log.info(`• Unique Candidates:    ${segments.size}`);
+    log.info(`• Profiles Synced:      ${syncedProfilesCount}/${segments.size}`);
+    log.info(`• Resumes Downloaded:   ${downloadedResumesCount}`);
+    log.info(`• Total Job Mappings:   ${totalJobAssignments}`);
+    log.info(`• Output Segments File: ${outputPath}`);
+    log.info('================================================================');
   } catch (error: any) {
-    console.error(`[Candidate Sync Runner] ❌ Error during candidate sync: ${error.message}`);
+    log.error(`[Candidate Sync Runner] ❌ Error during candidate sync: ${error.message}`);
     process.exitCode = 1;
   }
 }
