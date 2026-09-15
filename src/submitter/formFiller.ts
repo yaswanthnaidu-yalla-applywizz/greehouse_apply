@@ -278,7 +278,7 @@ async function clickDropdownOptionByMatch(
 ): Promise<boolean> {
   const roots: Locator[] = [];
   if (scope && (await scope.count()) > 0) roots.push(scope);
-  roots.push(page);
+  roots.push(page.locator('body'));
 
   for (const root of roots) {
     const options = root.locator(CUSTOM_SELECT_OPTION_LOCATOR);
@@ -345,7 +345,12 @@ async function fillInteractiveSelectDropdown(
       await page.waitForTimeout(350);
       clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
       if (!clicked) {
-        clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, page);
+        clicked = await clickDropdownOptionByMatch(
+          page,
+          answerText,
+          fuzzyOptionTextMatch,
+          page.locator('body')
+        );
       }
     }
   }
