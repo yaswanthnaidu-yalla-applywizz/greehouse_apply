@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import { hydrateApplicationResolvedFields } from './applicationFieldHydration.js';
 import {
   getSignedProofUrl,
   PROOFS_BUCKET,
@@ -115,6 +116,30 @@ export async function upsertApplication(
     ...app,
     updated_at: new Date().toISOString(),
   };
+
+  // Segregator upserts with resolved_fields: [] — never wipe a populated snapshot.
+  if (
+    Array.isArray(payload.resolved_fields) &&
+    payload.resolved_fields.length === 0 &&
+    payload.applywizz_id &&
+    payload.job_url &&
+    isSupabaseConfigured()
+  ) {
+    try {
+      const supabase = getDbClient();
+      const { data: existing } = await supabase
+        .from('candidate_applications')
+        .select('resolved_fields')
+        .eq('applywizz_id', payload.applywizz_id)
+        .eq('job_url', payload.job_url)
+        .maybeSingle();
+      if (Array.isArray(existing?.resolved_fields) && existing.resolved_fields.length > 0) {
+        payload.resolved_fields = existing.resolved_fields;
+      }
+    } catch {
+      /* fall through — empty payload is acceptable for brand-new rows */
+    }
+  }
 
   // Only pass id to Supabase if it's already a valid UUID
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.id || '');
@@ -769,6 +794,25 @@ export interface ApplicationDto {
   createdAt?: string;
   updated_at?: string;
   updatedAt?: string;
+}
+
+/**
+ * When resolved_fields is empty, copies fields_schema from scanned_job_templates and persists the snapshot.
+ */
+export async function hydrateAndPersistApplicationFields(app: ApplicationRow): Promise<ApplicationRow> {
+  const { application, hydratedFromTemplate } = await hydrateApplicationResolvedFields(app);
+  if (!hydratedFromTemplate) {
+    return application;
+  }
+  return upsertApplication({
+    id: application.id,
+    applywizz_id: application.applywizz_id,
+    job_url: application.job_url,
+    company_name: application.company_name,
+    job_title: application.job_title,
+    status: application.status,
+    resolved_fields: application.resolved_fields,
+  });
 }
 
 /**

@@ -297,9 +297,10 @@ export class AnswerResolver {
 
         // Persist resolved application record to Supabase (candidate_applications table)
         try {
+          const persistJobUrl = job.canonicalUrl || job.rawUrl || app.jobUrl;
           await upsertApplication({
             applywizz_id: app.applywizzId,
-            job_url: app.jobUrl,
+            job_url: persistJobUrl,
             company_name: app.companyName,
             job_title: app.jobTitle,
             resolved_fields: app.resolvedFields,

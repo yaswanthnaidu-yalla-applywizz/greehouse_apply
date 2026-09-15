@@ -136,3 +136,48 @@ export async function listTemplates(): Promise<TemplateRow[]> {
   return [];
 }
 
+function collectJobUrlVariants(jobUrl: string): string[] {
+  const urls: string[] = [];
+  const raw = (jobUrl || '').trim();
+  if (!raw) return urls;
+  urls.push(raw);
+  try {
+    const decoded = decodeURIComponent(raw);
+    if (decoded !== raw) urls.push(decoded);
+  } catch {
+    /* ignore */
+  }
+  return urls;
+}
+
+function urlsLooselyMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.includes(b) || b.includes(a);
+}
+
+/**
+ * Finds a scanned template for a job URL (exact match, then substring match across all templates).
+ */
+export async function findTemplateByJobUrl(jobUrl: string): Promise<TemplateRow | null> {
+  for (const variant of collectJobUrlVariants(jobUrl)) {
+    const exact = await getTemplateByUrl(variant);
+    if (exact && Array.isArray(exact.fields_schema) && exact.fields_schema.length > 0) {
+      return exact;
+    }
+  }
+
+  const variants = collectJobUrlVariants(jobUrl);
+  const all = await listTemplates();
+  for (const row of all) {
+    if (!row.job_url || !Array.isArray(row.fields_schema) || row.fields_schema.length === 0) {
+      continue;
+    }
+    if (variants.some((v) => urlsLooselyMatch(v, row.job_url))) {
+      return row;
+    }
+  }
+
+  return null;
+}
+

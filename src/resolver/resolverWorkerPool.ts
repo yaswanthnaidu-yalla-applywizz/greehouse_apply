@@ -3,6 +3,7 @@ import {
   upsertApplication,
   type ApplicationRow,
 } from '../db/applications.js';
+import { findTemplateByJobUrl } from '../db/templates.js';
 import { getProfile } from '../db/profiles.js';
 import { findAnswersByCandidate } from '../db/qaBank.js';
 import { getOrParseResume } from './tier2ResumeParse.js';
@@ -90,7 +91,17 @@ export class ResolverWorkerPool {
     const profile = await getProfile(application.applywizz_id);
     const parsedResume = await getOrParseResume(application.applywizz_id);
     const qaEntries = await findAnswersByCandidate(application.applywizz_id);
-    const existing = Array.isArray(application.resolved_fields) ? application.resolved_fields : [];
+    let existing = Array.isArray(application.resolved_fields) ? application.resolved_fields : [];
+    if (existing.length === 0) {
+      const template = await findTemplateByJobUrl(application.job_url);
+      const schema = template?.fields_schema;
+      if (Array.isArray(schema) && schema.length > 0) {
+        existing = schema;
+        console.log(
+          `[Resolver] Loaded ${schema.length} fields from fields_schema for ${application.applywizz_id} ${application.job_url}`
+        );
+      }
+    }
     const fields = existing.map((field, index) => asScannedField(field, index));
     const resolved: ResolvedField[] = [];
     const pending: ScannedField[] = [];

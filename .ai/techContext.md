@@ -106,9 +106,9 @@ Dashboard dry-run uses `POST /api/applications/:id/dry-run` → `dryRun.ts` (Sup
 ```env
 # Core — required
 SUPABASE_URL=
-SUPABASE_SERVICE_KEY=              # Often anon/publishable on Railway; server prefers service_role from SUPABASE_SERVICE_ROLE_KEY when set
-SUPABASE_SERVICE_ROLE_KEY=         # Legacy service_role secret — used for DB/Storage when SERVICE_KEY is not service_role
-SUPABASE_ANON_KEY=                 # Optional; Realtime falls back to SERVICE_KEY when that JWT is anon
+SUPABASE_SERVICE_KEY=              # Anon / publishable — browser (Realtime, dashboard template reads). Not service_role.
+SUPABASE_SERVICE_ROLE_KEY=         # Service role — server DB/Storage only (resolveSupabaseCredentials)
+SUPABASE_ANON_KEY=                 # Optional override for browser key (default: SUPABASE_SERVICE_KEY)
 APPLYWIZZ_API_URL=                    # ApplyWizz candidate profile endpoint
 
 # LLM — at least one required (based on LLM_PROVIDER)

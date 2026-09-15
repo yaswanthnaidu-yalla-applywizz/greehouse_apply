@@ -50,21 +50,129 @@ export interface LLMSynthesizerOptions {
 /**
  * Detects binary Yes/No form questions that must never receive prose or location strings.
  */
+/** Field types that must answer from a fixed option list when options are known. */
+const CHOICE_FIELD_TYPES = new Set<ScannedField['type']>(['select', 'radio', 'checkbox']);
+
+export function fieldHasChoiceOptions(field: ScannedField): boolean {
+  const opts = getEffectiveFieldOptions(field);
+  return opts !== undefined && opts.length > 0;
+}
+
+/**
+ * Options for prompt + alignment — uses scanned options, or defaults Yes/No for binary radio/select.
+ */
+export function getEffectiveFieldOptions(field: ScannedField): string[] | undefined {
+  if (field.options && field.options.length > 0) {
+    return field.options;
+  }
+  if (
+    (field.type === 'radio' || field.type === 'select') &&
+    isBinaryYesNoQuestion({ ...field, options: ['Yes', 'No'] })
+  ) {
+    return ['Yes', 'No'];
+  }
+  return undefined;
+}
+
 export function isBinaryYesNoQuestion(field: ScannedField): boolean {
   const label = field.label || '';
   const combined = `${label} ${field.name || ''} ${field.fieldId || ''}`;
+  const opts = field.options && field.options.length > 0 ? field.options : undefined;
 
-  if (field.options && field.options.length > 0) {
-    const normOpts = field.options.map((o) => o.toLowerCase().trim());
+  if (opts && opts.length > 0) {
+    const normOpts = opts.map((o) => o.toLowerCase().trim());
     const hasYes = normOpts.some((o) => o === 'yes' || /^yes\b/i.test(o));
     const hasNo = normOpts.some((o) => o === 'no' || /^no\b/i.test(o));
     if (hasYes && hasNo) return true;
+  }
+
+  if (field.type === 'radio' || field.type === 'select' || field.type === 'checkbox') {
+    if (
+      /^(are|is|do|does|did|will|would|can|could|have|has|had)\b/i.test(label.trim()) ||
+      /(willing to|able to|authorized to|eligible to|in the same city|sponsorship|require.*visa)/i.test(
+        combined
+      )
+    ) {
+      return true;
+    }
   }
 
   return (
     /^(are|is|do|does|did|will|would|can|could|have|has|had)\b/i.test(label.trim()) ||
     /(willing to|able to|authorized to|eligible to|in the same city)/i.test(combined)
   );
+}
+
+/**
+ * Infer strict Yes/No from profile for common authorization / sponsorship questions.
+ */
+export function inferYesNoFromProfile(
+  field: ScannedField,
+  profile: ApplyWizzCandidateProfile
+): 'Yes' | 'No' | null {
+  const combined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`.toLowerCase();
+
+  if (/authorized to work|legally authorized|work authorization|legal right to work|eligible to work/i.test(combined)) {
+    const auth = (profile.workAuthorization || '').trim();
+    if (/^no|false|not authorized|requires sponsorship/i.test(auth)) {
+      return 'No';
+    }
+    if (auth.length > 0 && !/^yes$/i.test(auth)) {
+      // e.g. H1B, OPT — authorized to work in US for most forms
+      return 'Yes';
+    }
+    return 'Yes';
+  }
+
+  if (/sponsorship|require.*visa|future.*sponsorship|visa status/i.test(combined)) {
+    return profile.requiresSponsorship ? 'Yes' : 'No';
+  }
+
+  if (
+    /(previously.*employed|worked for|former employee|non-compete|non compete|restrict.*employment|felony|terminated)/i.test(
+      combined
+    )
+  ) {
+    return 'No';
+  }
+
+  if (/(terms and conditions|privacy policy|certify|acknowledge|background check)/i.test(combined)) {
+    return 'Yes';
+  }
+
+  if (/(willing to relocate|open to relocate|relocation|in the same city|same city as)/i.test(combined)) {
+    const willing = profile.demographics?.willingToRelocate !== false;
+    return willing ? 'Yes' : 'No';
+  }
+
+  return null;
+}
+
+function buildProfileDecisionContext(field: ScannedField, profile: ApplyWizzCandidateProfile): string {
+  if (!isBinaryYesNoQuestion(field) && !fieldHasChoiceOptions(field)) {
+    return '';
+  }
+
+  const sponsorshipAnswer = profile.requiresSponsorship ? 'Yes' : 'No';
+  const lines = [
+    'Profile facts for Yes/No and choice questions (use these as ground truth):',
+    `- requires_sponsorship (needs visa sponsorship now or in the future): ${sponsorshipAnswer}`,
+    `- work_authorization: ${profile.workAuthorization || 'not specified'}`,
+    `- For "legally authorized to work" style questions: if work_authorization indicates US work eligibility (e.g. Citizen, GC, H1B, OPT, EAD), answer Yes unless the profile explicitly says otherwise.`,
+    `- For "require sponsorship" style questions: answer ${sponsorshipAnswer} based on requires_sponsorship above.`,
+  ];
+
+  const inferred = inferYesNoFromProfile(field, profile);
+  if (inferred) {
+    lines.push(`- Recommended answer for this question label from profile rules: ${inferred}`);
+  }
+
+  return `\n${lines.join('\n')}\n`;
+}
+
+function formatAvailableOptionsLine(options: string[]): string {
+  const list = options.map((o) => `"${o}"`).join(', ');
+  return `\nThe available options are: [${list}]. You MUST pick exactly one of these options verbatim — no free-text answer.\n`;
 }
 
 /**
@@ -174,7 +282,8 @@ function alignToOption(text: string, options?: string[]): string {
  */
 function finalizeBinaryAnswer(rawAnswer: string, field: ScannedField): string {
   const coerced = coerceBinaryYesNo(rawAnswer, field);
-  return field.options ? alignToOption(coerced, field.options) : coerced;
+  const options = getEffectiveFieldOptions(field);
+  return options ? alignToOption(coerced, options) : coerced;
 }
 
 /**
@@ -247,11 +356,31 @@ export class LLMSynthesizer {
     jobContext: JobContext = { title: 'Software Engineer', company: 'Company' },
     resumeFacts?: any
   ): Promise<ResolvedField> {
-    const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
+    const choiceOptions = getEffectiveFieldOptions(field);
+    const isChoiceField = choiceOptions && choiceOptions.length > 0 && CHOICE_FIELD_TYPES.has(field.type);
     const isBinary = isBinaryYesNoQuestion(field);
+
+    const profileYesNo = isBinary ? inferYesNoFromProfile(field, profile) : null;
+    if (profileYesNo) {
+      const aligned = choiceOptions ? alignToOption(profileYesNo, choiceOptions) : profileYesNo;
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: aligned,
+        source: 'ai',
+        resolvedByTier: 5,
+        confidence: 0.95,
+      };
+    }
+
+    const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
     const systemMessage = isBinary
-      ? 'You are an automated job application assistant. CRITICAL: This is a Yes/No question. You MUST reply with ONLY the word "Yes" or "No". Absolutely NO additional words, explanations, location names, or prose.'
-      : 'You are an automated job application assistant. You must output ONLY the direct answer text. Absolutely NO reasoning, NO thinking process, NO prefixes like "Here is a thinking process", and NO preamble.';
+      ? 'You are an automated job application assistant. CRITICAL: This is a Yes/No question. You MUST reply with ONLY the word "Yes" or "No" (or the exact Yes/No option string from the available options list). Absolutely NO additional words, explanations, location names, or prose.'
+      : isChoiceField
+        ? 'You are an automated job application assistant. The user message lists available options. You MUST reply with exactly one option string from that list, copied verbatim. No free-text answers, no reasoning, no preamble.'
+        : 'You are an automated job application assistant. You must output ONLY the direct answer text. Absolutely NO reasoning, NO thinking process, NO prefixes like "Here is a thinking process", and NO preamble.';
 
     // If API key is configured or provider is ollama, execute real LLM call
     if (this.apiKey || this.provider === 'ollama') {
@@ -299,8 +428,8 @@ export class LLMSynthesizer {
           if (rawAnswer && rawAnswer.length > 0) {
             let finalAnswer = isBinary
               ? finalizeBinaryAnswer(rawAnswer, field)
-              : field.options
-                ? alignToOption(rawAnswer, field.options)
+              : choiceOptions
+                ? alignToOption(rawAnswer, choiceOptions)
                 : rawAnswer;
             if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
               if (!/^https?:\/\//i.test(finalAnswer) && !/linkedin\.com|github\.com/i.test(finalAnswer)) {
@@ -328,8 +457,8 @@ export class LLMSynthesizer {
           if (cleaned && cleaned.length > 0) {
             let finalAnswer = isBinary
               ? finalizeBinaryAnswer(cleaned, field)
-              : field.options
-                ? alignToOption(cleaned, field.options)
+              : choiceOptions
+                ? alignToOption(cleaned, choiceOptions)
                 : cleaned;
             if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
               if (!/^https?:\/\//i.test(finalAnswer) && !/linkedin\.com|github\.com/i.test(finalAnswer)) {
@@ -473,27 +602,35 @@ ${resumeText.slice(0, 3000)}`;
     jobContext: JobContext,
     resumeFacts?: any
   ): string {
-    const optionsSection = field.options && field.options.length > 0
-      ? `\nAvailable Options (Select EXACTLY ONE):\n${field.options.map((o, idx) => `  ${idx + 1}. "${o}"`).join('\n')}`
-      : '';
+    const choiceOptions = getEffectiveFieldOptions(field);
+    const optionsSection =
+      choiceOptions && choiceOptions.length > 0 ? formatAvailableOptionsLine(choiceOptions) : '';
+
+    const profileDecisionBlock = buildProfileDecisionContext(field, profile);
 
     const binaryRule = isBinaryYesNoQuestion(field)
-      ? `\nCRITICAL: This is a Yes/No question. You MUST reply with ONLY the word "Yes" or "No". Absolutely NO additional words, explanations, location names, or prose.`
+      ? `\nCRITICAL: This is a Yes/No question. You MUST reply with ONLY the word "Yes" or "No" (or the exact matching option from the available options list). Absolutely NO additional words, explanations, location names, or prose.`
       : '';
 
     const instructions = isBinaryYesNoQuestion(field)
       ? `Instructions:
-1. Reply with ONLY "Yes" or "No" — pick the single best option from Available Options if provided.
-2. Do NOT include the candidate's city, state, location, or any explanatory sentences.
-3. Output ONLY the raw final answer text.`
-      : `Strict Instructions:
+1. Use the Profile facts section and requires_sponsorship / work_authorization to decide Yes vs No.
+2. Reply with ONLY "Yes" or "No" — pick the single best option from the available options list if provided.
+3. Do NOT include the candidate's city, state, location, or any explanatory sentences.
+4. Output ONLY the raw final answer text.`
+      : choiceOptions && choiceOptions.length > 0
+        ? `Strict Instructions:
+1. The available options are listed above — your response MUST be EXACTLY ONE of those strings, copied verbatim.
+2. Do NOT invent new options or write free-text sentences.
+3. Base your choice on the candidate profile, resume facts, and question label.
+4. Output ONLY the raw final answer text. No reasoning or preamble.`
+        : `Strict Instructions:
 1. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
 2. CRITICAL GROUNDING: You MUST base your answer strictly on the candidate's verified resume facts and experience.
 3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer". Always cite their ACTUAL past companies, verified project names, or specific tools (e.g., Jenkins, Docker, GitHub Actions, AWS, Python) found in their resume.
 4. If the candidate's resume does not mention the exact requested tool/technology, write honestly: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
-5. If Available Options are provided above, your response MUST be EXACTLY ONE option string from that list (verbatim).
-6. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
-7. Output ONLY the raw final answer text. Absolutely NO thinking process, NO "Here is a thinking process", NO markdown fences, and NO conversational filler.`;
+5. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
+6. Output ONLY the raw final answer text. Absolutely NO thinking process, NO "Here is a thinking process", NO markdown fences, and NO conversational filler.`;
 
     const resumeFactsBlock = this.buildResumeFactsBlock(resumeFacts, resumeText);
 
@@ -505,8 +642,9 @@ Candidate Information:
 - Years of Experience: ${profile.demographics?.yearsOfExperience || '5+ years'}
 - Education: ${profile.education?.map((e) => `${e.degree} in ${e.fieldOfStudy} from ${e.institution} (${e.graduationYear})`).join(', ') || 'Degree on file'}
 - Location: ${profile.location}
-- Work Authorization: ${profile.workAuthorization} (Requires Sponsorship: ${profile.requiresSponsorship ? 'Yes' : 'No'})
-
+- Work Authorization: ${profile.workAuthorization}
+- Requires Sponsorship (requires_sponsorship): ${profile.requiresSponsorship ? 'Yes' : 'No'}
+${profileDecisionBlock}
 ${resumeFactsBlock}
 
 Target Job:
@@ -552,15 +690,17 @@ ${instructions}`;
     }
 
     if (isBinaryYesNoQuestion(field)) {
-      const answer = coerceBinaryYesNo('', field);
-      return field.options ? alignToOption(answer, field.options) : answer;
+      const fromProfile = inferYesNoFromProfile(field, profile);
+      const answer = fromProfile ?? coerceBinaryYesNo('', field);
+      const options = getEffectiveFieldOptions(field);
+      return options ? alignToOption(answer, options) : answer;
     }
 
-    if (field.options && field.options.length > 0) {
-      // Default to "Yes" or first option
-      const yesOpt = field.options.find((o) => /^yes/i.test(o));
+    const choiceOptions = getEffectiveFieldOptions(field);
+    if (choiceOptions && choiceOptions.length > 0) {
+      const yesOpt = choiceOptions.find((o) => /^yes/i.test(o));
       if (yesOpt) return yesOpt;
-      return field.options[0];
+      return choiceOptions[0];
     }
 
     const lowerLabel = (field.label || '').toLowerCase();

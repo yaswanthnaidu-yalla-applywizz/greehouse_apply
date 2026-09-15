@@ -67,22 +67,23 @@ export function listSupabaseKeyCandidates(): { url: string; candidates: Supabase
 }
 
 /**
- * Picks the server-side Supabase secret. Prefers a JWT with role service_role when
- * both SUPABASE_SERVICE_KEY (often anon by mistake) and SUPABASE_SERVICE_ROLE_KEY are set.
+ * Server-side Supabase secret (service_role).
+ * When both env vars are set: SUPABASE_SERVICE_ROLE_KEY is the server key;
+ * SUPABASE_SERVICE_KEY is anon/publishable (browser only — see resolveSupabaseAnonKey).
  */
 export function resolveSupabaseCredentials(): ResolvedSupabaseCredentials {
   const { url, candidates } = listSupabaseKeyCandidates();
+
+  const roleKeyEnv = candidates.find((c) => c.source === 'SUPABASE_SERVICE_ROLE_KEY');
+  if (roleKeyEnv) {
+    return { url, serviceKey: roleKeyEnv.key, serviceKeySource: roleKeyEnv.source };
+  }
 
   const serviceRoleJwt = candidates.find(
     (c) => getSupabaseKeyDiagnostics(url, c.key).jwtRole === 'service_role'
   );
   if (serviceRoleJwt) {
     return { url, serviceKey: serviceRoleJwt.key, serviceKeySource: serviceRoleJwt.source };
-  }
-
-  const roleKeyEnv = candidates.find((c) => c.source === 'SUPABASE_SERVICE_ROLE_KEY');
-  if (roleKeyEnv) {
-    return { url, serviceKey: roleKeyEnv.key, serviceKeySource: roleKeyEnv.source };
   }
 
   const first = candidates[0];
@@ -104,18 +105,38 @@ export function getSupabaseServerApiKey(): string {
 }
 
 /**
- * Anon/publishable key for browser Realtime. Uses SUPABASE_ANON_KEY, or SUPABASE_SERVICE_KEY when that JWT is anon.
+ * Browser key (anon / publishable) for Realtime and dashboard Supabase reads.
+ *
+ * Project env convention (Railway):
+ * - SUPABASE_SERVICE_KEY → anon / publishable (safe for authenticated dashboard clients)
+ * - SUPABASE_SERVICE_ROLE_KEY → service_role (server only; never sent to the browser)
+ *
+ * Optional override: SUPABASE_ANON_KEY.
  */
 export function resolveSupabaseAnonKey(): string {
   const url = (config.SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
-  const explicit = (config.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  const explicit = normalizeSupabaseSecret(
+    config.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
+  );
   if (explicit) {
     return explicit;
   }
-  const fromServiceKey = (config.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY || '').trim();
-  if (fromServiceKey && getSupabaseKeyDiagnostics(url, fromServiceKey).jwtRole === 'anon') {
-    return fromServiceKey;
+
+  const anonOrPublishableKey = normalizeSupabaseSecret(
+    config.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY || ''
+  );
+  const serviceRoleKey = normalizeSupabaseSecret(
+    config.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+  );
+
+  if (serviceRoleKey && anonOrPublishableKey) {
+    return anonOrPublishableKey;
   }
+
+  if (anonOrPublishableKey && getSupabaseKeyDiagnostics(url, anonOrPublishableKey).jwtRole !== 'service_role') {
+    return anonOrPublishableKey;
+  }
+
   return '';
 }
 
