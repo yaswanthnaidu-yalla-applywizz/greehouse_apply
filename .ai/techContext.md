@@ -198,7 +198,7 @@ The dashboard's **▶ Start** button (header, next to refresh — rendered only 
 | ApplyWizz CA Mgmt | `https://applywizz-ca-management.vercel.app/api/ca/work-history` | Work history API |
 | Zoho Mail Reader | `https://zoho-mail-reader.onrender.com/` | OTP/email proof extraction |
 | ↳ REST (used by `zoho-connector.ts`) | `GET /api/zoho/ui/inbox?email=&limit=&start=` · `GET /api/zoho/ui/message?email=&accountId=&folderId=&messageId=` | Confirmation-email JSON |
-| ↳ Web UI (used by `zohoReader.ts`) | root `/` via Playwright | OTP lookup (login form → filter by email → "Read mails") |
+| ↳ Web UI (used by `zohoReader.ts`) | root `/` via Playwright | OTP lookup: **goto root + clear filter** each time, then filter by email → "Read mails". Empty user list → one `page.reload()` retry |
 
 **Zoho connector auth model:** mailbox access is **server-side OAuth per mailbox** — no client token or session cookie is sent, and none is returned (0 cookies is expected, not a bug). An unlinked mailbox responds `HTTP 400 {"error":"Mailbox not connected","hint":"Paste a Self Client code for this user first."}`. `ZOHO_CONNECTOR_USER` / `ZOHO_CONNECTOR_PASS` only drive the Playwright UI login, which is effectively cosmetic on this deployment.
 | OpenRouter | `https://openrouter.ai/api/v1` | LLM inference |

@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-15 (session end — main `31b830e`)_
+_Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step 1–8 logs + dashboard field filter)_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -59,12 +59,19 @@ _Last updated: 2026-09-15 (session end — main `31b830e`)_
 - [x] **Dashboard `.tsx` tree typechecks clean and stays that way** — 35 pre-existing errors fixed, `dashboard/tsconfig.json` added at root-equivalent strictness, and `npm run typecheck` chained to `npm run typecheck:dashboard`
 - [x] **Admin ▶ Start button for CSV ingestion** — `POST /api/admin/trigger-ingest-from-storage` is now admin-gated (`403` for non-admins, `409` while a run is in flight) and returns `202` with the pipeline running in the background; new `GET /api/admin/ingest-status` reports `{running, processedFile, message, error}`. Dashboard header has an `isAdminSession()`-gated **▶ Start** button that polls status every 5s, shows a banner for running/finished/failed, and refreshes candidate data when the run ends
 - [x] **Zoho OTP reader hardened** — verbose step-by-step logging across `zohoReader.ts` (navigation/login status, session cookies, search query, raw message list, per-email sender/subject/timestamp, active regex) and `zoho-connector.ts` (request URL, HTTP status, raw body before parsing, parsed message summary). New `isGreenhouseOtpEmail()` sender+subject+company gate runs before extraction; scan 3 → 15 rows; 10-min window; `parseZohoEmailTimestamp` unified with the confirmation path; `reason` field on failure. Verified live against AWL-31428 → `NgW4NT62`
+- [x] **Zoho OTP session reset** (`601d37d`) — `resetUiBeforeLookup` goto root + clear filter before each search; 0 user rows → one `page.reload()` retry
+- [x] **Operator dashboard title/favicon** (`b8b0276`) — title "Apply Wizz", `/full_logo.webp`
 - [x] **`EMAIL_UNVERIFIED` terminal status** — migration 013; poller after 10m timeout; dashboard badges + resubmit (`cf50a45`)
 - [x] **Supabase ingest credential resolution** — `supabaseKeyDiagnostics.ts`; prefer `service_role` JWT else `SUPABASE_SERVICE_ROLE_KEY` (incl. `sb_secret_`); normalize quoted/Bearer keys; ingest probes every key (`0d02593`); `GET /api/admin/supabase-storage-health` → `keyProbes`
 - [x] **Submission requeue hardening** — `EMAIL_PROOF_PENDING` in `IN_FLIGHT_STATUSES`; ignore PATCH `QUEUED` while in-flight; submit-response `persist: false`
 - [x] **Question cap 35 + `SKIPPED`** — `MAX_JOB_QUESTIONS` default 35; over-cap jobs upsert `SKIPPED` (migration 014); operator queue hides them
 - [x] **Form hydration from `fields_schema`** — empty `resolved_fields` filled from scanned templates (`applicationFieldHydration.ts`)
 - [x] **Tier 5 fail-closed + SMS skip** — LLM option mismatch / low confidence → `unresolved`; SMS/marketing opt-in always No at fill (`31b830e`)
+
+### Uncommitted (local — since `b8b0276`)
+- [ ] **`[Zoho] Step 1`–`8` logs** in `zohoReader.ts` plus 5s wait after user-list selector
+- [ ] **Dashboard field carousel** — identity + `unresolved`/`ai`/`manual`/`resume` only; submit still uses full `fields`
+- [ ] Removed `GET /api/candidates` totalJobs debug log in `src/server/index.ts`
 
 ### Beyond-V2-Docs Features (Already Shipped)
 - [x] Zoho Mail OTP auto-extraction (`zohoReader.ts`, `zoho-connector.ts`) — was V3 in docs
@@ -84,7 +91,7 @@ _Last updated: 2026-09-15 (session end — main `31b830e`)_
 |---|---|---|
 | Manager / COO analytics dashboard | Early build | `GET /dashboard` date-scoped client rollup; admins unfiltered across CAs |
 | Resolution engine — semantic/fuzzy improvement | Investigating | Tier 2+3 miss rate; approach not yet decided |
-| Email proof reliability | Awaiting live verification | OTP + confirmation filters + `EMAIL_UNVERIFIED` on `main`; 013 applied; not live-submitted yet |
+| Email proof / OTP reliability | Awaiting live verification | Reset+reload on `main` (`601d37d`); Step 1–8 logs uncommitted; 013 applied; no fresh Greenhouse OTP challenge yet |
 
 ---
 
@@ -113,8 +120,8 @@ _Last updated: 2026-09-15 (session end — main `31b830e`)_
 - **Gotcha — accept window is tied to the poller budget:** the connector accepts `submitted_at` → `+10min`, deliberately matching `emailProofPoller`'s 10min retry budget. If that budget changes, `WINDOW_MS` in `zoho-connector.ts` must change with it, or late confirmations silently end in `manual_review_needed`
 - **✅ FIXED — Zoho OTP false positives:** `fetchLatestOtp` now gates on sender + subject + company via `isGreenhouseOtpEmail()` **before** any regex runs, scans 15 messages (was 3), and returns `reason: 'no matching greenhouse OTP email found'` rather than falling through to unrelated mail. Two bugs were behind this: Pattern 2 (`\b[A-Za-z0-9]{8}\b`) lifted `jobs2web` from a PG&E job-alert, and on the real Greenhouse email it returned the candidate name `Akshitha` instead of `NgW4NT62`. Added Pattern 0 for Greenhouse's "Copy and paste this code … : CODE" wording (the label and code are separated by a clause, which the old adjacency-based Pattern 1 could not match) and tightened Pattern 2 to require a digit **and** a letter. Verified live against AWL-31428 → `NgW4NT62`. See observation 0002
 - **Gotcha — `extractOtpCode` is not safe standalone:** it is a pure extractor with a deliberately permissive last-resort pattern; an 8-char token like `jobs2web` is shape-indistinguishable from a real code. It must only ever be called on a message that has already passed `isGreenhouseOtpEmail()`
+- **✅ FIXED — Zoho OTP leftover filter / empty user list:** a reused Playwright page kept the previous email in the filter. `resetUiBeforeLookup` now goto-root + clear; empty list retries once with `page.reload()` (`601d37d`). See observation 0010
 - **Zoho Reader login is effectively a no-op:** connector inbox access is server-side OAuth per mailbox, not session-based — login yields **0 cookies** and no POST request, yet mail reading works. The post-login success check resolves via the *fallback* filter-input selector, so a failed login is not detectable. `ZOHO_CONNECTOR_USER` in `.env` currently holds a password-shaped value rather than an email (check `.env` directly) and nothing rejects it
-- **`fetchLatestOtp` timestamp parsing is weaker than the confirmation path:** it uses raw `Date.parse(whenText)` while `captureConfirmationEmailContent` uses `parseZohoEmailTimestamp` — relative formats ("Today, 11:25 AM") will not parse in the OTP path
 - **`zoho_connected_profiles` missing:** migration 011 is not applied on the current Supabase instance (`Could not find the table 'public.zoho_connected_profiles'`)
 - **Manager API in browser:** Opening `/api/manager/dashboard` without `Authorization: Bearer` always returns 401 — use **`/manager`** after operator sign-in
 - **Demo job scores:** Akshitha fixture jobs use scores 90–95; dashboard score filter (20–60) is bypassed for pinned demo IDs only
