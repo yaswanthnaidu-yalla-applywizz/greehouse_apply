@@ -20,6 +20,7 @@ import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { resolveTier5 } from './tier5LLM.js';
 import { upsertApplication } from '../db/applications.js';
+import { isOverQuestionCap, upsertSkippedOverQuestionCap } from '../db/skippedApplications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
 import type {
   ApplicationStatus,
@@ -287,7 +288,15 @@ export class AnswerResolver {
         if (!template) continue;
 
         const questionCount = template.fields?.length || 0;
-        if (questionCount >= config.MAX_JOB_QUESTIONS) {
+        const persistJobUrl = job.canonicalUrl || job.rawUrl || template.jobUrl;
+        if (isOverQuestionCap(questionCount)) {
+          try {
+            await upsertSkippedOverQuestionCap(seg.applywizzId, persistJobUrl, template, questionCount);
+          } catch (dbErr: any) {
+            console.warn(
+              `[Answer Resolver] ⚠️ Could not upsert SKIPPED candidate_applications for ${seg.applywizzId} ${persistJobUrl}: ${dbErr.message}`
+            );
+          }
           continue;
         }
 
@@ -297,7 +306,6 @@ export class AnswerResolver {
 
         // Persist resolved application record to Supabase (candidate_applications table)
         try {
-          const persistJobUrl = job.canonicalUrl || job.rawUrl || app.jobUrl;
           await upsertApplication({
             applywizz_id: app.applywizzId,
             job_url: persistJobUrl,

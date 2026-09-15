@@ -282,7 +282,8 @@ export type ApplicationStatus =
   | 'CAPTCHA_TIMEOUT'
   | 'CAPTCHA_REQUIRED'
   | 'EMAIL_PROOF_PENDING'
-  | 'EMAIL_UNVERIFIED';
+  | 'EMAIL_UNVERIFIED'
+  | 'SKIPPED';
 
 /**
  * Segregated candidate job queue item rendered in the operator dashboard.
