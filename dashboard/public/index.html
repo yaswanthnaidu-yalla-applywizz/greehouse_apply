@@ -1253,11 +1253,24 @@
         return filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
       }, [candidate, selectedApplywizzId]);
 
-      const handleJobSelect = (job) => {
+      const handleJobCardClick = (job) => {
         const jobKey = job.canonicalUrl || job.rawUrl;
         const currentStatus = job.status || 'READY_FOR_REVIEW';
+        const alreadyExpanded =
+          selectedJobUrl === jobKey ||
+          selectedJobUrl === job.rawUrl ||
+          selectedJobUrl === job.canonicalUrl;
+
+        if (alreadyExpanded) {
+          console.log(
+            `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → collapse (no submit)`
+          );
+          onSelectJob(null);
+          return;
+        }
+
         console.log(
-          `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → action taken: navigate`
+          `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → expand for review (no submit)`
         );
         onSelectJob(jobKey);
       };
@@ -1320,7 +1333,7 @@
                 <button
                   key={`${jobKey}-${idx}`}
                   type="button"
-                  onClick={() => handleJobSelect(job)}
+                  onClick={() => handleJobCardClick(job)}
                   className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
                     isSelected
                       ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
@@ -1570,7 +1583,6 @@
 
         console.log(`[Dashboard] Submit button clicked → triggers API (appId: ${appId})`);
         setIsSubmitting(true);
-        if (onStatusChange) onStatusChange('QUEUED');
         try {
           const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit`, {
             method: 'POST',
@@ -3055,13 +3067,8 @@
               jobs: candidateJobs,
             });
 
-            if (candidateJobs.length > 0) {
-              const firstJobUrl = candidateJobs[0].canonicalUrl || candidateJobs[0].rawUrl;
-              setSelectedJobUrl(firstJobUrl);
-            } else {
-              setSelectedJobUrl(null);
-              setApplication(null);
-            }
+            setSelectedJobUrl(null);
+            setApplication(null);
           } else if (res.status === 403) {
             console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} not accessible`);
             setCandidateDetail(null);
@@ -3121,9 +3128,12 @@
       }, []);
 
       useEffect(() => {
-        if (selectedCandidateId && selectedJobUrl) {
-          fetchJobApplication(selectedCandidateId, selectedJobUrl);
+        if (!selectedCandidateId || !selectedJobUrl) {
+          setApplication(null);
+          setIsLoadingApplication(false);
+          return;
         }
+        fetchJobApplication(selectedCandidateId, selectedJobUrl);
       }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
       useEffect(() => {
@@ -3734,9 +3744,16 @@
                       candidate={candidateDetail}
                       selectedApplywizzId={selectedCandidateId}
                       selectedJobUrl={selectedJobUrl}
-                      onSelectJob={(url) => setSelectedJobUrl(url)}
+                      onSelectJob={(url) => {
+                        setSelectedJobUrl(url);
+                        if (!url) {
+                          setApplication(null);
+                          setIsLoadingApplication(false);
+                        }
+                      }}
                     />
                     <FormRenderer
+                      key={selectedJobUrl || 'no-job'}
                       application={application}
                       isLoading={isLoadingApplication}
                       candidateName={candidateDetail.clientName}

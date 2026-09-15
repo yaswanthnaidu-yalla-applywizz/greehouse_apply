@@ -11,9 +11,52 @@ import fs from 'fs';
 import { chromium } from 'playwright';
 import { fillForm } from './formFiller.js';
 import type { ResolvedField } from '../types/index.js';
+import { akshithaApplications, AKSHITHA_APPLYWIZZ_ID } from '../dashboard/akshithaDemoFixtures.js';
+
+function getCliArg(name: string): string | undefined {
+  const prefix = `${name}=`;
+  const hit = process.argv.find((a) => a === name || a.startsWith(prefix));
+  if (!hit) return undefined;
+  if (hit.startsWith(prefix)) return hit.slice(prefix.length);
+  const idx = process.argv.indexOf(hit);
+  return process.argv[idx + 1];
+}
+
+const PROMETHEUS_SPONSORSHIP_FIELD = 'question_32545342003';
 
 async function main() {
-  const targetJobUrl = process.argv[2] || 'https://job-boards.greenhouse.io/pmg/jobs/8765658002?gh_src=lcrm1uib2us';
+  const candidateId = getCliArg('--candidate') || getCliArg('--applywizzId');
+  const maxJobsRaw = getCliArg('--maxJobs');
+  const jobUrlArg = getCliArg('--jobUrl');
+  const positionalUrl = process.argv[2]?.startsWith('http') ? process.argv[2] : undefined;
+
+  let targetJobUrl =
+    jobUrlArg ||
+    positionalUrl ||
+    'https://job-boards.greenhouse.io/pmg/jobs/8765658002?gh_src=lcrm1uib2us';
+  let resolvedFields: ResolvedField[] | null = null;
+  let applywizzId = 'my-resume';
+
+  if (candidateId === AKSHITHA_APPLYWIZZ_ID) {
+    applywizzId = AKSHITHA_APPLYWIZZ_ID;
+    const pool = jobUrlArg
+      ? akshithaApplications.filter((a) => a.jobUrl === jobUrlArg || a.jobUrl.includes(jobUrlArg))
+      : akshithaApplications;
+    let picked =
+      pool.find((a) =>
+        a.resolvedFields.some((f) => f.name === PROMETHEUS_SPONSORSHIP_FIELD)
+      ) || pool[0];
+    if (maxJobsRaw === '1' && !jobUrlArg) {
+      picked =
+        akshithaApplications.find((a) =>
+          a.resolvedFields.some((f) => f.name === PROMETHEUS_SPONSORSHIP_FIELD)
+        ) || picked;
+    }
+    targetJobUrl = picked.jobUrl;
+    resolvedFields = picked.resolvedFields;
+    console.log(`• Using AWL-31428 fixture: ${picked.companyName} — ${picked.jobTitle}`);
+  }
+
   const resumePath = path.resolve(process.cwd(), 'resumes/my-resume.pdf');
 
   console.log('================================================================');
@@ -27,13 +70,13 @@ async function main() {
   console.log(`• Resume PDF: ${resumePath}`);
   console.log('================================================================\n');
 
-  if (!fs.existsSync(resumePath)) {
+  if (!resolvedFields && !fs.existsSync(resumePath)) {
     console.error(`❌ Resume file not found at ${resumePath}`);
     process.exit(1);
   }
 
-  // Define candidate resolved answers mapped to the target job form
-  const resolvedFields: ResolvedField[] = [
+  // Define candidate resolved answers mapped to the target job form (Yaswanth PMG demo)
+  const yaswanthResolvedFields: ResolvedField[] = [
     {
       fieldId: 'first_name',
       name: 'first_name',
@@ -266,6 +309,10 @@ async function main() {
     },
   ];
 
+  if (!resolvedFields) {
+    resolvedFields = yaswanthResolvedFields;
+  }
+
   console.log('🌐 Launching Chromium browser in visible (headful) mode...');
   const browser = await chromium.launch({
     headless: false,
@@ -295,8 +342,8 @@ async function main() {
     console.log('📝 Starting automated form filling with human jitter (300ms - 800ms)...');
 
     const appRecord = {
-      id: 'yaswanth-demo-app',
-      applywizz_id: 'my-resume',
+      id: `${applywizzId}-dry-run`,
+      applywizz_id: applywizzId,
       job_url: targetJobUrl,
       status: 'READY_FOR_REVIEW' as const,
       resolved_fields: resolvedFields,
@@ -313,7 +360,12 @@ async function main() {
     console.log('================================================================');
     console.log('📸 Capturing screenshot of filled form...');
     
-    const screenshotPath = path.resolve(process.cwd(), 'output/user_application_headful.png');
+    const screenshotPath = path.resolve(
+      process.cwd(),
+      applywizzId === AKSHITHA_APPLYWIZZ_ID
+        ? 'output/awl31428_prometheus_dryrun.png'
+        : 'output/user_application_headful.png'
+    );
     await page.screenshot({ fullPage: true, path: screenshotPath });
     console.log(`🖼️ Screenshot saved to: ${screenshotPath}`);
 

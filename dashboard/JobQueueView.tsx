@@ -24,8 +24,8 @@ export interface JobQueueViewProps {
   selectedApplywizzId: string | null;
   /** Currently selected job canonical or raw URL */
   selectedJobUrl: string | null;
-  /** Callback fired when an operator selects a job tab */
-  onSelectJob: (jobUrl: string) => void;
+  /** Expand/collapse job for review only — never starts submit/dry-run */
+  onSelectJob: (jobUrl: string | null) => void;
 }
 
 type CandidateJob = CandidateDetail['jobs'][number];
@@ -42,11 +42,24 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
     }
     return filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
   }, [candidate, selectedApplywizzId]);
-  const handleJobSelect = (job: CandidateJob) => {
+  const handleJobCardClick = (job: CandidateJob) => {
     const jobKey = job.canonicalUrl || job.rawUrl;
     const currentStatus = job.status || 'READY_FOR_REVIEW';
+    const alreadyExpanded =
+      selectedJobUrl === jobKey ||
+      selectedJobUrl === job.rawUrl ||
+      selectedJobUrl === job.canonicalUrl;
+
+    if (alreadyExpanded) {
+      console.log(
+        `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → collapse (no submit)`
+      );
+      onSelectJob(null);
+      return;
+    }
+
     console.log(
-      `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → action taken: navigate`
+      `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → expand for review (no submit)`
     );
     onSelectJob(jobKey);
   };
@@ -117,7 +130,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             <button
               key={`${jobKey}-${idx}`}
               type="button"
-              onClick={() => handleJobSelect(job)}
+              onClick={() => handleJobCardClick(job)}
               className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
                 isSelected
                   ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'

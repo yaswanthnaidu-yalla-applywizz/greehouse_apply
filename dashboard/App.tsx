@@ -451,13 +451,8 @@ export const App: React.FC = () => {
           jobs: candidateJobs,
         });
 
-        if (candidateJobs.length > 0) {
-          const firstJobUrl = candidateJobs[0].canonicalUrl || candidateJobs[0].rawUrl;
-          setSelectedJobUrl(firstJobUrl);
-        } else {
-          setSelectedJobUrl(null);
-          setApplication(null);
-        }
+        setSelectedJobUrl(null);
+        setApplication(null);
       } else if (res.status === 403) {
         console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} not accessible`);
         setCandidateDetail(null);
@@ -521,9 +516,12 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (selectedCandidateId && selectedJobUrl) {
-      fetchJobApplication(selectedCandidateId, selectedJobUrl);
+    if (!selectedCandidateId || !selectedJobUrl) {
+      setApplication(null);
+      setIsLoadingApplication(false);
+      return;
     }
+    fetchJobApplication(selectedCandidateId, selectedJobUrl);
   }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
   const handleRealtimeApplicationRow = useCallback(
@@ -1116,11 +1114,18 @@ export const App: React.FC = () => {
                   candidate={candidateDetail}
                   selectedApplywizzId={selectedCandidateId}
                   selectedJobUrl={selectedJobUrl}
-                  onSelectJob={(url) => setSelectedJobUrl(url)}
+                  onSelectJob={(url) => {
+                    setSelectedJobUrl(url);
+                    if (!url) {
+                      setApplication(null);
+                      setIsLoadingApplication(false);
+                    }
+                  }}
                 />
 
                 {/* Right Main: Form Renderer */}
                 <FormRenderer
+                  key={selectedJobUrl || 'no-job'}
                   application={application}
                   isLoading={isLoadingApplication}
                   candidateName={candidateDetail.clientName}
