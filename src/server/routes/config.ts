@@ -4,7 +4,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import config from '../../config/env.js';
-import { isSupabaseConfigured } from '../../db/client.js';
+import { isSupabaseConfigured, resolveSupabaseAnonKey } from '../../db/client.js';
 
 export const configRouter = Router();
 
@@ -14,7 +14,7 @@ export const configRouter = Router();
  */
 configRouter.get('/supabase-realtime', (_req: Request, res: Response): void => {
   const url = (config.SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
-  const anonKey = (config.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  const anonKey = resolveSupabaseAnonKey();
 
   if (!isSupabaseConfigured() || !url || !anonKey) {
     res.json({ enabled: false });

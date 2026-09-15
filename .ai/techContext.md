@@ -106,7 +106,9 @@ Dashboard dry-run uses `POST /api/applications/:id/dry-run` → `dryRun.ts` (Sup
 ```env
 # Core — required
 SUPABASE_URL=
-SUPABASE_SERVICE_KEY=
+SUPABASE_SERVICE_KEY=              # Often anon/publishable on Railway; server prefers service_role from SUPABASE_SERVICE_ROLE_KEY when set
+SUPABASE_SERVICE_ROLE_KEY=         # Legacy service_role secret — used for DB/Storage when SERVICE_KEY is not service_role
+SUPABASE_ANON_KEY=                 # Optional; Realtime falls back to SERVICE_KEY when that JWT is anon
 APPLYWIZZ_API_URL=                    # ApplyWizz candidate profile endpoint
 
 # LLM — at least one required (based on LLM_PROVIDER)
@@ -182,7 +184,9 @@ There is **no** Supabase Storage webhook and **no** poller — a CSV appearing i
 | `POST /api/admin/trigger-ingest-from-storage` | Admin-only (`isUserAdmin`, 403 otherwise). `409` if a run is already in flight. Otherwise returns `202 {started, startedAt}` and runs `ingestCsvFromStorage()` in the background — the full pipeline takes minutes, so it must not be awaited in the request. |
 | `GET /api/admin/ingest-status` | Admin-only. Returns `{running, startedAt, finishedAt, processedCount, processedFile, message, error}` for the most recent run. |
 
-`SUPABASE_SERVICE_KEY` **must be the `service_role` secret**, not an anon/publishable key: an anon key still satisfies `isSupabaseConfigured()`, but every storage read comes back empty with no error, so ingestion cannot tell a misconfiguration from an empty dropzone. Ingestion now asserts `csv_uploads` is visible in `listBuckets()` first and fails with a named cause.
+On ingest, logs include `Credential identity: urlProjectRef=... | jwt.role=... | jwt.ref=... | urlRefMatch=...` (see `src/db/supabaseKeyDiagnostics.ts`) — never the raw key.
+
+The server resolves credentials via `resolveSupabaseCredentials()` in `src/db/client.ts`: if both `SUPABASE_SERVICE_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are set, the **`service_role` JWT wins** (typical Railway layout: anon in `SUPABASE_SERVICE_KEY`, role in `SUPABASE_SERVICE_ROLE_KEY`). Startup logs `[Server] Credential identity (SUPABASE_SERVICE_ROLE_KEY): … jwt.role=service_role …`. Admin probe: `GET /api/admin/supabase-storage-health`. An anon-only `SUPABASE_SERVICE_KEY` with no role key still makes `listBuckets()` look empty — ingestion fails loudly with JWT hints in the message.
 
 The dashboard's **▶ Start** button (header, next to refresh — rendered only under `isAdminSession()`) calls both: POST, then polls the status endpoint every 5s and reloads candidate data when the run ends. CLI equivalent: `npm run ingest:storage` (one-shot, exits when done). Run state lives in server memory, so a restart mid-run loses the status (the pipeline itself dies with the process too).
 
@@ -205,6 +209,7 @@ The dashboard's **▶ Start** button (header, next to refresh — rendered only 
 | Main entry / CLI | `src/index.ts` |
 | Env schema (Zod) | `src/config/env.ts` |
 | Supabase client | `src/db/client.ts` |
+| Supabase key diagnostics (ingest logs) | `src/db/supabaseKeyDiagnostics.ts` |
 | DB DDL | `src/db/schema.sql` |
 | Migrations dir | `src/db/migrations/` |
 | Form filler (largest file, 59KB) | `src/submitter/formFiller.ts` |

@@ -29,7 +29,8 @@ export type ApplicationStatus =
   | 'OTP_REQUIRED'
   | 'CAPTCHA_TIMEOUT'
   | 'CAPTCHA_REQUIRED'
-  | 'EMAIL_PROOF_PENDING';
+  | 'EMAIL_PROOF_PENDING'
+  | 'EMAIL_UNVERIFIED';
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
 

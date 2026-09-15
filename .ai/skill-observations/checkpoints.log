@@ -12,3 +12,10 @@
 2026-09-15 deliverable flush: dashboard typecheck enforced (dashboard/tsconfig.json + chained script, positive control verified); docs updated
 2026-09-15 session end: .ai docs updated per AGENTS.md (activeContext focus/blockers/decisions, progress shipped + In Progress row, techContext commands + key files, systemPatterns submission rules)
 2026-09-15 session end: observations 0004 and 0005 logged; 0001-0003 unchanged (0001/0002 actioned today, archive tomorrow; 0003 open)
+2026-09-15 session-end catch-up: task-observer backlog — logged 0006 (Storage listBuckets credential blindness), 0007 actioned (no auto ingest trigger); prior turn updated AGENTS.md docs only without observation flush
+2026-09-15 session-start scan: files=7 parsed=7
+2026-09-15 session-start scan: files=8 parsed=8
+2026-09-15 session end: docs updated (activeContext, progress, systemPatterns, techContext); observations 0006 and 0008 actioned; uncommitted work since 37bab44 documented
+2026-09-15 session-start scan: files=8 parsed=8 (context-load session)
+2026-09-15 session-start scan: files=8 parsed=8
+2026-09-15 session-start scan: files=8 parsed=8

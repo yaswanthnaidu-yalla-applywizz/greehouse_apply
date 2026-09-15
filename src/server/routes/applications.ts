@@ -39,6 +39,7 @@ const IN_FLIGHT_STATUSES = new Set<ApplicationStatus>([
   'APPLYING',
   'OTP_REQUIRED',
   'CAPTCHA_REQUIRED',
+  'EMAIL_PROOF_PENDING',
 ]);
 
 /**
@@ -264,8 +265,8 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     const resolvedEmailProofAttemptedAt = email_proof_attempted_at !== undefined ? email_proof_attempted_at : emailProofAttemptedAt;
 
     let effectiveStatus = status as ApplicationStatus;
-    if (status === 'APPLYING') {
-      const currentStatus = (application?.status || '') as ApplicationStatus;
+    const currentStatus = (application?.status || '') as ApplicationStatus;
+    if (status === 'QUEUED' || status === 'APPLYING') {
       if (IN_FLIGHT_STATUSES.has(currentStatus)) {
         // The dashboard echoes the status it polled, which would otherwise requeue a
         // submission a worker is still running (duplicate submissions).
@@ -273,9 +274,13 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
           `[API] Skipping requeue for ${targetAppId} — already in flight (${currentStatus})`
         );
         effectiveStatus = currentStatus;
-      } else {
+      } else if (status === 'APPLYING') {
         console.log(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
         effectiveStatus = 'QUEUED';
+      } else {
+        // Direct PATCH with QUEUED outside submit endpoint: preserve currentStatus unless operator re-submits
+        console.log(`[API] Direct PATCH with status=QUEUED ignored for ${targetAppId} (use /submit)`);
+        effectiveStatus = currentStatus || 'READY_FOR_REVIEW';
       }
     }
     console.log(`[API] Status → ${effectiveStatus} (PATCH /applications/${appId})`);

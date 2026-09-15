@@ -126,7 +126,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     currentStatus === 'APPLYING' ||
     currentStatus === 'QUEUED' ||
     currentStatus === 'OTP_REQUIRED' ||
-    currentStatus === 'CAPTCHA_REQUIRED';
+    currentStatus === 'CAPTCHA_REQUIRED' ||
+    currentStatus === 'EMAIL_PROOF_PENDING';
   const badgeStatus: ApplicationStatus | string =
     currentStatus === 'OTP_REQUIRED' ||
     currentStatus === 'CAPTCHA_REQUIRED'
@@ -134,7 +135,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       : currentStatus;
 
   useEffect(() => {
-    if (currentStatus === 'APPLIED' || currentStatus === 'FAILED') {
+    if (currentStatus === 'APPLIED' || currentStatus === 'FAILED' || currentStatus === 'EMAIL_UNVERIFIED') {
       setIsSubmitting(false);
     }
   }, [currentStatus]);
@@ -288,7 +289,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           onStatusChange('FAILED', {
             ...data,
             error: data.error || data.error_message || 'Submit request failed',
-          });
+          }, { persist: false });
         }
         setIsSubmitting(false);
         return;
@@ -297,7 +298,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       if (data.status === 'APPLIED') {
         const { proofWebUrl, proofCapturedAt } = await resolveProofFromSubmitResponse(data);
         if (onStatusChange) {
-          onStatusChange('APPLIED', { ...data, proofWebUrl, proofCapturedAt });
+          onStatusChange('APPLIED', { ...data, proofWebUrl, proofCapturedAt }, { persist: false });
         }
         if (proofWebUrl) {
           setViewerImageUrl(proofWebUrl);
@@ -309,12 +310,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       }
 
       if (onStatusChange) {
-        onStatusChange((data.status || 'QUEUED') as ApplicationStatus, data);
+        onStatusChange((data.status || 'QUEUED') as ApplicationStatus, data, { persist: false });
       }
     } catch (err: any) {
       console.error('Submission failed:', err);
       if (onStatusChange) {
-        onStatusChange('FAILED', { error: err.message });
+        onStatusChange('FAILED', { error: err.message }, { persist: false });
       }
       setIsSubmitting(false);
     }

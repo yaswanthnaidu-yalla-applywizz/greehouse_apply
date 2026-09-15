@@ -73,7 +73,8 @@ interface RawZohoMessageResponse {
 const GREENHOUSE_PROOF_SENDER = 'greenhouse-mail.io';
 
 /** Subject shapes that identify an application confirmation email. */
-const CONFIRMATION_SUBJECT_PATTERN = /thank you|application received|application confirmed/i;
+const CONFIRMATION_SUBJECT_PATTERN =
+  /thank you|application received|application confirmed|journey.*started|application.*submitted|received.*application/i;
 
 /** Subject shapes that identify an OTP / security-code email — never valid proof. */
 const OTP_SUBJECT_PATTERN = /security code|\botp\b|one[-\s]?time (pass)?code/i;
@@ -250,13 +251,11 @@ export async function queryZohoConfirmationEmail(
         continue;
       }
 
-      // 2. Sender + subject gate: Greenhouse confirmation mail only
+      // 2. Sender gate: Greenhouse proof mail only
       if (!fromAddress.includes(GREENHOUSE_PROOF_SENDER)) {
         continue;
       }
-      if (!CONFIRMATION_SUBJECT_PATTERN.test(subject)) {
-        continue;
-      }
+      const matchesConfirmationPattern = CONFIRMATION_SUBJECT_PATTERN.test(subject);
 
       // 3. Strict Timestamp Filter: at or after submission, within 10 minutes
       const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
@@ -282,7 +281,8 @@ export async function queryZohoConfirmationEmail(
 
       const isCompanyMatch = fromContainsCompanyEmail || subjectContainsCompanyName || fromContainsCompanyName;
 
-      if (isCompanyMatch) {
+      // Accept if company matches AND either confirmation pattern matches or subject contains company name
+      if (isCompanyMatch && (matchesConfirmationPattern || subjectContainsCompanyName)) {
         matchingMsg = msg;
         matchingReceivedMs = receivedMs;
         break;

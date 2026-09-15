@@ -58,6 +58,7 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
       status === 'QUEUED' ||
       status === 'OTP_REQUIRED' ||
       status === 'CAPTCHA_REQUIRED' ||
+      status === 'EMAIL_PROOF_PENDING' ||
       status === 'FAILED';
     const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
     if ((!shouldPollStatus && !shouldPollEmailProof) || !applicationId) {
@@ -134,6 +135,28 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         >
           <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
           <span>Submitting... (Live)</span>
+        </span>
+      );
+
+    case 'EMAIL_PROOF_PENDING':
+      return (
+        <span
+          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
+          title="Web submission confirmed — verifying confirmation email..."
+        >
+          <span className="w-2 h-2 rounded-full border-2 border-[#0369A1] border-t-transparent animate-spin"></span>
+          <span>Email Pending...</span>
+        </span>
+      );
+
+    case 'EMAIL_UNVERIFIED':
+      return (
+        <span
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          title="Email Unverified: Form submitted on website with proof screenshot; thank-you email was not verified"
+        >
+          <span className="w-2 h-2 rounded-full bg-[#D97706]"></span>
+          <span>Email Unverified</span>
         </span>
       );
 

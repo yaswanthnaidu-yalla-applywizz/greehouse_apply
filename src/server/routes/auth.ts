@@ -10,7 +10,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
+import { getDbClient, getSupabaseServerApiKey, isSupabaseConfigured } from '../../db/client.js';
 import { config } from '../../config/env.js';
 import { sendOtpEmail } from '../../services/azureEmail.js';
 import { checkOtpCooldown, generateAndStoreOtp, verifyStoredOtp } from '../../services/otpStore.js';
@@ -405,7 +405,7 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
     const enrollRes = await fetch(`${config.SUPABASE_URL}/auth/v1/factors`, {
       method: 'POST',
       headers: {
-        apikey: config.SUPABASE_SERVICE_KEY || '',
+        apikey: getSupabaseServerApiKey(),
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
@@ -558,7 +558,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     const challengeRes = await fetch(`${config.SUPABASE_URL}/auth/v1/factors/${verifiedTotp.id}/challenge`, {
       method: 'POST',
       headers: {
-        apikey: config.SUPABASE_SERVICE_KEY || '',
+        apikey: getSupabaseServerApiKey(),
         Authorization: `Bearer ${tempToken}`,
         'Content-Type': 'application/json',
       },
@@ -577,7 +577,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     const verifyRes = await fetch(`${config.SUPABASE_URL}/auth/v1/factors/${verifiedTotp.id}/verify`, {
       method: 'POST',
       headers: {
-        apikey: config.SUPABASE_SERVICE_KEY || '',
+        apikey: getSupabaseServerApiKey(),
         Authorization: `Bearer ${tempToken}`,
         'Content-Type': 'application/json',
       },
@@ -651,7 +651,7 @@ authRouter.post('/mfa/enroll', async (req: Request, res: Response): Promise<void
     const enrollRes = await fetch(`${config.SUPABASE_URL}/auth/v1/factors`, {
       method: 'POST',
       headers: {
-        apikey: config.SUPABASE_SERVICE_KEY || '',
+        apikey: getSupabaseServerApiKey(),
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
@@ -708,7 +708,7 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
     const challengeRes = await fetch(`${config.SUPABASE_URL}/auth/v1/factors/${factorId}/challenge`, {
       method: 'POST',
       headers: {
-        apikey: config.SUPABASE_SERVICE_KEY || '',
+        apikey: getSupabaseServerApiKey(),
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
@@ -727,7 +727,7 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
     const verifyRes = await fetch(`${config.SUPABASE_URL}/auth/v1/factors/${factorId}/verify`, {
       method: 'POST',
       headers: {
-        apikey: config.SUPABASE_SERVICE_KEY || '',
+        apikey: getSupabaseServerApiKey(),
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
