@@ -63,6 +63,9 @@ const envSchema = z.object({
   /** Allow admin/CLI cooperative pipeline stop (also enabled when NODE_ENV=development) */
   ENABLE_PIPELINE_STOP: z.coerce.boolean().default(false),
 
+  /** Per-URL scan + per-field resolution logs (default: compact pipeline summaries only) */
+  PIPELINE_VERBOSE: z.coerce.boolean().default(false),
+
   /** JWT Secret for backend session verification */
   JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
 

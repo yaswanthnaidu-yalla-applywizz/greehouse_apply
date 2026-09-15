@@ -170,6 +170,7 @@ OPENROUTER_HTTP_REFERER=https://apply-wizz.me
 # Railway deployment
 RAILWAY_ENV=true                      # Disables headful mode, caps memory
 ENABLE_PIPELINE_STOP=false            # Allow admin ⏹ Stop + CLI SIGINT (also auto-on when NODE_ENV=development)
+PIPELINE_VERBOSE=false                # Per-URL scan + per-field resolve logs; default is one summary line per phase/candidate
 ```
 
 ## Deployment

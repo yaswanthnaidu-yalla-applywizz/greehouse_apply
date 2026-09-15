@@ -23,6 +23,7 @@ import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
 import { config } from '../config/env.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import {
   isPipelineAbortedError,
   isPipelineStopEnabled,
@@ -80,7 +81,9 @@ export async function listPendingDropzoneCsvs(): Promise<{
     const listNames = (listed || []).map((f) => f.name).filter(Boolean);
     const line = `${candidate.source}: jwt.role=${diag.jwtRole ?? 'unknown'} keyShape=${diag.keyShape} urlRefMatch=${diag.urlRefMatch} entries=${listNames.length} names=${listNames.join(',') || '(none)'}${listError ? ` error=${listError.message}` : ''}`;
     probeLines.push(line);
-    log.info(`[Storage CSV Ingestion] Probe ${line}`);
+    if (!isPipelineCompactLogging()) {
+      log.info(`[Storage CSV Ingestion] Probe ${line}`);
+    }
 
     const fromList = (listed || [])
       .filter((f) => isPendingCsvObjectName(f.name || ''))
@@ -113,16 +116,21 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
 
   const { url: supabaseUrl, serviceKey: rawServiceKey, serviceKeySource } = resolveSupabaseCredentials();
   const keyDiag = getSupabaseKeyDiagnostics(supabaseUrl, rawServiceKey);
-  log.info(
-    `[Storage CSV Ingestion] Credential identity (${serviceKeySource ?? 'unknown'}): ${keyDiag.summary}`
-  );
+  const compact = isPipelineCompactLogging();
+  if (!compact) {
+    log.info(
+      `[Storage CSV Ingestion] Credential identity (${serviceKeySource ?? 'unknown'}): ${keyDiag.summary}`
+    );
+  }
   if (keyDiag.keyHadSurroundingWhitespace) {
     log.warn(
       '[Storage CSV Ingestion] SUPABASE_SERVICE_KEY has leading/trailing whitespace — trim the value in Railway.'
     );
   }
 
-  log.info(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
+  if (!compact) {
+    log.info(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
+  }
 
   const { files: pendingCsvFiles, source, probeLines } = await listPendingDropzoneCsvs();
 
@@ -150,7 +158,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
   const supabase = getDbClient();
   const targetFile = pendingCsvFiles[0];
   log.info(
-    `[Storage CSV Ingestion] 📥 Found pending file via ${source}: "${targetFile.name}". Downloading...`
+    `[Storage CSV Ingestion] ingest file="${targetFile.name}" source=${source} bucket=${CSV_UPLOADS_BUCKET}`
   );
 
   // Download from Supabase Storage
@@ -170,7 +178,9 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
   const sanitizedName = path.basename(targetFile.name).replace(/[^a-zA-Z0-9._-]/g, '_');
   const tempFilePath = path.join(os.tmpdir(), `csv_dropzone_${Date.now()}_${sanitizedName}`);
   fs.writeFileSync(tempFilePath, buffer);
-  log.info(`[Storage CSV Ingestion] 💾 Saved temp CSV to: ${tempFilePath} (${(buffer.length / 1024).toFixed(1)} KB)`);
+  if (!compact) {
+    log.info(`[Storage CSV Ingestion] 💾 Saved temp CSV to: ${tempFilePath} (${(buffer.length / 1024).toFixed(1)} KB)`);
+  }
 
   let pipelineResult: PipelineResult | undefined;
   try {
@@ -195,7 +205,10 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
       throw pipelineErr;
     }
 
-    log.info(`[Storage CSV Ingestion] ✅ Pipeline completed successfully for ${targetFile.name}.`);
+    const pr = pipelineResult;
+    log.info(
+      `[Storage CSV Ingestion] pipeline complete file="${targetFile.name}" candidates=${pr?.uniqueCandidates ?? '?'} urls=${pr?.uniqueUrls ?? '?'} applications=${pr?.resolvedApplications ?? '?'} duration_ms=${pr?.durationMs ?? '?'} status=${pr?.status ?? '?'}`
+    );
 
     // Move processed CSV to archive folder in Supabase Storage
     const archiveDest = `archive/${Date.now()}_${sanitizedName}`;
@@ -206,7 +219,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     if (moveError) {
       log.warn(`[Storage CSV Ingestion] ⚠️ Warning: Could not move file to ${archiveDest}: ${moveError.message}`);
     } else {
-      log.info(`[Storage CSV Ingestion] 📦 Archived storage file to: ${archiveDest}`);
+      if (!compact) log.info(`[Storage CSV Ingestion] 📦 Archived storage file to: ${archiveDest}`);
     }
 
     return {
@@ -222,7 +235,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     try {
       if (fs.existsSync(tempFilePath)) {
         fs.unlinkSync(tempFilePath);
-        log.info(`[Storage CSV Ingestion] 🧹 Cleaned up temp file: ${tempFilePath}`);
+        if (!compact) log.info(`[Storage CSV Ingestion] 🧹 Cleaned up temp file: ${tempFilePath}`);
       }
     } catch (cleanupErr: any) {
       log.warn(`[Storage CSV Ingestion] ⚠️ Could not remove temp file: ${cleanupErr.message}`);

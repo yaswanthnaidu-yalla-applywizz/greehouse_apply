@@ -18,6 +18,7 @@ import { upsertTemplate } from '../db/templates.js';
 import { isSupabaseConfigured } from '../db/client.js';
 import type { ScannedJobTemplate } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
+import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 
 const log = createLogger('Export Scanned Jobs');
 
@@ -77,14 +78,18 @@ export async function exportScannedJobs(
   const jsonPath = path.join(resolvedDir, 'scanned_jobs.json');
   const csvPath = path.join(resolvedDir, 'scanned_jobs.csv');
 
-  log.info(`[Export Scanned Jobs] 💾 Writing scanned job outputs to: ${resolvedDir}`);
+  const compact = isPipelineCompactLogging();
 
   // 1. Write Full Structured JSON
   const jsonContent = JSON.stringify(templates, null, 2);
   await fs.promises.writeFile(jsonPath, jsonContent, 'utf-8');
   const jsonStats = fs.statSync(jsonPath);
-  log.info(`[Export Scanned Jobs] ✅ JSON written: ${jsonPath} (${(jsonStats.size / 1024).toFixed(1)} KB)`);
+  if (!compact) {
+    log.info(`[Export Scanned Jobs] 💾 Writing scanned job outputs to: ${resolvedDir}`);
+    log.info(`[Export Scanned Jobs] ✅ JSON written: ${jsonPath} (${(jsonStats.size / 1024).toFixed(1)} KB)`);
+  }
 
+  let dbTemplatesPersisted = 0;
   if (isSupabaseConfigured() && templates.length > 0) {
     let persisted = 0;
     for (const template of templates) {
@@ -104,9 +109,12 @@ export async function exportScannedJobs(
         );
       }
     }
-    log.info(
-      `[Export Scanned Jobs] ✅ Upserted ${persisted}/${templates.length} templates to scanned_job_templates (fields_schema)`
-    );
+    dbTemplatesPersisted = persisted;
+    if (!compact) {
+      log.info(
+        `[Export Scanned Jobs] ✅ Upserted ${persisted}/${templates.length} templates to scanned_job_templates (fields_schema)`
+      );
+    }
   }
 
   // 2. Flatten Templates to CSV Rows
@@ -160,7 +168,17 @@ export async function exportScannedJobs(
   });
 
   const csvStats = fs.statSync(csvPath);
-  log.info(`[Export Scanned Jobs] ✅ CSV written: ${csvPath} (${csvRows.length.toLocaleString()} rows, ${(csvStats.size / 1024).toFixed(1)} KB)`);
+  if (compact) {
+    const persistedNote =
+      isSupabaseConfigured() && templates.length > 0 ? ` db_templates=${dbTemplatesPersisted}/${templates.length}` : '';
+    log.info(
+      `[Export Scanned Jobs] export jobs=${templates.length} field_rows=${csvRows.length.toLocaleString()} json_kb=${(jsonStats.size / 1024).toFixed(1)} csv_kb=${(csvStats.size / 1024).toFixed(1)}${persistedNote}`
+    );
+  } else {
+    log.info(
+      `[Export Scanned Jobs] ✅ CSV written: ${csvPath} (${csvRows.length.toLocaleString()} rows, ${(csvStats.size / 1024).toFixed(1)} KB)`
+    );
+  }
 
   return {
     jsonPath,
