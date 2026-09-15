@@ -9,7 +9,7 @@
  * 5. Extracts the alphanumeric OTP and returns it for auto-filling
  */
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
 import { config } from '../config/env.js';
 import type { EmailProofJson } from '../db/applications.js';
 
@@ -397,6 +397,67 @@ class ZohoReaderService {
   }
 
   /**
+   * Reloads the connector root so leftover filter text / selected mailbox
+   * from the previous lookup cannot bleed into this search.
+   */
+  private async resetUiBeforeLookup(email: string): Promise<void> {
+    if (!this.page || this.page.isClosed()) {
+      throw new Error('Zoho Reader page is unavailable.');
+    }
+
+    const rootUrl = config.ZOHO_CONNECTOR_URL;
+    console.log(`[Zoho Reader] 🔄 Session reset before lookup for ${email}`);
+    await this.page.goto(rootUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000,
+    });
+    await this.page.waitForSelector('input[placeholder*="Filter by email"]', { timeout: 20000 });
+
+    const filterInput = this.page.locator('#search, input[placeholder*="Filter by email" i]').first();
+    await filterInput.waitFor({ state: 'visible', timeout: 10000 });
+    await filterInput.click({ clickCount: 3 }).catch(() => {});
+    await filterInput.fill('');
+    const leftover = await filterInput.inputValue().catch(() => '');
+    if (leftover) {
+      await filterInput.press('Control+A').catch(() => {});
+      await this.page.keyboard.press('Backspace').catch(() => {});
+    }
+  }
+
+  private async typeEmailFilter(normalizedEmail: string): Promise<void> {
+    if (!this.page || this.page.isClosed()) {
+      throw new Error('Zoho Reader page is unavailable.');
+    }
+    const filterInput = this.page.locator('#search, input[placeholder*="Filter by email" i]').first();
+    await filterInput.waitFor({ state: 'visible', timeout: 10000 });
+    await filterInput.click({ clickCount: 3 }).catch(() => {});
+    await filterInput.fill('');
+    console.log(`[Zoho Reader] 🔎 Search query sent to filter input: "${normalizedEmail}"`);
+    await filterInput.fill(normalizedEmail);
+    await this.page.waitForTimeout(500);
+  }
+
+  /** Exact email row, then prefix-before-@ — null when the users list is empty. */
+  private async findCandidateUserRow(
+    normalizedEmail: string
+  ): Promise<{ locator: Locator } | null> {
+    if (!this.page || this.page.isClosed()) {
+      throw new Error('Zoho Reader page is unavailable.');
+    }
+    const candidateItem = this.page.locator(`text="${normalizedEmail}"`).first();
+    const count = await candidateItem.count();
+    console.log(`[Zoho Reader] 🔎 Exact-match user rows for "${normalizedEmail}": ${count}`);
+    if (count > 0) return { locator: candidateItem };
+
+    const prefix = normalizedEmail.split('@')[0];
+    const partialItem = this.page.locator(`text="${prefix}"`).first();
+    const partialCount = await partialItem.count();
+    console.log(`[Zoho Reader] 🔎 Falling back to prefix search "${prefix}" → ${partialCount} rows`);
+    if (partialCount > 0) return { locator: partialItem };
+    return null;
+  }
+
+  /**
    * Fetches the latest OTP for a candidate by reading emails in Zoho Reader.
    *
    * @param candidateEmail - Candidate's company email (e.g. `user@applywizard.ai`)
@@ -430,9 +491,10 @@ class ZohoReaderService {
         throw new Error('Zoho Reader page is unavailable.');
       }
 
+      await this.resetUiBeforeLookup(normalizedEmail);
+
       console.log(`[Zoho Reader] 🔍 Looking up inbox for candidate: ${normalizedEmail}`);
 
-      // Confirm the authenticated session survived from login into this search call
       const searchCookies = (await this.context?.cookies().catch(() => [])) || [];
       console.log(
         `[Zoho Reader] 🍪 Auth state at search time | url: ${this.page.url()} | cookies (${searchCookies.length}): ${
@@ -440,31 +502,20 @@ class ZohoReaderService {
         }`
       );
 
-      // 1. Filter by email in the search input
-      const filterInput = this.page.locator('#search, input[placeholder*="Filter by email" i]').first();
-      await filterInput.waitFor({ state: 'visible', timeout: 10000 });
-      await filterInput.fill('');
-      console.log(`[Zoho Reader] 🔎 Search query sent to filter input: "${normalizedEmail}"`);
-      await filterInput.fill(normalizedEmail);
-      await this.page.waitForTimeout(500);
-
-      // 2. Select the candidate row in the left users list
-      const candidateItem = this.page.locator(`text="${normalizedEmail}"`).first();
-      const count = await candidateItem.count();
-      console.log(`[Zoho Reader] 🔎 Exact-match user rows for "${normalizedEmail}": ${count}`);
-      if (count === 0) {
-        // Check partial match before '@'
-        const prefix = normalizedEmail.split('@')[0];
-        const partialItem = this.page.locator(`text="${prefix}"`).first();
-        const partialCount = await partialItem.count();
-        console.log(`[Zoho Reader] 🔎 Falling back to prefix search "${prefix}" → ${partialCount} rows`);
-        if (partialCount === 0) {
+      // 1–2. Filter by email and select the candidate row
+      await this.typeEmailFilter(normalizedEmail);
+      let userRow = await this.findCandidateUserRow(normalizedEmail);
+      if (!userRow) {
+        console.log('[Zoho Reader] ⚠️ Zero rows after reset — retrying with full reload.');
+        await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+        await this.page.waitForSelector('input[placeholder*="Filter by email"]', { timeout: 20000 });
+        await this.typeEmailFilter(normalizedEmail);
+        userRow = await this.findCandidateUserRow(normalizedEmail);
+        if (!userRow) {
           throw new Error(`Candidate email '${normalizedEmail}' not found in Zoho users list.`);
         }
-        await partialItem.click();
-      } else {
-        await candidateItem.click();
       }
+      await userRow.locator.click();
 
       // Confirmed ~5s for the connector to load the selected user's mailbox
       console.log('[Zoho Reader] ⌛ Waiting 5s for user mailbox to load...');
