@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     email TEXT,                                          -- Legacy contact email (prefer company_email)
     company_email TEXT,                                  -- ApplyWizz company email (always used for forms)
     phone TEXT,
+    country TEXT,                                        -- Residential country (e.g. "India", "United States of America")
+    country_code TEXT,                                   -- Phone calling code (e.g. "+91", "+1")
     location TEXT,
     linkedin_url TEXT,
     website_url TEXT,

@@ -212,8 +212,37 @@
           return;
         }
         setTab('system');
-        setIngestRun({ running: true, startedAt: payload.startedAt });
+        setIngestRun({ running: true, startedAt: payload.startedAt, stopEnabled: true });
       };
+
+      const handleStop = async () => {
+        const res = await fetch('/api/admin/stop-ingest', { method: 'POST', headers: ApplyWizzRoles.getAuthHeaders() });
+        const payload = await res.json();
+        if (!res.ok) {
+          setError(payload.error || 'Unable to stop ingest');
+          return;
+        }
+        setIngestRun((prev) => ({ ...(prev || {}), ...payload, running: true }));
+      };
+
+      useEffect(() => {
+        if (!ingestRun?.running || !token) return;
+        let cancelled = false;
+        const poll = async () => {
+          try {
+            const status = await loadJson('/api/admin/ingest-status');
+            if (!cancelled) setIngestRun(status);
+          } catch (_) {
+            /* ignore poll errors */
+          }
+        };
+        poll();
+        const interval = setInterval(poll, 3000);
+        return () => {
+          cancelled = true;
+          clearInterval(interval);
+        };
+      }, [ingestRun?.running, token]);
 
       if (!token || access.reason === 'anon') {
         return (
@@ -248,6 +277,9 @@
                 </label>
                 <button type="button" onClick={refresh} className="bg-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
                 <button type="button" onClick={handleStart} disabled={Boolean(ingestRun?.running)} className="bg-[#9AC89A] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded disabled:opacity-60">{ingestRun?.running ? 'Running…' : '▶ Start'}</button>
+                {ingestRun?.running && ingestRun?.stopEnabled ? (
+                  <button type="button" onClick={handleStop} className="bg-[#FECACA] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">⏹ Stop</button>
+                ) : null}
                 <HeaderSignOut />
               </div>
             </header>

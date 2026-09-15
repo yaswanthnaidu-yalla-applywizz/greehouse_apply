@@ -1,6 +1,6 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (session — ingest `haltWithDevAlert`)_
+_Last updated: 2026-09-15 (session — profiles.country missing on live schema)_
 
 ## Current Focus (Active Sprint)
 
@@ -12,9 +12,10 @@ _Last updated: 2026-09-15 (session — ingest `haltWithDevAlert`)_
 
 ### 1. CSV ingest FK — no `profiles` row before application upsert
 - **Symptom:** `upsertApplication` ERROR `candidate_applications_applywizz_id_fkey` (e.g. AWL-39218 Fanatics)
-- **Cause:** Phase C skips IDs not already in `profiles` (Rule 1 / not Zoho-connected). `ensureApplicationRowsFromCsv` then upserts **every** CSV pair with `syncProfiles: false`, so Postgres rejects the child row
-- **Fix (this session):** Phase C calls `ensureSupabaseProfile` — missing IDs are detected via `hasSupabaseProfile` (not local `getProfile`), fetched from ApplyWizz, upserted to `profiles`. Verified 9/9 in `tests/ensureSupabaseProfile.test.ts`. New rows default `zoho_connected=false`, so the candidate may still be skipped for resolve; the parent row is created so application upserts no longer FK-fail
-- Status: **code ready, not committed** — re-run ▶ Start / ingest; look for `has no profiles row — fetching ApplyWizz profile` then either `profiles row was created` or a successful sync
+- **Cause (original):** Phase C skipped IDs not already in `profiles`. `ensureApplicationRowsFromCsv` then upserted every CSV pair with `syncProfiles: false`
+- **Cause (2026-09-15 logs):** ApplyWizz fetch succeeds, then `upsertProfile` fails: `Could not find the 'country' column of 'profiles' in the schema cache`. Code writes `country`/`country_code`; `schema.sql` and every migration through 015 never added them. `upsertProfile` swallows the error and writes local JSON, so `hasSupabaseProfile` stays false → skip `ApplyWizz profile was not written to Supabase profiles` (AWL-39777, AWL-39218, AWL-36146, …)
+- **Fix:** Phase C `ensureSupabaseProfile` (already in tree) + migration **016** (`country`, `country_code`) + `upsertProfile` / profile patches retry by stripping any column PostgREST reports missing from the `profiles` schema cache (not country-only)
+- Status: **shipped on main (pending deploy)** — apply `src/db/migrations/016_profiles_country.sql` in Supabase SQL Editor, then re-run ▶ Start so country persists (creates work even before 016 via schema-cache column stripping)
 
 ### 2. Role-based Admin / Manager / Dev dashboards
 - Migration **015 applied** on Supabase (`audit_events` + `application_events` + service_role RLS). Activity/audit/debugger can fill from here
@@ -62,7 +63,7 @@ _Last updated: 2026-09-15 (session — ingest `haltWithDevAlert`)_
 - App logo: square AW mark at `dashboard/public/logo.webp` (favicon + header/auth); `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
 
 ## Immediate Blockers / Open Questions
-- [ ] **AWL-39218 FK after ingest** — code fix ready (profile-first upsert). Re-run ingest after deploy to confirm ApplyWizz returns a profile and a `profiles` row is written. If ApplyWizz 404s, applications stay skipped (correct)
+- [ ] **AWL-39218 / new-profile create** — ApplyWizz fetch works; Supabase insert dies on missing `profiles.country`. Apply migration **016**, deploy the upsert retry, re-run ingest. Confirm `upsertProfile wrote … without country` goes away after 016, and skipped IDs become `created`
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
 - [x] **Migration 015** — operator applied 2026-09-15 (`audit_events` + `application_events` + service_role RLS)
 - [ ] Semantic search: choose approach (embeddings vs fuzzy tuning) before implementation

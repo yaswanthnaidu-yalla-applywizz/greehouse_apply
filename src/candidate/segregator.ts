@@ -22,6 +22,7 @@ import { ensureApplicationRowsForSegment } from '../db/ensureCandidateApplicatio
 import { ensureSupabaseProfile } from './ensureSupabaseProfile.js';
 import type { CandidateSegment } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 
 const log = createLogger('Segregator');
 
@@ -418,6 +419,7 @@ export async function segregateCandidatesByApplyWizzId(
 
     const worker = async () => {
       while (queue.length > 0) {
+        throwIfPipelineAborted('Candidate profile sync');
         const id = queue.shift();
         if (!id) break;
 

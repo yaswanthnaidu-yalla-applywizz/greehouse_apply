@@ -36,6 +36,11 @@ import { wsManager } from './ws.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
 import { requireRole, requireRoleIfAuthenticated } from './routes/requireRole.js';
 import { getIngestRun, registerQueueDaemon, setIngestRun } from './runtimeState.js';
+import {
+  isPipelineStopEnabled,
+  requestPipelineAbort,
+  resetPipelineAbort,
+} from '../orchestrator/pipelineAbort.js';
 import { insertAuditEvent } from '../db/events.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.js';
 import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
@@ -584,6 +589,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     const startedAt = new Date().toISOString();
+    resetPipelineAbort();
     setIngestRun({ running: true, startedAt });
     const actorEmail = getAuthenticatedCaEmail(req) || (req.user as { email?: string } | undefined)?.email || '';
     void insertAuditEvent({
@@ -610,11 +616,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         processedFile: result.processedFile,
         // A failed run reports through `message`; surface it as an error so the
         // dashboard does not show a misconfiguration as a calm "nothing to do".
-        message: result.success ? result.message : undefined,
+        message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
         error: result.success ? undefined : result.message,
       });
       log.info(
-        `[Admin] ${result.success ? '✅' : '❌'} Storage CSV ingestion finished: ${result.message}`
+        `[Admin] ${result.success ? '✅' : result.aborted ? '⏹️' : '❌'} Storage CSV ingestion finished: ${result.message}`
       );
     } catch (err: any) {
       const message = err.message || 'Storage ingestion failed';
@@ -625,7 +631,33 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         error: message,
       });
       log.error('[Admin] ❌ Storage CSV ingestion failed:', err);
+    } finally {
+      resetPipelineAbort();
     }
+  });
+
+  /**
+   * POST /api/admin/stop-ingest
+   * Requests cooperative stop of the in-flight storage CSV pipeline (dev only).
+   */
+  app.post('/api/admin/stop-ingest', (req: AuthenticatedRequest, res: Response) => {
+    if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
+      res.status(403).json({ error: 'Forbidden: only admins can stop the pipeline.' });
+      return;
+    }
+    if (!isPipelineStopEnabled()) {
+      res.status(403).json({
+        error: 'Pipeline stop is disabled. Set NODE_ENV=development or ENABLE_PIPELINE_STOP=true.',
+      });
+      return;
+    }
+    if (!getIngestRun().running) {
+      res.status(409).json({ error: 'No ingestion run is in progress.', ...getIngestRun() });
+      return;
+    }
+    requestPipelineAbort();
+    log.warn('[Admin] ⏹️ Storage CSV ingestion stop requested by operator');
+    res.json({ stopping: true, ...getIngestRun() });
   });
 
   /**
@@ -637,7 +669,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
       return;
     }
-    res.json(getIngestRun());
+    res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
   });
 
   /**
