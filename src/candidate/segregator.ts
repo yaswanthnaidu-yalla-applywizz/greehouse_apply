@@ -18,7 +18,7 @@ import { config } from '../config/env.js';
 import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
 import { profileRowToCandidateProfile, upsertProfile, getProfile, updateResumeStoragePath } from '../db/profiles.js';
-import { upsertApplication } from '../db/applications.js';
+import { ensureApplicationRowsForSegment } from '../db/ensureCandidateApplicationRows.js';
 import { uploadResume } from '../db/storage.js';
 import type { CandidateSegment } from '../types/index.js';
 
@@ -171,27 +171,6 @@ export function parseCsvJobRow(
   };
 }
 
-async function persistCandidateApplicationRows(segment: CandidateSegment): Promise<number> {
-  let created = 0;
-  for (const job of segment.jobs) {
-    try {
-      await upsertApplication({
-        applywizz_id: segment.applywizzId,
-        job_url: job.canonicalUrl,
-        company_name: segment.clientName || segment.applywizzId,
-        status: 'READY_FOR_REVIEW',
-        resolved_fields: [],
-      });
-      created++;
-    } catch (err: any) {
-      console.warn(
-        `[Segregator] ⚠️ Could not upsert candidate_applications for ${segment.applywizzId} ${job.canonicalUrl}: ${err.message}`
-      );
-    }
-  }
-  return created;
-}
-
 /**
  * Options configuring candidate segregation and profile synchronization.
  */
@@ -247,6 +226,11 @@ export interface SegregatorOptions {
    * Progress update callback.
    */
   onProgress?: (stats: { processedCandidates: number; totalCandidates: number; totalJobs: number }) => void;
+
+  /**
+   * When true with syncProfiles=false: upsert candidate_applications from CSV without requiring profile/Zoho sync.
+   */
+  applicationRowsFromCsvOnly?: boolean;
 }
 
 /**
@@ -274,6 +258,7 @@ export async function segregateCandidatesByApplyWizzId(
     client = new ApplyWizzClient(),
     candidateId,
     onProgress,
+    applicationRowsFromCsvOnly = false,
   } = options;
 
   if (!fs.existsSync(csvPath)) {
@@ -539,24 +524,50 @@ export async function segregateCandidatesByApplyWizzId(
   }
 
   // Remove candidates that could not be loaded from Supabase/cache or were not Zoho-connected.
-  for (const [id, segment] of Array.from(segmentsMap.entries())) {
-    if (!segment.profile) {
-      segmentsMap.delete(id);
-      console.log(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
+  if (syncProfiles && !applicationRowsFromCsvOnly) {
+    for (const [id, segment] of Array.from(segmentsMap.entries())) {
+      if (!segment.profile) {
+        segmentsMap.delete(id);
+        console.log(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
+      }
     }
   }
 
+  let applicationJobsAttempted = 0;
   let applicationRowsUpserted = 0;
+  let applicationSkippedOverCap = 0;
+  let applicationUpsertFailed = 0;
   for (const segment of segmentsMap.values()) {
-    applicationRowsUpserted += await persistCandidateApplicationRows(segment);
+    const rowResult = await ensureApplicationRowsForSegment(segment);
+    applicationJobsAttempted += rowResult.attempted;
+    applicationRowsUpserted += rowResult.upserted;
+    applicationSkippedOverCap += rowResult.skippedOverCap;
+    applicationUpsertFailed += rowResult.failed;
   }
-  if (applicationRowsUpserted > 0) {
+  if (applicationJobsAttempted > 0) {
     console.log(
-      `[Segregator] 💾 Upserted ${applicationRowsUpserted} candidate_applications row(s) for Zoho-connected candidates.`
+      `[Segregator] 💾 candidate_applications: attempted=${applicationJobsAttempted} upserted=${applicationRowsUpserted} ` +
+        `skippedOverCap=${applicationSkippedOverCap} failed=${applicationUpsertFailed} (CSV jobs → DB rows for Zoho-connected candidates)`
     );
   }
 
   return segmentsMap;
+}
+
+/**
+ * Upserts candidate_applications for every CSV (applywizz_id, job_url) without profile sync.
+ * Call after scan so scanned_job_templates metadata is available for enrichment.
+ */
+export async function ensureApplicationRowsFromCsv(
+  csvPath: string,
+  options: Pick<SegregatorOptions, 'limit' | 'maxJobsPerCandidate' | 'candidateId'> = {}
+): Promise<Map<string, CandidateSegment>> {
+  return segregateCandidatesByApplyWizzId(csvPath, {
+    ...options,
+    syncProfiles: false,
+    downloadResumes: false,
+    applicationRowsFromCsvOnly: true,
+  });
 }
 
 /**

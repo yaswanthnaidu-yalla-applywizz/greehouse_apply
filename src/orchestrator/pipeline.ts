@@ -20,7 +20,11 @@ import { config } from '../config/env.js';
 import { readAndDeduplicateUrls } from '../scanner/csvDeduplicator.js';
 import { PlaywrightScanner } from '../scanner/playwrightScanner.js';
 import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
-import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
+import {
+  segregateCandidatesByApplyWizzId,
+  exportCandidateSegments,
+  ensureApplicationRowsFromCsv,
+} from '../candidate/segregator.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
 import type {
   CandidateJobApplication,
@@ -186,6 +190,15 @@ export class V1Pipeline {
     } catch (err: any) {
       console.error(`[Pipeline Phase C] ❌ Failed during candidate sync: ${err.message}`);
       throw err;
+    }
+
+    // Post-segregator safety net: every CSV job row → candidate_applications (templates now in DB from Phase B).
+    try {
+      await ensureApplicationRowsFromCsv(resolvedCsvPath, {
+        limit: options.limit,
+      });
+    } catch (err: any) {
+      console.warn(`[Pipeline Phase C] ⚠️ ensureApplicationRowsFromCsv: ${err.message}`);
     }
 
     // -------------------------------------------------------------

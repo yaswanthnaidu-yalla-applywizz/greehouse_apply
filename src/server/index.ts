@@ -50,6 +50,7 @@ import {
   upsertApplication,
   serializeApplicationDto,
   hydrateAndPersistApplicationFields,
+  countNonSkippedApplicationsByApplywizzIds,
   type ApplicationRow,
 } from '../db/applications.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
@@ -808,6 +809,21 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       candidateSummaries = candidateSummaries.filter((c) =>
         connectedIds.has(c.applywizzId.trim().toUpperCase())
       );
+
+      const queueCounts = await countNonSkippedApplicationsByApplywizzIds(
+        candidateSummaries.map((c) => c.applywizzId)
+      );
+      candidateSummaries = candidateSummaries.map((summary) => {
+        const dbTotal = queueCounts.get(summary.applywizzId.trim().toUpperCase());
+        if (dbTotal === undefined) {
+          return summary;
+        }
+        return { ...summary, totalJobs: dbTotal };
+      });
+      console.log(
+        `[API] GET /api/candidates totalJobs source=candidate_applications status!=SKIPPED ` +
+          `candidates=${candidateSummaries.length} withDbCounts=${queueCounts.size}`
+      );
     }
 
     if (isAdmin) {
@@ -1131,7 +1147,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
+    // Queue source: candidate_applications only (no SQL join to scanned_job_templates).
+    // Template company/title enrichment is done in the dashboard via Supabase client on scanned_job_templates.
     let jobs: Array<Record<string, unknown>> = [];
+    let dbRowCount = 0;
+    let skippedCaAssignment = 0;
 
     if (isSupabaseConfigured()) {
       const { data, error } = await getDbClient()
@@ -1143,9 +1163,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         res.status(500).json({ error: error.message });
         return;
       }
+      dbRowCount = (data || []).length;
       for (const application of data || []) {
         if (!isAdmin && userEmail && application.assigned_ca_email &&
             application.assigned_ca_email.trim().toLowerCase() !== userEmail.trim().toLowerCase()) {
+          skippedCaAssignment++;
           continue;
         }
         jobs.push({
@@ -1160,6 +1182,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
+    const afterCaFilter = jobs.length;
     const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);
     if (pinnedDemo && isAdmin) {
       jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
@@ -1178,7 +1201,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     console.log(
-      `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) → filtered to ${jobs.length} jobs`
+      `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) ` +
+        `source=candidate_applications_only dbRows=${dbRowCount} skippedCaAssignment=${skippedCaAssignment} ` +
+        `afterCaFilter=${afterCaFilter} responseJobs=${jobs.length}`
     );
     res.json({ applywizzId, jobs });
   });
