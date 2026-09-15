@@ -33,6 +33,7 @@ import {
 } from '../../services/workHistoryClient.js';
 import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
+import { applicationRowHasPersistedResolution } from '../../dashboard/candidateQueueFilter.js';
 
 const log = createLogger('Applications');
 
@@ -556,6 +557,7 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         return;
       }
       applications = (data || []).filter((app: any) => {
+        if (!applicationRowHasPersistedResolution(app)) return false;
         if (!isAdmin && userEmail && app.assigned_ca_email) {
           return app.assigned_ca_email.trim().toLowerCase() === userEmail.trim().toLowerCase();
         }
@@ -613,6 +615,11 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
 
     if (!app) {
       res.status(404).json({ error: `Application '${appId}' not found.` });
+      return;
+    }
+
+    if (!applicationRowHasPersistedResolution(app)) {
+      res.status(404).json({ error: `Application '${appId}' is not yet resolved.` });
       return;
     }
 

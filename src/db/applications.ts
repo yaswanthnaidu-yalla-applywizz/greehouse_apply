@@ -18,6 +18,7 @@ import {
   isApplicationUuid,
 } from './storage.js';
 import { createLogger } from '../utils/logger.js';
+import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 
 const log = createLogger('Applications');
 
@@ -1084,7 +1085,7 @@ export async function listApplications(filter?: {
 }
 
 /**
- * Count candidate_applications per applywizz_id, excluding SKIPPED (dashboard queue size).
+ * Count candidate_applications per applywizz_id, excluding SKIPPED and unresolved placeholders (dashboard queue size).
  */
 export async function countNonSkippedApplicationsByApplywizzIds(
   applywizzIds: string[]
@@ -1100,11 +1101,12 @@ export async function countNonSkippedApplicationsByApplywizzIds(
       const supabase = getDbClient();
       const { data, error } = await supabase
         .from('candidate_applications')
-        .select('applywizz_id, status')
+        .select('applywizz_id, status, resolved_fields')
         .in('applywizz_id', ids);
       if (!error && data) {
         for (const row of data) {
           if (row.status === 'SKIPPED') continue;
+          if (!applicationRowHasPersistedResolution(row)) continue;
           const key = String(row.applywizz_id || '').trim().toUpperCase();
           if (!key) continue;
           counts.set(key, (counts.get(key) || 0) + 1);
@@ -1118,6 +1120,7 @@ export async function countNonSkippedApplicationsByApplywizzIds(
 
   for (const app of memoryApplications.values()) {
     if (app.status === 'SKIPPED') continue;
+    if (!applicationRowHasPersistedResolution(app)) continue;
     const key = app.applywizz_id.trim().toUpperCase();
     if (!ids.some((id) => id.toUpperCase() === key)) continue;
     counts.set(key, (counts.get(key) || 0) + 1);

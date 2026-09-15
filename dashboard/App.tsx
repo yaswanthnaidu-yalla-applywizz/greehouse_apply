@@ -29,6 +29,7 @@ import {
 } from '../src/dashboard/applicationRealtimeMerge.js';
 import {
   filterJobsForCandidate,
+  filterOperatorApplicationJobs,
   isSameApplywizzId,
   normalizeApplywizzId,
 } from '../src/dashboard/candidateQueueFilter.js';
@@ -393,7 +394,9 @@ export const App: React.FC = () => {
         const rawJobs: CandidateDetail['jobs'] = Array.isArray(jobsPayload?.jobs)
           ? jobsPayload.jobs
           : [];
-        const candidateJobs = filterJobsForCandidate(rawJobs, requestedId);
+        const candidateJobs = filterOperatorApplicationJobs(
+          filterJobsForCandidate(rawJobs, requestedId)
+        );
         setCandidateDetail({
           ...detail,
           applywizzId: requestedId,

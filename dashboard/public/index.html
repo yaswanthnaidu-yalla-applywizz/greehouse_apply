@@ -1278,7 +1278,7 @@
           return [];
         }
         const owned = filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
-        return excludeSkippedApplicationJobs(owned);
+        return filterOperatorApplicationJobs(owned);
       }, [candidate, selectedApplywizzId]);
 
       const handleJobCardClick = (job) => {
@@ -2638,6 +2638,21 @@
       return jobs.filter((job) => (job.status || '').toUpperCase() !== 'SKIPPED');
     }
 
+    function applicationRowHasPersistedResolution(row) {
+      const fields = row.resolved_fields ?? row.resolvedFields;
+      if (Array.isArray(fields) && fields.length > 0) return true;
+      return typeof row.fieldsCount === 'number' && row.fieldsCount > 0;
+    }
+
+    function excludeUnresolvedApplicationJobs(jobs) {
+      if (!Array.isArray(jobs)) return [];
+      return jobs.filter((job) => applicationRowHasPersistedResolution(job));
+    }
+
+    function filterOperatorApplicationJobs(jobs) {
+      return excludeUnresolvedApplicationJobs(excludeSkippedApplicationJobs(jobs));
+    }
+
     function isSkippedApplicationStatus(status) {
       return (status || '').toUpperCase() === 'SKIPPED';
     }
@@ -2653,7 +2668,7 @@
 
       const { data, error } = await client
         .from('candidate_applications')
-        .select('applywizz_id, status')
+        .select('applywizz_id, status, resolved_fields')
         .in('applywizz_id', ids);
 
       if (error) {
@@ -2674,6 +2689,7 @@
       for (const id of ids) counts.set(normalizeApplywizzId(id), 0);
       for (const row of data) {
         if (isSkippedApplicationStatus(row.status)) continue;
+        if (!applicationRowHasPersistedResolution(row)) continue;
         const key = normalizeApplywizzId(row.applywizz_id);
         if (!counts.has(key)) continue;
         counts.set(key, counts.get(key) + 1);
@@ -2688,7 +2704,7 @@
 
     function withQueueJobCount(candidates, applywizzId, jobs) {
       if (!Array.isArray(candidates) || !applywizzId) return candidates;
-      const liveCount = excludeSkippedApplicationJobs(
+      const liveCount = filterOperatorApplicationJobs(
         filterJobsForCandidate(jobs || [], applywizzId)
       ).length;
       return candidates.map((c) =>
@@ -3328,7 +3344,9 @@
             }
 
             const rawJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
-            const candidateJobs = filterJobsForCandidate(rawJobs, requestedId);
+            const candidateJobs = filterOperatorApplicationJobs(
+              filterJobsForCandidate(rawJobs, requestedId)
+            );
             const jobsWithTemplates = await enrichJobsWithScannedTemplates(
               candidateJobs,
               getAuthHeaders()
