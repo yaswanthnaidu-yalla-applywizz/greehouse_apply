@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-15 (operator applied migration 015; 7-day sessions + email-map /dev on `7def1bb`; open 0003/0005/0011/0012)_
+_Last updated: 2026-09-15 (session — ingest `haltWithDevAlert` for systemic failures)_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -74,7 +74,7 @@ _Last updated: 2026-09-15 (operator applied migration 015; 7-day sessions + emai
 
 - [x] **Central logger** — `src/utils/logger.ts`; all `src/` `console.log`/`warn`/`error` → `createLogger`; `[ISO] [LEVEL] [MODULE] message`
 - [x] **AW app logo** — `dashboard/public/logo.webp` as favicon + header/auth/manager mark; `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
-- [x] **Role-based dashboards** (`2d268a3` / `7def1bb`) — Admin `/admin`, Manager `/manager`, Dev `/dev`; email-map role (dev is not admin); Sign Out on every header; 7-day refresh sessions; migration 015 applied on Supabase
+- [x] **Dev ApplyWizz health ping** (`7f91c59`) — `get-client-details` without an id returns HTTP 400; that counts as reachable. Timeouts / 5xx still error
 
 ### Beyond-V2-Docs Features (Already Shipped)
 - [x] Zoho Mail OTP auto-extraction (`zohoReader.ts`, `zoho-connector.ts`) — was V3 in docs
@@ -92,7 +92,8 @@ _Last updated: 2026-09-15 (operator applied migration 015; 7-day sessions + emai
 
 | Item | Status | Notes |
 |---|---|---|
-| Manager / COO analytics dashboard | On `main` (`7def1bb`) | Client table home + Operators/Activity/Reports; team scoping off until CA-manager email map exists; 015 applied |
+| Ingest `haltWithDevAlert` | Code ready, not committed | Systemic only: Playwright launch, Supabase, ApplyWizz 5xx/timeout, missing table, first LLM call, bad CSV. Per-job / CAPTCHA / OTP stay WARN |
+| Manager / COO analytics dashboard | On `main` (`7f91c59`) | Client table home + Operators/Activity/Reports; team scoping off; 015 applied; ApplyWizz health 400 = reachable |
 | Resolution engine — semantic/fuzzy improvement | Investigating | Tier 2+3 miss rate; approach not yet decided |
 | Email proof / OTP reliability | Awaiting live verification | Reset+reload on `main` (`601d37d`); Step 1–8 logs on `main` (`8a44cf2`); 013 applied; no fresh Greenhouse OTP challenge yet |
 
@@ -111,6 +112,7 @@ _Last updated: 2026-09-15 (operator applied migration 015; 7-day sessions + emai
 ---
 
 ## Known Bugs / Gotchas
+- **✅ FIXED (code, not yet committed) — `candidate_applications` FK after CSV ingest:** `ensureApplicationRowsFromCsv` upserted every CSV pair even when Phase C never wrote `profiles` (new ID / Rule 1 blocked API). Postgres `candidate_applications_applywizz_id_fkey` failed (AWL-39218 Fanatics). Ingest/pipeline now fetches missing ApplyWizz profiles; application upserts skip unless `hasSupabaseProfile` is true
 - **✅ FIXED — CSV uploads to Storage never started the pipeline:** there was no webhook, no Realtime listener, no DB trigger and no poller; `ingestCsvFromStorage` was reachable only via the one-shot `npm run ingest:storage` CLI and an admin route the dashboard never called. Now admin-driven via the **▶ Start** button on `/admin`.
 - **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** anon/publishable keys get `[]` with no error from `listBuckets()` and `from(bucket).list()`. Ingest probes every configured key (`0d02593`), logs `jwt.role` + names, fails if all lists are empty. Local `service_role` JWT sees `test(Sheet1).csv`. **Railway still reports entries=0** — process keys are not a Storage-capable `service_role` JWT
 - **Gotcha — env vars set ≠ Storage can list:** `SUPABASE_SERVICE_KEY` = publishable and `SUPABASE_SERVICE_ROLE_KEY` = `sb_secret_` (or another anon) still yields empty lists. Need the legacy `eyJ…` `service_role` secret. Decode `role` from ingest `Probe` lines. Project ref: `dpwhgwdsfqzfwxlwvchp`

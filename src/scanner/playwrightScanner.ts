@@ -22,7 +22,7 @@ import type {
   ScannedFieldType,
   ScannedJobTemplate,
 } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 
 const log = createLogger('Playwright Scanner');
 
@@ -223,16 +223,24 @@ export class PlaywrightScanner {
     let browser: Browser | null = null;
 
     try {
-      browser = await chromium.launch({
-        headless: this.headless,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-        ],
-      });
+      try {
+        browser = await chromium.launch({
+          headless: this.headless,
+          args: [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+          ],
+        });
+      } catch (launchErr) {
+        haltWithDevAlert(
+          'Scanner',
+          'Playwright failed to launch — check RAILWAY_ENV and browser binary',
+          launchErr
+        );
+      }
 
       const workerTasks: Promise<void>[] = [];
       const poolSize = Math.min(this.workerPoolSize, total);

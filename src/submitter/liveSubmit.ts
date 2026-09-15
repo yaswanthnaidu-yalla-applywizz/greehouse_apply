@@ -39,7 +39,7 @@ import {
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
 import { zohoReader } from '../services/zohoReader.js';
 import { config } from '../config/env.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 
 const log = createLogger('Live Submit');
 
@@ -683,16 +683,25 @@ export async function switchToHeadfulMode(
   const appliedHeadfulAt = Date.now();
   const isHeadless = options.headless !== undefined ? options.headless : false;
 
-  const newBrowser = await chromium.launch({
-    headless: isHeadless,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
-  });
+  let newBrowser: Browser;
+  try {
+    newBrowser = await chromium.launch({
+      headless: isHeadless,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
+    });
+  } catch (launchErr) {
+    haltWithDevAlert(
+      'Scanner',
+      'Playwright failed to launch — check RAILWAY_ENV and browser binary',
+      launchErr
+    );
+  }
 
   const context = await newBrowser.newContext({
     userAgent:
@@ -1308,16 +1317,24 @@ export async function runLiveSubmit(
 
   try {
     // 2. Launch headless browser with anti-detection flags (strictly headless; never headful)
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
+    try {
+      browser = await chromium.launch({
+        headless: true,
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
+      });
+    } catch (launchErr) {
+      haltWithDevAlert(
+        'Scanner',
+        'Playwright failed to launch — check RAILWAY_ENV and browser binary',
+        launchErr
+      );
+    }
 
     context = await browser.newContext({
       userAgent:

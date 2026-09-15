@@ -17,11 +17,11 @@ import * as fastCsv from 'fast-csv';
 import { config } from '../config/env.js';
 import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
-import { profileRowToCandidateProfile, upsertProfile, getProfile, updateResumeStoragePath } from '../db/profiles.js';
+import { profileRowToCandidateProfile } from '../db/profiles.js';
 import { ensureApplicationRowsForSegment } from '../db/ensureCandidateApplicationRows.js';
-import { uploadResume } from '../db/storage.js';
+import { ensureSupabaseProfile } from './ensureSupabaseProfile.js';
 import type { CandidateSegment } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 
 const log = createLogger('Segregator');
 
@@ -278,12 +278,14 @@ export async function segregateCandidatesByApplyWizzId(
   let skippedInvalidRows = 0;
   let droppedScoreRows = 0;
 
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve) => {
     const stream = fs.createReadStream(csvPath);
 
     fastCsv
       .parseStream(stream, { headers: true, trim: true, ignoreEmpty: true })
-      .on('error', (err) => reject(new Error(`Failed to parse CSV: ${err.message}`)))
+      .on('error', (err) => {
+        haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed', err);
+      })
       .on('data', (row: Record<string, string>) => {
         rowCount++;
 
@@ -368,6 +370,18 @@ export async function segregateCandidatesByApplyWizzId(
       .on('end', () => resolve());
   });
 
+  if (rowCount === 0 || csvFormat === 'UNKNOWN') {
+    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+  }
+  if (
+    segmentsMap.size === 0 &&
+    skippedInvalidRows > 0 &&
+    droppedScoreRows === 0 &&
+    !candidateId
+  ) {
+    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+  }
+
   if (skippedUnknownFormatRows > 0) {
     log.warn(
       `[Segregator] Skipped ${skippedUnknownFormatRows.toLocaleString()} row(s): unknown CSV format.`
@@ -411,94 +425,35 @@ export async function segregateCandidatesByApplyWizzId(
         if (!segment) continue;
 
         try {
-          // Check Supabase first — zero network requests for existing candidates
-          const existingProfile = await getProfile(id);
-          if (existingProfile) {
-            if (!existingProfile.zoho_connected) {
-              segmentsMap.delete(id);
-              log.info(`[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)`);
-              continue;
-            }
+          const ensured = await ensureSupabaseProfile(id, {
+            allowOutboundApi,
+            downloadResumes,
+            client,
+          });
 
-            segment.profile = profileRowToCandidateProfile(existingProfile);
-            if (existingProfile.client_name && existingProfile.client_name !== id) {
-              segment.clientName = existingProfile.client_name;
-            }
-            fromSupabase++;
-          } else {
+          if (ensured.status === 'skipped' || ensured.status === 'failed' || !ensured.profile) {
             segmentsMap.delete(id);
-            log.info(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
-
-            const isCached = client.isProfileCached(id);
-            if (!isCached && !allowOutboundApi) {
-              log.info(
-                `[Candidate Ingestion] ⚠️ Candidate ${id} not found in Supabase or local cache. Skipping unapproved outbound API request per Rule 1.`
-              );
-              continue;
-            }
-
-            // ONLY for candidates in local cache or allowed
             log.info(
-              `[Candidate Ingestion] ℹ️ Candidate ${id} profile lookup (checking cache first)...`
+              `[Segregator] ⛔ Skipping candidate ${id} (${ensured.reason || ensured.status})`
             );
-            const { profile, raw } = await client.fetchCandidateProfileWithRaw(id, false);
-            segment.profile = profile;
+            continue;
+          }
 
-            if (profile.clientName && profile.clientName !== id) {
-              segment.clientName = profile.clientName;
-            }
+          if (ensured.status === 'created') fromApi++;
+          else fromSupabase++;
 
-            let resumeStoragePath: string | null = null;
-            if (downloadResumes && profile.resumeUrl) {
-              const localPath = await client.downloadResume(id, profile.resumeUrl);
-              try {
-                if (fs.existsSync(localPath) && fs.statSync(localPath).size > 100) {
-                  const buffer = await fs.promises.readFile(localPath);
-                  resumeStoragePath = await uploadResume(id, buffer);
-                }
-              } catch (uploadErr: any) {
-                log.warn(
-                  `[Candidate Ingestion] ⚠️ Could not upload resume for ${id} to Supabase Storage: ${uploadErr.message}`
-                );
-              }
-            }
+          if (!ensured.profile.zoho_connected) {
+            segmentsMap.delete(id);
+            log.info(
+              `[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)` +
+                (ensured.status === 'created' ? ' — profiles row was created' : '')
+            );
+            continue;
+          }
 
-            try {
-              await upsertProfile({
-                applywizz_id: profile.applywizzId,
-                client_name: profile.clientName || id,
-                first_name: profile.firstName || null,
-                last_name: profile.lastName || null,
-                company_email: profile.email || null,
-                email: profile.email || null,
-                phone: profile.phone || null,
-                country: profile.country || null,
-                country_code: profile.countryCode || null,
-                location: profile.location || null,
-                linkedin_url: profile.linkedinUrl || null,
-                website_url: profile.websiteUrl || null,
-                github_url: profile.githubUrl || null,
-                work_authorization: profile.workAuthorization || null,
-                requires_sponsorship: Boolean(profile.requiresSponsorship),
-                education: profile.education || [],
-                work_experience: profile.workExperience || [],
-                resume_url: profile.resumeUrl || null,
-                resume_storage_path: resumeStoragePath,
-                raw_api_payload: {
-                  ...raw,
-                  demographics: profile.demographics || raw.demographics,
-                },
-                last_api_fetch_at: new Date().toISOString(),
-              });
-              if (resumeStoragePath) {
-                await updateResumeStoragePath(id, resumeStoragePath);
-              }
-            } catch (dbErr: any) {
-              log.warn(
-                `[Candidate Ingestion] ⚠️ Could not upsert new candidate profile ${id} to Supabase: ${dbErr.message}`
-              );
-            }
-            fromApi++;
+          segment.profile = profileRowToCandidateProfile(ensured.profile);
+          if (ensured.profile.client_name && ensured.profile.client_name !== id) {
+            segment.clientName = ensured.profile.client_name;
           }
         } catch (err: any) {
           log.warn(`[Candidate Segregator] ⚠️ Failed to sync candidate ${id}: ${err.message}. Skipping profile sync.`);
@@ -539,18 +494,21 @@ export async function segregateCandidatesByApplyWizzId(
   let applicationJobsAttempted = 0;
   let applicationRowsUpserted = 0;
   let applicationSkippedOverCap = 0;
+  let applicationSkippedNoProfile = 0;
   let applicationUpsertFailed = 0;
   for (const segment of segmentsMap.values()) {
     const rowResult = await ensureApplicationRowsForSegment(segment);
     applicationJobsAttempted += rowResult.attempted;
     applicationRowsUpserted += rowResult.upserted;
     applicationSkippedOverCap += rowResult.skippedOverCap;
+    applicationSkippedNoProfile += rowResult.skippedNoProfile;
     applicationUpsertFailed += rowResult.failed;
   }
   if (applicationJobsAttempted > 0) {
     log.info(
       `[Segregator] 💾 candidate_applications: attempted=${applicationJobsAttempted} upserted=${applicationRowsUpserted} ` +
-        `skippedOverCap=${applicationSkippedOverCap} failed=${applicationUpsertFailed} (CSV jobs → DB rows for Zoho-connected candidates)`
+        `skippedOverCap=${applicationSkippedOverCap} skippedNoProfile=${applicationSkippedNoProfile} ` +
+        `failed=${applicationUpsertFailed} (CSV jobs → DB rows only when a profiles row exists)`
     );
   }
 

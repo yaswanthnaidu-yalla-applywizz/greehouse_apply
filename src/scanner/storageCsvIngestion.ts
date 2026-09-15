@@ -5,7 +5,7 @@
  * 1. Checks `csv_uploads` bucket in Supabase Storage for newly uploaded CSV files.
  * 2. Downloads the pending CSV to a temporary local file.
  * 3. Runs the master V1Pipeline with single worker concurrency for Railway survival.
- * 4. Strictly obeys Rule 1: Checks Supabase and local cache; zero unapproved API requests.
+ * 4. CSV applywizz IDs are the approval to fetch missing ApplyWizz profiles (then persist to `profiles`).
  * 5. Moves processed CSV into `csv_uploads/archive/` to prevent re-processing.
  * 6. Cleans up temporary files.
  *
@@ -22,7 +22,7 @@ import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
 import { config } from '../config/env.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 
 const log = createLogger('Storage Csv Ingestion');
 
@@ -97,12 +97,10 @@ export async function listPendingDropzoneCsvs(): Promise<{
  */
 export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
   if (!isSupabaseConfigured()) {
-    log.warn('[Storage CSV Ingestion] ⚠️ Supabase is not configured. Ingestion skipped.');
-    return {
-      success: false,
-      processedCount: 0,
-      message: 'Supabase is not configured on the server.',
-    };
+    haltWithDevAlert(
+      'Supabase',
+      'Supabase connection failure — bad credentials, unreachable, or empty key probe'
+    );
   }
 
   const { url: supabaseUrl, serviceKey: rawServiceKey, serviceKeySource } = resolveSupabaseCredentials();
@@ -123,6 +121,16 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
   if (pendingCsvFiles.length === 0) {
     const probe = probeLines.join(' | ') || '(no keys probed)';
     const hint = ` Source=${source}. ${probe}`;
+    const { candidates } = listSupabaseKeyCandidates();
+    const looksLikeEmptyKeyProbe =
+      candidates.length === 0 ||
+      probeLines.every((line) => !/jwt\.role=service_role/.test(line));
+    if (looksLikeEmptyKeyProbe) {
+      haltWithDevAlert(
+        'Supabase',
+        'Supabase connection failure — bad credentials, unreachable, or empty key probe'
+      );
+    }
     log.info(`[Storage CSV Ingestion] ℹ️ No pending CSV files found in dropzone.${hint}`);
     return {
       success: false,
@@ -210,7 +218,6 @@ if (isMain) {
       process.exit(result.success ? 0 : 1);
     })
     .catch((err) => {
-      log.error('Fatal ingestion error:', err);
-      process.exit(1);
+      haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed', err);
     });
 }

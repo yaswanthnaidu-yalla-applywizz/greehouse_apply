@@ -29,7 +29,7 @@ function persistAuthSession(data: {
   refresh_token?: string;
   sessionTtlSeconds?: number;
   role?: string;
-  user?: { role?: string };
+  user?: { role?: string; email?: string };
   isAdmin?: boolean;
 }): boolean {
   if (data.token) localStorage.setItem('applywizz_auth_token', data.token);

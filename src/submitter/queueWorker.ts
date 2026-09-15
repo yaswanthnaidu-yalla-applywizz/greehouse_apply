@@ -3,7 +3,8 @@
  */
 
 import { SubmitterPool } from './submitterPool.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { assertSupabaseReady } from '../db/client.js';
 
 const log = createLogger('Queue Worker');
 
@@ -23,6 +24,7 @@ export class SubmissionQueueDaemon {
   }
 
   public start(): void {
+    void assertSupabaseReady();
     this.pool.start();
   }
 
@@ -44,6 +46,8 @@ export async function main(): Promise<void> {
     }
   }
 
+  await assertSupabaseReady();
+
   const daemon = new SubmissionQueueDaemon({ concurrency: 3, pollIntervalMs: interval });
   const handleShutdown = async (signal: string) => {
     process.stderr.write(`\n[SubmissionQueueDaemon] Received ${signal}. Stopping workers...\n`);
@@ -58,7 +62,6 @@ export async function main(): Promise<void> {
 
 if (process.argv[1] && process.argv[1].includes('queueWorker')) {
   main().catch((error: Error) => {
-    process.stderr.write(`[SubmissionQueueDaemon] Fatal error: ${error.message}\n`);
-    process.exitCode = 1;
+    haltWithDevAlert('Queue Worker', `Fatal queue worker error: ${error.message}`, error);
   });
 }

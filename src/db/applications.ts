@@ -169,7 +169,14 @@ export async function upsertApplication(
         return row;
       }
       if (error) {
-        log.error(`[DB] upsertApplication Supabase error (${app.applywizz_id}, ${app.job_url}):`, error.message);
+        const missingProfileFk = /candidate_applications_applywizz_id_fkey/i.test(error.message);
+        if (missingProfileFk) {
+          log.warn(
+            `[DB] upsertApplication skipped — no profiles row for ${app.applywizz_id} (${app.job_url}). Sync the candidate before creating applications.`
+          );
+        } else {
+          log.error(`[DB] upsertApplication Supabase error (${app.applywizz_id}, ${app.job_url}):`, error.message);
+        }
       }
     } catch (err: any) {
       log.warn(`[DB] upsertApplication exception:`, err);

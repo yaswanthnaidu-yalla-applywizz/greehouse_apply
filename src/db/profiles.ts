@@ -7,6 +7,9 @@ import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
 import type { ApplyWizzCandidateProfile } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Profiles');
 
 export interface ProfileRow {
   id?: string;
@@ -162,8 +165,11 @@ export async function upsertProfile(
       if (!error && data) {
         return data as ProfileRow;
       }
+      if (error) {
+        log.warn(`[DB] upsertProfile Supabase error (${profile.applywizz_id}): ${error.message}`);
+      }
     } catch (err: any) {
-      // Fall through to local fallback
+      log.warn(`[DB] upsertProfile exception (${profile.applywizz_id}): ${err?.message || err}`);
     }
   }
 
@@ -206,6 +212,27 @@ export async function upsertProfile(
   } catch {}
 
   return payload as ProfileRow;
+}
+
+/**
+ * True only when a row exists in Supabase `profiles`. Local cache / demo fallbacks do not count —
+ * `candidate_applications.applywizz_id` FKs to `profiles.applywizz_id`.
+ */
+export async function hasSupabaseProfile(applywizzId: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  const id = (applywizzId || '').trim();
+  if (!id) return false;
+  try {
+    const supabase = getDbClient();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('applywizz_id')
+      .eq('applywizz_id', id)
+      .maybeSingle();
+    return !error && Boolean(data?.applywizz_id);
+  } catch {
+    return false;
+  }
 }
 
 /**

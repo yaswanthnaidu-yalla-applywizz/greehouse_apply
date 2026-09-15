@@ -5,6 +5,8 @@
 import { upsertApplication, type ApplicationStatus } from './applications.js';
 import { findTemplateByJobUrl } from './templates.js';
 import { isOverQuestionCap, upsertSkippedOverQuestionCap } from './skippedApplications.js';
+import { hasSupabaseProfile } from './profiles.js';
+import { isSupabaseConfigured } from './client.js';
 import type { CandidateSegment } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -14,6 +16,7 @@ export interface EnsureApplicationRowResult {
   attempted: number;
   upserted: number;
   skippedOverCap: number;
+  skippedNoProfile: number;
   failed: number;
 }
 
@@ -27,8 +30,20 @@ export async function ensureApplicationRowsForSegment(
     attempted: segment.jobs.length,
     upserted: 0,
     skippedOverCap: 0,
+    skippedNoProfile: 0,
     failed: 0,
   };
+
+  if (isSupabaseConfigured()) {
+    const profileExists = await hasSupabaseProfile(segment.applywizzId);
+    if (!profileExists) {
+      result.skippedNoProfile = segment.jobs.length;
+      log.warn(
+        `[Segregator] ⛔ Skipping application upserts for ${segment.applywizzId} — no profiles row (candidate_applications FK)`
+      );
+      return result;
+    }
+  }
 
   for (const job of segment.jobs) {
     const persistJobUrl = (job.canonicalUrl || job.rawUrl || '').trim();

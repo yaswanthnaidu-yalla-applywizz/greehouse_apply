@@ -31,7 +31,7 @@ import type {
   CandidateSegment,
   ScannedJobTemplate,
 } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 
 const log = createLogger('Pipeline');
 
@@ -138,8 +138,7 @@ export class V1Pipeline {
       });
       log.info(`[Pipeline Phase A] ✅ Extracted ${uniqueUrls.length} unique canonical Greenhouse URLs.\n`);
     } catch (err: any) {
-      log.error(`[Pipeline Phase A] ❌ Failed to deduplicate URLs: ${err.message}`);
-      throw err;
+      haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed', err);
     }
 
     // -------------------------------------------------------------
@@ -185,6 +184,8 @@ export class V1Pipeline {
         concurrency: 10,
         syncProfiles: true,
         downloadResumes: true,
+        // CSV IDs are an explicit ingest request — fetch missing profiles so application upserts can satisfy the FK.
+        allowOutboundApi: true,
       });
 
       await exportCandidateSegments(candidateMap, resolvedOutputDir);

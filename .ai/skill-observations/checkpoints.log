@@ -44,3 +44,8 @@
 2026-09-15 session-end: observation 0012 logged (privilege flag is not a role); 7-day sessions + Sign Out + email-map /dev + 015 RLS shipping; open 0003+0005+0011+0012
 2026-09-15 session-start scan: files=12 parsed=12 (015 applied confirmation)
 2026-09-15: operator applied migration 015; docs (activeContext, progress, techContext, AGENTS.md); no new observations
+2026-09-15 session-end: no new observations; HEAD 7f91c59 (ApplyWizz 400 ping = reachable; 015 applied); open 0003+0005+0011+0012; actioned 0001/0002/0004/0006-0010
+2026-09-15 session-start scan: files=12 parsed=12 (ingest FK AWL-39218)
+2026-09-15 checkpoint: logged 0013 (safety-net must reuse eligibility gate); ingest FK fix not committed
+2026-09-15 session-start scan: files=13 parsed=13
+2026-09-15 session-end: no new observations; haltWithDevAlert shipped (systemic ingest halt); typecheck clean; open 0003+0005+0011+0012+0013

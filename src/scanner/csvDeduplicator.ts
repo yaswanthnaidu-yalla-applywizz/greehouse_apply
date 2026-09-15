@@ -12,7 +12,7 @@
 
 import fs from 'fs';
 import * as fastCsv from 'fast-csv';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 
 const log = createLogger('Csv Deduplicator');
 
@@ -232,13 +232,17 @@ export async function readAndDeduplicateUrls(
 
   log.info(`[CSV Deduplicator] 📂 Stream-parsing input CSV: ${csvPath}`);
 
-  await new Promise<void>((resolve, reject) => {
+  await new Promise<void>((resolve) => {
     const stream = fs.createReadStream(csvPath);
 
     fastCsv
       .parseStream(stream, { headers: true, trim: true, ignoreEmpty: true })
       .on('error', (error) => {
-        reject(new Error(`Failed to parse CSV at ${csvPath}: ${error.message}`));
+        haltWithDevAlert(
+          'CSV',
+          'CSV parse failure — malformed CSV or zero valid rows parsed',
+          error
+        );
       })
       .on('data', (row: Record<string, string>) => {
         parsedRows++;
@@ -273,6 +277,10 @@ export async function readAndDeduplicateUrls(
       });
   });
 
+  if (parsedRows === 0) {
+    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+  }
+
   log.info(`[CSV Deduplicator] 📊 Parsed ${parsedRows.toLocaleString()} rows. Found ${rawUrlsSet.size.toLocaleString()} distinct raw URLs.`);
 
   const finalUrlsSet = new Set<string>();
@@ -297,6 +305,9 @@ export async function readAndDeduplicateUrls(
   }
 
   const uniqueCanonicalUrls = Array.from(finalUrlsSet).filter(Boolean);
+  if (uniqueCanonicalUrls.length === 0) {
+    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+  }
   log.info(`[CSV Deduplicator] ✅ Deduplication complete. Total unique canonical URLs: ${uniqueCanonicalUrls.length.toLocaleString()}`);
 
   return uniqueCanonicalUrls;

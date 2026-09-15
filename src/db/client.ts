@@ -8,7 +8,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import config from '../config/env.js';
 import { getSupabaseKeyDiagnostics } from './supabaseKeyDiagnostics.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert, isMissingTableError } from '../utils/logger.js';
 
 const log = createLogger('Client');
 
@@ -143,9 +143,39 @@ export function resolveSupabaseAnonKey(): string {
   return '';
 }
 
-/**
- * Checks whether Supabase URL and Service Key are properly configured.
- */
+/** Probe URL + key + a core table. Halts the process on empty keys, unreachable API, or missing `profiles`. */
+export async function assertSupabaseReady(): Promise<void> {
+  if (!isSupabaseConfigured()) {
+    haltWithDevAlert(
+      'Supabase',
+      'Supabase connection failure — bad credentials, unreachable, or empty key probe'
+    );
+  }
+  try {
+    const { error } = await getDbClient().from('profiles').select('applywizz_id').limit(1);
+    if (!error) return;
+    if (isMissingTableError(error)) {
+      haltWithDevAlert(
+        'Migration',
+        'required migration not applied (e.g. missing table error)',
+        error
+      );
+    }
+    haltWithDevAlert(
+      'Supabase',
+      'Supabase connection failure — bad credentials, unreachable, or empty key probe',
+      error
+    );
+  } catch (err) {
+    haltWithDevAlert(
+      'Supabase',
+      'Supabase connection failure — bad credentials, unreachable, or empty key probe',
+      err
+    );
+  }
+}
+
+/** Checks whether Supabase URL and Service Key are properly configured. */
 export function isSupabaseConfigured(): boolean {
   if (process.env.FORCE_MEMORY_DB === 'true') {
     return false;

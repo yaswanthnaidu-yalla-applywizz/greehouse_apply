@@ -19,6 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import { config } from './config/env.js';
 import { ensureBucketsExist } from './db/storage.js';
+import { assertSupabaseReady } from './db/client.js';
 import { migrate } from './db/migrate.js';
 import { readAndDeduplicateUrls } from './scanner/csvDeduplicator.js';
 import { PlaywrightScanner } from './scanner/playwrightScanner.js';
@@ -30,7 +31,7 @@ import {
 } from './candidate/segregator.js';
 import { AnswerResolver, exportResolvedApplications, resolutionSourceKey } from './resolver/answerResolver.js';
 import { createServer, loadArtifacts } from './server/index.js';
-import { createLogger } from './utils/logger.js';
+import { createLogger, haltWithDevAlert } from './utils/logger.js';
 
 const log = createLogger('App');
 
@@ -166,6 +167,7 @@ export async function main(): Promise<void> {
     // Step 1: Storage & Pre-flight Provisioning
     // -------------------------------------------------------------------------
     log.info('📦 [Step 1/5] Ensuring Supabase Storage buckets exist...');
+    await assertSupabaseReady();
     try {
       await ensureBucketsExist();
     } catch (bucketErr: any) {
@@ -181,7 +183,11 @@ export async function main(): Promise<void> {
         await migrate();
         log.info('✅ Migration check completed.');
       } catch (migrateErr: any) {
-        log.warn(`[Migration] ⚠️ Migration skipped or warning: ${migrateErr.message}`);
+        haltWithDevAlert(
+          'Migration',
+          'required migration not applied (e.g. missing table error)',
+          migrateErr
+        );
       }
     } else if (options.limit || options.candidateId) {
       log.info('\n🔄 [Step 2/5] Skipping historical cache migration (sample/target candidate mode enabled).');
@@ -257,6 +263,7 @@ export async function main(): Promise<void> {
         const candidateSegments = await segregateCandidatesByApplyWizzId(resolvedCsv, {
           syncProfiles: true,
           downloadResumes: true,
+          allowOutboundApi: true,
           limit: options.limit,
           maxJobsPerCandidate: options.maxJobs,
           candidateId: options.candidateId,
@@ -406,8 +413,7 @@ export async function main(): Promise<void> {
       }
     }
   } catch (err: any) {
-    log.error(`\n❌ Fatal pipeline execution error: ${err.message}`);
-    process.exit(1);
+    haltWithDevAlert('Pipeline', `Fatal pipeline execution error: ${err.message}`, err);
   }
 }
 
