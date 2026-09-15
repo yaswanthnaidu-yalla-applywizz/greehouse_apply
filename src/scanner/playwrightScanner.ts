@@ -23,6 +23,7 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 
 const log = createLogger('Playwright Scanner');
 
@@ -264,6 +265,7 @@ export class PlaywrightScanner {
               }
 
               const targetUrl = urls[jobIndex];
+              throwIfPipelineAborted('Playwright scan');
               const template = await this.scanSingleUrl(targetUrl, page);
               results[jobIndex] = template;
               completedCount++;

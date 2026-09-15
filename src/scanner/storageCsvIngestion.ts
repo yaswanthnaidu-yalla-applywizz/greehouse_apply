@@ -23,6 +23,12 @@ import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
 import { config } from '../config/env.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import {
+  isPipelineAbortedError,
+  isPipelineStopEnabled,
+  requestPipelineAbort,
+  resetPipelineAbort,
+} from '../orchestrator/pipelineAbort.js';
 
 const log = createLogger('Storage Csv Ingestion');
 
@@ -33,6 +39,8 @@ export interface StorageIngestionResult {
   archivePath?: string;
   pipelineResult?: PipelineResult;
   message: string;
+  /** Set when an operator stopped the run via dev stop control */
+  aborted?: boolean;
 }
 
 type DropzoneCsv = { name: string; createdAt: string | null };
@@ -166,11 +174,26 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
 
   let pipelineResult: PipelineResult | undefined;
   try {
+    resetPipelineAbort();
     // Run V1Pipeline with single worker concurrency for Railway stability
     const pipeline = new V1Pipeline();
-    pipelineResult = await pipeline.runFullPipeline(tempFilePath, config.OUTPUT_DIR, {
-      concurrency: config.WORKER_POOL_SIZE || 1,
-    });
+    try {
+      pipelineResult = await pipeline.runFullPipeline(tempFilePath, config.OUTPUT_DIR, {
+        concurrency: config.WORKER_POOL_SIZE || 1,
+      });
+    } catch (pipelineErr) {
+      if (isPipelineAbortedError(pipelineErr)) {
+        log.warn(`[Storage CSV Ingestion] ⏹️ ${pipelineErr.message}`);
+        return {
+          success: false,
+          processedCount: 0,
+          processedFile: targetFile.name,
+          message: pipelineErr.message,
+          aborted: true,
+        };
+      }
+      throw pipelineErr;
+    }
 
     log.info(`[Storage CSV Ingestion] ✅ Pipeline completed successfully for ${targetFile.name}.`);
 
@@ -212,6 +235,12 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolv
 
 if (isMain) {
   log.info('--- Starting Storage CSV Ingestion CLI ---');
+  if (isPipelineStopEnabled()) {
+    process.on('SIGINT', () => {
+      log.warn('[Storage CSV Ingestion] ⏹️ SIGINT — requesting pipeline stop…');
+      requestPipelineAbort();
+    });
+  }
   ingestCsvFromStorage()
     .then((result) => {
       log.info('Result:', JSON.stringify(result, null, 2));

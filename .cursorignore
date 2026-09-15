@@ -1,0 +1,46 @@
+﻿# Dependencies & build
+node_modules/
+dist/
+
+# Secrets
+.env
+.env.*
+
+# Local pipeline artifacts (V1-style; not source of truth)
+cache/
+output/
+resumes/
+*.pdf
+
+# Railway / export log dumps (multi-MB; grep once, do not index)
+greenhouse_logs*.md
+logs.*.json
+*.log
+
+# Task-observer meta-skill (large bundle; AGENTS.md points here on demand)
+.ai/skills/task-observer/
+
+# Skill observation backlog (session noise; not product code)
+.ai/skill-observations/
+
+# Planning / handover scratch (also in .gitignore)
+docs/
+project docs/
+*.plan.md
+handover.md
+context.md
+CODEBASE_ANALYSIS.md
+codebase_analysis.md
+CAPACITY_*.md
+capacity_and_timing_math.md
+round_robin_queue_scheduler.md
+COMMANDS.md
+
+# CSV inputs (PII)
+*.csv
+
+# OS & editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.git/

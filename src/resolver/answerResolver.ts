@@ -31,6 +31,7 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnectionError } from '../utils/logger.js';
+import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 
 const log = createLogger('Answer Resolver');
 
@@ -275,6 +276,7 @@ export class AnswerResolver {
 
     for (const seg of segments) {
       for (const job of seg.jobs) {
+        throwIfPipelineAborted('Answer resolution');
         let canonical = job.canonicalUrl || job.rawUrl;
         if (canonical.includes('grnh.se')) {
           canonical = await resolveShortlink(canonical);

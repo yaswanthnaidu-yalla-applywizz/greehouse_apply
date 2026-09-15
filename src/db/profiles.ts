@@ -125,6 +125,99 @@ export function profileRowToCandidateProfile(row: ProfileRow): ApplyWizzCandidat
   };
 }
 
+const MAX_PROFILES_SCHEMA_CACHE_RETRIES = 40;
+
+/**
+ * PostgREST rejects the whole write when `profiles` DDL lags TypeScript `ProfileRow`.
+ * Example: "Could not find the 'country' column of 'profiles' in the schema cache"
+ */
+export function parseMissingProfilesColumnFromPostgrestError(message: string): string | null {
+  const match = message.match(
+    /Could not find the '([^']+)' column of 'profiles' in the schema cache/i
+  );
+  return match?.[1] ?? null;
+}
+
+async function upsertProfileRowWithSchemaCacheFallback(
+  applywizzId: string,
+  row: Record<string, unknown>
+): Promise<ProfileRow | null> {
+  const supabase = getDbClient();
+  let payload: Record<string, unknown> = { ...row };
+  const omitted: string[] = [];
+
+  for (let attempt = 0; attempt < MAX_PROFILES_SCHEMA_CACHE_RETRIES; attempt++) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert(payload, { onConflict: 'applywizz_id' })
+      .select()
+      .single();
+
+    if (!error && data) {
+      if (omitted.length > 0) {
+        log.warn(
+          `[DB] upsertProfile wrote ${applywizzId} omitting columns missing from profiles schema cache: ${omitted.join(', ')}`
+        );
+      }
+      return data as ProfileRow;
+    }
+
+    const missing = parseMissingProfilesColumnFromPostgrestError(error?.message ?? '');
+    if (!missing || !(missing in payload)) {
+      if (error) {
+        log.warn(`[DB] upsertProfile Supabase error (${applywizzId}): ${error.message}`);
+      }
+      return null;
+    }
+
+    const next = { ...payload };
+    delete next[missing];
+    payload = next;
+    omitted.push(missing);
+    log.warn(
+      `[DB] upsertProfile retry without '${missing}' (${applywizzId}) — add column via migration when ready`
+    );
+  }
+
+  log.warn(
+    `[DB] upsertProfile gave up after ${MAX_PROFILES_SCHEMA_CACHE_RETRIES} schema-cache column retries (${applywizzId})`
+  );
+  return null;
+}
+
+async function patchProfileRowWithSchemaCacheFallback(
+  applywizzId: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const supabase = getDbClient();
+  let payload: Record<string, unknown> = { ...patch };
+  const omitted: string[] = [];
+
+  for (let attempt = 0; attempt < MAX_PROFILES_SCHEMA_CACHE_RETRIES; attempt++) {
+    const { error } = await supabase.from('profiles').update(payload).eq('applywizz_id', applywizzId);
+
+    if (!error) {
+      if (omitted.length > 0) {
+        log.warn(
+          `[DB] profiles patch for ${applywizzId} omitted columns missing from schema cache: ${omitted.join(', ')}`
+        );
+      }
+      return;
+    }
+
+    const missing = parseMissingProfilesColumnFromPostgrestError(error?.message ?? '');
+    if (!missing || !(missing in payload)) {
+      log.warn(`[DB] profiles patch error (${applywizzId}): ${error.message}`);
+      return;
+    }
+
+    const next = { ...payload };
+    delete next[missing];
+    payload = next;
+    omitted.push(missing);
+  }
+}
+
 /**
  * Upserts a candidate profile record into Supabase or local cache.
  * Uses applywizz_id as the unique conflict target.
@@ -155,18 +248,12 @@ export async function upsertProfile(
 
   if (isSupabaseConfigured()) {
     try {
-      const supabase = getDbClient();
-      const { data, error } = await supabase
-        .from('profiles')
-        .upsert(payload, { onConflict: 'applywizz_id' })
-        .select()
-        .single();
-
-      if (!error && data) {
-        return data as ProfileRow;
-      }
-      if (error) {
-        log.warn(`[DB] upsertProfile Supabase error (${profile.applywizz_id}): ${error.message}`);
+      const saved = await upsertProfileRowWithSchemaCacheFallback(
+        profile.applywizz_id,
+        { ...payload } as Record<string, unknown>
+      );
+      if (saved) {
+        return saved;
       }
     } catch (err: any) {
       log.warn(`[DB] upsertProfile exception (${profile.applywizz_id}): ${err?.message || err}`);
@@ -412,14 +499,10 @@ export async function updateResumeStoragePath(
 ): Promise<void> {
   if (isSupabaseConfigured()) {
     try {
-      const supabase = getDbClient();
-      await supabase
-        .from('profiles')
-        .update({
-          resume_storage_path: storagePath,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('applywizz_id', applywizzId);
+      await patchProfileRowWithSchemaCacheFallback(applywizzId, {
+        resume_storage_path: storagePath,
+        updated_at: new Date().toISOString(),
+      });
     } catch {}
   }
 }
@@ -434,15 +517,11 @@ export async function updateParsedResume(
 ): Promise<void> {
   if (isSupabaseConfigured()) {
     try {
-      const supabase = getDbClient();
-      await supabase
-        .from('profiles')
-        .update({
-          resume_text: resumeText,
-          resume_facts: resumeFacts,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('applywizz_id', applywizzId);
+      await patchProfileRowWithSchemaCacheFallback(applywizzId, {
+        resume_text: resumeText,
+        resume_facts: resumeFacts,
+        updated_at: new Date().toISOString(),
+      });
     } catch {}
   }
 }

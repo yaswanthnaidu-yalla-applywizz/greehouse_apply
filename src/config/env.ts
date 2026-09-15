@@ -60,6 +60,9 @@ const envSchema = z.object({
   /** Flag indicating deployment on Railway free-tier (caps memory, disables headful) */
   RAILWAY_ENV: z.coerce.boolean().default(false),
 
+  /** Allow admin/CLI cooperative pipeline stop (also enabled when NODE_ENV=development) */
+  ENABLE_PIPELINE_STOP: z.coerce.boolean().default(false),
+
   /** JWT Secret for backend session verification */
   JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
 

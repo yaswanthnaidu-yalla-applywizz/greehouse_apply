@@ -32,6 +32,7 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { resetPipelineAbort, throwIfPipelineAborted } from './pipelineAbort.js';
 
 const log = createLogger('Pipeline');
 
@@ -122,6 +123,8 @@ export class V1Pipeline {
     log.info(`• LLM Model:      ${config.OPENROUTER_MODEL || 'default'}`);
     log.info('================================================================\n');
 
+    resetPipelineAbort();
+
     let uniqueUrls: string[] = [];
     let scannedTemplates: ScannedJobTemplate[] = [];
     let candidateSegments: CandidateSegment[] = [];
@@ -140,6 +143,7 @@ export class V1Pipeline {
     } catch (err: any) {
       haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed', err);
     }
+    throwIfPipelineAborted('Phase A');
 
     // -------------------------------------------------------------
     // Phase B: Headless Playwright DOM Scanning (Branch 1)
@@ -173,6 +177,7 @@ export class V1Pipeline {
         log.warn(`[Pipeline Phase B] ⚠️ Playwright scan encountered non-fatal error: ${err.message}. Continuing.`);
       }
     }
+    throwIfPipelineAborted('Phase B');
 
     // -------------------------------------------------------------
     // Phase C: Candidate Segregation & Profile Sync (Branch 2)
@@ -204,6 +209,7 @@ export class V1Pipeline {
     } catch (err: any) {
       log.warn(`[Pipeline Phase C] ⚠️ ensureApplicationRowsFromCsv: ${err.message}`);
     }
+    throwIfPipelineAborted('Phase C');
 
     // -------------------------------------------------------------
     // Phase D: Multi-Tier Answer Resolution Engine
@@ -221,6 +227,7 @@ export class V1Pipeline {
       log.error(`[Pipeline Phase D] ❌ Error during answer resolution: ${err.message}`);
       throw err;
     }
+    throwIfPipelineAborted('Phase D');
 
     // -------------------------------------------------------------
     // Phase E: Aggregation & Summary Metrics

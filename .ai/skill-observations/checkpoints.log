@@ -49,3 +49,9 @@
 2026-09-15 checkpoint: logged 0013 (safety-net must reuse eligibility gate); ingest FK fix not committed
 2026-09-15 session-start scan: files=13 parsed=13
 2026-09-15 session-end: no new observations; haltWithDevAlert shipped (systemic ingest halt); typecheck clean; open 0003+0005+0011+0012+0013
+2026-09-15 session-start scan: files=13 parsed=13 (ingest skip audit)
+2026-09-15 checkpoint: no observations — answered ingest scan/resolve skip behavior (no code changes)
+2026-09-15 checkpoint: shipped dev pipeline stop (pipelineAbort, admin Stop, ENABLE_PIPELINE_STOP)
+2026-09-15 session-start scan: files=13 parsed=13 suspect=0 (new-profile create failures)
+2026-09-15 session-end: logged 0014 (TS row fields need SQL columns); migration 016 + upsertProfile country retry; open 0003+0005+0011+0012+0013+0014
+2026-09-15 session-end: commit+push; 0014 actioned; excluded greenhouse_logs + logs json from commit

@@ -96,6 +96,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `applywizz_id` | TEXT UNIQUE | Primary identifier (e.g. `AWL-31428`) |
 | `client_name`, `first_name`, `last_name` | TEXT | |
 | `email`, `phone`, `location` | TEXT | |
+| `country`, `country_code` | TEXT | Residential country + phone calling code. Migration **016**. Missing columns make `upsertProfile` fail, so new IDs never get a `profiles` row |
 | `linkedin_url` | TEXT | |
 | `work_authorization` | TEXT | |
 | `requires_sponsorship` | BOOLEAN | |
@@ -167,7 +168,7 @@ Organization audit log written by the server (signup, login, logout, ingest star
 Status-change timeline written from `updateStatus()`. Used by manager Activity and the dev application debugger. Missing table is fail-closed. RLS on; `service_role` only.
 
 ### DB Migrations (16 files, applied via `src/db/migrate.ts`)
-`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` audit_events + application_events + service_role RLS | `latest` combined
+`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` audit_events + application_events + service_role RLS | `016` profiles.country + country_code | `latest` combined
 
 ## Dashboard roles (email map — no DB)
 
