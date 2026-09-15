@@ -3,7 +3,7 @@
  *
  * For applications transitioning to EMAIL_PROOF_PENDING after web confirmation:
  * Polls Zoho Mail every 30 seconds for up to 10 minutes (20 attempts).
- * Validates timestamp (>= applied_at - 2m) AND company name.
+ * Validates Greenhouse sender + confirmation subject, timestamp (>= submitted_at) AND company name.
  * On match: promotes application status from EMAIL_PROOF_PENDING to APPLIED with proof_email_json.
  * On 10m timeout: flags application with email_proof_status = 'manual_review_needed', manual_email_review = true.
  */
@@ -71,6 +71,16 @@ export class EmailProofPoller {
           return;
         }
 
+        // Proof capture only runs on a web-confirmed submission (EMAIL_PROOF_PENDING).
+        // While the application is still in the OTP / CAPTCHA flow the inbox only holds
+        // security-code mail, which must never be captured as proof.
+        if (currentApp.status !== 'EMAIL_PROOF_PENDING') {
+          console.log(
+            `[Email Proof Poller] ⏸️ ${appId} is not a confirmed submission yet (status: ${currentApp.status}). Skipping cycle.`
+          );
+          return;
+        }
+
         // Fetch company email
         const profile = await getProfile(currentApp.applywizz_id);
         const companyEmail = profile ? getCompanyEmail(profile) : null;
@@ -96,7 +106,7 @@ export class EmailProofPoller {
 
         if (result.matched && result.email) {
           console.log(
-            `[Email Proof Poller] 🎉 Found matching confirmation email for ${appId}! Transitioning to APPLIED.`
+            `[Email Proof Poller] 🎉 Proof email captured: ${result.email.subject} from ${result.email.from} at ${result.email.received_at} — transitioning ${appId} to APPLIED.`
           );
           const targetId = currentApp.id || appId;
           const appRef = {

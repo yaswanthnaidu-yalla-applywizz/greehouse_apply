@@ -262,6 +262,8 @@ export interface ResolvedField {
   confidence: number;
   /** Flag indicating if the operator has modified this field manually */
   isEdited?: boolean;
+  /** Carried over from the scanned field; drives the required-marker in the dashboard */
+  isRequired?: boolean;
 }
 
 /**

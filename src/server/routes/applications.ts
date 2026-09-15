@@ -33,6 +33,14 @@ import type { ResolvedField } from '../../types/index.js';
 
 export const applicationsRouter = Router();
 
+/** Statuses where a worker already owns the application; requeueing would duplicate the submission. */
+const IN_FLIGHT_STATUSES = new Set<ApplicationStatus>([
+  'QUEUED',
+  'APPLYING',
+  'OTP_REQUIRED',
+  'CAPTCHA_REQUIRED',
+]);
+
 /**
  * PATCH /api/applications/:id/fields/:fieldId
  * Modifies an individual form field answer.
@@ -257,8 +265,18 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
 
     let effectiveStatus = status as ApplicationStatus;
     if (status === 'APPLYING') {
-      console.log(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
-      effectiveStatus = 'QUEUED';
+      const currentStatus = (application?.status || '') as ApplicationStatus;
+      if (IN_FLIGHT_STATUSES.has(currentStatus)) {
+        // The dashboard echoes the status it polled, which would otherwise requeue a
+        // submission a worker is still running (duplicate submissions).
+        console.log(
+          `[API] Skipping requeue for ${targetAppId} — already in flight (${currentStatus})`
+        );
+        effectiveStatus = currentStatus;
+      } else {
+        console.log(`[API] Submit endpoint received → setting status to: QUEUED (was: APPLYING)`);
+        effectiveStatus = 'QUEUED';
+      }
     }
     console.log(`[API] Status → ${effectiveStatus} (PATCH /applications/${appId})`);
 

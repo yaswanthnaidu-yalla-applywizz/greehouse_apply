@@ -12,6 +12,9 @@ import type {
   ResolvedField,
   SourceTag,
 } from '../src/types/index.js';
+// Re-exported rather than redeclared: the DB CHECK constraint is the source of
+// truth for these unions, and a local copy silently drifts from it.
+import type { ApplicationStatus, EmailProofStatus } from '../src/db/applications.js';
 
 export type { ApplyWizzCandidateProfile, CandidateJobApplication, ResolvedField, SourceTag };
 
@@ -48,6 +51,10 @@ export interface CandidateDetail {
     status: string;
     fieldsCount: number;
     hasManualEdits?: boolean;
+    error_message?: string | null;
+    /** Owner tag the queue filter reads to drop another candidate's rows. */
+    applywizz_id?: string;
+    applywizzId?: string;
   }>;
 }
 
@@ -68,18 +75,7 @@ export interface DashboardStats {
   pipelineStatus: 'READY' | 'IDLE' | 'PROCESSING';
 }
 
-export type ApplicationStatus =
-  | 'READY_FOR_REVIEW'
-  | 'DRY_RUN_COMPLETE'
-  | 'QUEUED'
-  | 'APPLYING'
-  | 'APPLIED'
-  | 'FAILED'
-  | 'EXPIRED'
-  | 'OTP_REQUIRED'
-  | 'CAPTCHA_TIMEOUT';
-
-export type EmailProofStatus = 'pending' | 'captured' | 'timed_out';
+export type { ApplicationStatus, EmailProofStatus };
 
 export interface ApplicationDetail {
   id?: string;

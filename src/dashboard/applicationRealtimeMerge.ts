@@ -93,7 +93,12 @@ export function patchJobInCandidateDetail<
   T extends {
     applywizzId?: string;
     applywizz_id?: string;
-    jobs: Array<{ canonicalUrl?: string; rawUrl?: string; status?: string; error_message?: string }>;
+    jobs: Array<{
+      canonicalUrl?: string;
+      rawUrl?: string;
+      status?: string;
+      error_message?: string | null;
+    }>;
   }
 >(detail: T, row: RealtimeApplicationRow): T {
   const detailId = detail.applywizzId || detail.applywizz_id;

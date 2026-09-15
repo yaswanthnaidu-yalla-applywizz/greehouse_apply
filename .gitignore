@@ -17,9 +17,6 @@ context.md
 *.plan.md
 rules.md
 
-# AI agent project memory (.ai/ — local only, not versioned)
-.ai/
-
 # Planning, capacity scratch & deployment notes (not product docs)
 CAPACITY_*.md
 capacity_and_timing_math.md
@@ -31,6 +28,8 @@ docs/
 project docs/
 *.csv
 greenhouse_only_applywizz_prod(in).csv
+# Raw debug captures: real candidate inboxes, live OTP codes, application history
+.ai/skill-observations/evidence/
 
 # Build output
 dist/

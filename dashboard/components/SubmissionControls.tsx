@@ -24,7 +24,11 @@ export interface SubmissionControlsProps {
   apiBaseUrl?: string;
   onTriggerDryRun: () => void;
   onTriggerSubmit: () => void;
-  onStatusChange?: (newStatus: ApplicationStatus, updatedApp?: any) => void;
+  onStatusChange?: (
+    newStatus: ApplicationStatus,
+    updatedApp?: any,
+    options?: { persist?: boolean }
+  ) => void;
   onViewProof?: () => void;
   onViewEmailProof?: () => void;
   onViewDryRun?: () => void;
@@ -120,7 +124,9 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
           setEmailProof(resolvedEmail);
         }
         if (onStatusChange) {
-          onStatusChange((appData.status || applicationStatus) as ApplicationStatus, appData);
+          onStatusChange((appData.status || applicationStatus) as ApplicationStatus, appData, {
+            persist: false,
+          });
         }
       }
     } catch (err) {

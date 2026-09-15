@@ -1099,7 +1099,6 @@ export async function submitOtpToPausedSession(
       console.log(`[Live Submit] 📧 Checking for immediate confirmation email after OTP...`);
       const emailProof = await captureAndSaveEmailProof(application, {
         timeoutMs: 15000,
-        sinceTimestamp: new Date(submittedAt).getTime() - 2 * 60 * 1000,
       }).catch(() => null);
 
       if (emailProof) {
@@ -1702,7 +1701,6 @@ export async function runLiveSubmit(
       console.log(`[Live Submit] 📧 Checking for immediate confirmation email matching company & apply time...`);
       const emailProof = await captureAndSaveEmailProof(application, {
         timeoutMs: 15000,
-        sinceTimestamp: new Date(submittedAt).getTime() - 2 * 60 * 1000,
       }).catch(() => null);
 
       if (emailProof) {

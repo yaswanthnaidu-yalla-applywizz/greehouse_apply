@@ -408,6 +408,85 @@ export function isSponsorshipQuestion(fieldId: string, name: string, label: stri
   return /sponsorship|visa|require.*sponsorship|employer-based visa/i.test(combined);
 }
 
+/** DEBUG (sponsorship dry-run): print every input on the page with its id and role. */
+async function debugDumpPageInputs(page: Page): Promise<void> {
+  const inputs = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll('input')).map((el) => ({
+        id: el.id || '(no id)',
+        role: el.getAttribute('role') || '(no role)',
+        type: el.type,
+        ariaExpanded: el.getAttribute('aria-expanded'),
+        cls: (el.className || '').toString().slice(0, 60),
+      }))
+    )
+    .catch(() => [] as Array<{ id: string; role: string; type: string; ariaExpanded: string | null; cls: string }>);
+  console.log(`[Sponsorship DEBUG] ${inputs.length} input elements on page:`);
+  for (const i of inputs) {
+    console.log(
+      `  - id=${i.id} role=${i.role} type=${i.type} aria-expanded=${i.ariaExpanded} class=${i.cls}`
+    );
+  }
+}
+
+/**
+ * DEBUG fallback (sponsorship): exact sequence — page.locator('[role="combobox"]'),
+ * match by nearest label text containing "sponsor" when multiple, click → type answer →
+ * wait for [role="option"] → click matching option.
+ */
+async function debugSponsorshipComboboxSequence(page: Page, answerText: string): Promise<boolean> {
+  const comboboxes = page.locator('[role="combobox"]');
+  const count = await comboboxes.count().catch(() => 0);
+  console.log(`[Sponsorship DEBUG] Found ${count} [role="combobox"] element(s) on page`);
+  if (count === 0) return false;
+
+  let target = comboboxes.first();
+  if (count > 1) {
+    for (let i = 0; i < count; i++) {
+      const cb = comboboxes.nth(i);
+      const labelText = await cb
+        .evaluate((el: HTMLElement) => {
+          const root =
+            el.closest('.field-wrapper') || el.closest('label') || el.parentElement?.parentElement;
+          return (root?.textContent || '').trim();
+        })
+        .catch(() => '');
+      console.log(`[Sponsorship DEBUG] combobox[${i}] nearest label text: "${labelText.slice(0, 100)}"`);
+      if (/sponsor/i.test(labelText)) {
+        target = cb;
+        console.log(`[Sponsorship DEBUG] → selected combobox[${i}] (label contains "sponsor")`);
+        break;
+      }
+    }
+  }
+
+  const targetId = await target.getAttribute('id').catch(() => null);
+  console.log(`[Sponsorship DEBUG] Attempting sequence on combobox id=${targetId ?? '(none)'}`);
+  await target.click({ timeout: 3000 }).catch((e) => {
+    console.log(`[Sponsorship DEBUG] click failed: ${e.message}`);
+  });
+  await target.pressSequentially(answerText, { delay: 40 }).catch((e) => {
+    console.log(`[Sponsorship DEBUG] type failed: ${e.message}`);
+  });
+
+  const option = page
+    .locator('[role="option"]', { hasText: new RegExp(`^${answerText}\\b`, 'i') })
+    .first();
+  try {
+    await option.waitFor({ state: 'visible', timeout: 4000 });
+  } catch {
+    const visibleOptions = await page.locator('[role="option"]').allInnerTexts().catch(() => []);
+    console.log(
+      `[Sponsorship DEBUG] No [role="option"] matching "${answerText}" appeared; options seen: ${JSON.stringify(visibleOptions)}`
+    );
+    return false;
+  }
+  const optText = (await option.innerText().catch(() => '')).trim();
+  await option.click({ timeout: 3000 });
+  console.log(`[Sponsorship DEBUG] Clicked option "${optText}" ✅`);
+  return true;
+}
+
 async function clickBooleanOption(
   locator: Locator,
   fieldName: string,
@@ -666,6 +745,13 @@ export async function fillSingleField(
         `input[id*="${escapeAttr(fieldId)}"]`,
       ].filter(Boolean);
 
+      if (isSponsorship) {
+        await debugDumpPageInputs(page);
+        console.log(
+          `[Sponsorship DEBUG] Question: "${label}" → attempting selectors: ${JSON.stringify(selectSelectors)}`
+        );
+      }
+
       // Retry finding locator if field was conditionally rendered
       let found = await findElementLocator(page, selectSelectors, timeoutMs);
       if (!found) {
@@ -770,6 +856,8 @@ export async function fillSingleField(
               console.warn(
                 `[Submitter] Sponsorship combobox fill failed → selector: ${found.selector} → field HTML snippet:\n${fieldDump}`
               );
+              const debugFilled = await debugSponsorshipComboboxSequence(page, selectValue);
+              if (debugFilled) fillResult.success = true;
             }
           }
 
@@ -867,6 +955,14 @@ export async function fillSingleField(
           }
         }
       } else {
+        if (isSponsorship) {
+          console.log(`[Sponsorship DEBUG] No selector matched — trying [role="combobox"] sequence directly`);
+          const debugFilled = await debugSponsorshipComboboxSequence(page, selectValue);
+          if (debugFilled) {
+            fillResult.success = true;
+            return fillResult;
+          }
+        }
         // Fallback: Select2, remix-css combobox, or role=combobox on page
         const searchable = await findSearchableSelectControl(
           page,
