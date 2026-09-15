@@ -613,7 +613,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const supabase = getDbClient();
     const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
     const bucketNames = (buckets || []).map((b) => b.name);
-    const { error: csvProbeError } = await supabase.storage.from(CSV_UPLOADS_BUCKET).list('', { limit: 1 });
+    const { data: listed, error: csvProbeError } = await supabase.storage
+      .from(CSV_UPLOADS_BUCKET)
+      .list('', { limit: 100, offset: 0 });
     res.json({
       configured: true,
       serviceKeySource,
@@ -624,6 +626,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       visibleBuckets: bucketNames,
       csvUploadsDirectListOk: !csvProbeError,
       csvUploadsDirectListError: csvProbeError?.message ?? null,
+      csvUploadsListNames: (listed || []).map((f) => f.name),
     });
   });
 

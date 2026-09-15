@@ -38,11 +38,18 @@ export function resolveSupabaseCredentials(): ResolvedSupabaseCredentials {
     .map((c) => ({ ...c, key: (c.raw || '').trim() }))
     .filter((c) => c.key.length > 0);
 
-  const serviceRole = withRole.find(
+  const serviceRoleJwt = withRole.find(
     (c) => getSupabaseKeyDiagnostics(url, c.key).jwtRole === 'service_role'
   );
-  if (serviceRole?.source && serviceRole.key) {
-    return { url, serviceKey: serviceRole.key, serviceKeySource: serviceRole.source };
+  if (serviceRoleJwt?.source && serviceRoleJwt.key) {
+    return { url, serviceKey: serviceRoleJwt.key, serviceKeySource: serviceRoleJwt.source };
+  }
+
+  // New-format sb_secret_ keys have no JWT role claim. Prefer ROLE_KEY over an
+  // anon/publishable value sitting in SUPABASE_SERVICE_KEY (typical Railway layout).
+  const roleKeyEnv = withRole.find((c) => c.source === 'SUPABASE_SERVICE_ROLE_KEY');
+  if (roleKeyEnv?.source && roleKeyEnv.key) {
+    return { url, serviceKey: roleKeyEnv.key, serviceKeySource: roleKeyEnv.source };
   }
 
   const first = withRole[0];

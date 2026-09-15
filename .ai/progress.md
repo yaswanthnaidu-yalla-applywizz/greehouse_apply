@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-15 (session end — uncommitted batch documented)_
+_Last updated: 2026-09-15 (ingest prefers SERVICE_ROLE_KEY including sb_secret; dropzone list logs names)_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -62,7 +62,7 @@ _Last updated: 2026-09-15 (session end — uncommitted batch documented)_
 
 ### Uncommitted (local — since `37bab44`, needs commit + deploy)
 - [ ] **`EMAIL_UNVERIFIED` terminal status** — migration `013_add_email_unverified_status.sql`; `emailProofPoller` sets status after 10m timeout (keeps web proof); operator dashboard badges + resubmit + View Proof in `index.html` / `.tsx` copies
-- [ ] **Supabase ingest credential diagnostics** — `src/db/supabaseKeyDiagnostics.ts`; `Credential identity:` log line on ingest; JWT role/ref hints when `csv_uploads` bucket invisible; URL/key trim in `getDbClient()`
+- [x] **Supabase ingest credential diagnostics** — `src/db/supabaseKeyDiagnostics.ts`; `Credential identity:` log line on ingest; `resolveSupabaseCredentials()` prefers `service_role` JWT else `SUPABASE_SERVICE_ROLE_KEY` (including `sb_secret_` keys); ingest logs `storage.list` root names and fails on an empty list
 - [ ] **Submission requeue hardening** — `EMAIL_PROOF_PENDING` in `IN_FLIGHT_STATUSES`; ignore direct `PATCH` with `QUEUED` while in-flight; submit-response `onStatusChange(..., { persist: false })` in served HTML + `FormRenderer.tsx`; `liveSubmit` OTP completion preserves `EMAIL_PROOF_PENDING` / `EMAIL_UNVERIFIED` instead of forcing `APPLIED`
 - [ ] **Zoho confirmation subject flexibility** — broader `CONFIRMATION_SUBJECT_PATTERN`; accept company-named subjects without strict pattern match when company gate passes
 - [ ] **`src/types/index.ts` `ApplicationStatus`** — aligned with DB CHECK (adds `APPROVED`, `QUEUED`, `CAPTCHA_REQUIRED`, `EMAIL_UNVERIFIED`)
@@ -103,7 +103,7 @@ _Last updated: 2026-09-15 (session end — uncommitted batch documented)_
 
 ## Known Bugs / Gotchas
 - **✅ FIXED — CSV uploads to Storage never started the pipeline:** there was no webhook, no Realtime listener, no DB trigger and no poller; `ingestCsvFromStorage` was reachable only via the one-shot `npm run ingest:storage` CLI and an admin route the dashboard never called. Now operator-driven via the **▶ Start** button. A Storage webhook was rejected as an option because `/api/admin/*` sits behind `requireAuth` and Supabase cannot mint an operator token
-- **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** a non-`service_role` key gets an **empty list and no error** from both `listBuckets()` and `from(bucket).list()`, so ingestion reported `success: true, processedCount: 0` while the dropzone actually held a CSV, and `ensureBucketsExist()` (called on every ingest) concluded all four buckets were missing and logged 4× `new row violates row-level security policy` trying to recreate them. Ingestion now lists buckets to assert `csv_uploads` is visible and returns `success: false` naming the likely cause; bucket provisioning was dropped from the ingest path (it belongs to `npm run db:migrate`). Seen on deploy 2026-09-15 12:34 — the deployed `SUPABASE_SERVICE_KEY` was not the service_role secret
+- **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** a non-`service_role` key gets an **empty list and no error** from both `listBuckets()` and `from(bucket).list()`. Ingest no longer treats that as a ready dropzone: it prefers `SUPABASE_SERVICE_ROLE_KEY` even when the value is `sb_secret_` (no JWT role), logs actual root names, and returns `success: false` if the list is empty. Bucket provisioning stays on `npm run db:migrate`. File in bucket (local probe): `test(Sheet1).csv`
 - **✅ FIXED (uncommitted) — credential identity logging on ingest:** `getSupabaseKeyDiagnostics()` decodes JWT `role`/`ref`, compares to URL project ref, flags whitespace — logged as `Credential identity:` without printing secrets. See observation 0006
 - **Gotcha — `SUPABASE_SERVICE_KEY` must be the `service_role` secret:** an anon/publishable key passes `isSupabaseConfigured()` and every storage read silently returns empty instead of failing. Decode the JWT and check `role` before blaming the code (or read the ingest log line). Correct project ref: `dpwhgwdsfqzfwxlwvchp`
 - **Gotcha — ingest run state is in-process memory:** `ingest-status` is a closure variable in `createServer`, so a Railway restart mid-run reports `{running: false}` with no history — and the pipeline itself dies with the process. Only one run can be in flight per server instance
