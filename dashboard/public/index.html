@@ -1519,13 +1519,38 @@
         );
       };
 
-      const actionableFields = fields.filter(
+      const isIdentityProfileField = (field) => {
+        const name = String(field?.name || field?.fieldId || '').toLowerCase();
+        const label = String(field?.label || '').toLowerCase().trim();
+        const identity = ['first_name', 'last_name', 'phone', 'email'];
+        if (identity.includes(name)) return true;
+        if (identity.some((id) => name.endsWith(`[${id}]`) || name.endsWith(`.${id}`) || name.endsWith(`_${id}`))) {
+          return true;
+        }
+        const labelKey = label.replace(/\s+/g, '_');
+        if (identity.includes(labelKey)) return true;
+        if (label === 'first name' || label === 'last name' || label === 'phone number' || label === 'email address') {
+          return true;
+        }
+        return false;
+      };
+
+      const isVisuallyRenderedField = (field) => {
+        if (isIdentityProfileField(field)) return true;
+        const source = (field?.source || '').toLowerCase();
+        return source === 'unresolved' || source === 'ai' || source === 'manual' || source === 'resume';
+      };
+
+      // Display-only: underlying `fields` stays complete for approve/submit payloads.
+      const visuallyRenderedFields = fields.filter(isVisuallyRenderedField);
+
+      const actionableFields = visuallyRenderedFields.filter(
         (f) => !isDemographic(f.label) || f.source === 'ai' || f.source === 'unresolved' || (f.isRequired || f.required)
       );
 
       const displayFields = filterActionableOnly && actionableFields.length > 0
         ? actionableFields
-        : fields;
+        : visuallyRenderedFields;
 
       const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
       const currentField = displayFields[boundedIndex];

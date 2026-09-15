@@ -820,10 +820,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         }
         return { ...summary, totalJobs: dbTotal };
       });
-      console.log(
-        `[API] GET /api/candidates totalJobs source=candidate_applications status!=SKIPPED ` +
-          `candidates=${candidateSummaries.length} withDbCounts=${queueCounts.size}`
-      );
     }
 
     if (isAdmin) {
