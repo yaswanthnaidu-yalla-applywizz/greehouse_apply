@@ -32,6 +32,54 @@ export interface StorageIngestionResult {
   message: string;
 }
 
+type DropzoneCsv = { name: string; createdAt: string | null };
+
+function isPendingCsvObjectName(name: string): boolean {
+  const n = (name || '').replace(/^\/+/, '').trim();
+  if (!n || n.startsWith('.')) return false;
+  const lower = n.toLowerCase();
+  if (!lower.endsWith('.csv')) return false;
+  if (lower === 'archive' || lower.startsWith('archive/')) return false;
+  return true;
+}
+
+/**
+ * Find pending CSVs via storage.list (no created_at sortBy — that can return []).
+ */
+export async function listPendingDropzoneCsvs(): Promise<{
+  files: DropzoneCsv[];
+  source: string;
+  listedNames: string[];
+}> {
+  const supabase = getDbClient();
+
+  const { data: listed, error: listError } = await supabase.storage
+    .from(CSV_UPLOADS_BUCKET)
+    .list('', { limit: 100, offset: 0 });
+
+  const listNames = (listed || []).map((f) => f.name).filter(Boolean);
+  if (listError) {
+    console.warn(`[Storage CSV Ingestion] storage.list failed: ${listError.message}`);
+  } else {
+    console.log(
+      `[Storage CSV Ingestion] storage.list root entries (${listNames.length}): ${listNames.join(', ') || '(none)'}`
+    );
+    const fromList = (listed || [])
+      .filter((f) => isPendingCsvObjectName(f.name || ''))
+      .map((f) => ({ name: f.name, createdAt: f.created_at ?? null }));
+    if (fromList.length > 0) {
+      fromList.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      return { files: fromList, source: 'storage.list', listedNames: listNames };
+    }
+  }
+
+  return {
+    files: [],
+    source: listError ? 'storage.list-error' : 'storage.list',
+    listedNames: listNames,
+  };
+}
+
 /**
  * Checks the `csv_uploads` storage bucket, ingests the latest CSV file, and moves it to `archive/`.
  */
@@ -45,7 +93,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     };
   }
 
-  const { url: supabaseUrl, serviceKey: rawServiceKey, serviceKeySource } = resolveSupabaseCredentials();
+  const { url: supabaseUrl, serviceKey: rawServiceKey } = resolveSupabaseCredentials();
   const keyDiag = getSupabaseKeyDiagnostics(supabaseUrl, rawServiceKey);
   console.log(`[Storage CSV Ingestion] Credential identity: ${keyDiag.summary}`);
   if (keyDiag.keyHadSurroundingWhitespace) {
@@ -56,88 +104,25 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
 
   const supabase = getDbClient();
 
-  // Bucket provisioning belongs to `npm run db:migrate`, not to ingestion. Listing the
-  // buckets here instead verifies the credentials can actually see the dropzone: a key
-  // without service_role privileges gets an empty list and no error, which would
-  // otherwise be indistinguishable from an empty dropzone.
-  const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-  if (bucketsError) {
-    console.error(`[Storage CSV Ingestion] ❌ Could not list storage buckets: ${bucketsError.message}`);
-    return {
-      success: false,
-      processedCount: 0,
-      message: `Could not list Supabase Storage buckets: ${bucketsError.message}`,
-    };
-  }
-
-  const bucketNames = (buckets || []).map((b) => b.name);
-  let bucketReady = bucketNames.includes(CSV_UPLOADS_BUCKET);
-
-  if (!bucketReady) {
-    const { error: probeError } = await supabase.storage.from(CSV_UPLOADS_BUCKET).list('', {
-      limit: 1,
-    });
-    if (!probeError) {
-      console.warn(
-        `[Storage CSV Ingestion] listBuckets omitted '${CSV_UPLOADS_BUCKET}' (visible: ${bucketNames.join(', ') || 'none'}) but direct bucket list succeeded — continuing.`
-      );
-      bucketReady = true;
-    }
-  }
-
-  if (!bucketReady) {
-    const visible = bucketNames.join(', ') || 'none';
-    const hint =
-      keyDiag.jwtRole && keyDiag.jwtRole !== 'service_role'
-        ? `JWT role is "${keyDiag.jwtRole}" (need service_role).`
-        : keyDiag.urlRefMatch === false
-          ? `SUPABASE_URL project ref (${keyDiag.urlProjectRef}) does not match JWT ref (${keyDiag.jwtRef}).`
-          : serviceKeySource === 'SUPABASE_SERVICE_KEY'
-            ? 'Use the legacy service_role secret (eyJ…) in SUPABASE_SERVICE_KEY, or set SUPABASE_SERVICE_ROLE_KEY if the publishable key is in SUPABASE_SERVICE_KEY.'
-            : 'Set SUPABASE_SERVICE_KEY to the service_role secret for this project.';
-    console.error(
-      `[Storage CSV Ingestion] ❌ Bucket '${CSV_UPLOADS_BUCKET}' is not accessible (listBuckets visible: ${visible}). ${hint} Identity: ${keyDiag.summary}`
-    );
-    return {
-      success: false,
-      processedCount: 0,
-      message: `Storage bucket '${CSV_UPLOADS_BUCKET}' is not accessible (listBuckets visible: ${visible}). ${hint} [${keyDiag.summary}]`,
-    };
-  }
-
   console.log(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
 
-  // List all files in the root of csv_uploads
-  const { data: files, error: listError } = await supabase.storage
-    .from(CSV_UPLOADS_BUCKET)
-    .list('', {
-      limit: 50,
-      sortBy: { column: 'created_at', order: 'desc' },
-    });
-
-  if (listError) {
-    console.error('[Storage CSV Ingestion] ❌ Failed to list bucket:', listError.message);
-    throw new Error(`Failed to list ${CSV_UPLOADS_BUCKET}: ${listError.message}`);
-  }
-
-  // Filter for valid CSV files not in archive and not hidden
-  const pendingCsvFiles = (files || []).filter((f) => {
-    if (!f.name || f.name.startsWith('.')) return false;
-    const lower = f.name.toLowerCase();
-    return lower.endsWith('.csv') && !lower.startsWith('archive');
-  });
+  const { files: pendingCsvFiles, source, listedNames } = await listPendingDropzoneCsvs();
 
   if (pendingCsvFiles.length === 0) {
-    console.log('[Storage CSV Ingestion] ℹ️ No pending CSV files found in dropzone.');
+    const seen = listedNames.slice(0, 15).join(', ') || '(none)';
+    const hint = ` Source=${source}. Keys/entries seen: ${seen}.`;
+    console.log(`[Storage CSV Ingestion] ℹ️ No pending CSV files found in dropzone.${hint}`);
     return {
-      success: true,
+      success: listedNames.length > 0,
       processedCount: 0,
-      message: 'No pending CSV files in csv_uploads storage dropzone.',
+      message: `No pending CSV files in csv_uploads storage dropzone.${hint}`,
     };
   }
 
   const targetFile = pendingCsvFiles[0];
-  console.log(`[Storage CSV Ingestion] 📥 Found pending file: "${targetFile.name}". Downloading...`);
+  console.log(
+    `[Storage CSV Ingestion] 📥 Found pending file via ${source}: "${targetFile.name}". Downloading...`
+  );
 
   // Download from Supabase Storage
   const { data: fileData, error: downloadError } = await supabase.storage

@@ -19,3 +19,4 @@
 2026-09-15 session-start scan: files=8 parsed=8 (context-load session)
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-15 session-start scan: files=8 parsed=8
+2026-09-15 deliverable flush: observation 0006 resolution updated (prefer SERVICE_ROLE_KEY including sb_secret; empty dropzone list is failure); ingest listing no longer gates on listBuckets

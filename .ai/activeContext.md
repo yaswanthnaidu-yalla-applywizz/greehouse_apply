@@ -1,6 +1,6 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (session end — EMAIL_UNVERIFIED, ingest JWT diagnostics, submit persist:false, requeue guards)_
+_Last updated: 2026-09-15 (ingest: prefer SERVICE_ROLE_KEY including sb_secret; list dropzone names)_
 
 ## Current Focus (Active Sprint)
 
@@ -34,8 +34,8 @@ _Last updated: 2026-09-15 (session end — EMAIL_UNVERIFIED, ingest JWT diagnost
 - **Root-caused (2026-09-15):** uploading a CSV to the `csv_uploads` bucket triggered nothing because **no webhook and no poller exist** — `ingestCsvFromStorage` only had a one-shot CLI (`npm run ingest:storage`) and an admin HTTP route nothing called. Not a dead daemon: the queue worker is a separate concern and only runs in-process under `ENABLE_QUEUE_WORKER=true`
 - Fixed by making ingestion explicitly operator-driven: `POST /api/admin/trigger-ingest-from-storage` is now admin-gated, returns `202` and runs in the background (409 while in flight), paired with `GET /api/admin/ingest-status`; the dashboard has an admin-only **▶ Start** button that polls it
 - **Deployed run exposed a second defect (2026-09-15 12:34):** the Start button worked, but the run logged 4× `new row violates row-level security policy` and then "No pending CSV files" despite `test(Sheet1).csv` sitting in the bucket. Cause: the deployed `SUPABASE_SERVICE_KEY` is not a `service_role` key, so every storage read returns empty without an error. Ingestion now asserts bucket visibility and fails loudly, and no longer tries to provision buckets
-- **JWT credential diagnostics (local, not yet pushed):** `getSupabaseKeyDiagnostics()` logs `jwt.role`, `jwt.ref`, `urlRefMatch` on every ingest; `getDbClient()` trims URL/key. Use Railway log line `Credential identity:` after deploy to see whether `SUPABASE_SERVICE_KEY` is anon vs service_role or URL/ref mismatch
-- Status: **shipped on main through `37bab44`; ingest diagnostics commit pending** — blocked on correct Railway `SUPABASE_SERVICE_KEY` before end-to-end CSV run
+- **JWT credential diagnostics:** `getSupabaseKeyDiagnostics()` logs `jwt.role`, `jwt.ref`, `urlRefMatch` on every ingest. `resolveSupabaseCredentials()` prefers a `service_role` JWT, else **whatever is in `SUPABASE_SERVICE_ROLE_KEY`** (including `sb_secret_` keys that have no JWT role — previously we skipped those and kept using anon in `SUPABASE_SERVICE_KEY`). Ingest no longer gates on `listBuckets`; it logs `storage.list root entries` and fails if that list is empty. Local probe (same project) sees `test(Sheet1).csv` at bucket root with a `service_role` JWT
+- Status: **awaiting Railway deploy + ▶ Start** — look for `Found pending file … "test(Sheet1).csv"`
 
 ## Immediate Blockers / Open Questions
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
@@ -46,7 +46,7 @@ _Last updated: 2026-09-15 (session end — EMAIL_UNVERIFIED, ingest JWT diagnost
 - [ ] OTP fix not yet exercised against a *fresh* Greenhouse OTP challenge — validated against existing security-code mail only (a live challenge needs an operator submission)
 - [ ] **Uncommitted session batch (not on `main` yet):** `supabaseKeyDiagnostics.ts`, migration 013 / `EMAIL_UNVERIFIED`, Zoho confirmation patterns, requeue + persist fixes, dashboard badges — commit and push before prod deploy
 - [ ] **Migration 013** (`EMAIL_UNVERIFIED`) not applied on Supabase — run `npm run db:migrate` after deploy
-- [ ] **Deployed `SUPABASE_SERVICE_KEY` is not the `service_role` secret** — replace it in Railway (project ref `dpwhgwdsfqzfwxlwvchp`, Supabase → Settings → API → `service_role` secret, not anon/publishable). Set the same value on the Railway service env var `SUPABASE_SERVICE_KEY`, confirm `SUPABASE_URL` is `https://dpwhgwdsfqzfwxlwvchp.supabase.co`, redeploy. Code fix `5d089d5` is on `main` (fails loudly + no bucket-create spam); until the key is fixed, **Start** will show a red error banner instead of false "no pending"
+- [ ] **Railway ingest using anon while ROLE_KEY is set** — code now prefers `SUPABASE_SERVICE_ROLE_KEY` even without a JWT role claim; verify after deploy via `Credential identity` + `storage.list root entries`
 - [ ] ▶ Start button not yet run end-to-end against a real CSV — the admin gate (403), status endpoint and UI were verified, but firing the pipeline processes and archives `test(Sheet1).csv` in Storage, so it needs operator go-ahead
 - [ ] Duplicate-submission fix not yet exercised against a live submission — confirm `[API] Status → QUEUED (PATCH ...)` never appears during an `APPLYING` window, and that one app never occupies two workers
 - [x] ~~**`src/types/index.ts` `ApplicationStatus` drift**~~ — aligned with DB in uncommitted diff (`APPROVED`, `QUEUED`, `CAPTCHA_REQUIRED`, `EMAIL_UNVERIFIED`). `src/db/applications.ts` remains canonical for server code

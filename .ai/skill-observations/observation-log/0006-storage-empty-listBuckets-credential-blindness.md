@@ -11,7 +11,7 @@ date: 2026-09-15
 session_context: "Admin Start button for csv_uploads ingest; Railway reported visible buckets none despite CSV present; env allegedly set"
 parked_until:
 resolved: 2026-09-15
-resolution: "Added src/db/supabaseKeyDiagnostics.ts (JWT role/ref vs URL, whitespace flag); ingest logs Credential identity and bucket-missing hints; getDbClient trims URL/key. Uncommitted with rest of session work."
+resolution: "Prefer SUPABASE_SERVICE_ROLE_KEY even when it is sb_secret_ (no JWT role); do not fall back to anon in SERVICE_KEY. Ingest lists csv_uploads without sortBy created_at, logs root names, fails on empty list. Do not treat empty listBuckets + empty list (no error) as success."
 reference: ".ai/progress.md (Known Bugs), src/scanner/storageCsvIngestion.ts"
 ---
 
