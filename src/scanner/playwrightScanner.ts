@@ -23,6 +23,7 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 
 const log = createLogger('Playwright Scanner');
@@ -213,13 +214,20 @@ export class PlaywrightScanner {
     }
 
     const total = urls.length;
-    log.info(
-      `[Playwright Scanner] 🚀 Launching scanner pool: ${this.workerPoolSize} workers for ${total.toLocaleString()} unique URLs (Timeout: ${this.timeoutMs}ms, Jitter: ${this.minJitterMs}-${this.maxJitterMs}ms)...`
-    );
+    const compact = isPipelineCompactLogging();
+    if (!compact) {
+      log.info(
+        `[Playwright Scanner] 🚀 Launching scanner pool: ${this.workerPoolSize} workers for ${total.toLocaleString()} unique URLs (Timeout: ${this.timeoutMs}ms, Jitter: ${this.minJitterMs}-${this.maxJitterMs}ms)...`
+      );
+    }
 
     const results: ScannedJobTemplate[] = new Array(total);
     let currentIndex = 0;
     let completedCount = 0;
+    let activeJobs = 0;
+    let expiredJobs = 0;
+    let totalFields = 0;
+    const scanStartedAt = Date.now();
 
     let browser: Browser | null = null;
 
@@ -266,18 +274,23 @@ export class PlaywrightScanner {
 
               const targetUrl = urls[jobIndex];
               throwIfPipelineAborted('Playwright scan');
-              const template = await this.scanSingleUrl(targetUrl, page);
+              const template = await this.scanSingleUrl(targetUrl, page, compact);
               results[jobIndex] = template;
               completedCount++;
+              if (template.isExpired) expiredJobs++;
+              else activeJobs++;
+              totalFields += template.fields?.length || 0;
 
               if (this.onJobScanned) {
                 this.onJobScanned(template, completedCount, total);
               }
 
-              const statusIcon = template.isExpired ? '❌ [Expired/404]' : `✅ [${template.fields.length} fields]`;
-              log.info(
-                `[Playwright Scanner] [${completedCount}/${total}] ${statusIcon} ${template.companyName ? `${template.companyName} — ` : ''}${template.jobTitle || 'Job'} (${targetUrl})`
-              );
+              if (!compact) {
+                const statusIcon = template.isExpired ? '❌ [Expired/404]' : `✅ [${template.fields.length} fields]`;
+                log.info(
+                  `[Playwright Scanner] [${completedCount}/${total}] ${statusIcon} ${template.companyName ? `${template.companyName} — ` : ''}${template.jobTitle || 'Job'} (${targetUrl})`
+                );
+              }
 
               // Apply jitter before next URL on this worker
               if (jobIndex + 1 < total && this.maxJitterMs > 0) {
@@ -300,7 +313,10 @@ export class PlaywrightScanner {
       }
     }
 
-    log.info(`[Playwright Scanner] 🏁 Finished scanning ${completedCount}/${total} URLs.`);
+    const elapsedSec = ((Date.now() - scanStartedAt) / 1000).toFixed(1);
+    log.info(
+      `[Playwright Scanner] scan complete urls=${completedCount}/${total} active=${activeJobs} expired=${expiredJobs} fields=${totalFields} workers=${Math.min(this.workerPoolSize, total)} elapsed=${elapsedSec}s`
+    );
     return results.filter(Boolean);
   }
 
@@ -311,7 +327,7 @@ export class PlaywrightScanner {
    * @param page - Active Playwright Page instance.
    * @returns ScannedJobTemplate representing the parsed form structure or expired state.
    */
-  public async scanSingleUrl(url: string, page: Page): Promise<ScannedJobTemplate> {
+  public async scanSingleUrl(url: string, page: Page, compactLogs = isPipelineCompactLogging()): Promise<ScannedJobTemplate> {
     const scannedAt = new Date().toISOString();
 
     // Default template state
@@ -557,7 +573,9 @@ export class PlaywrightScanner {
 
       return template;
     } catch (error: any) {
-      log.warn(`[Playwright Scanner] ⚠️ Error scanning ${url}: ${error.message}`);
+      if (!compactLogs) {
+        log.warn(`[Playwright Scanner] ⚠️ Error scanning ${url}: ${error.message}`);
+      }
       template.isExpired = true;
       return template;
     }

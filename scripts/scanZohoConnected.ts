@@ -89,7 +89,7 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
       () =>
         page.goto(BASE_URL, {
           waitUntil: 'domcontentloaded',
-          timeout: 45000,
+          timeout: 90000,
         }),
       'connector navigation'
     );
@@ -102,10 +102,13 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
     await page.waitForSelector(
       'text=Users, input[placeholder*="Filter by email" i], #search, table, tbody tr, [role="row"], [data-testid*="user" i]',
       {
-      timeout: 20000,
+        timeout: 90000,
       }
     ).catch(() => {
       console.log('[Zoho Scanner] ℹ️ Users list selector timed out, attempting scrape on current DOM state.');
+    });
+    await page.waitForLoadState('networkidle', { timeout: 90000 }).catch(() => {
+      console.log('[Zoho Scanner] ℹ️ networkidle wait timed out; continuing.');
     });
 
     // ── Step 3: Look for "Connected" filter tab/button and click if present ──
@@ -124,7 +127,8 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
         const el = page.locator(sel).first();
         if ((await el.count()) > 0 && (await el.isVisible())) {
           await el.click();
-          await page.waitForTimeout(1200);
+          await page.waitForTimeout(4000);
+          await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {});
           filterClicked = true;
           console.log(`[Zoho Scanner] 🔵 Clicked "Connected" filter: ${sel}`);
           break;
@@ -146,7 +150,7 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
 
     while (pageNum <= maxPages) {
       console.log(`[Zoho Scanner] 📄 Scraping page ${pageNum}...`);
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(2000);
 
       const emailsOnPage: string[] = await page.evaluate((isFiltered) => {
         const results: string[] = [];
@@ -354,10 +358,11 @@ async function performLoginIfNeeded(page: Page, user: string, pass: string): Pro
     }
 
     await page.waitForSelector('text=Mailbox connector, text=Users, input[placeholder*="Filter by email" i]', {
-      timeout: 25000,
+      timeout: 90000,
     }).catch(() => {
       console.log('[Zoho Scanner] ℹ️ Dashboard selector wait completed.');
     });
+    await page.waitForLoadState('networkidle', { timeout: 90000 }).catch(() => {});
   } else {
     console.log('[Zoho Scanner] ℹ️ Already authenticated or on dashboard.');
   }

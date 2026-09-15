@@ -14,6 +14,7 @@ import {
 import { uploadResume } from '../db/storage.js';
 import type { ApplyWizzCandidateProfile } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
+import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 
 const log = createLogger('Ensure Supabase Profile');
 
@@ -81,7 +82,9 @@ export async function ensureSupabaseProfile(
     };
   }
 
-  log.info(`[Candidate Ingestion] ℹ️ Candidate ${id} has no profiles row — fetching ApplyWizz profile...`);
+  if (!isPipelineCompactLogging()) {
+    log.info(`[Candidate Ingestion] ℹ️ Candidate ${id} has no profiles row — fetching ApplyWizz profile...`);
+  }
 
   try {
     const { profile, raw } = await options.client.fetchCandidateProfileWithRaw(id, false);

@@ -22,6 +22,7 @@ import { ensureApplicationRowsForSegment } from '../db/ensureCandidateApplicatio
 import { ensureSupabaseProfile } from './ensureSupabaseProfile.js';
 import type { CandidateSegment } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 
 const log = createLogger('Segregator');
@@ -269,7 +270,7 @@ export async function segregateCandidatesByApplyWizzId(
     throw new Error(`Input CSV file not found at: "${csvPath}"`);
   }
 
-  log.info(`[Candidate Segregator] 📂 Ingesting candidate rows from: ${csvPath}`);
+  const compact = isPipelineCompactLogging();
 
   const segmentsMap = new Map<string, CandidateSegment>();
   let rowCount = 0;
@@ -293,9 +294,11 @@ export async function segregateCandidatesByApplyWizzId(
         if (csvFormat === null) {
           csvFormat = detectCsvFormat(Object.keys(row));
           if (!formatLogged) {
-            log.info(
-              `[Segregator] Format detected: ${csvFormat === 'UNKNOWN' ? 'UNKNOWN' : csvFormat}`
-            );
+            if (!compact) {
+              log.info(
+                `[Segregator] Format detected: ${csvFormat === 'UNKNOWN' ? 'UNKNOWN' : csvFormat}`
+              );
+            }
             formatLogged = true;
           }
         }
@@ -325,7 +328,7 @@ export async function segregateCandidatesByApplyWizzId(
 
         if (score < 20 || score > 60) {
           droppedScoreRows++;
-          if (droppedScoreRows === 1) {
+          if (!compact && droppedScoreRows === 1) {
             log.info(
               `[Segregator] Dropping jobs outside dashboard score range 20–60 (summary after ingest).`
             );
@@ -383,37 +386,47 @@ export async function segregateCandidatesByApplyWizzId(
     haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
   }
 
-  if (skippedUnknownFormatRows > 0) {
-    log.warn(
-      `[Segregator] Skipped ${skippedUnknownFormatRows.toLocaleString()} row(s): unknown CSV format.`
-    );
-  }
-  if (skippedInvalidRows > 0) {
-    log.warn(
-      `[Segregator] Skipped ${skippedInvalidRows.toLocaleString()} row(s): missing applywizz id or job URL for format ${csvFormat ?? 'UNKNOWN'}.`
-    );
-  }
-  if (droppedScoreRows > 0) {
+  if (compact) {
     log.info(
-      `[Segregator] Dropped ${droppedScoreRows.toLocaleString()} row(s) with score outside 20–60.`
+      `[Candidate Segregator] csv ingest rows=${rowCount.toLocaleString()} candidates=${segmentsMap.size.toLocaleString()} format=${csvFormat ?? 'UNKNOWN'} skipped_invalid=${skippedInvalidRows} dropped_score=${droppedScoreRows} skipped_unknown_format=${skippedUnknownFormatRows}`
+    );
+  } else {
+    if (skippedUnknownFormatRows > 0) {
+      log.warn(
+        `[Segregator] Skipped ${skippedUnknownFormatRows.toLocaleString()} row(s): unknown CSV format.`
+      );
+    }
+    if (skippedInvalidRows > 0) {
+      log.warn(
+        `[Segregator] Skipped ${skippedInvalidRows.toLocaleString()} row(s): missing applywizz id or job URL for format ${csvFormat ?? 'UNKNOWN'}.`
+      );
+    }
+    if (droppedScoreRows > 0) {
+      log.info(
+        `[Segregator] Dropped ${droppedScoreRows.toLocaleString()} row(s) with score outside 20–60.`
+      );
+    }
+    log.info(
+      `[Candidate Segregator] 📊 Ingested ${rowCount.toLocaleString()} rows. Segregated ${segmentsMap.size.toLocaleString()} unique candidates.`
     );
   }
-
-  log.info(
-    `[Candidate Segregator] 📊 Ingested ${rowCount.toLocaleString()} rows. Segregated ${segmentsMap.size.toLocaleString()} unique candidates.`
-  );
 
   // Synchronize Candidate Profiles & Resumes
   if (syncProfiles && segmentsMap.size > 0) {
     const candidateIds = Array.from(segmentsMap.keys());
     const totalCandidates = candidateIds.length;
-    log.info(
-      `[Candidate Segregator] 🔄 Syncing ${totalCandidates.toLocaleString()} candidate profiles (Supabase-first, API only for new candidates) (Concurrency: ${concurrency})...`
-    );
+    if (!compact) {
+      log.info(
+        `[Candidate Segregator] 🔄 Syncing ${totalCandidates.toLocaleString()} candidate profiles (Supabase-first, API only for new candidates) (Concurrency: ${concurrency})...`
+      );
+    }
 
     let completed = 0;
     let fromSupabase = 0;
     let fromApi = 0;
+    let skippedEnsured = 0;
+    let skippedNotZoho = 0;
+    let skippedSyncFailed = 0;
     const queue = [...candidateIds];
     const workers: Promise<void>[] = [];
 
@@ -435,9 +448,12 @@ export async function segregateCandidatesByApplyWizzId(
 
           if (ensured.status === 'skipped' || ensured.status === 'failed' || !ensured.profile) {
             segmentsMap.delete(id);
-            log.info(
-              `[Segregator] ⛔ Skipping candidate ${id} (${ensured.reason || ensured.status})`
-            );
+            skippedEnsured++;
+            if (!compact) {
+              log.info(
+                `[Segregator] ⛔ Skipping candidate ${id} (${ensured.reason || ensured.status})`
+              );
+            }
             continue;
           }
 
@@ -446,10 +462,13 @@ export async function segregateCandidatesByApplyWizzId(
 
           if (!ensured.profile.zoho_connected) {
             segmentsMap.delete(id);
-            log.info(
-              `[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)` +
-                (ensured.status === 'created' ? ' — profiles row was created' : '')
-            );
+            skippedNotZoho++;
+            if (!compact) {
+              log.info(
+                `[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)` +
+                  (ensured.status === 'created' ? ' — profiles row was created' : '')
+              );
+            }
             continue;
           }
 
@@ -458,7 +477,10 @@ export async function segregateCandidatesByApplyWizzId(
             segment.clientName = ensured.profile.client_name;
           }
         } catch (err: any) {
-          log.warn(`[Candidate Segregator] ⚠️ Failed to sync candidate ${id}: ${err.message}. Skipping profile sync.`);
+          skippedSyncFailed++;
+          if (!compact) {
+            log.warn(`[Candidate Segregator] ⚠️ Failed to sync candidate ${id}: ${err.message}. Skipping profile sync.`);
+          }
         } finally {
           completed++;
           if (onProgress) {
@@ -478,18 +500,31 @@ export async function segregateCandidatesByApplyWizzId(
     }
 
     await Promise.all(workers);
-    log.info(
-      `[Candidate Segregator] ✅ Profile sync complete: ${fromSupabase} from Supabase (0 API calls), ${fromApi} new via API (${completed}/${totalCandidates} total).`
-    );
+    if (compact) {
+      log.info(
+        `[Candidate Segregator] profile sync candidates=${totalCandidates} kept=${segmentsMap.size} supabase=${fromSupabase} api_new=${fromApi} skipped_ensure=${skippedEnsured} skipped_not_zoho=${skippedNotZoho} sync_failed=${skippedSyncFailed}`
+      );
+    } else {
+      log.info(
+        `[Candidate Segregator] ✅ Profile sync complete: ${fromSupabase} from Supabase (0 API calls), ${fromApi} new via API (${completed}/${totalCandidates} total).`
+      );
+    }
   }
 
   // Remove candidates that could not be loaded from Supabase/cache or were not Zoho-connected.
+  let skippedNoProfile = 0;
   if (syncProfiles && !applicationRowsFromCsvOnly) {
     for (const [id, segment] of Array.from(segmentsMap.entries())) {
       if (!segment.profile) {
         segmentsMap.delete(id);
-        log.info(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
+        skippedNoProfile++;
+        if (!compact) {
+          log.info(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
+        }
       }
+    }
+    if (compact && skippedNoProfile > 0) {
+      log.info(`[Candidate Segregator] profile filter removed=${skippedNoProfile} (no profile after sync)`);
     }
   }
 
@@ -508,9 +543,7 @@ export async function segregateCandidatesByApplyWizzId(
   }
   if (applicationJobsAttempted > 0) {
     log.info(
-      `[Segregator] 💾 candidate_applications: attempted=${applicationJobsAttempted} upserted=${applicationRowsUpserted} ` +
-        `skippedOverCap=${applicationSkippedOverCap} skippedNoProfile=${applicationSkippedNoProfile} ` +
-        `failed=${applicationUpsertFailed} (CSV jobs → DB rows only when a profiles row exists)`
+      `[Candidate Segregator] candidate_applications attempted=${applicationJobsAttempted} upserted=${applicationRowsUpserted} skipped_over_cap=${applicationSkippedOverCap} skipped_no_profile=${applicationSkippedNoProfile} failed=${applicationUpsertFailed}`
     );
   }
 
@@ -556,9 +589,15 @@ export async function exportCandidateSegments(
   await fs.promises.writeFile(jsonPath, serialized, 'utf-8');
   const stats = fs.statSync(jsonPath);
 
-  log.info(
-    `[Candidate Segregator] 💾 Exported ${segments.size.toLocaleString()} candidate segments to: ${jsonPath} (${(stats.size / 1024).toFixed(1)} KB)`
-  );
+  if (isPipelineCompactLogging()) {
+    log.info(
+      `[Candidate Segregator] export segments=${segments.size.toLocaleString()} path=${jsonPath} kb=${(stats.size / 1024).toFixed(1)}`
+    );
+  } else {
+    log.info(
+      `[Candidate Segregator] 💾 Exported ${segments.size.toLocaleString()} candidate segments to: ${jsonPath} (${(stats.size / 1024).toFixed(1)} KB)`
+    );
+  }
 
   return jsonPath;
 }

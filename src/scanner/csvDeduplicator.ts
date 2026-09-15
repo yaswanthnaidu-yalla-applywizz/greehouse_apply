@@ -13,6 +13,7 @@
 import fs from 'fs';
 import * as fastCsv from 'fast-csv';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 
 const log = createLogger('Csv Deduplicator');
 
@@ -230,7 +231,7 @@ export async function readAndDeduplicateUrls(
   const shortlinkSet = new Set<string>();
   let parsedRows = 0;
 
-  log.info(`[CSV Deduplicator] 📂 Stream-parsing input CSV: ${csvPath}`);
+  const compact = isPipelineCompactLogging();
 
   await new Promise<void>((resolve) => {
     const stream = fs.createReadStream(csvPath);
@@ -281,12 +282,9 @@ export async function readAndDeduplicateUrls(
     haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
   }
 
-  log.info(`[CSV Deduplicator] 📊 Parsed ${parsedRows.toLocaleString()} rows. Found ${rawUrlsSet.size.toLocaleString()} distinct raw URLs.`);
-
   const finalUrlsSet = new Set<string>();
 
   if (resolveShortlinks && shortlinkSet.size > 0) {
-    log.info(`[CSV Deduplicator] 🔄 Resolving ${shortlinkSet.size.toLocaleString()} unique grnh.se shortlinks (concurrency: ${concurrency})...`);
     const shortlinkList = Array.from(shortlinkSet);
     const resolvedMap = await resolveShortlinksBatch(shortlinkList, concurrency);
 
@@ -308,7 +306,24 @@ export async function readAndDeduplicateUrls(
   if (uniqueCanonicalUrls.length === 0) {
     haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
   }
-  log.info(`[CSV Deduplicator] ✅ Deduplication complete. Total unique canonical URLs: ${uniqueCanonicalUrls.length.toLocaleString()}`);
+  if (compact) {
+    log.info(
+      `[CSV Deduplicator] ingest rows=${parsedRows.toLocaleString()} raw_urls=${rawUrlsSet.size.toLocaleString()} shortlinks=${shortlinkSet.size.toLocaleString()} unique_canonical=${uniqueCanonicalUrls.length.toLocaleString()}`
+    );
+  } else {
+    log.info(`[CSV Deduplicator] 📂 Stream-parsed: ${csvPath}`);
+    log.info(
+      `[CSV Deduplicator] 📊 Parsed ${parsedRows.toLocaleString()} rows. Found ${rawUrlsSet.size.toLocaleString()} distinct raw URLs.`
+    );
+    if (resolveShortlinks && shortlinkSet.size > 0) {
+      log.info(
+        `[CSV Deduplicator] 🔄 Resolved ${shortlinkSet.size.toLocaleString()} grnh.se shortlinks (concurrency: ${concurrency})`
+      );
+    }
+    log.info(
+      `[CSV Deduplicator] ✅ Deduplication complete. Total unique canonical URLs: ${uniqueCanonicalUrls.length.toLocaleString()}`
+    );
+  }
 
   return uniqueCanonicalUrls;
 }

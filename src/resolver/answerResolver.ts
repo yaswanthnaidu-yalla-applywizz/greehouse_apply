@@ -31,6 +31,7 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnectionError } from '../utils/logger.js';
+import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 
 const log = createLogger('Answer Resolver');
@@ -57,6 +58,12 @@ export function formatResolutionSource(resolved: ResolvedField): string {
 /**
  * Returns a short resolution source key for batch summary logs.
  */
+export function isResolvedApplicationSuccessful(app: CandidateJobApplication): boolean {
+  if (app.status === 'EXPIRED') return false;
+  if (app.status !== 'READY_FOR_REVIEW') return false;
+  return !app.resolvedFields.some((f) => f.source === 'unresolved' || f.resolvedByTier === null);
+}
+
 export function resolutionSourceKey(resolved: ResolvedField): 'supabase' | 'resume' | 'llm' | 'unresolved' | 'other' {
   if (resolved.source === 'unresolved' || resolved.resolvedByTier === null) return 'unresolved';
   if (resolved.source === 'resume_parse' || resolved.resolvedByTier === 2) return 'resume';
@@ -208,7 +215,12 @@ export class AnswerResolver {
     }
 
     const resolvedFields: ResolvedField[] = [];
-    log.info(`\n[Answer Resolver] 👤 Resolving [${candidateName}] for "${template.jobTitle}" at "${template.companyName}" (${template.fields.length} questions)...`);
+    const verbose = !isPipelineCompactLogging();
+    if (verbose) {
+      log.info(
+        `\n[Answer Resolver] 👤 Resolving [${candidateName}] for "${template.jobTitle}" at "${template.companyName}" (${template.fields.length} questions)...`
+      );
+    }
 
     for (const field of template.fields) {
       const resolved = await this.resolveField(applywizzId, field, {
@@ -219,10 +231,14 @@ export class AnswerResolver {
       });
       resolvedFields.push(resolved);
 
-      const preview = resolved.value
-        ? (resolved.value.length > 35 ? resolved.value.slice(0, 32) + '...' : resolved.value)
-        : '<blank>';
-      log.info(`  • [${formatResolutionSource(resolved)}] "${field.label}" ➔ "${preview}"`);
+      if (verbose) {
+        const preview = resolved.value
+          ? resolved.value.length > 35
+            ? resolved.value.slice(0, 32) + '...'
+            : resolved.value
+          : '<blank>';
+        log.info(`  • [${formatResolutionSource(resolved)}] "${field.label}" ➔ "${preview}"`);
+      }
     }
 
     return {
@@ -255,9 +271,16 @@ export class AnswerResolver {
       totalPairs += seg.jobs.length;
     }
 
-    log.info(
-      `[Answer Resolver] 🚀 Resolving answers across ${segments.length} candidates and ${totalPairs} job assignments (Supabase → Resume → LLM)...`
-    );
+    const compact = isPipelineCompactLogging();
+    if (!compact) {
+      log.info(
+        `[Answer Resolver] 🚀 Resolving answers across ${segments.length} candidates and ${totalPairs} job assignments (Supabase → Resume → LLM)...`
+      );
+    } else {
+      log.info(
+        `[Answer Resolver] resolve start candidates=${segments.length} job_assignments=${totalPairs}`
+      );
+    }
 
     // Pre-resolve shortlinks if any
     const shortlinksToResolve = new Set<string>();
@@ -273,8 +296,16 @@ export class AnswerResolver {
     }
 
     let resolvedCount = 0;
+    let totalSuccessful = 0;
+    let totalUnsuccessful = 0;
 
     for (const seg of segments) {
+      let successful = 0;
+      let unsuccessful = 0;
+      let skippedCap = 0;
+      let noTemplate = 0;
+      let failed = 0;
+
       for (const job of seg.jobs) {
         throwIfPipelineAborted('Answer resolution');
         let canonical = job.canonicalUrl || job.rawUrl;
@@ -290,7 +321,10 @@ export class AnswerResolver {
             (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
           );
 
-        if (!template) continue;
+        if (!template) {
+          noTemplate++;
+          continue;
+        }
 
         const questionCount = template.fields?.length || 0;
         const persistJobUrl = job.canonicalUrl || job.rawUrl || template.jobUrl;
@@ -316,6 +350,7 @@ export class AnswerResolver {
               `[Answer Resolver] ⚠️ Could not upsert SKIPPED candidate_applications for ${seg.applywizzId} ${persistJobUrl}: ${dbErr.message}`
             );
           }
+          skippedCap++;
           continue;
         }
 
@@ -337,11 +372,18 @@ export class AnswerResolver {
               resolveErr
             );
           }
-          log.warn(
-            `[Answer Resolver] ⚠️ Failed to resolve ${seg.applywizzId} ${persistJobUrl}: ${resolveErr.message}`
-          );
+          failed++;
+          if (!compact) {
+            log.warn(
+              `[Answer Resolver] ⚠️ Failed to resolve ${seg.applywizzId} ${persistJobUrl}: ${resolveErr.message}`
+            );
+          }
           continue;
         }
+
+        if (isResolvedApplicationSuccessful(app)) successful++;
+        else unsuccessful++;
+
         applications.push(app);
         resolvedCount++;
 
@@ -372,15 +414,31 @@ export class AnswerResolver {
           log.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
         }
 
-        const counts = { supabase: 0, resume: 0, llm: 0, unresolved: 0, other: 0 };
-        for (const f of app.resolvedFields) {
-          counts[resolutionSourceKey(f)]++;
+        if (!compact) {
+          const counts = { supabase: 0, resume: 0, llm: 0, unresolved: 0, other: 0 };
+          for (const f of app.resolvedFields) {
+            counts[resolutionSourceKey(f)]++;
+          }
+          log.info(
+            `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [Supabase:${counts.supabase} Resume:${counts.resume} LLM:${counts.llm} Unresolved:${counts.unresolved}]`
+          );
         }
+      }
 
+      totalSuccessful += successful;
+      totalUnsuccessful += unsuccessful;
+
+      if (compact && seg.jobs.length > 0) {
         log.info(
-          `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [Supabase:${counts.supabase} Resume:${counts.resume} LLM:${counts.llm} Unresolved:${counts.unresolved}]`
+          `[Answer Resolver] ${seg.applywizzId} resolved successful=${successful} unsuccessful=${unsuccessful} skipped_cap=${skippedCap} no_template=${noTemplate} failed=${failed}`
         );
       }
+    }
+
+    if (compact) {
+      log.info(
+        `[Answer Resolver] resolve complete applications=${applications.length} successful=${totalSuccessful} unsuccessful=${totalUnsuccessful}`
+      );
     }
 
     return applications;
