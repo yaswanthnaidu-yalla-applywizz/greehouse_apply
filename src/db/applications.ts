@@ -1060,6 +1060,48 @@ export async function listApplications(filter?: {
   return results;
 }
 
+/**
+ * Count candidate_applications per applywizz_id, excluding SKIPPED (dashboard queue size).
+ */
+export async function countNonSkippedApplicationsByApplywizzIds(
+  applywizzIds: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const ids = [...new Set(applywizzIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) {
+    return counts;
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_applications')
+        .select('applywizz_id, status')
+        .in('applywizz_id', ids);
+      if (!error && data) {
+        for (const row of data) {
+          if (row.status === 'SKIPPED') continue;
+          const key = String(row.applywizz_id || '').trim().toUpperCase();
+          if (!key) continue;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+        return counts;
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  for (const app of memoryApplications.values()) {
+    if (app.status === 'SKIPPED') continue;
+    const key = app.applywizz_id.trim().toUpperCase();
+    if (!ids.some((id) => id.toUpperCase() === key)) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
 /** Count applications in a given status (Supabase head count, memory fallback). */
 export async function countApplicationsByStatus(status: ApplicationStatus): Promise<number> {
   if (isSupabaseConfigured()) {
