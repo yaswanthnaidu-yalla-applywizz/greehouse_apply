@@ -186,7 +186,7 @@ There is **no** Supabase Storage webhook and **no** poller — a CSV appearing i
 
 On ingest, logs include `Credential identity: urlProjectRef=... | jwt.role=... | jwt.ref=... | urlRefMatch=...` (see `src/db/supabaseKeyDiagnostics.ts`) — never the raw key.
 
-The server resolves credentials via `resolveSupabaseCredentials()` in `src/db/client.ts`: a JWT with `role=service_role` wins; otherwise **`SUPABASE_SERVICE_ROLE_KEY` is used even when it is a new `sb_secret_` key** (those have no JWT role claim — do not fall back to anon in `SUPABASE_SERVICE_KEY`). Typical Railway layout: anon/publishable in `SUPABASE_SERVICE_KEY`, secret in `SUPABASE_SERVICE_ROLE_KEY`. Startup logs `[Server] Credential identity (SUPABASE_SERVICE_ROLE_KEY): …`. Ingest lists `csv_uploads` **without** `sortBy created_at` and logs root names; an empty object list is a failed run, not “nothing to do”. Admin probe: `GET /api/admin/supabase-storage-health` (includes `csvUploadsListNames`).
+The server resolves credentials via `resolveSupabaseCredentials()` / `listSupabaseKeyCandidates()` in `src/db/client.ts`: a JWT with `role=service_role` wins; otherwise **`SUPABASE_SERVICE_ROLE_KEY` is used even when it is `sb_secret_`**. Keys are normalized (trim, unwrap quotes, strip `Bearer`, strip JWT whitespace). Ingest **probes each key with a fresh client** and logs `Probe SUPABASE_… jwt.role=… entries=N names=…`. An empty object list is a failed run. Admin probe: `GET /api/admin/supabase-storage-health` returns `keyProbes[]` (no secrets). `sb_secret_` / anon keys still cannot list private `csv_uploads` — use the legacy `eyJ…` service_role JWT.
 
 The dashboard's **▶ Start** button (header, next to refresh — rendered only under `isAdminSession()`) calls both: POST, then polls the status endpoint every 5s and reloads candidate data when the run ends. CLI equivalent: `npm run ingest:storage` (one-shot, exits when done). Run state lives in server memory, so a restart mid-run loses the status (the pipeline itself dies with the process too).
 
@@ -210,6 +210,9 @@ The dashboard's **▶ Start** button (header, next to refresh — rendered only 
 | Env schema (Zod) | `src/config/env.ts` |
 | Supabase client | `src/db/client.ts` |
 | Supabase key diagnostics (ingest logs) | `src/db/supabaseKeyDiagnostics.ts` |
+| Empty-form hydration | `src/db/applicationFieldHydration.ts` |
+| Over-cap SKIPPED upserts | `src/db/skippedApplications.ts` |
+| Operator queue filters | `src/dashboard/candidateQueueFilter.ts` |
 | DB DDL | `src/db/schema.sql` |
 | Migrations dir | `src/db/migrations/` |
 | Form filler (largest file, 59KB) | `src/submitter/formFiller.ts` |

@@ -1,7 +1,7 @@
 ---
 id: 4
 title: "Fixing a class of defects in unchecked code is half the work; the missing check is the cause"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "completing cleanup tasks; pairing a fix with the enforcement that keeps i
 date: 2026-09-15
 session_context: "Fixing 35 accumulated type errors in a dashboard source tree that no tsconfig covered"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-09-15
+resolution: "dashboard/tsconfig.json + npm run typecheck chained to typecheck:dashboard; positive control verified (deliberate .tsx break exits 2). Enforcement shipped with the cleanup, not after."
 reference:
 ---
 

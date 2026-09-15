@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-15 (ingest prefers SERVICE_ROLE_KEY including sb_secret; dropzone list logs names)_
+_Last updated: 2026-09-15 (session end — main `31b830e`)_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -23,7 +23,7 @@ _Last updated: 2026-09-15 (ingest prefers SERVICE_ROLE_KEY including sb_secret; 
 
 ### Database
 - [x] Full Supabase schema: 5 core tables + storage buckets
-- [x] 13 incremental migrations in repo (001–012 + `013` EMAIL_UNVERIFIED + latest combined); **013 pending apply** on current Supabase instance
+- [x] 15 files in `src/db/migrations/` (001–014 + `latest_supabase_migration.sql`). **014 (`SKIPPED`) may still need apply** on Supabase. **013 (`EMAIL_UNVERIFIED`)** operator reported applied
 - [x] Idempotent upsert patterns throughout
 - [x] V1 → V2 migration runner (`db/migrate.ts`)
 
@@ -59,13 +59,12 @@ _Last updated: 2026-09-15 (ingest prefers SERVICE_ROLE_KEY including sb_secret; 
 - [x] **Dashboard `.tsx` tree typechecks clean and stays that way** — 35 pre-existing errors fixed, `dashboard/tsconfig.json` added at root-equivalent strictness, and `npm run typecheck` chained to `npm run typecheck:dashboard`
 - [x] **Admin ▶ Start button for CSV ingestion** — `POST /api/admin/trigger-ingest-from-storage` is now admin-gated (`403` for non-admins, `409` while a run is in flight) and returns `202` with the pipeline running in the background; new `GET /api/admin/ingest-status` reports `{running, processedFile, message, error}`. Dashboard header has an `isAdminSession()`-gated **▶ Start** button that polls status every 5s, shows a banner for running/finished/failed, and refreshes candidate data when the run ends
 - [x] **Zoho OTP reader hardened** — verbose step-by-step logging across `zohoReader.ts` (navigation/login status, session cookies, search query, raw message list, per-email sender/subject/timestamp, active regex) and `zoho-connector.ts` (request URL, HTTP status, raw body before parsing, parsed message summary). New `isGreenhouseOtpEmail()` sender+subject+company gate runs before extraction; scan 3 → 15 rows; 10-min window; `parseZohoEmailTimestamp` unified with the confirmation path; `reason` field on failure. Verified live against AWL-31428 → `NgW4NT62`
-
-### Uncommitted (local — since `37bab44`, needs commit + deploy)
-- [ ] **`EMAIL_UNVERIFIED` terminal status** — migration `013_add_email_unverified_status.sql`; `emailProofPoller` sets status after 10m timeout (keeps web proof); operator dashboard badges + resubmit + View Proof in `index.html` / `.tsx` copies
-- [x] **Supabase ingest credential diagnostics** — `src/db/supabaseKeyDiagnostics.ts`; `Credential identity:` log line on ingest; `resolveSupabaseCredentials()` prefers `service_role` JWT else `SUPABASE_SERVICE_ROLE_KEY` (including `sb_secret_` keys); ingest logs `storage.list` root names and fails on an empty list
-- [ ] **Submission requeue hardening** — `EMAIL_PROOF_PENDING` in `IN_FLIGHT_STATUSES`; ignore direct `PATCH` with `QUEUED` while in-flight; submit-response `onStatusChange(..., { persist: false })` in served HTML + `FormRenderer.tsx`; `liveSubmit` OTP completion preserves `EMAIL_PROOF_PENDING` / `EMAIL_UNVERIFIED` instead of forcing `APPLIED`
-- [ ] **Zoho confirmation subject flexibility** — broader `CONFIRMATION_SUBJECT_PATTERN`; accept company-named subjects without strict pattern match when company gate passes
-- [ ] **`src/types/index.ts` `ApplicationStatus`** — aligned with DB CHECK (adds `APPROVED`, `QUEUED`, `CAPTCHA_REQUIRED`, `EMAIL_UNVERIFIED`)
+- [x] **`EMAIL_UNVERIFIED` terminal status** — migration 013; poller after 10m timeout; dashboard badges + resubmit (`cf50a45`)
+- [x] **Supabase ingest credential resolution** — `supabaseKeyDiagnostics.ts`; prefer `service_role` JWT else `SUPABASE_SERVICE_ROLE_KEY` (incl. `sb_secret_`); normalize quoted/Bearer keys; ingest probes every key (`0d02593`); `GET /api/admin/supabase-storage-health` → `keyProbes`
+- [x] **Submission requeue hardening** — `EMAIL_PROOF_PENDING` in `IN_FLIGHT_STATUSES`; ignore PATCH `QUEUED` while in-flight; submit-response `persist: false`
+- [x] **Question cap 35 + `SKIPPED`** — `MAX_JOB_QUESTIONS` default 35; over-cap jobs upsert `SKIPPED` (migration 014); operator queue hides them
+- [x] **Form hydration from `fields_schema`** — empty `resolved_fields` filled from scanned templates (`applicationFieldHydration.ts`)
+- [x] **Tier 5 fail-closed + SMS skip** — LLM option mismatch / low confidence → `unresolved`; SMS/marketing opt-in always No at fill (`31b830e`)
 
 ### Beyond-V2-Docs Features (Already Shipped)
 - [x] Zoho Mail OTP auto-extraction (`zohoReader.ts`, `zoho-connector.ts`) — was V3 in docs
@@ -85,7 +84,7 @@ _Last updated: 2026-09-15 (ingest prefers SERVICE_ROLE_KEY including sb_secret; 
 |---|---|---|
 | Manager / COO analytics dashboard | Early build | `GET /dashboard` date-scoped client rollup; admins unfiltered across CAs |
 | Resolution engine — semantic/fuzzy improvement | Investigating | Tier 2+3 miss rate; approach not yet decided |
-| Email proof reliability | Awaiting live verification + migration 013 | OTP + confirmation filters shipped; uncommitted: `EMAIL_UNVERIFIED` timeout state, wider confirmation subjects; neither full path exercised on live submit yet |
+| Email proof reliability | Awaiting live verification | OTP + confirmation filters + `EMAIL_UNVERIFIED` on `main`; 013 applied; not live-submitted yet |
 
 ---
 
@@ -97,19 +96,18 @@ _Last updated: 2026-09-15 (ingest prefers SERVICE_ROLE_KEY including sb_secret; 
 | Multi-tenant RBAC / Row-Level Security | Supabase RLS; all access via service key currently |
 | Supabase Storage bucket access policies | Deferred with RLS |
 | Residential proxy pool | Anti-bot detection hardening |
-| Lift `< 23` question restriction | One config change (`MAX_JOB_QUESTIONS=999`); pending validation |
+| Lift question cap beyond 35 | `MAX_JOB_QUESTIONS` default is 35; further lift needs explicit instruction |
 
 ---
 
 ## Known Bugs / Gotchas
 - **✅ FIXED — CSV uploads to Storage never started the pipeline:** there was no webhook, no Realtime listener, no DB trigger and no poller; `ingestCsvFromStorage` was reachable only via the one-shot `npm run ingest:storage` CLI and an admin route the dashboard never called. Now operator-driven via the **▶ Start** button. A Storage webhook was rejected as an option because `/api/admin/*` sits behind `requireAuth` and Supabase cannot mint an operator token
-- **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** a non-`service_role` key gets an **empty list and no error** from both `listBuckets()` and `from(bucket).list()`. Ingest no longer treats that as a ready dropzone: it prefers `SUPABASE_SERVICE_ROLE_KEY` even when the value is `sb_secret_` (no JWT role), logs actual root names, and returns `success: false` if the list is empty. Bucket provisioning stays on `npm run db:migrate`. File in bucket (local probe): `test(Sheet1).csv`
-- **✅ FIXED (uncommitted) — credential identity logging on ingest:** `getSupabaseKeyDiagnostics()` decodes JWT `role`/`ref`, compares to URL project ref, flags whitespace — logged as `Credential identity:` without printing secrets. See observation 0006
-- **Gotcha — `SUPABASE_SERVICE_KEY` must be the `service_role` secret:** an anon/publishable key passes `isSupabaseConfigured()` and every storage read silently returns empty instead of failing. Decode the JWT and check `role` before blaming the code (or read the ingest log line). Correct project ref: `dpwhgwdsfqzfwxlwvchp`
+- **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** anon/publishable keys get `[]` with no error from `listBuckets()` and `from(bucket).list()`. Ingest probes every configured key (`0d02593`), logs `jwt.role` + names, fails if all lists are empty. Local `service_role` JWT sees `test(Sheet1).csv`. **Railway still reports entries=0** — process keys are not a Storage-capable `service_role` JWT
+- **Gotcha — env vars set ≠ Storage can list:** `SUPABASE_SERVICE_KEY` = publishable and `SUPABASE_SERVICE_ROLE_KEY` = `sb_secret_` (or another anon) still yields empty lists. Need the legacy `eyJ…` `service_role` secret. Decode `role` from ingest `Probe` lines. Project ref: `dpwhgwdsfqzfwxlwvchp`
 - **Gotcha — ingest run state is in-process memory:** `ingest-status` is a closure variable in `createServer`, so a Railway restart mid-run reports `{running: false}` with no history — and the pipeline itself dies with the process. Only one run can be in flight per server instance
 - **✅ FIXED — Duplicate live submissions (same app on 2–3 workers):** `PATCH /api/applications/:id/status` rewrote `APPLYING → QUEUED` unconditionally, and the dashboard's `handleStatusChange` echoed back the status its 2s badge poll just read — so an application a worker was mid-fill on got thrown back in the queue and immediately re-dequeued into another lane. Observed 6 submit clicks for one app (`b1f7250c`, AWL-31428 Prometheus). Fixes: the route skips requeue when current status is in `IN_FLIGHT_STATUSES` (now includes `EMAIL_PROOF_PENDING`; also blocks naked `PATCH` with `QUEUED` while in-flight); `SubmitterPool` tracks `inFlightApplicationIds`; poll-originated updates and **submit HTTP response handlers** pass `{ persist: false }` (observation 0008). **Not** an OTP/CAPTCHA requeue bug — no requeue-on-failure path exists anywhere in the codebase. See observation 0003
 - **Gotcha — the dashboard `.tsx` tree is not the running UI:** `dashboard/public/index.html` (inline Babel/JSX) is what the server sends; `dashboard/App.tsx`, `FormRenderer.tsx`, `JobQueueView.tsx` and `components/*.tsx` are an unserved parallel copy. `tsconfig.json` is `"include": ["src/**/*"]` and `"build": "tsc"` has no bundler step, so those files are neither typechecked nor compiled. **Any operator-UI change must go in `index.html` to take effect**; edit the `.tsx` copies only to keep them from diverging further
-- **✅ FIXED (2026-09-15) — 35 type errors in the dashboard `.tsx` tree**, from four root causes: (1) `CandidateDetail['jobs']` lacked the `applywizz_id`/`applywizzId` tags that `filterJobsForCandidate` reads, and because `JobWithOptionalOwner` is an all-optional *weak type*, TS rejected the call and fell back to the constraint — which cascaded into ~22 property errors in `JobQueueView.tsx`; (2) three divergent `ApplicationStatus` unions — `dashboard/types.ts` now re-exports the canonical one from `src/db/applications.ts`; (3) `ResolvedField.isRequired` added to `src/types/index.ts`; (4) TDZ crash in `App.tsx` WebSocket effect moved below callbacks. **`src/types/index.ts` union widened (uncommitted)** to include `APPROVED`, `QUEUED`, `CAPTCHA_REQUIRED`, `EMAIL_UNVERIFIED`
+- **✅ FIXED (2026-09-15) — 35 type errors in the dashboard `.tsx` tree**, from four root causes: (1) `CandidateDetail['jobs']` lacked the `applywizz_id`/`applywizzId` tags that `filterJobsForCandidate` reads, and because `JobWithOptionalOwner` is an all-optional *weak type*, TS rejected the call and fell back to the constraint — which cascaded into ~22 property errors in `JobQueueView.tsx`; (2) three divergent `ApplicationStatus` unions — `dashboard/types.ts` now re-exports the canonical one from `src/db/applications.ts`; (3) `ResolvedField.isRequired` added to `src/types/index.ts`; (4) TDZ crash in `App.tsx` WebSocket effect moved below callbacks. **`src/types/index.ts` union includes `APPROVED`, `QUEUED`, `CAPTCHA_REQUIRED`, `EMAIL_UNVERIFIED`, `SKIPPED`**
 - **Enforced since 2026-09-15:** `dashboard/tsconfig.json` (`noEmit`, same strictness as root) covers the whole tree, and `npm run typecheck` is now `tsc --noEmit && npm run typecheck:dashboard`, so the tree cannot silently re-accumulate errors. Verified with a positive control: a deliberately broken `.tsx` makes `npm run typecheck` exit 2. `npm run build` and the Dockerfile still run plain `tsc` on `src/` only, so the Railway deploy is unaffected
 - **✅ FIXED — OTP email captured as email proof:** `queryZohoConfirmationEmail` used a ±5min window around submission, so the Greenhouse security-code mail that arrives *before* the submit landed inside the window and was stored as `proof_email_json`. The window is now forward-only (`submitted_at` → `+10min`, matching the poller budget), OTP/security-code subjects are explicitly rejected (logged), and a row must come from `greenhouse-mail.io` with a `thank you` / `application received` / `application confirmed` subject. The dead `sinceTimestamp` option on `captureAndSaveEmailProof` (3 call sites passed `submitted_at - 2min` into a parameter that was never read) is gone. `emailProofPoller.ts` additionally skips any cycle where status is not `EMAIL_PROOF_PENDING`, so nothing is captured mid-OTP flow
 - **Gotcha — accept window is tied to the poller budget:** the connector accepts `submitted_at` → `+10min`, deliberately matching `emailProofPoller`'s 10min retry budget. If that budget changes, `WINDOW_MS` in `zoho-connector.ts` must change with it, or late confirmations silently end in `manual_review_needed`
@@ -124,6 +122,6 @@ _Last updated: 2026-09-15 (ingest prefers SERVICE_ROLE_KEY including sb_secret; 
 - Local dev defaults LLM to **Ollama** (`llama3.1:latest`) — will fail silently if Ollama isn't running; override with `LLM_PROVIDER=openrouter`
 - `RAILWAY_ENV=true` must be set on Railway or headful Playwright will try to open a display and fail
 - `candidate_resume_parsed` is parsed once and cached; if resume changes, the old parse is stale — no auto-invalidation
-- The `< 23` field count filter runs at scan time and is stored on `scanned_job_templates.field_count`; changing `MAX_JOB_QUESTIONS` requires re-scanning affected jobs
+- The `< 35` field count filter runs at scan/resolve time (`MAX_JOB_QUESTIONS=35`); over-cap jobs persist as `SKIPPED` (migration 014). Changing the cap requires re-resolve for already-SKIPPED rows
 - **React-Select combobox:** Do not use keyboard Enter as a fallback after failed option click — it clears the type-ahead without committing (use option click or flyout toggle). Full-page option search uses `page.locator('body')` (Locator, not Page) for portaled menus.
 - **Local dry-run script** (`runUserApplication.ts`) is separate from dashboard `POST .../dry-run` (`dryRun.ts` + Supabase application row)

@@ -2609,6 +2609,64 @@
       return jobs.filter((job) => (job.status || '').toUpperCase() !== 'SKIPPED');
     }
 
+    function isSkippedApplicationStatus(status) {
+      return (status || '').toUpperCase() === 'SKIPPED';
+    }
+
+    /** Overlay card counts from candidate_applications (exclude SKIPPED). Falls back to API totalJobs on error/empty-list blindness. */
+    async function overlayLiveApplicationCounts(candidates, authHeaders) {
+      if (!Array.isArray(candidates) || candidates.length === 0) return candidates;
+      const client = await getSupabaseBrowserClient(authHeaders);
+      if (!client) return candidates;
+
+      const ids = candidates.map((c) => c.applywizzId).filter(Boolean);
+      if (ids.length === 0) return candidates;
+
+      const { data, error } = await client
+        .from('candidate_applications')
+        .select('applywizz_id, status')
+        .in('applywizz_id', ids);
+
+      if (error) {
+        console.warn('[Dashboard] candidate_applications count overlay failed:', error.message);
+        return candidates;
+      }
+      if (!data) return candidates;
+
+      const apiHadJobs = candidates.some((c) => Number(c.totalJobs) > 0);
+      if (apiHadJobs && data.length === 0) {
+        console.warn(
+          '[Dashboard] candidate_applications count overlay returned 0 rows while GET /api/candidates reported jobs — keeping API totals'
+        );
+        return candidates;
+      }
+
+      const counts = new Map();
+      for (const id of ids) counts.set(normalizeApplywizzId(id), 0);
+      for (const row of data) {
+        if (isSkippedApplicationStatus(row.status)) continue;
+        const key = normalizeApplywizzId(row.applywizz_id);
+        if (!counts.has(key)) continue;
+        counts.set(key, counts.get(key) + 1);
+      }
+
+      return candidates.map((c) => {
+        const key = normalizeApplywizzId(c.applywizzId);
+        if (!counts.has(key)) return c;
+        return { ...c, totalJobs: counts.get(key) };
+      });
+    }
+
+    function withQueueJobCount(candidates, applywizzId, jobs) {
+      if (!Array.isArray(candidates) || !applywizzId) return candidates;
+      const liveCount = excludeSkippedApplicationJobs(
+        filterJobsForCandidate(jobs || [], applywizzId)
+      ).length;
+      return candidates.map((c) =>
+        isSameApplywizzId(c.applywizzId, applywizzId) ? { ...c, totalJobs: liveCount } : c
+      );
+    }
+
     function candidateDetailMatchesSelection(detail, selectedApplywizzId) {
       if (!detail || !selectedApplywizzId) return false;
       const detailId = detail.applywizzId || detail.applywizz_id;
@@ -3019,7 +3077,11 @@
               : candidatesRes.headers.get('x-work-history-unreachable') === 'true';
             const emptyMsg = !Array.isArray(raw) ? (raw.message || null) : null;
 
-            setCandidates(candidateData);
+            const candidatesWithLiveCounts = await overlayLiveApplicationCounts(
+              candidateData,
+              headers
+            );
+            setCandidates(candidatesWithLiveCounts);
             if (unreachable) setWorkHistoryUnreachable(true);
             setNoCandidatesMessage(emptyMsg);
 
@@ -3093,9 +3155,12 @@
         }
       };
 
+      const ingestWasRunningRef = useRef(false);
+
       // Poll the ingestion status while a run is in flight; the pipeline takes minutes.
       useEffect(() => {
         if (!ingestRun?.running) return;
+        ingestWasRunningRef.current = true;
         let cancelled = false;
         const checkStatus = async () => {
           try {
@@ -3103,14 +3168,15 @@
             if (!res.ok || cancelled) return;
             const status = await res.json();
             if (cancelled) return;
-            setIngestRun(status);
             if (!status.running) {
               await fetchInitialData(false);
             }
+            if (!cancelled) setIngestRun(status);
           } catch (err) {
             console.warn('Ingest status poll failed:', err);
           }
         };
+        checkStatus();
         const interval = setInterval(checkStatus, 5000);
         return () => {
           cancelled = true;
@@ -3260,6 +3326,7 @@
               applywizzId: requestedId,
               jobs: jobsWithTemplates,
             });
+            setCandidates((prev) => withQueueJobCount(prev, requestedId, jobsWithTemplates));
 
             setSelectedJobUrl(null);
             setApplication(null);
@@ -3286,6 +3353,36 @@
         setApplication(null);
         fetchCandidateDetail(selectedCandidateId);
       }, [selectedCandidateId, fetchCandidateDetail]);
+
+      // When ▶ Start polling resolves (running → finished), re-fetch GET /api/candidates.
+      useEffect(() => {
+        if (ingestRun?.running) {
+          ingestWasRunningRef.current = true;
+          return;
+        }
+        if (!ingestWasRunningRef.current) return;
+        ingestWasRunningRef.current = false;
+
+        let cancelled = false;
+        (async () => {
+          try {
+            await fetch('/api/admin/refresh-artifacts', {
+              method: 'POST',
+              headers: getAuthHeaders(),
+            }).catch(() => {});
+            if (cancelled) return;
+            await fetchInitialData(false);
+            if (cancelled) return;
+            const selectedId = selectedCandidateRef.current;
+            if (selectedId) await fetchCandidateDetail(selectedId);
+          } catch (err) {
+            console.warn('[Dashboard] Post-ingest candidate refresh failed:', err);
+          }
+        })();
+        return () => {
+          cancelled = true;
+        };
+      }, [ingestRun?.running, fetchInitialData, fetchCandidateDetail]);
 
       const fetchJobApplication = useCallback(async (applywizzId, jobUrl) => {
         const requestedId = normalizeApplywizzId(applywizzId);
@@ -3350,7 +3447,14 @@
           if (selectedId && rowApplywizz && !isSameApplywizzId(rowApplywizz, selectedId)) return;
 
           setApplication((prev) => mergeApplicationFromRealtimeRow(prev, row, selectedId));
-          setCandidateDetail((prev) => (prev ? patchJobInCandidateDetail(prev, row) : prev));
+          setCandidateDetail((prev) => {
+            const next = prev ? patchJobInCandidateDetail(prev, row) : prev;
+            if (next) {
+              const owner = next.applywizzId || next.applywizz_id || selectedId;
+              setCandidates((cands) => withQueueJobCount(cands, owner, next.jobs));
+            }
+            return next;
+          });
         };
 
         (async () => {
