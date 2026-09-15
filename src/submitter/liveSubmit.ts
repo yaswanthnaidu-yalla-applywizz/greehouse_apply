@@ -1522,6 +1522,7 @@ export async function runLiveSubmit(
             const zohoResult = await zohoReader.fetchLatestOtp(companyEmail, {
               timeoutMs: Math.max(config.ZOHO_CONNECTOR_TIMEOUT_MS || 120000, 120000),
               sinceTimestamp: otpDetectedTime - 60000,
+              companyName: application.company_name || undefined,
             });
 
             if (zohoResult.success && zohoResult.otp) {

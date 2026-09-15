@@ -148,20 +148,55 @@ export async function queryZohoConfirmationEmail(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 25000);
 
+    // This REST path carries no client-side credentials: the connector holds Zoho OAuth
+    // tokens per mailbox, so a "Mailbox not connected" 400 means the mailbox needs linking.
+    console.log(`[Zoho Connector] 🌐 GET ${inboxUrl} (no auth header — server-side mailbox OAuth)`);
+
     const res = await fetch(inboxUrl, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
 
+    console.log(
+      `[Zoho Connector] 🌐 Inbox response: HTTP ${res.status} ${res.statusText} | content-type: ${
+        res.headers.get('content-type') || 'unknown'
+      }`
+    );
+
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
+      console.error(`[Zoho Connector] ❌ Raw error body: ${errText.slice(0, 500)}`);
       throw new Error(`Zoho connector returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
     }
 
-    const data = (await res.json()) as RawZohoInboxResponse;
+    // Log the raw payload before parsing so malformed/unexpected shapes are visible
+    const rawBody = await res.text();
+    console.log(`[Zoho Connector] 📥 Raw inbox response (${rawBody.length} chars): ${rawBody.slice(0, 1500)}`);
+
+    let data: RawZohoInboxResponse;
+    try {
+      data = JSON.parse(rawBody) as RawZohoInboxResponse;
+    } catch (parseErr: any) {
+      throw new Error(`Zoho connector returned non-JSON inbox response: ${parseErr.message}`);
+    }
+
     const messages = data.messages || [];
     const accountId = data.accountId;
+
+    console.log(
+      `[Zoho Connector] 📬 Parsed ${messages.length} emails (count=${data.count ?? 'n/a'}, totalMatched=${
+        data.totalMatched ?? 'n/a'
+      }, accountId=${accountId || 'none'}, folderId=${data.folder?.folderId || 'none'})`
+    );
+    messages.forEach((m, i) => {
+      const ms = Number(m.receivedTime);
+      console.log(
+        `[Zoho Connector] 📧 [${i + 1}/${messages.length}] from="${m.from || ''}" | subject="${
+          m.subject || ''
+        }" | receivedAt=${Number.isNaN(ms) || ms <= 0 ? `UNPARSEABLE(${m.receivedTime})` : new Date(ms).toISOString()}`
+      );
+    });
 
     if (!messages.length) {
       console.log(`[Zoho Connector] ℹ️ Inbox is empty for ${candidateEmail}. Zero matches.`);
