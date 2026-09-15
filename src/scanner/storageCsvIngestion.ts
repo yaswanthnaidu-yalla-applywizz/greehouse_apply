@@ -17,7 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { getDbClient, isSupabaseConfigured, resolveSupabaseCredentials } from '../db/client.js';
+import { getDbClient, isSupabaseConfigured, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient, replaceDbClient } from '../db/client.js';
 import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
@@ -44,39 +44,48 @@ function isPendingCsvObjectName(name: string): boolean {
 }
 
 /**
- * Find pending CSVs via storage.list (no created_at sortBy — that can return []).
+ * Probe every configured key with a fresh client. Anon/publishable JWTs return [] with no error.
  */
 export async function listPendingDropzoneCsvs(): Promise<{
   files: DropzoneCsv[];
   source: string;
   listedNames: string[];
+  probeLines: string[];
 }> {
-  const supabase = getDbClient();
+  const { url, candidates } = listSupabaseKeyCandidates();
+  const probeLines: string[] = [];
 
-  const { data: listed, error: listError } = await supabase.storage
-    .from(CSV_UPLOADS_BUCKET)
-    .list('', { limit: 100, offset: 0 });
+  if (candidates.length === 0) {
+    probeLines.push('no SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY on this process');
+    return { files: [], source: 'storage.list', listedNames: [], probeLines };
+  }
 
-  const listNames = (listed || []).map((f) => f.name).filter(Boolean);
-  if (listError) {
-    console.warn(`[Storage CSV Ingestion] storage.list failed: ${listError.message}`);
-  } else {
-    console.log(
-      `[Storage CSV Ingestion] storage.list root entries (${listNames.length}): ${listNames.join(', ') || '(none)'}`
-    );
+  for (const candidate of candidates) {
+    const diag = getSupabaseKeyDiagnostics(url, candidate.key);
+    const client = createSupabaseServerClient(url, candidate.key);
+    const { data: listed, error: listError } = await client.storage
+      .from(CSV_UPLOADS_BUCKET)
+      .list('', { limit: 100, offset: 0 });
+    const listNames = (listed || []).map((f) => f.name).filter(Boolean);
+    const line = `${candidate.source}: jwt.role=${diag.jwtRole ?? 'unknown'} keyShape=${diag.keyShape} urlRefMatch=${diag.urlRefMatch} entries=${listNames.length} names=${listNames.join(',') || '(none)'}${listError ? ` error=${listError.message}` : ''}`;
+    probeLines.push(line);
+    console.log(`[Storage CSV Ingestion] Probe ${line}`);
+
     const fromList = (listed || [])
       .filter((f) => isPendingCsvObjectName(f.name || ''))
       .map((f) => ({ name: f.name, createdAt: f.created_at ?? null }));
     if (fromList.length > 0) {
       fromList.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      return { files: fromList, source: 'storage.list', listedNames: listNames };
+      replaceDbClient(client);
+      return { files: fromList, source: candidate.source, listedNames: listNames, probeLines };
     }
   }
 
   return {
     files: [],
-    source: listError ? 'storage.list-error' : 'storage.list',
-    listedNames: listNames,
+    source: 'storage.list',
+    listedNames: [],
+    probeLines,
   };
 }
 
@@ -93,32 +102,33 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     };
   }
 
-  const { url: supabaseUrl, serviceKey: rawServiceKey } = resolveSupabaseCredentials();
+  const { url: supabaseUrl, serviceKey: rawServiceKey, serviceKeySource } = resolveSupabaseCredentials();
   const keyDiag = getSupabaseKeyDiagnostics(supabaseUrl, rawServiceKey);
-  console.log(`[Storage CSV Ingestion] Credential identity: ${keyDiag.summary}`);
+  console.log(
+    `[Storage CSV Ingestion] Credential identity (${serviceKeySource ?? 'unknown'}): ${keyDiag.summary}`
+  );
   if (keyDiag.keyHadSurroundingWhitespace) {
     console.warn(
       '[Storage CSV Ingestion] SUPABASE_SERVICE_KEY has leading/trailing whitespace — trim the value in Railway.'
     );
   }
 
-  const supabase = getDbClient();
-
   console.log(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
 
-  const { files: pendingCsvFiles, source, listedNames } = await listPendingDropzoneCsvs();
+  const { files: pendingCsvFiles, source, probeLines } = await listPendingDropzoneCsvs();
 
   if (pendingCsvFiles.length === 0) {
-    const seen = listedNames.slice(0, 15).join(', ') || '(none)';
-    const hint = ` Source=${source}. Keys/entries seen: ${seen}.`;
+    const probe = probeLines.join(' | ') || '(no keys probed)';
+    const hint = ` Source=${source}. ${probe}`;
     console.log(`[Storage CSV Ingestion] ℹ️ No pending CSV files found in dropzone.${hint}`);
     return {
-      success: listedNames.length > 0,
+      success: false,
       processedCount: 0,
       message: `No pending CSV files in csv_uploads storage dropzone.${hint}`,
     };
   }
 
+  const supabase = getDbClient();
   const targetFile = pendingCsvFiles[0];
   console.log(
     `[Storage CSV Ingestion] 📥 Found pending file via ${source}: "${targetFile.name}". Downloading...`
