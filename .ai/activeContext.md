@@ -31,7 +31,8 @@ _Last updated: 2026-09-15 (session end — duplicate-submission fix, dashboard t
 ### 5. CSV Ingestion Trigger
 - **Root-caused (2026-09-15):** uploading a CSV to the `csv_uploads` bucket triggered nothing because **no webhook and no poller exist** — `ingestCsvFromStorage` only had a one-shot CLI (`npm run ingest:storage`) and an admin HTTP route nothing called. Not a dead daemon: the queue worker is a separate concern and only runs in-process under `ENABLE_QUEUE_WORKER=true`
 - Fixed by making ingestion explicitly operator-driven: `POST /api/admin/trigger-ingest-from-storage` is now admin-gated, returns `202` and runs in the background (409 while in flight), paired with `GET /api/admin/ingest-status`; the dashboard has an admin-only **▶ Start** button that polls it
-- Status: **shipped; end-to-end run against a real CSV still pending** (a pending `test(Sheet1).csv` sits in the bucket)
+- **Deployed run exposed a second defect (2026-09-15 12:34):** the Start button worked, but the run logged 4× `new row violates row-level security policy` and then "No pending CSV files" despite `test(Sheet1).csv` sitting in the bucket. Cause: the deployed `SUPABASE_SERVICE_KEY` is not a `service_role` key, so every storage read returns empty without an error. Ingestion now asserts bucket visibility and fails loudly, and no longer tries to provision buckets
+- Status: **shipped; blocked on the deployment's Supabase key** before an end-to-end run
 
 ## Immediate Blockers / Open Questions
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
@@ -40,6 +41,7 @@ _Last updated: 2026-09-15 (session end — duplicate-submission fix, dashboard t
 - [ ] **`ZOHO_CONNECTOR_USER` holds a password-shaped value, not an email** (check `.env` directly; the literal is deliberately not repeated here) — needs an operator to confirm the correct username. Login yields 0 cookies and no POST, so a wrong value is currently undetectable
 - [ ] **Migration 011 not applied** on the current Supabase instance — `zoho_connected_profiles` table is missing (`Could not find the table 'public.zoho_connected_profiles'`)
 - [ ] OTP fix not yet exercised against a *fresh* Greenhouse OTP challenge — validated against existing security-code mail only (a live challenge needs an operator submission)
+- [ ] **Deployed `SUPABASE_SERVICE_KEY` is not the `service_role` secret** — replace it in Railway (project ref `dpwhgwdsfqzfwxlwvchp`, Settings → API → `service_role`) and redeploy; until then the deployed server cannot see Storage at all
 - [ ] ▶ Start button not yet run end-to-end against a real CSV — the admin gate (403), status endpoint and UI were verified, but firing the pipeline processes and archives `test(Sheet1).csv` in Storage, so it needs operator go-ahead
 - [ ] Duplicate-submission fix not yet exercised against a live submission — confirm `[API] Status → QUEUED (PATCH ...)` never appears during an `APPLYING` window, and that one app never occupies two workers
 - [ ] **`src/types/index.ts` `ApplicationStatus` is missing `APPROVED`, `QUEUED` and `CAPTCHA_REQUIRED`** relative to the DB CHECK constraint. Nothing errors on it today, so it was left alone; widening it is a deliberate change to make, not a cleanup side effect. `src/db/applications.ts` is the canonical union

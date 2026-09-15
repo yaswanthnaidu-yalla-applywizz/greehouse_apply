@@ -182,6 +182,8 @@ There is **no** Supabase Storage webhook and **no** poller — a CSV appearing i
 | `POST /api/admin/trigger-ingest-from-storage` | Admin-only (`isUserAdmin`, 403 otherwise). `409` if a run is already in flight. Otherwise returns `202 {started, startedAt}` and runs `ingestCsvFromStorage()` in the background — the full pipeline takes minutes, so it must not be awaited in the request. |
 | `GET /api/admin/ingest-status` | Admin-only. Returns `{running, startedAt, finishedAt, processedCount, processedFile, message, error}` for the most recent run. |
 
+`SUPABASE_SERVICE_KEY` **must be the `service_role` secret**, not an anon/publishable key: an anon key still satisfies `isSupabaseConfigured()`, but every storage read comes back empty with no error, so ingestion cannot tell a misconfiguration from an empty dropzone. Ingestion now asserts `csv_uploads` is visible in `listBuckets()` first and fails with a named cause.
+
 The dashboard's **▶ Start** button (header, next to refresh — rendered only under `isAdminSession()`) calls both: POST, then polls the status endpoint every 5s and reloads candidate data when the run ends. CLI equivalent: `npm run ingest:storage` (one-shot, exits when done). Run state lives in server memory, so a restart mid-run loses the status (the pipeline itself dies with the process too).
 
 ## External Services & Endpoints
