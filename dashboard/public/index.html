@@ -2048,7 +2048,7 @@
     }
 
     function persistAuthSession(data) {
-      const role = ApplyWizzRoles.persistRole(data.role || data.user?.role || 'operator');
+      const role = ApplyWizzRoles.persistSession(data, true);
       return ApplyWizzRoles.redirectToRoleHome(role);
     }
 
@@ -3001,12 +3001,7 @@
         return token ? { Authorization: `Bearer ${token}` } : {};
       };
 
-      const sessionRole = () => {
-        const stored = (localStorage.getItem('applywizz_role') || currentUser?.role || '').trim().toLowerCase();
-        if (stored === 'dev' || stored === 'admin' || stored === 'manager' || stored === 'operator') return stored;
-        if (localStorage.getItem('applywizz_is_admin') === 'true') return 'admin';
-        return 'operator';
-      };
+      const sessionRole = () => ApplyWizzRoles.sessionRole();
 
       const isAdminSession = () => {
         const role = sessionRole();
@@ -3080,22 +3075,7 @@
       };
 
       const handleSignOut = () => {
-        const token = localStorage.getItem('applywizz_auth_token');
-        if (token) {
-          fetch('/api/auth/logout', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
-          }).catch(() => {});
-        }
-        localStorage.removeItem('applywizz_auth_token');
-        localStorage.removeItem('applywizz_auth_user');
-        localStorage.removeItem('applywizz_wh_unreachable');
-        localStorage.removeItem('applywizz_is_admin');
-        localStorage.removeItem('applywizz_role');
-        setWorkHistoryUnreachable(false);
-        setWorkHistoryBannerDismissed(false);
-        setNoCandidatesMessage(null);
-        setCurrentUser(null);
+        ApplyWizzRoles.signOut();
       };
 
       const fetchInitialData = useCallback(async (isPolling = false) => {

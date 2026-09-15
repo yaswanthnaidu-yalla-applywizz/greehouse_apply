@@ -91,9 +91,18 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!localStorage.getItem('applywizz_auth_token')) return;
-    const stored = (localStorage.getItem('applywizz_role') || '').trim().toLowerCase();
-    if (stored === 'manager') window.location.replace('/manager');
-    else if (stored === 'admin') window.location.replace('/admin');
+    let role = (localStorage.getItem('applywizz_role') || '').trim().toLowerCase();
+    try {
+      const user = JSON.parse(localStorage.getItem('applywizz_auth_user') || 'null');
+      const email = String(user?.email || '').trim().toLowerCase();
+      if (email === 'yaswanthnaiduyalla@applywizz.ai') role = 'dev';
+      else if (email === 'ramakrishna@applywizz.ai' || email === 'anushabandreddy@applywizz.ai') role = 'admin';
+      else if (email === 'balaji@applywizz.ai' || email === 'ramakrishnaa.tejavath@applywizz.ai') role = 'manager';
+      else if (email) role = 'operator';
+    } catch {}
+    if (role === 'dev') window.location.replace('/dev');
+    else if (role === 'manager') window.location.replace('/manager');
+    else if (role === 'admin') window.location.replace('/admin');
   }, []);
 
   useEffect(() => {
@@ -170,9 +179,16 @@ export const App: React.FC = () => {
 
   const sessionRole = (): string => {
     if (typeof window === 'undefined') return 'operator';
+    try {
+      const user = JSON.parse(localStorage.getItem('applywizz_auth_user') || 'null');
+      const email = String(user?.email || currentUser?.email || '').trim().toLowerCase();
+      if (email === 'yaswanthnaiduyalla@applywizz.ai') return 'dev';
+      if (email === 'ramakrishna@applywizz.ai' || email === 'anushabandreddy@applywizz.ai') return 'admin';
+      if (email === 'balaji@applywizz.ai' || email === 'ramakrishnaa.tejavath@applywizz.ai') return 'manager';
+      if (email) return 'operator';
+    } catch {}
     const stored = (localStorage.getItem('applywizz_role') || currentUser?.role || '').trim().toLowerCase();
     if (stored === 'dev' || stored === 'admin' || stored === 'manager' || stored === 'operator') return stored;
-    if (localStorage.getItem('applywizz_is_admin') === 'true') return 'admin';
     return 'operator';
   };
 
@@ -211,6 +227,8 @@ export const App: React.FC = () => {
       }).catch(() => {});
     }
     localStorage.removeItem('applywizz_auth_token');
+    localStorage.removeItem('applywizz_refresh_token');
+    localStorage.removeItem('applywizz_session_expires_at');
     localStorage.removeItem('applywizz_auth_user');
     localStorage.removeItem('applywizz_wh_unreachable');
     localStorage.removeItem('applywizz_is_admin');

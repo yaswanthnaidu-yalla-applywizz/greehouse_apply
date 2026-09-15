@@ -32,6 +32,28 @@
       );
     }
 
+    function HeaderSignOut() {
+      const email = ApplyWizzRoles.sessionUserEmail();
+      return (
+        <div className="flex items-center gap-2">
+          {email && (
+            <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
+              <div className="w-5 h-5 rounded-full bg-[#E88474] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-black text-white uppercase">{email.charAt(0)}</div>
+              <span className="text-xs font-bold text-[#1A1A2E] max-w-[160px] truncate hidden sm:inline" title={email}>{email}</span>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => ApplyWizzRoles.signOut()}
+            title="Sign Out"
+            className="text-xs bg-[#FFF5EB] hover:bg-[#E88474] hover:text-white text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
+          >
+            Sign Out
+          </button>
+        </div>
+      );
+    }
+
     function lightClass(status) {
       if (status === 'ok') return 'bg-[#9AC89A]';
       if (status === 'degraded') return 'bg-[#F4D66B]';
@@ -139,6 +161,7 @@
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
                 </label>
                 <button type="button" onClick={refresh} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
+                <HeaderSignOut />
               </div>
             </header>
             <nav className="flex flex-wrap gap-2 mb-6">

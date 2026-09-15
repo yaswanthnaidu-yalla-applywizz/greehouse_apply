@@ -23,8 +23,28 @@ function homePathForRole(role: string): string {
   return '/';
 }
 
-function persistAuthSession(data: { role?: string; user?: { role?: string }; isAdmin?: boolean }): boolean {
-  const role = String(data.role || data.user?.role || 'operator').trim().toLowerCase();
+function persistAuthSession(data: {
+  token?: string;
+  refreshToken?: string;
+  refresh_token?: string;
+  sessionTtlSeconds?: number;
+  role?: string;
+  user?: { role?: string };
+  isAdmin?: boolean;
+}): boolean {
+  if (data.token) localStorage.setItem('applywizz_auth_token', data.token);
+  const refresh = data.refreshToken || data.refresh_token;
+  if (refresh) localStorage.setItem('applywizz_refresh_token', refresh);
+  const ttlMs =
+    Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : 7 * 24 * 60 * 60 * 1000;
+  localStorage.setItem('applywizz_session_expires_at', String(Date.now() + ttlMs));
+  const role = (() => {
+    const email = String(data.user?.email || '').trim().toLowerCase();
+    if (email === 'yaswanthnaiduyalla@applywizz.ai') return 'dev';
+    if (email === 'ramakrishna@applywizz.ai' || email === 'anushabandreddy@applywizz.ai') return 'admin';
+    if (email === 'balaji@applywizz.ai' || email === 'ramakrishnaa.tejavath@applywizz.ai') return 'manager';
+    return String(data.role || data.user?.role || 'operator').trim().toLowerCase();
+  })();
   localStorage.setItem('applywizz_role', role);
   if (role === 'admin' || role === 'dev') {
     localStorage.setItem('applywizz_is_admin', 'true');

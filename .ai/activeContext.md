@@ -1,15 +1,16 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (role-based dashboards + logger + AW logo committed to main; apply migration 015)_
+_Last updated: 2026-09-15 (session end — 7-day sessions, email-map roles, Sign Out on all dashboards, 015 RLS; apply 015 on Supabase)_
 
 ## Current Focus (Active Sprint)
 
 ### 1. Role-based Admin / Manager / Dev dashboards
-- Strict isolation: operator `/`, manager `/manager`, admin `/admin`, dev `/dev` + switcher
-- Manager home keeps the existing client table with click-to-expand proofs and date/CA filters
-- Admin has org overview + ▶ Start ingest; Dev has health / runs / debugger
-- **Apply migration 015** (`audit_events`, `application_events`) in the Supabase SQL editor or Activity/audit tabs stay empty
-- Status: **on `main`; apply migration 015**
+- Role is resolved from the **email map** on every load (`roleAccess.js`). `applywizz_is_admin` is not a role — it was sending the dev email to `/admin`
+- Login home: operator `/`, manager `/manager`, admin `/admin`, **dev `/dev`** (switcher still opens the others)
+- Sign Out is top-right on operator, manager, admin, and dev
+- Dashboard sessions persist **7 days** (`refreshToken` + `POST /api/auth/refresh`)
+- **Apply migration 015** in the Supabase SQL editor: tables `audit_events` + `application_events`, plus **service_role-only RLS**. Activity/audit/debugger timelines stay empty until the tables exist
+- Status: **shipping to `main`; 015 SQL (tables + RLS) must still be run in Supabase**
 
 ### 2. Resolution Engine — Semantic Search for Resume Parsing
 - Current Tier 2 (pdf-parse) + Tier 3 (Fuse.js fuzzy) sometimes miss relevant resume content
@@ -50,7 +51,7 @@ _Last updated: 2026-09-15 (role-based dashboards + logger + AW logo committed to
 
 ## Immediate Blockers / Open Questions
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
-- [ ] **Migration 015** (`audit_events` + `application_events`) — apply in Supabase SQL Editor or Activity / audit / debugger timelines stay empty
+- [ ] **Migration 015** — run the full file in Supabase SQL Editor (tables **and** `service_role` RLS). Tables missing → empty Activity/audit/debugger. Tables without RLS → publishable key can read audit rows
 - [ ] Semantic search: choose approach (embeddings vs fuzzy tuning) before implementation
 - [ ] **`ZOHO_CONNECTOR_USER` holds a password-shaped value, not an email** — operator must confirm the username
 - [ ] **Migration 011** — `zoho_connected_profiles` still missing on the instance that logged the missing-table error (re-check)
@@ -60,12 +61,15 @@ _Last updated: 2026-09-15 (role-based dashboards + logger + AW logo committed to
 - [ ] ▶ Start not yet completed end-to-end (would archive `test(Sheet1).csv`)
 - [ ] Duplicate-submission fix not yet exercised on a live submit
 - [ ] Email proof `EMAIL_UNVERIFIED` path not live-verified
-- [ ] **Skill-review apply** for open observations **0003, 0005, 0011** — listed 2026-09-15; user deferred to **end of week** (do not stage/action until then)
+- [ ] **Skill-review apply** for open observations **0003, 0005, 0011, 0012** — listed 2026-09-15; user deferred **0003/0005/0011** to **end of week** (do not stage/action those until then)
 
 ## Recent Decisions Made
 - CSV ingestion is **admin-triggered from `/admin`**, not from the operator header
-- Roles are isolated: managers cannot open operator/admin/dev; admins cannot open manager/operator/dev; missing email is never admin
+- Roles are isolated: managers cannot open operator/admin/dev; admins cannot open manager/operator/dev; missing email is never admin. **Role comes from the email map**, not `applywizz_is_admin` (that flag sent the dev user to `/admin`)
+- Dashboard sessions persist **7 days** (`refreshToken` + `POST /api/auth/refresh`); existing localStorage tokens without a refresh token must sign in once
+- Sign Out is on every dashboard header (operator already had it; admin/manager/dev added)
 - Manager dashboard currently shows **all clients** (`MANAGER_TEAM_SCOPE_ENABLED = false` in `clientDashboard.ts`). Re-enable team scoping once we know which `careerassociatemanager_id` maps to which manager email.
+- `audit_events` / `application_events` RLS is **service_role only** — do not copy the core-table `USING (true)` policies onto these. Core tables remain open `USING (true)` (multi-tenant RLS still V3).
 - Long-running admin actions return `202` and expose a status endpoint
 - CAPTCHA automation is explicitly out of scope
 - Question cap is **35**, not 23 — further lifts need an explicit instruction (`AGENTS.md` rule 7)
@@ -78,7 +82,7 @@ _Last updated: 2026-09-15 (role-based dashboards + logger + AW logo committed to
 - Operator UI source of truth is **`dashboard/public/index.html`**
 - A reused Playwright page must be **reset to root and the filter cleared** before the next OTP lookup; one reload if the user list is empty
 - All `src/` stdout goes through **`createLogger`** (`src/utils/logger.ts`) — no new raw `console.*` in `src/`
-- Open skill observations **0003, 0005, 0011** stay open until an end-of-week apply (listing already done; do not restage this week unless asked)
+- Open skill observations **0003, 0005, 0011** stay open until an end-of-week apply; **0012** logged this session (privilege flag ≠ role)
 
 ## How to Update This File
 After each significant sprint or feature ship, update:
