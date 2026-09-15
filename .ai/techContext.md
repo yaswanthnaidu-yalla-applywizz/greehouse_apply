@@ -186,6 +186,8 @@ There is **no** Supabase Storage webhook and **no** poller — a CSV appearing i
 | `POST /api/admin/trigger-ingest-from-storage` | Admin-only (`isUserAdmin`, 403 otherwise). `409` if a run is already in flight. Otherwise returns `202 {started, startedAt}` and runs `ingestCsvFromStorage()` in the background — the full pipeline takes minutes, so it must not be awaited in the request. |
 | `GET /api/admin/ingest-status` | Admin-only. Returns `{running, startedAt, finishedAt, processedCount, processedFile, message, error}` for the most recent run. |
 
+CSV `applywizz_id`s are the approval to fetch missing ApplyWizz profiles. Application rows are written only after a Supabase `profiles` row exists (`hasSupabaseProfile`); otherwise the `candidate_applications_applywizz_id_fkey` is skipped with a warn.
+
 On ingest, logs include `Credential identity: urlProjectRef=... | jwt.role=... | jwt.ref=... | urlRefMatch=...` (see `src/db/supabaseKeyDiagnostics.ts`) — never the raw key.
 
 The server resolves credentials via `resolveSupabaseCredentials()` / `listSupabaseKeyCandidates()` in `src/db/client.ts`: a JWT with `role=service_role` wins; otherwise **`SUPABASE_SERVICE_ROLE_KEY` is used even when it is `sb_secret_`**. Keys are normalized (trim, unwrap quotes, strip `Bearer`, strip JWT whitespace). Ingest **probes each key with a fresh client** and logs `Probe SUPABASE_… jwt.role=… entries=N names=…`. An empty object list is a failed run. Admin probe: `GET /api/admin/supabase-storage-health` returns `keyProbes[]` (no secrets). `sb_secret_` / anon keys still cannot list private `csv_uploads` — use the legacy `eyJ…` service_role JWT.
@@ -210,7 +212,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 |---|---|
 | Main entry / CLI | `src/index.ts` |
 | Env schema (Zod) | `src/config/env.ts` |
-| Central logger | `src/utils/logger.ts` — `[ISO] [LEVEL] [MODULE] message`; no external lib |
+| Central logger | `src/utils/logger.ts` — `[ISO] [LEVEL] [MODULE] message`; levels INFO/WARN/ERROR/DEBUG/HALT. `haltWithDevAlert(module, message, error?)` logs `[HALT]` + `🚨 DEV ACTION REQUIRED` and `process.exit(1)` for systemic ingest failures only |
 | Supabase client | `src/db/client.ts` |
 | Supabase key diagnostics (ingest logs) | `src/db/supabaseKeyDiagnostics.ts` |
 | Empty-form hydration | `src/db/applicationFieldHydration.ts` |
@@ -220,7 +222,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (applied 2026-09-15) |
 | Audit / application events | `src/db/events.ts` — fail-closed if 015 tables missing |
 | Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = false`) |
-| Admin / Dev API | `src/server/routes/adminDashboard.ts`, `src/server/routes/devDashboard.ts` |
+| Admin / Dev health probes | `src/server/healthSnapshot.ts` — ApplyWizz GET without id: HTTP 400 = reachable |
 | Form filler (largest file, 59KB) | `src/submitter/formFiller.ts` |
 | Live submit engine (69KB) | `src/submitter/liveSubmit.ts` |
 | Playwright scanner | `src/scanner/playwrightScanner.ts` |

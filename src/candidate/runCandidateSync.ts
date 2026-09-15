@@ -82,6 +82,7 @@ export async function main(): Promise<void> {
       concurrency,
       syncProfiles: true,
       downloadResumes: true,
+      allowOutboundApi: true,
     });
 
     const outputPath = await exportCandidateSegments(segments, outputDir);

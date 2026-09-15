@@ -18,9 +18,22 @@ import type {
   ResolvedField,
   ScannedField,
 } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 
 const log = createLogger('Llm Synthesizer');
+
+let firstProviderCallChecked = false;
+
+function haltIfFirstProviderCallFailed(reachedProvider: boolean): void {
+  if (firstProviderCallChecked) return;
+  firstProviderCallChecked = true;
+  if (!reachedProvider) {
+    haltWithDevAlert(
+      'LLM',
+      'LLM provider unreachable — all configured providers fail on first call'
+    );
+  }
+}
 
 /**
  * Job context metadata passed into LLM prompt synthesis.
@@ -386,6 +399,7 @@ export class LLMSynthesizer {
     // If API key is configured or provider is ollama, execute real LLM call
     if (this.apiKey || this.provider === 'ollama') {
       try {
+        let providerReached = false;
         if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
           let rawAnswer = '';
           const candidateModels =
@@ -413,6 +427,7 @@ export class LLMSynthesizer {
                 temperature: 0.2,
                 max_tokens: 300,
               });
+              providerReached = true;
 
               const content = completion?.choices?.[0]?.message?.content?.trim();
               const cleaned = cleanLLMOutput(content || '');
@@ -426,6 +441,8 @@ export class LLMSynthesizer {
             }
           }
 
+          haltIfFirstProviderCallFailed(providerReached);
+
           if (rawAnswer && rawAnswer.length > 0) {
             return this.finalizeLlmAnswer(rawAnswer, field, profile, jobContext, choiceOptions);
           }
@@ -434,13 +451,20 @@ export class LLMSynthesizer {
         if (this.provider === 'gemini' && this.geminiClient) {
           const model = this.geminiClient.getGenerativeModel({ model: this.modelName });
           const result = await model.generateContent(prompt);
+          providerReached = true;
+          haltIfFirstProviderCallFailed(true);
           const content = result.response.text().trim();
           const cleaned = cleanLLMOutput(content);
           if (cleaned && cleaned.length > 0) {
             return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
           }
         }
+
+        if (this.provider === 'gemini') {
+          haltIfFirstProviderCallFailed(providerReached);
+        }
       } catch (err: any) {
+        haltIfFirstProviderCallFailed(false);
         log.warn(`[LLM Synthesizer] ⚠️ LLM inference error for "${field.label}": ${err.message}. Falling back to heuristic answer.`);
       }
     }
@@ -528,20 +552,28 @@ ${questions.map((question, index) => `${index}. [${question.type}] ${question.la
     }
 
     let raw = '';
-    if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
-      const completion = await this.openaiClient.chat.completions.create({
-        model: this.modelName,
-        messages: [{ role: 'system', content: systemMessage }, { role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: Math.max(300, questions.length * 100),
-      });
-      raw = completion?.choices?.[0]?.message?.content || '';
-    } else if (this.provider === 'gemini' && this.geminiClient) {
-      const model = this.geminiClient.getGenerativeModel({ model: this.modelName });
-      const result = await model.generateContent(`${systemMessage}\n\n${prompt}`);
-      raw = result.response.text();
-    } else {
-      throw new Error(`LLM provider ${this.provider} is unavailable.`);
+    try {
+      if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
+        const completion = await this.openaiClient.chat.completions.create({
+          model: this.modelName,
+          messages: [{ role: 'system', content: systemMessage }, { role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: Math.max(300, questions.length * 100),
+        });
+        haltIfFirstProviderCallFailed(true);
+        raw = completion?.choices?.[0]?.message?.content || '';
+      } else if (this.provider === 'gemini' && this.geminiClient) {
+        const model = this.geminiClient.getGenerativeModel({ model: this.modelName });
+        const result = await model.generateContent(`${systemMessage}\n\n${prompt}`);
+        haltIfFirstProviderCallFailed(true);
+        raw = result.response.text();
+      } else {
+        haltIfFirstProviderCallFailed(false);
+        throw new Error(`LLM provider ${this.provider} is unavailable.`);
+      }
+    } catch (err) {
+      haltIfFirstProviderCallFailed(false);
+      throw err;
     }
 
     const parsed: unknown = JSON.parse(cleanLLMOutput(raw));

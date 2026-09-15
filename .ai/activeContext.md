@@ -1,23 +1,36 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (operator applied migration 015 on Supabase)_
+_Last updated: 2026-09-15 (session — ingest `haltWithDevAlert`)_
 
 ## Current Focus (Active Sprint)
 
-### 1. Role-based Admin / Manager / Dev dashboards
+### 0. Ingest halt — systemic failures stop the process
+- **`haltWithDevAlert(module, message, error?)`** in `src/utils/logger.ts` logs `[HALT]` + `🚨 DEV ACTION REQUIRED` and `process.exit(1)`
+- Wired for Playwright launch, Supabase probe / empty key, ApplyWizz 5xx/timeout, missing required tables, first LLM provider call, malformed/zero-row CSV
+- Recoverable: single job scan, single candidate resolve, CAPTCHA/OTP, individual submit — `[WARN]` and continue
+- Status: **code ready, not committed** — `npm run typecheck` clean
+
+### 1. CSV ingest FK — no `profiles` row before application upsert
+- **Symptom:** `upsertApplication` ERROR `candidate_applications_applywizz_id_fkey` (e.g. AWL-39218 Fanatics)
+- **Cause:** Phase C skips IDs not already in `profiles` (Rule 1 / not Zoho-connected). `ensureApplicationRowsFromCsv` then upserts **every** CSV pair with `syncProfiles: false`, so Postgres rejects the child row
+- **Fix (this session):** Phase C calls `ensureSupabaseProfile` — missing IDs are detected via `hasSupabaseProfile` (not local `getProfile`), fetched from ApplyWizz, upserted to `profiles`. Verified 9/9 in `tests/ensureSupabaseProfile.test.ts`. New rows default `zoho_connected=false`, so the candidate may still be skipped for resolve; the parent row is created so application upserts no longer FK-fail
+- Status: **code ready, not committed** — re-run ▶ Start / ingest; look for `has no profiles row — fetching ApplyWizz profile` then either `profiles row was created` or a successful sync
+
+### 2. Role-based Admin / Manager / Dev dashboards
 - Migration **015 applied** on Supabase (`audit_events` + `application_events` + service_role RLS). Activity/audit/debugger can fill from here
 - Login home: operator `/`, manager `/manager`, admin `/admin`, **dev `/dev`** (switcher still opens the others)
 - Sign Out is top-right on operator, manager, admin, and dev
 - Dashboard sessions persist **7 days** (`refreshToken` + `POST /api/auth/refresh`)
-- Status: **on `main` (`7def1bb`)**
+- Status: **on `main` (`7f91c59`)**
+- Dev System **ApplyWizz** tile: GET `get-client-details` with no id. HTTP 400 means reachable (id required); only timeouts / 5xx are errors
 
-### 2. Resolution Engine — Semantic Search for Resume Parsing
+### 3. Resolution Engine — Semantic Search for Resume Parsing
 - Current Tier 2 (pdf-parse) + Tier 3 (Fuse.js fuzzy) sometimes miss relevant resume content
 - **Shipped (2026-09-15, `31b830e`):** Tier 5 fail-closed — LLM answers that are not an exact option (or below min confidence) stay `unresolved`. SMS/recruiting/marketing opt-in questions are always filled **No** at submit time (`isConsentSmsMarketingField`)
 - Open question: use vector embeddings vs. smarter Fuse.js tuning vs. structured extraction pre-pass
 - Status: **semantic search still investigating**; fail-closed + SMS skip on `main`
 
-### 3. Email Proof / OTP Reliability
+### 4. Email Proof / OTP Reliability
 - **OTP path fixed (2026-09-15):** `isGreenhouseOtpEmail` gate before extraction; verified live AWL-31428 → `NgW4NT62`
 - **Confirmation path fixed:** forward-only window from `submitted_at`; OTP subjects rejected; `EMAIL_PROOF_PENDING`-only poller
 - **`EMAIL_UNVERIFIED` (on `main`, `cf50a45`):** after 10m with no confirmation mail → `EMAIL_UNVERIFIED`. Migration 013 — operator reported applied
@@ -26,11 +39,11 @@ _Last updated: 2026-09-15 (operator applied migration 015 on Supabase)_
 - Remaining: not yet exercised against a live Greenhouse OTP challenge
 - Status: **reset/retry + step logs on `main`; live OTP verification still pending**
 
-### 4. Submission Queue Integrity
+### 5. Submission Queue Integrity
 - Duplicate live submissions guarded on `main` (`cf50a45`): `IN_FLIGHT_STATUSES` includes `EMAIL_PROOF_PENDING`; PATCH ignores naked `QUEUED` while in-flight; `persist: false` on poll and submit-response paths
 - Status: **shipped; live verification pending**
 
-### 5. CSV Ingestion Trigger
+### 6. CSV Ingestion Trigger
 - Operator-driven: dashboard **▶ Start** → `POST /api/admin/trigger-ingest-from-storage` (202 + poll `ingest-status`). No Storage webhook
 - Credential resolution (`src/db/client.ts`): prefer `service_role` JWT, else `SUPABASE_SERVICE_ROLE_KEY` (including `sb_secret_`); normalize quoted/Bearer/whitespace secrets
 - Ingest (`0d02593`) probes **every** configured key with a fresh client and logs `jwt.role` + entry names. Empty list is a failed run
@@ -38,17 +51,18 @@ _Last updated: 2026-09-15 (operator applied migration 015 on Supabase)_
 - Admin probe: `GET /api/admin/supabase-storage-health` returns `keyProbes[]`
 - Status: **code on `main`; Railway still cannot list the dropzone — put the legacy `eyJ…` service_role JWT in `SUPABASE_SERVICE_ROLE_KEY`**
 
-### 6. Question cap + SKIPPED + empty forms
+### 7. Question cap + SKIPPED + empty forms
 - **`MAX_JOB_QUESTIONS` default raised 23 → 35** (`716b42d`). Jobs with `field_count >= 35` upsert `SKIPPED` (`skippedApplications.ts`, migration **014**)
 - Operator queue hides `SKIPPED` (`excludeSkippedApplicationJobs`)
 - Empty `resolved_fields` hydrated from `scanned_job_templates.fields_schema` (`applicationFieldHydration.ts`, `2bca544`) so the dashboard is not a blank form after segregator-only upserts
 - Status: **on `main`; apply migration 014 on Supabase if SKIPPED upserts fail the CHECK constraint**
 
-### 7. Central logger + AW logo (shipped with dashboards)
+### 8. Central logger + AW logo (shipped with dashboards)
 - **Central logger** — `src/utils/logger.ts` (`createLogger`); all `src/` `console.log`/`warn`/`error` swapped; format `[ISO] [LEVEL] [MODULE] message`
 - App logo: square AW mark at `dashboard/public/logo.webp` (favicon + header/auth); `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
 
 ## Immediate Blockers / Open Questions
+- [ ] **AWL-39218 FK after ingest** — code fix ready (profile-first upsert). Re-run ingest after deploy to confirm ApplyWizz returns a profile and a `profiles` row is written. If ApplyWizz 404s, applications stay skipped (correct)
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
 - [x] **Migration 015** — operator applied 2026-09-15 (`audit_events` + `application_events` + service_role RLS)
 - [ ] Semantic search: choose approach (embeddings vs fuzzy tuning) before implementation
@@ -82,6 +96,7 @@ _Last updated: 2026-09-15 (operator applied migration 015 on Supabase)_
 - A reused Playwright page must be **reset to root and the filter cleared** before the next OTP lookup; one reload if the user list is empty
 - All `src/` stdout goes through **`createLogger`** (`src/utils/logger.ts`) — no new raw `console.*` in `src/`
 - Open skill observations **0003, 0005, 0011** stay open until an end-of-week apply; **0012** logged this session (privilege flag ≠ role)
+- Ingest `haltWithDevAlert` exits the process on systemic failures only — never on CAPTCHA, OTP, or a single job/candidate/application failure
 
 ## How to Update This File
 After each significant sprint or feature ship, update:

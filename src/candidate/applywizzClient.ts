@@ -22,7 +22,7 @@ import type {
   CandidateWorkExperience,
   CandidateDemographics,
 } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert, isApplyWizzUnreachableError } from '../utils/logger.js';
 
 const log = createLogger('Applywizz Client');
 
@@ -259,6 +259,14 @@ export class ApplyWizzClient {
           break;
         }
       }
+    }
+
+    if (isApplyWizzUnreachableError(lastError)) {
+      haltWithDevAlert(
+        'ApplyWizz',
+        'ApplyWizz API unreachable — 5xx or timeout on candidate profile fetch',
+        lastError
+      );
     }
 
     throw new Error(

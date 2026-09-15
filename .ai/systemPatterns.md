@@ -15,9 +15,9 @@ Input CSV (greenhouse_only_applywizz_prod(in).csv)
          │
          └─ BRANCH 2: Candidate Sync & Resolution
                segregateCandidatesByApplyWizzId → group CSV by AWL ID
-               → ApplyWizz API sync → profile JSON + resume PDF → Supabase Storage
+               → ApplyWizz API sync (CSV IDs are the approval) → profile JSON + resume PDF → `profiles`
+               → candidate_applications upserted only after a `profiles` row exists (FK)
                → AnswerResolver (5-Tier Waterfall, per candidate × job field)
-               → candidate_applications upserted to Supabase
                      │
                      ▼
                Operator Dashboard (Express REST + React Native Web)
@@ -138,7 +138,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 ### `candidate_applications`
 | Column | Type | Notes |
 |---|---|---|
-| `applywizz_id` | TEXT FK | |
+| `applywizz_id` | TEXT FK | Must exist in `profiles` first. `ensureApplicationRowsFromCsv` skips IDs with no parent row |
 | `template_id` | TEXT FK | References `scanned_job_templates` |
 | `job_url` | TEXT | |
 | `status` | ENUM | See lifecycle above |
@@ -192,3 +192,4 @@ On login, role is set on the returned `user.role`, written to Supabase `app_meta
 5. **Supabase service key for data access** — Express uses `service_role`. Core tables still have open `USING (true)` policies (multi-tenant RLS is V3). **015 event tables** enable RLS with **service_role-only** policies — do not add anon/authenticated `USING (true)` there. Storage `list()` with an anon/publishable JWT returns `[]` and no error — probe every configured key (`listSupabaseKeyCandidates`) before treating the dropzone as empty.
 6. **RAILWAY_ENV=true** — disables headful mode, caps memory on Railway deployment
 7. **Stdout in `src/` goes through `createLogger`** (`src/utils/logger.ts`) — `[ISO timestamp] [LEVEL] [MODULE] message`. Do not add new `console.log` / `warn` / `error` in `src/`.
+8. **`haltWithDevAlert` is for systemic ingest failures only** — Playwright launch, Supabase unreachable / empty key probe, ApplyWizz 5xx/timeout, required-migration missing table, first LLM provider call down, malformed/empty CSV. Single job scan, single candidate resolve, CAPTCHA, OTP, and individual submit failures stay `[WARN]` and continue.

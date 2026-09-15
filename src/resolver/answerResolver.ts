@@ -30,7 +30,7 @@ import type {
   ScannedField,
   ScannedJobTemplate,
 } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
+import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnectionError } from '../utils/logger.js';
 
 const log = createLogger('Answer Resolver');
 
@@ -296,6 +296,20 @@ export class AnswerResolver {
           try {
             await upsertSkippedOverQuestionCap(seg.applywizzId, persistJobUrl, template, questionCount);
           } catch (dbErr: any) {
+            if (isMissingTableError(dbErr)) {
+              haltWithDevAlert(
+                'Migration',
+                'required migration not applied (e.g. missing table error)',
+                dbErr
+              );
+            }
+            if (isSupabaseConnectionError(dbErr)) {
+              haltWithDevAlert(
+                'Supabase',
+                'Supabase connection failure — bad credentials, unreachable, or empty key probe',
+                dbErr
+              );
+            }
             log.warn(
               `[Answer Resolver] ⚠️ Could not upsert SKIPPED candidate_applications for ${seg.applywizzId} ${persistJobUrl}: ${dbErr.message}`
             );
@@ -303,7 +317,29 @@ export class AnswerResolver {
           continue;
         }
 
-        const app = await this.resolveJobApplication(seg.applywizzId, template);
+        let app: CandidateJobApplication;
+        try {
+          app = await this.resolveJobApplication(seg.applywizzId, template);
+        } catch (resolveErr: any) {
+          if (isMissingTableError(resolveErr)) {
+            haltWithDevAlert(
+              'Migration',
+              'required migration not applied (e.g. missing table error)',
+              resolveErr
+            );
+          }
+          if (isSupabaseConnectionError(resolveErr)) {
+            haltWithDevAlert(
+              'Supabase',
+              'Supabase connection failure — bad credentials, unreachable, or empty key probe',
+              resolveErr
+            );
+          }
+          log.warn(
+            `[Answer Resolver] ⚠️ Failed to resolve ${seg.applywizzId} ${persistJobUrl}: ${resolveErr.message}`
+          );
+          continue;
+        }
         applications.push(app);
         resolvedCount++;
 
@@ -317,6 +353,20 @@ export class AnswerResolver {
             resolved_fields: app.resolvedFields,
           });
         } catch (dbErr: any) {
+          if (isMissingTableError(dbErr)) {
+            haltWithDevAlert(
+              'Migration',
+              'required migration not applied (e.g. missing table error)',
+              dbErr
+            );
+          }
+          if (isSupabaseConnectionError(dbErr)) {
+            haltWithDevAlert(
+              'Supabase',
+              'Supabase connection failure — bad credentials, unreachable, or empty key probe',
+              dbErr
+            );
+          }
           log.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
         }
 
