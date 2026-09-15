@@ -18,6 +18,7 @@ import { getOrParseResume, type ResumeParsedRow } from '../resolver/tier2ResumeP
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import type {
   ResolvedField,
+  ScannedField,
   CandidateJobApplication,
 } from '../types/index.js';
 import type { ApplicationRow } from '../db/applications.js';
@@ -406,6 +407,47 @@ export function isCountryCodeField(fieldId: string, name: string, label: string)
 export function isSponsorshipQuestion(fieldId: string, name: string, label: string): boolean {
   const combined = `${fieldId} ${name} ${label}`.toLowerCase();
   return /sponsorship|visa|require.*sponsorship|employer-based visa/i.test(combined);
+}
+
+const CONSENT_SMS_MARKETING_LABEL_PATTERNS = [
+  'sms',
+  'recruiting messages',
+  'text message',
+  'marketing',
+] as const;
+
+/** SMS / recruiting / marketing opt-in questions — always answer No at fill time (skip resolver). */
+export function isConsentSmsMarketingField(label: string): boolean {
+  const norm = (label || '').toLowerCase();
+  if (!norm) return false;
+  return CONSENT_SMS_MARKETING_LABEL_PATTERNS.some((p) => norm.includes(p));
+}
+
+function toConsentSmsNoResolvedField(
+  field: Pick<ScannedField, 'fieldId' | 'name' | 'type' | 'label' | 'isRequired'>
+): ResolvedField {
+  return {
+    fieldId: field.fieldId,
+    name: field.name,
+    type: field.type,
+    label: field.label,
+    value: 'No',
+    source: 'supabase',
+    resolvedByTier: 1,
+    confidence: 1.0,
+    isRequired: field.isRequired,
+  };
+}
+
+function applyConsentSmsMarketingNo(field: ResolvedField): ResolvedField {
+  console.log(`[Form Filler] Consent/SMS field auto-answered No: ${field.label}`);
+  return {
+    ...field,
+    value: 'No',
+    source: 'supabase',
+    resolvedByTier: 1,
+    confidence: 1.0,
+  };
 }
 
 /** DEBUG (sponsorship dry-run): print every input on the page with its id and role. */
@@ -1499,7 +1541,9 @@ export async function fillForm(
 
     // 2. Populate initial queue of resolved fields
     for (let i = 0; i < fields.length; i++) {
-      const field = fields[i];
+      const field = isConsentSmsMarketingField(fields[i].label || '')
+        ? applyConsentSmsMarketingNo(fields[i])
+        : fields[i];
       const fillRes = await fillSingleField(page, field, applywizzId, tempFilesToClean, options);
       results.push(fillRes);
 
@@ -1545,16 +1589,21 @@ export async function fillForm(
       }
 
       for (const unmappedField of unmappedFields) {
-        // Resolve field on the fly via 5-tier waterfall
-        const resolved = await resolver.resolveField(applywizzId, unmappedField, {
-          profile,
-          parsedResume,
-          qaEntries,
-          jobContext: {
-            companyName: appObj.company_name || appObj.companyName || '',
-            jobTitle: appObj.job_title || appObj.jobTitle || '',
-          },
-        });
+        let resolved: ResolvedField;
+        if (isConsentSmsMarketingField(unmappedField.label || '')) {
+          console.log(`[Form Filler] Consent/SMS field auto-answered No: ${unmappedField.label}`);
+          resolved = toConsentSmsNoResolvedField(unmappedField);
+        } else {
+          resolved = await resolver.resolveField(applywizzId, unmappedField, {
+            profile,
+            parsedResume,
+            qaEntries,
+            jobContext: {
+              companyName: appObj.company_name || appObj.companyName || '',
+              jobTitle: appObj.job_title || appObj.jobTitle || '',
+            },
+          });
+        }
 
         console.log(
           `[Form Filler] 💡 Resolved dynamic field "${resolved.label}" (${resolved.fieldId}) -> "${resolved.value}" [Tier ${resolved.resolvedByTier ?? 'None'}]`
