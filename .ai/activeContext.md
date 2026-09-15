@@ -1,6 +1,6 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (session end — main at `31b830e`)_
+_Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step logs + dashboard field filter)_
 
 ## Current Focus (Active Sprint)
 
@@ -19,9 +19,11 @@ _Last updated: 2026-09-15 (session end — main at `31b830e`)_
 ### 3. Email Proof / OTP Reliability
 - **OTP path fixed (2026-09-15):** `isGreenhouseOtpEmail` gate before extraction; verified live AWL-31428 → `NgW4NT62`
 - **Confirmation path fixed:** forward-only window from `submitted_at`; OTP subjects rejected; `EMAIL_PROOF_PENDING`-only poller
-- **`EMAIL_UNVERIFIED` (on `main`, `cf50a45`):** after 10m with no confirmation mail → `EMAIL_UNVERIFIED` (`email_proof_status=manual_review_needed`). Dashboard amber badge, resubmit, View Proof. Migration `013_add_email_unverified_status.sql` — operator reported applied
-- Remaining: not yet exercised against a live submission
-- Status: **coded + 013 applied; live verification pending**
+- **`EMAIL_UNVERIFIED` (on `main`, `cf50a45`):** after 10m with no confirmation mail → `EMAIL_UNVERIFIED`. Migration 013 — operator reported applied
+- **Session reset (`601d37d`):** each `fetchLatestOtp` goto-root + clear filter; empty user list → one `page.reload()` retry
+- **Uncommitted:** numbered `[Zoho] Step 1`–`8` verification logs + extra 5s wait after user-list selector
+- Remaining: not yet exercised against a live Greenhouse OTP challenge
+- Status: **reset/retry on `main`; step logs local; live OTP verification still pending**
 
 ### 4. Submission Queue Integrity
 - Duplicate live submissions guarded on `main` (`cf50a45`): `IN_FLIGHT_STATUSES` includes `EMAIL_PROOF_PENDING`; PATCH ignores naked `QUEUED` while in-flight; `persist: false` on poll and submit-response paths
@@ -40,6 +42,11 @@ _Last updated: 2026-09-15 (session end — main at `31b830e`)_
 - Operator queue hides `SKIPPED` (`excludeSkippedApplicationJobs`)
 - Empty `resolved_fields` hydrated from `scanned_job_templates.fields_schema` (`applicationFieldHydration.ts`, `2bca544`) so the dashboard is not a blank form after segregator-only upserts
 - Status: **on `main`; apply migration 014 on Supabase if SKIPPED upserts fail the CHECK constraint**
+
+### 7. Uncommitted (this session, not on `main`)
+- `[Zoho] Step 1`–`8` verification logs + 5s user-list wait (`src/services/zohoReader.ts`)
+- Dashboard carousel: show identity + `unresolved`/`ai`/`manual`/`resume` only (`dashboard/public/index.html`); submit payload still uses full `fields`
+- Dropped `GET /api/candidates` totalJobs debug `console.log` (`src/server/index.ts`)
 
 ## Immediate Blockers / Open Questions
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
@@ -65,6 +72,7 @@ _Last updated: 2026-09-15 (session end — main at `31b830e`)_
 - Prefer probing every env key over trusting `listBuckets()` or a singleton client
 - Queue ownership: in-flight statuses are never requeued; `persist: false` for poll/submit bookkeeping
 - Operator UI source of truth is **`dashboard/public/index.html`**
+- A reused Playwright page must be **reset to root and the filter cleared** before the next OTP lookup; one reload if the user list is empty
 
 ## How to Update This File
 After each significant sprint or feature ship, update:
