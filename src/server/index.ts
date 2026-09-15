@@ -63,6 +63,7 @@ import {
   countNonSkippedApplicationsByApplywizzIds,
   type ApplicationRow,
 } from '../db/applications.js';
+import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
 import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient } from '../db/client.js';
 import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
@@ -1218,6 +1219,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     let jobs: Array<Record<string, unknown>> = [];
     let dbRowCount = 0;
     let skippedCaAssignment = 0;
+    let skippedUnresolved = 0;
 
     if (isSupabaseConfigured()) {
       const { data, error } = await getDbClient()
@@ -1234,6 +1236,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         if (!isAdmin && userEmail && application.assigned_ca_email &&
             application.assigned_ca_email.trim().toLowerCase() !== userEmail.trim().toLowerCase()) {
           skippedCaAssignment++;
+          continue;
+        }
+        if (!applicationRowHasPersistedResolution(application)) {
+          skippedUnresolved++;
           continue;
         }
         jobs.push({
@@ -1269,7 +1275,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     log.info(
       `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) ` +
         `source=candidate_applications_only dbRows=${dbRowCount} skippedCaAssignment=${skippedCaAssignment} ` +
-        `afterCaFilter=${afterCaFilter} responseJobs=${jobs.length}`
+        `skippedUnresolved=${skippedUnresolved} afterCaFilter=${afterCaFilter} responseJobs=${jobs.length}`
     );
     res.json({ applywizzId, jobs });
   });
@@ -1476,6 +1482,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     // If Supabase record exists, return it immediately as source of truth
     if (supabaseRecord) {
+      if (
+        !applicationRowHasPersistedResolution(supabaseRecord) &&
+        !isPinnedDemoApplywizzId(applywizzId)
+      ) {
+        res.status(404).json({
+          error: `Application not yet resolved for candidate '${applywizzId}' and job '${decodedUrl}'.`,
+        });
+        return;
+      }
       let row = supabaseRecord as ApplicationRow;
       row = await hydrateAndPersistApplicationFields(row);
 

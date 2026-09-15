@@ -37,6 +37,34 @@ export function excludeSkippedApplicationJobs<T extends { status?: string | null
   return jobs.filter((job) => (job.status || '').toUpperCase() !== 'SKIPPED');
 }
 
+type ResolutionFieldsCarrier = {
+  resolved_fields?: unknown;
+  resolvedFields?: unknown;
+  fieldsCount?: number | null;
+};
+
+/** True when the pipeline has persisted a resolution snapshot (non-empty resolved_fields). */
+export function applicationRowHasPersistedResolution(row: ResolutionFieldsCarrier): boolean {
+  const fields = row.resolved_fields ?? row.resolvedFields;
+  return Array.isArray(fields) && fields.length > 0;
+}
+
+/** Drops segregator placeholders and other rows the resolver has not populated yet. */
+export function excludeUnresolvedApplicationJobs<T extends ResolutionFieldsCarrier & { status?: string | null }>(
+  jobs: T[]
+): T[] {
+  return jobs.filter(
+    (job) => applicationRowHasPersistedResolution(job) || (typeof job.fieldsCount === 'number' && job.fieldsCount > 0)
+  );
+}
+
+/** Operator queue: assigned candidate, not SKIPPED, resolver has run. */
+export function filterOperatorApplicationJobs<T extends ResolutionFieldsCarrier & { status?: string | null }>(
+  jobs: T[]
+): T[] {
+  return excludeUnresolvedApplicationJobs(excludeSkippedApplicationJobs(jobs));
+}
+
 export function candidateDetailMatchesSelection(
   detail: { applywizzId?: string; applywizz_id?: string } | null | undefined,
   selectedApplywizzId: string | null | undefined
