@@ -42,3 +42,5 @@
 2026-09-15 session-end: no new observations; docs synced (activeContext, progress, systemPatterns rule 5, techContext, projectbrief, AGENTS.md); 015 RLS in-repo still uncommitted vs 2d268a3; open 0003+0005+0011 deferred to end of week
 2026-09-15 session-start scan: files=11 parsed=11 (push-and-session-end)
 2026-09-15 session-end: observation 0012 logged (privilege flag is not a role); 7-day sessions + Sign Out + email-map /dev + 015 RLS shipping; open 0003+0005+0011+0012
+2026-09-15 session-start scan: files=12 parsed=12 (015 applied confirmation)
+2026-09-15: operator applied migration 015; docs (activeContext, progress, techContext, AGENTS.md); no new observations

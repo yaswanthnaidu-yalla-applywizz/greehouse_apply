@@ -217,7 +217,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Over-cap SKIPPED upserts | `src/db/skippedApplications.ts` |
 | Operator queue filters | `src/dashboard/candidateQueueFilter.ts` |
 | DB DDL | `src/db/schema.sql` |
-| Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (apply in SQL editor) |
+| Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (applied 2026-09-15) |
 | Audit / application events | `src/db/events.ts` — fail-closed if 015 tables missing |
 | Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = false`) |
 | Admin / Dev API | `src/server/routes/adminDashboard.ts`, `src/server/routes/devDashboard.ts` |

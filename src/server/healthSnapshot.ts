@@ -33,6 +33,21 @@ async function pingUrl(url: string, timeoutMs = 5000): Promise<{ ok: boolean; st
   }
 }
 
+/** ApplyWizz get-client-details without an id returns 400. That still means the host answered. */
+function applywizzProbeStatus(ping: { status?: number; error?: string }): {
+  status: ProbeStatus;
+  detail: string;
+} {
+  const code = ping.status;
+  if (typeof code === 'number' && code < 500) {
+    if (code === 400) {
+      return { status: 'ok', detail: 'HTTP 400 (reachable; get-client-details needs applywizz_id)' };
+    }
+    return { status: 'ok', detail: `HTTP ${code}` };
+  }
+  return { status: 'error', detail: ping.error || (code ? `HTTP ${code}` : 'request failed') };
+}
+
 export async function collectHealthSnapshot(): Promise<{
   generatedAt: string;
   probes: ServiceProbe[];
@@ -128,12 +143,13 @@ export async function collectHealthSnapshot(): Promise<{
     const applywizzUrl = new URL(config.APPLYWIZZ_API_URL);
     applywizzUrl.search = '';
     const applywizz = await pingUrl(applywizzUrl.toString());
+    const judged = applywizzProbeStatus(applywizz);
     probes.push({
       name: 'applywizz',
-      status: applywizz.ok ? 'ok' : 'error',
-      detail: applywizz.ok ? `HTTP ${applywizz.status}` : applywizz.error || `HTTP ${applywizz.status}`,
+      status: judged.status,
+      detail: judged.detail,
       responseMs: applywizz.responseMs,
-      lastError: applywizz.error,
+      lastError: judged.status === 'error' ? applywizz.error : undefined,
     });
   } catch (err: any) {
     probes.push({

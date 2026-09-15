@@ -1,16 +1,15 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (session end — 7-day sessions, email-map roles, Sign Out on all dashboards, 015 RLS; apply 015 on Supabase)_
+_Last updated: 2026-09-15 (operator applied migration 015 on Supabase)_
 
 ## Current Focus (Active Sprint)
 
 ### 1. Role-based Admin / Manager / Dev dashboards
-- Role is resolved from the **email map** on every load (`roleAccess.js`). `applywizz_is_admin` is not a role — it was sending the dev email to `/admin`
+- Migration **015 applied** on Supabase (`audit_events` + `application_events` + service_role RLS). Activity/audit/debugger can fill from here
 - Login home: operator `/`, manager `/manager`, admin `/admin`, **dev `/dev`** (switcher still opens the others)
 - Sign Out is top-right on operator, manager, admin, and dev
 - Dashboard sessions persist **7 days** (`refreshToken` + `POST /api/auth/refresh`)
-- **Apply migration 015** in the Supabase SQL editor: tables `audit_events` + `application_events`, plus **service_role-only RLS**. Activity/audit/debugger timelines stay empty until the tables exist
-- Status: **shipping to `main`; 015 SQL (tables + RLS) must still be run in Supabase**
+- Status: **on `main` (`7def1bb`)**
 
 ### 2. Resolution Engine — Semantic Search for Resume Parsing
 - Current Tier 2 (pdf-parse) + Tier 3 (Fuse.js fuzzy) sometimes miss relevant resume content
@@ -51,7 +50,7 @@ _Last updated: 2026-09-15 (session end — 7-day sessions, email-map roles, Sign
 
 ## Immediate Blockers / Open Questions
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
-- [ ] **Migration 015** — run the full file in Supabase SQL Editor (tables **and** `service_role` RLS). Tables missing → empty Activity/audit/debugger. Tables without RLS → publishable key can read audit rows
+- [x] **Migration 015** — operator applied 2026-09-15 (`audit_events` + `application_events` + service_role RLS)
 - [ ] Semantic search: choose approach (embeddings vs fuzzy tuning) before implementation
 - [ ] **`ZOHO_CONNECTOR_USER` holds a password-shaped value, not an email** — operator must confirm the username
 - [ ] **Migration 011** — `zoho_connected_profiles` still missing on the instance that logged the missing-table error (re-check)
