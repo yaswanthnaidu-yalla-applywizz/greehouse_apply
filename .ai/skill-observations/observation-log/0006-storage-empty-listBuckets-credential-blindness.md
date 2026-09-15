@@ -11,7 +11,7 @@ date: 2026-09-15
 session_context: "Admin Start button for csv_uploads ingest; Railway reported visible buckets none despite CSV present; env allegedly set"
 parked_until:
 resolved: 2026-09-15
-resolution: "Prefer SUPABASE_SERVICE_ROLE_KEY even when it is sb_secret_ (no JWT role); do not fall back to anon in SERVICE_KEY. Ingest lists csv_uploads without sortBy created_at, logs root names, fails on empty list. Do not treat empty listBuckets + empty list (no error) as success."
+resolution: "Prefer SUPABASE_SERVICE_ROLE_KEY even when sb_secret; probe EVERY configured key with a fresh client; normalize quoted/Bearer/whitespace secrets; log jwt.role+entry count per key; fail loudly when all lists are empty. Empty listBuckets + empty list (no error) is anon, not an empty dropzone."
 reference: ".ai/progress.md (Known Bugs), src/scanner/storageCsvIngestion.ts"
 ---
 

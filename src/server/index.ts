@@ -45,7 +45,7 @@ import {
 import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHydrate.js';
 import { cacheApplicationLocally, getSubmissionOutcomeCounts, getApplication, upsertApplication, serializeApplicationDto } from '../db/applications.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
-import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials } from '../db/client.js';
+import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient } from '../db/client.js';
 import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import {
@@ -610,23 +610,33 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
     const { url, serviceKey, serviceKeySource } = resolveSupabaseCredentials();
     const diagnostics = getSupabaseKeyDiagnostics(url, serviceKey);
-    const supabase = getDbClient();
-    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
-    const bucketNames = (buckets || []).map((b) => b.name);
-    const { data: listed, error: csvProbeError } = await supabase.storage
-      .from(CSV_UPLOADS_BUCKET)
-      .list('', { limit: 100, offset: 0 });
+    const { candidates } = listSupabaseKeyCandidates();
+    const keyProbes = [];
+    for (const candidate of candidates) {
+      const diag = getSupabaseKeyDiagnostics(url, candidate.key);
+      const client = createSupabaseServerClient(url, candidate.key);
+      const { data: listed, error: csvProbeError } = await client.storage
+        .from(CSV_UPLOADS_BUCKET)
+        .list('', { limit: 100, offset: 0 });
+      const { data: buckets, error: bucketsError } = await client.storage.listBuckets();
+      keyProbes.push({
+        source: candidate.source,
+        jwtRole: diag.jwtRole,
+        keyShape: diag.keyShape,
+        urlRefMatch: diag.urlRefMatch,
+        listBucketsError: bucketsError?.message ?? null,
+        visibleBuckets: (buckets || []).map((b) => b.name),
+        csvUploadsListNames: (listed || []).map((f) => f.name),
+        csvUploadsDirectListError: csvProbeError?.message ?? null,
+      });
+    }
     res.json({
       configured: true,
       serviceKeySource,
       diagnostics: diagnostics.summary,
       jwtRole: diagnostics.jwtRole,
       urlRefMatch: diagnostics.urlRefMatch,
-      listBucketsError: bucketsError?.message ?? null,
-      visibleBuckets: bucketNames,
-      csvUploadsDirectListOk: !csvProbeError,
-      csvUploadsDirectListError: csvProbeError?.message ?? null,
-      csvUploadsListNames: (listed || []).map((f) => f.name),
+      keyProbes,
     });
   });
 

@@ -17,47 +17,85 @@ export type ResolvedSupabaseCredentials = {
   serviceKeySource: 'SUPABASE_SERVICE_KEY' | 'SUPABASE_SERVICE_ROLE_KEY' | null;
 };
 
-/**
- * Picks the server-side Supabase secret. Prefers a JWT with role service_role when
- * both SUPABASE_SERVICE_KEY (often anon by mistake) and SUPABASE_SERVICE_ROLE_KEY are set.
- */
-export function resolveSupabaseCredentials(): ResolvedSupabaseCredentials {
+export type SupabaseKeyCandidate = {
+  source: NonNullable<ResolvedSupabaseCredentials['serviceKeySource']>;
+  key: string;
+};
+
+/** Strip quotes, Bearer, and JWT/sb_* whitespace from Railway-pasted secrets. */
+export function normalizeSupabaseSecret(raw: string): string {
+  let k = (raw || '').trim();
+  if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
+    k = k.slice(1, -1).trim();
+  }
+  if (/^bearer\s+/i.test(k)) {
+    k = k.replace(/^bearer\s+/i, '').trim();
+  }
+  if (k.startsWith('eyJ') || k.startsWith('sb_')) {
+    k = k.replace(/\s+/g, '');
+  }
+  return k;
+}
+
+export function createSupabaseServerClient(url: string, serviceKey: string): SupabaseClient {
+  return createClient(url, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
+export function listSupabaseKeyCandidates(): { url: string; candidates: SupabaseKeyCandidate[] } {
   const url = (config.SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
-  const candidates: Array<{
-    source: ResolvedSupabaseCredentials['serviceKeySource'];
-    raw: string | undefined;
-  }> = [
+  const raw: Array<{ source: SupabaseKeyCandidate['source']; raw: string | undefined }> = [
     { source: 'SUPABASE_SERVICE_KEY', raw: config.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY },
     {
       source: 'SUPABASE_SERVICE_ROLE_KEY',
       raw: config.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY,
     },
   ];
+  const seen = new Set<string>();
+  const candidates: SupabaseKeyCandidate[] = [];
+  for (const c of raw) {
+    const key = normalizeSupabaseSecret(c.raw || '');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ source: c.source, key });
+  }
+  return { url, candidates };
+}
 
-  const withRole = candidates
-    .map((c) => ({ ...c, key: (c.raw || '').trim() }))
-    .filter((c) => c.key.length > 0);
+/**
+ * Picks the server-side Supabase secret. Prefers a JWT with role service_role when
+ * both SUPABASE_SERVICE_KEY (often anon by mistake) and SUPABASE_SERVICE_ROLE_KEY are set.
+ */
+export function resolveSupabaseCredentials(): ResolvedSupabaseCredentials {
+  const { url, candidates } = listSupabaseKeyCandidates();
 
-  const serviceRoleJwt = withRole.find(
+  const serviceRoleJwt = candidates.find(
     (c) => getSupabaseKeyDiagnostics(url, c.key).jwtRole === 'service_role'
   );
-  if (serviceRoleJwt?.source && serviceRoleJwt.key) {
+  if (serviceRoleJwt) {
     return { url, serviceKey: serviceRoleJwt.key, serviceKeySource: serviceRoleJwt.source };
   }
 
-  // New-format sb_secret_ keys have no JWT role claim. Prefer ROLE_KEY over an
-  // anon/publishable value sitting in SUPABASE_SERVICE_KEY (typical Railway layout).
-  const roleKeyEnv = withRole.find((c) => c.source === 'SUPABASE_SERVICE_ROLE_KEY');
-  if (roleKeyEnv?.source && roleKeyEnv.key) {
+  const roleKeyEnv = candidates.find((c) => c.source === 'SUPABASE_SERVICE_ROLE_KEY');
+  if (roleKeyEnv) {
     return { url, serviceKey: roleKeyEnv.key, serviceKeySource: roleKeyEnv.source };
   }
 
-  const first = withRole[0];
-  if (first?.source && first.key) {
+  const first = candidates[0];
+  if (first) {
     return { url, serviceKey: first.key, serviceKeySource: first.source };
   }
 
   return { url, serviceKey: '', serviceKeySource: null };
+}
+
+/** Swap the process-wide client after ingest finds a key that can see Storage. */
+export function replaceDbClient(client: SupabaseClient): void {
+  supabaseClientInstance = client;
 }
 
 /** Service role (or best available) key for server DB, Storage, and Auth admin API. */
@@ -132,12 +170,7 @@ export function getDbClient(): SupabaseClient {
     );
   }
 
-  supabaseClientInstance = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
+  supabaseClientInstance = createSupabaseServerClient(supabaseUrl, supabaseServiceKey);
 
   return supabaseClientInstance;
 }
