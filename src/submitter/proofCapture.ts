@@ -25,6 +25,9 @@ import {
 import { isApplicationUuid } from '../db/storage.js';
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
 import { queryZohoConfirmationEmail } from '../services/zoho-connector.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Proof Capture');
 
 export interface ProofCaptureResult {
   proofWebUrl: string;
@@ -92,11 +95,11 @@ export async function captureWebProof(
 
   const attached = await attachProofToApplication(appRef, proofWebUrl, capturedAt);
   if (attached) {
-    console.log(
+    log.info(
       `[Proof Capture] 📸 Proof screenshot saved for application ${storageKey}: ${proofWebUrl}`
     );
   } else {
-    console.warn(
+    log.warn(
       `[Proof Capture] ⚠️ Could not update DB record with proof URL: upload succeeded for ${storageKey} but DB attach failed`
     );
   }
@@ -177,11 +180,11 @@ export async function captureFailedScreenshot(
   const proofFailedUrl = await uploadFailedScreenshot(storageKey, screenshotBuffer);
   const attached = await attachFailedProofToApplication(appRef, proofFailedUrl, capturedAt);
   if (attached) {
-    console.log(
+    log.info(
       `[Proof Capture] 📸 Failure screenshot saved for application ${storageKey}: ${proofFailedUrl}`
     );
   } else {
-    console.warn(
+    log.warn(
       `[Proof Capture] ⚠️ Could not update DB record with failure proof URL: upload succeeded for ${storageKey} but DB attach failed`
     );
   }
@@ -224,7 +227,7 @@ export async function captureJobOpenScreenshot(
   }
 
   const jobOpenUrl = await uploadJobOpenScreenshot(storageKey, screenshotBuffer);
-  console.log(
+  log.info(
     `[Proof Capture] 📸 Job open screenshot saved for application ${storageKey}: ${jobOpenUrl}`
   );
 
@@ -258,7 +261,7 @@ export async function captureJobSubmittedScreenshot(
   }
 
   const jobSubmittedUrl = await uploadJobSubmittedScreenshot(storageKey, screenshotBuffer);
-  console.log(
+  log.info(
     `[Proof Capture] 📸 Job submitted screenshot saved for application ${storageKey}: ${jobSubmittedUrl}`
   );
 
@@ -284,7 +287,7 @@ export async function captureAndSaveEmailProof(
   }
 
   if (!appRow) {
-    console.warn(`[Email Proof] ⚠️ Application record not found for ${storageKey}`);
+    log.warn(`[Email Proof] ⚠️ Application record not found for ${storageKey}`);
     return null;
   }
 
@@ -294,7 +297,7 @@ export async function captureAndSaveEmailProof(
   try {
     await updateEmailProofStatus(appRef, 'pending');
   } catch (err: any) {
-    console.warn(`[Email Proof] ⚠️ Could not set email_proof_status to pending: ${err.message}`);
+    log.warn(`[Email Proof] ⚠️ Could not set email_proof_status to pending: ${err.message}`);
   }
 
   // Resolve candidate's company email
@@ -305,7 +308,7 @@ export async function captureAndSaveEmailProof(
       companyEmail = getCompanyEmail(profile);
     }
   } catch (err: any) {
-    console.warn(`[Email Proof] ⚠️ Could not fetch profile for company email: ${err.message}`);
+    log.warn(`[Email Proof] ⚠️ Could not fetch profile for company email: ${err.message}`);
   }
 
   // Fallback 1: Extract from resolved_fields if present
@@ -332,12 +335,12 @@ export async function captureAndSaveEmailProof(
   }
 
   if (!companyEmail) {
-    console.warn(`[Email Proof] ⚠️ No company email found for candidate ${appRow.applywizz_id}`);
+    log.warn(`[Email Proof] ⚠️ No company email found for candidate ${appRow.applywizz_id}`);
     await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
     return null;
   }
 
-  console.log(
+  log.info(
     `[Email Proof] ⏳ Initiating confirmation email capture for ${appRow.applywizz_id} (${companyEmail}, manual: ${Boolean(options.isManual)})...`
   );
 
@@ -350,7 +353,7 @@ export async function captureAndSaveEmailProof(
     const appliedIso = appRow.submitted_at || appRow.proof_captured_at || appRow.reviewed_at || new Date().toISOString();
     const companyName = (appRow.company_name || '').trim();
     if (!companyName) {
-      console.warn(`[Email Proof] ⚠️ Missing company_name on application ${storageKey}; cannot match inbox email.`);
+      log.warn(`[Email Proof] ⚠️ Missing company_name on application ${storageKey}; cannot match inbox email.`);
       await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
       return null;
     }
@@ -367,24 +370,24 @@ export async function captureAndSaveEmailProof(
       const capturedAt = result.email.received_at || new Date().toISOString();
       const attached = await attachEmailProofJsonToApplication(appRef, result.email, capturedAt);
       if (attached) {
-        console.log(
+        log.info(
           `[Email Proof] 📧 Stored confirmation email JSON for ${storageKey} (subject: "${result.email.subject}")`
         );
       } else {
-        console.warn(
+        log.warn(
           `[Email Proof] ⚠️ Could not update DB record with email proof JSON for ${storageKey}`
         );
       }
       return result.email;
     } else {
-      console.warn(
+      log.warn(
         `[Email Proof] ⚠️ Confirmation email not found within 10m post-submit window for ${storageKey}: ${result.errorMessage}`
       );
       await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
       return null;
     }
   } catch (err: any) {
-    console.error(`[Email Proof] ❌ Background email proof capture error: ${err.message}`);
+    log.error(`[Email Proof] ❌ Background email proof capture error: ${err.message}`);
     await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
     return null;
   }

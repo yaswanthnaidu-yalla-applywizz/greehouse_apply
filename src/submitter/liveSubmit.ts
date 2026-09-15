@@ -39,6 +39,9 @@ import {
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
 import { zohoReader } from '../services/zohoReader.js';
 import { config } from '../config/env.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Live Submit');
 
 export interface LiveSubmitOptions extends FormFillerOptions {
   /** Launch in headless mode (default: true) */
@@ -672,7 +675,7 @@ export async function switchToHeadfulMode(
   currentUrl: string,
   options: { headless?: boolean } = {}
 ): Promise<{ browser: Browser; context: BrowserContext; page: Page; appliedHeadfulAt: number }> {
-  console.log(`[Live Submit] 🖥️ Switching to headful browser for URL ${currentUrl}...`);
+  log.info(`[Live Submit] 🖥️ Switching to headful browser for URL ${currentUrl}...`);
 
   // Closes current headless browser
   await browser.close().catch(() => {});
@@ -715,7 +718,7 @@ export async function switchBrowserToHeadful(
   targetUrl: string,
   options: { headless?: boolean } = {}
 ): Promise<{ browser: Browser; context: BrowserContext; page: Page; appliedHeadfulAt: number }> {
-  console.log(
+  log.info(
     `[Live Submit] 🖥️ Switching to headful browser for application ${application.id || application.applywizz_id}...`
   );
   return switchToHeadfulMode(currentBrowser, targetUrl, options);
@@ -745,7 +748,7 @@ export async function pollCaptchaSolved(
   const pollIntervalMs = options.pollIntervalMs ?? 500;
   const startTime = Date.now();
 
-  console.log(
+  log.info(
     `[Live Submit] 🔄 Polling for CAPTCHA resolution for application ${applicationId} (every ${pollIntervalMs}ms, up to ${timeoutMs / 1000}s)...`
   );
 
@@ -786,7 +789,7 @@ export async function pollCaptchaSolved(
       }
 
       if (!captchaPresent && submitBtn) {
-        console.log(`[Live Submit] ✅ CAPTCHA solved! Auto-clicking submit button...`);
+        log.info(`[Live Submit] ✅ CAPTCHA solved! Auto-clicking submit button...`);
         await submitBtn.click({ timeout: 5000 });
 
         await page.waitForTimeout(1500);
@@ -794,7 +797,7 @@ export async function pollCaptchaSolved(
         // Check if OTP field appeared post-submit
         const otpField = await detectOTPField(page);
         if (otpField.found) {
-          console.warn(
+          log.warn(
             `[Live Submit] 🔢 OTP requirement detected after CAPTCHA solve (${otpField.selector})`
           );
           if (application.id) {
@@ -820,10 +823,10 @@ export async function pollCaptchaSolved(
         // Verification signals (30s timeout)
         const verification = await verifySubmissionSignals(page, 30000);
         if (verification.verified) {
-          console.log(`[Live Submit] 🎉 Submission verified after CAPTCHA solve! Signal: ${verification.signal}`);
+          log.info(`[Live Submit] 🎉 Submission verified after CAPTCHA solve! Signal: ${verification.signal}`);
           const proofResult = await captureWebProof(page, application);
           if (proofResult.proofWebUrl) {
-            console.log(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
+            log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
           }
           if (application.id) {
             await updateStatus(application.id, 'APPLIED', {
@@ -834,7 +837,7 @@ export async function pollCaptchaSolved(
 
           // Asynchronously capture confirmation email proof from Zoho Mail in the background
           captureAndSaveEmailProof(application).catch((err: any) => {
-            console.warn(`[Live Submit] ⚠️ Background email proof capture failed: ${err.message}`);
+            log.warn(`[Live Submit] ⚠️ Background email proof capture failed: ${err.message}`);
           });
 
           const resolved = resolvePausedSession(applicationId);
@@ -855,16 +858,16 @@ export async function pollCaptchaSolved(
           const isTimeout = /time.*out/i.test(verification.error || '');
           const errorMsg = verification.error || 'Timeout: Submission verification timed out.';
           if (isTimeout) {
-            console.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
+            log.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
           } else {
-            console.warn(`[Live Submit] ❌ Verification failed: ${errorMsg}`);
+            log.warn(`[Live Submit] ❌ Verification failed: ${errorMsg}`);
           }
           let failedProofUrl: string | undefined;
           let failedCapturedAt: string | undefined;
           try {
             const failed = await captureFailedScreenshot(page, application);
             if (failed?.url) {
-              console.log(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
+              log.info(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
               failedProofUrl = failed.proofFailedUrl || failed.url;
               failedCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
             }
@@ -899,7 +902,7 @@ export async function pollCaptchaSolved(
 
   // Timeout reached (5 min)
   const timeoutMsg = 'Timeout: Session timed out after 5 minutes';
-  console.warn(`[Live Submit] ⏱️ Timeout: ${timeoutMsg} for application ${applicationId}`);
+  log.warn(`[Live Submit] ⏱️ Timeout: ${timeoutMsg} for application ${applicationId}`);
 
   let timeoutFailedUrl: string | undefined;
   let timeoutCapturedAt: string | undefined;
@@ -907,13 +910,13 @@ export async function pollCaptchaSolved(
     if (!page.isClosed()) {
       const failed = await captureFailedScreenshot(page, application);
       if (failed?.url) {
-        console.log(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
+        log.info(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
         timeoutFailedUrl = failed.proofFailedUrl || failed.url;
         timeoutCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
       }
     }
   } catch (err: any) {
-    console.warn(`[Live Submit] ⚠️ Pre-close failure screenshot failed: ${err.message}`);
+    log.warn(`[Live Submit] ⚠️ Pre-close failure screenshot failed: ${err.message}`);
   }
 
   const targetAppId = application.id || application.applywizz_id || applicationId;
@@ -926,7 +929,7 @@ export async function pollCaptchaSolved(
         job_url: application.job_url,
       });
     } catch (err: any) {
-      console.warn(`[Live Submit] ⚠️ Error updating status to FAILED on timeout: ${err.message}`);
+      log.warn(`[Live Submit] ⚠️ Error updating status to FAILED on timeout: ${err.message}`);
     }
   }
 
@@ -1006,7 +1009,7 @@ export async function submitOtpToPausedSession(
       if (page && !page.isClosed()) {
         const failed = await captureFailedScreenshot(page, application).catch(() => null);
         if (failed?.url) {
-          console.log(`[Live Submit] 📸 OTP missing field failure screenshot URL: ${failed.url}`);
+          log.info(`[Live Submit] 📸 OTP missing field failure screenshot URL: ${failed.url}`);
         }
       }
       throw new Error('OTP input field not found on paused session page.');
@@ -1022,20 +1025,20 @@ export async function submitOtpToPausedSession(
     boxSelectors = detected.boxSelectors || [];
   }
 
-  console.log(`[Live Submit] 🔢 Submitting OTP for ${canonicalKey} (alphanumeric, multiBox=${isMultiBox})`);
+  log.info(`[Live Submit] 🔢 Submitting OTP for ${canonicalKey} (alphanumeric, multiBox=${isMultiBox})`);
 
   if (application.id) {
     try {
       await updateStatus(application.id, 'APPLYING');
     } catch (err: any) {
-      console.warn(`[Live Submit] ⚠️ Could not set status APPLYING: ${err.message}`);
+      log.warn(`[Live Submit] ⚠️ Could not set status APPLYING: ${err.message}`);
     }
   }
 
   try {
     if (isMultiBox && boxSelectors.length > 0) {
       const chars = cleanOtp.split('');
-      console.log(
+      log.info(
         `[Live Submit] 🔢 Multi-box OTP: filling ${chars.length} characters into ${boxSelectors.length} boxes...`
       );
       for (let i = 0; i < Math.min(chars.length, boxSelectors.length); i++) {
@@ -1054,7 +1057,7 @@ export async function submitOtpToPausedSession(
     for (const sel of OTP_VERIFY_SELECTORS) {
       const btn = page.locator(sel).first();
       if ((await btn.count()) > 0 && (await btn.isVisible())) {
-        console.log(`[Live Submit] 🖱️ Clicking OTP verify button (${sel})...`);
+        log.info(`[Live Submit] 🖱️ Clicking OTP verify button (${sel})...`);
         await btn.click({ timeout: 5000 });
         verifyClicked = true;
         break;
@@ -1062,7 +1065,7 @@ export async function submitOtpToPausedSession(
     }
 
     if (!verifyClicked) {
-      console.log('[Live Submit] ↩️ No OTP verify button found — pressing Enter on OTP field.');
+      log.info('[Live Submit] ↩️ No OTP verify button found — pressing Enter on OTP field.');
       if (isMultiBox && boxSelectors.length > 0) {
         const lastBox = page.locator(boxSelectors[boxSelectors.length - 1]).first();
         await lastBox.press('Enter').catch(() => {});
@@ -1072,16 +1075,16 @@ export async function submitOtpToPausedSession(
       }
     }
 
-    console.log(`[Live Submit] ⏳ Waiting up to ${timeoutMs / 1000}s for confirmation after OTP...`);
+    log.info(`[Live Submit] ⏳ Waiting up to ${timeoutMs / 1000}s for confirmation after OTP...`);
     const verification = await verifySubmissionSignals(page, timeoutMs);
 
     if (verification.verified) {
-      console.log(`[Live Submit] 🎉 OTP verification confirmed! Signal: ${verification.signal}`);
+      log.info(`[Live Submit] 🎉 OTP verification confirmed! Signal: ${verification.signal}`);
 
       const proofResult = await captureWebProof(page, application);
       session.screenshotCaptured = true;
       if (proofResult.proofWebUrl) {
-        console.log(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
+        log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
       }
 
       const targetAppId = application.id || canonicalKey;
@@ -1096,13 +1099,13 @@ export async function submitOtpToPausedSession(
       await clearPausedSession(canonicalKey);
 
       // Attempt immediate confirmation email verification (up to 15s)
-      console.log(`[Live Submit] 📧 Checking for immediate confirmation email after OTP...`);
+      log.info(`[Live Submit] 📧 Checking for immediate confirmation email after OTP...`);
       const emailProof = await captureAndSaveEmailProof(application, {
         timeoutMs: 15000,
       }).catch(() => null);
 
       if (emailProof) {
-        console.log(`[Live Submit] 🎉 Confirmation email verified immediately after OTP! Marking APPLIED.`);
+        log.info(`[Live Submit] 🎉 Confirmation email verified immediately after OTP! Marking APPLIED.`);
         await updateStatus(targetAppId, 'APPLIED', {
           proof_web_url: proofResult.proofWebUrl,
           proof_captured_at: proofResult.proofCapturedAt,
@@ -1123,7 +1126,7 @@ export async function submitOtpToPausedSession(
       }
 
       // Zero matches on immediate check: transition to EMAIL_PROOF_PENDING & start 30s background retry
-      console.log(
+      log.info(
         `[Live Submit] ⏳ Confirmation email not found immediately after OTP. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
       );
       const appForPoller: ApplicationRow = {
@@ -1152,9 +1155,9 @@ export async function submitOtpToPausedSession(
       : (verification.error || 'OTP submission verification failed.');
 
     if (isTimeout) {
-      console.warn(`[Live Submit] ⏱️ Timeout: OTP verification timed out for application ${canonicalKey}`);
+      log.warn(`[Live Submit] ⏱️ Timeout: OTP verification timed out for application ${canonicalKey}`);
     } else {
-      console.warn(`[Live Submit] ❌ OTP submission verification failed: ${errorMsg}`);
+      log.warn(`[Live Submit] ❌ OTP submission verification failed: ${errorMsg}`);
     }
 
     let failedProofUrl: string | undefined;
@@ -1163,7 +1166,7 @@ export async function submitOtpToPausedSession(
     if (page && !page.isClosed()) {
       const failed = await captureFailedScreenshot(page, application).catch(() => null);
       if (failed?.url) {
-        console.log(`[Live Submit] 📸 OTP verification failure screenshot URL: ${failed.url}`);
+        log.info(`[Live Submit] 📸 OTP verification failure screenshot URL: ${failed.url}`);
         failedProofUrl = failed.proofFailedUrl || failed.url;
         failedCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
       }
@@ -1196,9 +1199,9 @@ export async function submitOtpToPausedSession(
       : (err.message || 'Error occurred during OTP submission.');
 
     if (isTimeout) {
-      console.warn(`[Live Submit] ⏱️ Timeout: OTP submission timed out for ${canonicalKey}`);
+      log.warn(`[Live Submit] ⏱️ Timeout: OTP submission timed out for ${canonicalKey}`);
     } else {
-      console.error(`[Live Submit] ❌ OTP submit error for ${canonicalKey}:`, err);
+      log.error(`[Live Submit] ❌ OTP submit error for ${canonicalKey}:`, err);
     }
 
     let errProofUrl: string | undefined;
@@ -1206,7 +1209,7 @@ export async function submitOtpToPausedSession(
     if (page && !page.isClosed()) {
       const failed = await captureFailedScreenshot(page, application).catch(() => null);
       if (failed?.url) {
-        console.log(`[Live Submit] 📸 OTP submit error failure screenshot URL: ${failed.url}`);
+        log.info(`[Live Submit] 📸 OTP submit error failure screenshot URL: ${failed.url}`);
         errProofUrl = failed.proofFailedUrl || failed.url;
         errCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
       }
@@ -1272,7 +1275,7 @@ export async function runLiveSubmit(
       });
       application = { ...application, ...upserted };
     } catch (err: any) {
-      console.warn(`[Live Submit] ⚠️ Could not upsert application record before submit: ${err.message}`);
+      log.warn(`[Live Submit] ⚠️ Could not upsert application record before submit: ${err.message}`);
     }
   }
 
@@ -1283,7 +1286,7 @@ export async function runLiveSubmit(
     throw new Error(`Application ${applicationId} has no job_url specified.`);
   }
 
-  console.log(
+  log.info(
     `[Live Submit] 🚀 Initiating live submission for ${application.applywizz_id} [${targetUrl}] (headless: true)...`
   );
 
@@ -1292,7 +1295,7 @@ export async function runLiveSubmit(
     try {
       await updateStatus(application.id, 'APPLYING');
     } catch (err: any) {
-      console.warn(`[Live Submit] ⚠️ Could not set status APPLYING: ${err.message}`);
+      log.warn(`[Live Submit] ⚠️ Could not set status APPLYING: ${err.message}`);
     }
   }
 
@@ -1325,7 +1328,7 @@ export async function runLiveSubmit(
     page = await context.newPage();
 
     // 3. Navigate to the job application URL
-    console.log(`[Live Submit] 🌐 Navigating to ${targetUrl}...`);
+    log.info(`[Live Submit] 🌐 Navigating to ${targetUrl}...`);
     await page.goto(targetUrl, {
       waitUntil: 'domcontentloaded',
       timeout: timeoutMs,
@@ -1335,10 +1338,10 @@ export async function runLiveSubmit(
     try {
       const openResult = await captureJobOpenScreenshot(page, application);
       if (openResult.url) {
-        console.log(`[Live Submit] 📸 Job open screenshot URL: ${openResult.url}`);
+        log.info(`[Live Submit] 📸 Job open screenshot URL: ${openResult.url}`);
       }
     } catch (openErr: any) {
-      console.warn(`[Live Submit] ⚠️ Could not capture job open screenshot: ${openErr.message}`);
+      log.warn(`[Live Submit] ⚠️ Could not capture job open screenshot: ${openErr.message}`);
     }
 
     // 4. Fill all form fields
@@ -1350,12 +1353,12 @@ export async function runLiveSubmit(
       });
     } catch (fillErr: any) {
       const fillErrMsg = `Form filling error: ${fillErr.message || 'Failed to populate application fields.'}`;
-      console.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+      log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
       let failedProof: any = null;
       if (page && !page.isClosed()) {
         failedProof = await captureFailedScreenshot(page, application).catch(() => null);
         if (failedProof?.url) {
-          console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+          log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
         }
         screenshotCaptured = true;
       }
@@ -1395,7 +1398,7 @@ export async function runLiveSubmit(
     for (const sel of submitSelectors) {
       const btn = page.locator(sel).first();
       if ((await btn.count()) > 0 && (await btn.isVisible())) {
-        console.log(`[Live Submit] 🖱️ Clicking submit button (${sel})...`);
+        log.info(`[Live Submit] 🖱️ Clicking submit button (${sel})...`);
         await btn.click({ timeout: 5000 });
         submitClicked = true;
         break;
@@ -1404,12 +1407,12 @@ export async function runLiveSubmit(
 
     if (!submitClicked) {
       const fillErrMsg = 'Form filling error: Submit button could not be located on the application form.';
-      console.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+      log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
       let failedProof: any = null;
       if (page && !page.isClosed()) {
         failedProof = await captureFailedScreenshot(page, application).catch(() => null);
         if (failedProof?.url) {
-          console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+          log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
         }
         screenshotCaptured = true;
       }
@@ -1436,14 +1439,14 @@ export async function runLiveSubmit(
     try {
       const submittedResult = await captureJobSubmittedScreenshot(page, application);
       if (submittedResult.url) {
-        console.log(`[Live Submit] 📸 Job submitted screenshot URL: ${submittedResult.url}`);
+        log.info(`[Live Submit] 📸 Job submitted screenshot URL: ${submittedResult.url}`);
       }
     } catch (subErr: any) {
-      console.warn(`[Live Submit] ⚠️ Could not capture job submitted screenshot: ${subErr.message}`);
+      log.warn(`[Live Submit] ⚠️ Could not capture job submitted screenshot: ${subErr.message}`);
     }
 
     // 6. Wait 2-3 seconds for page to respond after submit click
-    console.log('[Live Submit] ⏳ Waiting 2-3s for page response post-submit...');
+    log.info('[Live Submit] ⏳ Waiting 2-3s for page response post-submit...');
     await page.waitForTimeout(2500);
 
     const currentUrl = page.url();
@@ -1462,14 +1465,14 @@ export async function runLiveSubmit(
       );
 
     if (hasSuccessIndicators) {
-      console.log(
+      log.info(
         `[Live Submit] 🚀 Submission responded successfully (urlChanged=${urlChanged}, url=${currentUrl}). Continuing to confirmation verification...`
       );
     } else {
       // Check for OTP field requirement
       const otpField = await detectOTPField(page);
       if (otpField.found) {
-        console.warn(
+        log.warn(
           `[Live Submit] 🔢 OTP input detected post-submit (${otpField.selector})` +
             `${otpField.metadata?.type ? ` [type=${otpField.metadata.type}]` : ''}` +
             `${otpField.metadata?.matchReason ? ` — ${otpField.metadata.matchReason}` : ''}`
@@ -1509,11 +1512,11 @@ export async function runLiveSubmit(
             companyEmail = getCompanyEmail(profile);
           }
         } catch (profErr: any) {
-          console.warn(`[Live Submit] ⚠️ Could not fetch profile for company email: ${profErr.message}`);
+          log.warn(`[Live Submit] ⚠️ Could not fetch profile for company email: ${profErr.message}`);
         }
 
         if (companyEmail && config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
-          console.log(
+          log.info(
             `[Live Submit] 🤖 Automated OTP resolution enabled. Querying Zoho Mail Reader for ${companyEmail}...`
           );
           try {
@@ -1525,7 +1528,7 @@ export async function runLiveSubmit(
             });
 
             if (zohoResult.success && zohoResult.otp) {
-              console.log(`[Live Submit] 🔑 Received OTP (${zohoResult.otp}) from Zoho Mail. Auto-submitting...`);
+              log.info(`[Live Submit] 🔑 Received OTP (${zohoResult.otp}) from Zoho Mail. Auto-submitting...`);
               const submitResult = await submitOtpToPausedSession(sessionKey, zohoResult.otp, {
                 timeoutMs: options.timeoutMs ?? 30000,
                 jobUrl: targetUrl,
@@ -1553,7 +1556,7 @@ export async function runLiveSubmit(
             }
           } catch (autoOtpErr: any) {
             const otpErrMsg = 'OTP solve failed';
-            console.error(
+            log.error(
               `[Live Submit] ❌ ${otpErrMsg} for application ${applicationId}: ${autoOtpErr.message}`
             );
             // User requested error out on failure
@@ -1590,12 +1593,12 @@ export async function runLiveSubmit(
       const fillError = await detectFormFillingErrors(page);
       if (fillError.hasError) {
         const fillErrMsg = `Form filling error: ${fillError.message}`;
-        console.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+        log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
         let failedProof: any = null;
         if (page && !page.isClosed()) {
           failedProof = await captureFailedScreenshot(page, application).catch(() => null);
           if (failedProof?.url) {
-            console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+            log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
           }
           screenshotCaptured = true;
         }
@@ -1650,7 +1653,7 @@ export async function runLiveSubmit(
 
       if (isActuallyBlocked) {
         const captchaErrorMessage = 'CAPTCHA encountered';
-        console.warn('[Submitter] 🚫 CAPTCHA detected → marked FAILED.');
+        log.warn('[Submitter] 🚫 CAPTCHA detected → marked FAILED.');
         keepSessionOpen = false;
         const failedProof = await captureFailedScreenshot(page, application).catch(() => null);
         screenshotCaptured = true;
@@ -1672,24 +1675,24 @@ export async function runLiveSubmit(
           proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
         };
       } else {
-        console.log(
+        log.info(
           `[Live Submit] ℹ️ No actual block detected (urlChanged=${urlChanged}, buttonReset=${isSubmitButtonReset}, hasBlockError=${hasBlockErrorMessage}). Continuing to confirmation verification...`
         );
       }
     }
 
     // 7. Multi-Signal Completion Verification (up to 30s)
-    console.log(`[Live Submit] ⏳ Waiting up to ${timeoutMs / 1000}s for submission confirmation signals...`);
+    log.info(`[Live Submit] ⏳ Waiting up to ${timeoutMs / 1000}s for submission confirmation signals...`);
     const verification = await verifySubmissionSignals(page, timeoutMs);
 
     if (verification.verified) {
-      console.log(`[Live Submit] 🎉 Submission verified! Signal: ${verification.signal}`);
+      log.info(`[Live Submit] 🎉 Submission verified! Signal: ${verification.signal}`);
 
       // 8. Capture full-page proof screenshot & attach to application (like dry-run)
       const proofResult = await captureWebProof(page, application);
       screenshotCaptured = true;
       if (proofResult.proofWebUrl) {
-        console.log(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
+        log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
       }
 
       // 9. Attach web proof & set submission timestamp
@@ -1702,13 +1705,13 @@ export async function runLiveSubmit(
       });
 
       // 10. Attempt immediate email confirmation check (up to 15s)
-      console.log(`[Live Submit] 📧 Checking for immediate confirmation email matching company & apply time...`);
+      log.info(`[Live Submit] 📧 Checking for immediate confirmation email matching company & apply time...`);
       const emailProof = await captureAndSaveEmailProof(application, {
         timeoutMs: 15000,
       }).catch(() => null);
 
       if (emailProof) {
-        console.log(`[Live Submit] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
+        log.info(`[Live Submit] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
         await updateStatus(targetAppId, 'APPLIED', {
           proof_web_url: proofResult.proofWebUrl,
           proof_captured_at: proofResult.proofCapturedAt,
@@ -1729,7 +1732,7 @@ export async function runLiveSubmit(
       }
 
       // Zero matches on immediate check: transition to EMAIL_PROOF_PENDING & start 30s background retry
-      console.log(
+      log.info(
         `[Live Submit] ⏳ Confirmation email not found immediately. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
       );
       const appForPoller: ApplicationRow = {
@@ -1757,20 +1760,20 @@ export async function runLiveSubmit(
 
       if (isFormError) {
         errorMsg = verification.error || 'Form filling error: Validation failed.';
-        console.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
+        log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
       } else if (isTimeout) {
         errorMsg = 'Timeout: Submission verification timed out after 30s.';
-        console.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
+        log.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
       } else {
         errorMsg = verification.error || 'Submission verification failed.';
-        console.warn(`[Live Submit] ❌ Submission verification failed: ${errorMsg} for application ${applicationId}`);
+        log.warn(`[Live Submit] ❌ Submission verification failed: ${errorMsg} for application ${applicationId}`);
       }
 
       let failedProof: any = null;
       if (page && !page.isClosed() && !screenshotCaptured) {
         failedProof = await captureFailedScreenshot(page, application).catch(() => null);
         if (failedProof?.url) {
-          console.log(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failedProof.url}`);
+          log.info(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failedProof.url}`);
         }
         screenshotCaptured = true;
       }
@@ -1801,19 +1804,19 @@ export async function runLiveSubmit(
 
     if (isFillError) {
       finalErrMsg = `Form filling error: ${err.message}`;
-      console.error(`[Live Submit] ❌ ${finalErrMsg} for application ${applicationId}`);
+      log.error(`[Live Submit] ❌ ${finalErrMsg} for application ${applicationId}`);
     } else if (isTimeout) {
       finalErrMsg = `Timeout: ${err.message}`;
-      console.warn(`[Live Submit] ⏱️ Timeout: ${finalErrMsg} for application ${applicationId}`);
+      log.warn(`[Live Submit] ⏱️ Timeout: ${finalErrMsg} for application ${applicationId}`);
     } else {
-      console.error(`[Live Submit] ❌ Submission execution error for application ${applicationId}: ${finalErrMsg}`);
+      log.error(`[Live Submit] ❌ Submission execution error for application ${applicationId}: ${finalErrMsg}`);
     }
 
     let failedProof: any = null;
     if (page && !page.isClosed() && !screenshotCaptured) {
       failedProof = await captureFailedScreenshot(page, application).catch(() => null);
       if (failedProof?.url) {
-        console.log(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+        log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
       }
       screenshotCaptured = true;
     }
@@ -1842,10 +1845,10 @@ export async function runLiveSubmit(
     if (!keepSessionOpen) {
       if (page && !page.isClosed() && !screenshotCaptured) {
         try {
-          console.log(`[Live Submit] 📸 Capturing failure screenshot before closing browser for ${applicationId}...`);
+          log.info(`[Live Submit] 📸 Capturing failure screenshot before closing browser for ${applicationId}...`);
           const failed = await captureFailedScreenshot(page, application);
           if (failed?.url) {
-            console.log(`[Live Submit] 📸 Pre-close failure screenshot URL: ${failed.url}`);
+            log.info(`[Live Submit] 📸 Pre-close failure screenshot URL: ${failed.url}`);
             const targetAppId = application.id || application.applywizz_id;
             if (targetAppId) {
               await updateStatus(targetAppId, 'FAILED', {
@@ -1856,15 +1859,15 @@ export async function runLiveSubmit(
             }
           }
         } catch (preCloseErr: any) {
-          console.warn(`[Live Submit] ⚠️ Pre-close screenshot failed: ${preCloseErr.message}`);
+          log.warn(`[Live Submit] ⚠️ Pre-close screenshot failed: ${preCloseErr.message}`);
         }
       }
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
       if (browser) await browser.close().catch(() => {});
-      console.log(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
+      log.info(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
     } else {
-      console.log(
+      log.info(
         `[Live Submit] ⏸️ Browser context kept paused in memory for application ${applicationId}.`
       );
     }

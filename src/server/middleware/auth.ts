@@ -7,6 +7,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
+import { resolveRoleFromEmail } from '../routes/auth.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: any;
@@ -28,7 +29,8 @@ export async function requireAuth(
     req.headers['x-test-bypass'] === 'true'
   ) {
     if (req.headers['x-user-email']) {
-      req.user = { email: String(req.headers['x-user-email']) };
+      const email = String(req.headers['x-user-email']);
+      req.user = { email, role: resolveRoleFromEmail(email) };
     }
     next();
     return;
@@ -55,7 +57,10 @@ export async function requireAuth(
       return;
     }
 
-    req.user = data.user;
+    req.user = {
+      ...data.user,
+      role: resolveRoleFromEmail(data.user.email),
+    };
     next();
   } catch (err: any) {
     res.status(401).json({ error: `Unauthorized: ${err.message}` });

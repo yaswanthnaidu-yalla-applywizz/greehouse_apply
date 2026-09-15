@@ -188,7 +188,7 @@ On ingest, logs include `Credential identity: urlProjectRef=... | jwt.role=... |
 
 The server resolves credentials via `resolveSupabaseCredentials()` / `listSupabaseKeyCandidates()` in `src/db/client.ts`: a JWT with `role=service_role` wins; otherwise **`SUPABASE_SERVICE_ROLE_KEY` is used even when it is `sb_secret_`**. Keys are normalized (trim, unwrap quotes, strip `Bearer`, strip JWT whitespace). Ingest **probes each key with a fresh client** and logs `Probe SUPABASE_… jwt.role=… entries=N names=…`. An empty object list is a failed run. Admin probe: `GET /api/admin/supabase-storage-health` returns `keyProbes[]` (no secrets). `sb_secret_` / anon keys still cannot list private `csv_uploads` — use the legacy `eyJ…` service_role JWT.
 
-The dashboard's **▶ Start** button (header, next to refresh — rendered only under `isAdminSession()`) calls both: POST, then polls the status endpoint every 5s and reloads candidate data when the run ends. CLI equivalent: `npm run ingest:storage` (one-shot, exits when done). Run state lives in server memory, so a restart mid-run loses the status (the pipeline itself dies with the process too).
+The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboard/public/admin.html`, `/admin`). It calls POST `/api/admin/trigger-ingest-from-storage`, then polls `GET /api/admin/ingest-status`. CLI equivalent: `npm run ingest:storage` (one-shot, exits when done). Run state lives in server memory (`src/server/runtimeState.ts`), so a restart mid-run loses the status (the pipeline itself dies with the process too).
 
 ## External Services & Endpoints
 | Service | URL | Purpose |
@@ -208,6 +208,7 @@ The dashboard's **▶ Start** button (header, next to refresh — rendered only 
 |---|---|
 | Main entry / CLI | `src/index.ts` |
 | Env schema (Zod) | `src/config/env.ts` |
+| Central logger | `src/utils/logger.ts` — `[ISO] [LEVEL] [MODULE] message`; no external lib |
 | Supabase client | `src/db/client.ts` |
 | Supabase key diagnostics (ingest logs) | `src/db/supabaseKeyDiagnostics.ts` |
 | Empty-form hydration | `src/db/applicationFieldHydration.ts` |
@@ -221,8 +222,12 @@ The dashboard's **▶ Start** button (header, next to refresh — rendered only 
 | Answer resolver orchestrator | `src/resolver/answerResolver.ts` |
 | LLM synthesizer | `src/resolver/llmSynthesizer.ts` |
 | Express server | `src/server/index.ts` |
-| **Operator UI (the one actually served)** | `dashboard/public/index.html` — inline Babel/JSX, served by the `app.get('*')` catch-all |
-| Manager UI (static) | `dashboard/public/manager.html` → `GET /manager` |
+| **Operator UI (the one actually served)** | `dashboard/public/index.html` — inline Babel/JSX, served at `GET /` |
+| Manager UI | `dashboard/public/manager.html` → `GET /manager` |
+| Admin UI | `dashboard/public/admin.html` → `GET /admin` |
+| Dev UI | `dashboard/public/dev.html` → `GET /dev` |
+| Shared role helper | `dashboard/public/roleAccess.js` |
+| App logo / favicon | `dashboard/public/logo.webp` — served by `express.static(dashboard/public)` |
 | Bundled Akshitha demo | `src/dashboard/akshithaDemoFixtures.ts` |
 | Searchable select tests | `tests/searchableSelect.test.ts` |
 | All TypeScript types | `src/types/index.ts` |

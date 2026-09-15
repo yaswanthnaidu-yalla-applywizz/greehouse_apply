@@ -12,6 +12,9 @@
 import fs from 'fs';
 import path from 'path';
 import type { ResolvedField, SourceTag } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Qa Bank');
 
 /**
  * Key-value mapping of normalized question keys to resolved answers.
@@ -79,7 +82,7 @@ export class QABank {
           store.set(k, v);
         }
       } catch (err: any) {
-        console.warn(`[Q&A Bank] ⚠️ Failed to load Q&A cache for ${applywizzId}: ${err.message}`);
+        log.warn(`[Q&A Bank] ⚠️ Failed to load Q&A cache for ${applywizzId}: ${err.message}`);
       }
     }
 
@@ -150,7 +153,7 @@ export class QABank {
     try {
       fs.writeFileSync(filePath, JSON.stringify(obj, null, 2), 'utf-8');
     } catch (err: any) {
-      console.warn(`[Q&A Bank] ⚠️ Failed to save Q&A cache for ${applywizzId}: ${err.message}`);
+      log.warn(`[Q&A Bank] ⚠️ Failed to save Q&A cache for ${applywizzId}: ${err.message}`);
     }
   }
 }

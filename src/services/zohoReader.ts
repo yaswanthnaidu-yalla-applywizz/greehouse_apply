@@ -12,6 +12,9 @@
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
 import { config } from '../config/env.js';
 import type { EmailProofJson } from '../db/applications.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Zoho Reader');
 
 export interface ZohoOtpResult {
   success: boolean;
@@ -233,12 +236,12 @@ class ZohoReaderService {
     if (this.page && !this.page.isClosed()) {
       if (this.page.url() === 'about:blank') {
         try {
-          console.log(`[Zoho] Step 1: Navigating to ${config.ZOHO_CONNECTOR_URL}`);
+          log.info(`[Zoho] Step 1: Navigating to ${config.ZOHO_CONNECTOR_URL}`);
           const navResponse = await this.page.goto(config.ZOHO_CONNECTOR_URL, {
             waitUntil: 'domcontentloaded',
             timeout: 30000,
           });
-          console.log(
+          log.info(
             `[Zoho] Step 1 ✅ Landed on ${this.page.url()} HTTP ${navResponse?.status() ?? 'unknown'}`
           );
         } catch {}
@@ -264,11 +267,11 @@ class ZohoReaderService {
     const pass = config.ZOHO_CONNECTOR_PASS;
 
     if (!user || !pass) {
-      console.warn('[Zoho Reader] ⚠️ ZOHO_CONNECTOR_USER or ZOHO_CONNECTOR_PASS is missing in environment.');
+      log.warn('[Zoho Reader] ⚠️ ZOHO_CONNECTOR_USER or ZOHO_CONNECTOR_PASS is missing in environment.');
       return;
     }
 
-    console.log(`[Zoho Reader] 🚀 Launching background session for ${url}...`);
+    log.info(`[Zoho Reader] 🚀 Launching background session for ${url}...`);
 
     try {
       this.browser = await chromium.launch({
@@ -290,16 +293,16 @@ class ZohoReaderService {
 
       this.page = await this.context.newPage();
 
-      console.log(`[Zoho] Step 1: Navigating to ${url}`);
-      console.log(`[Zoho Reader] 🌐 Navigating to connector endpoint: ${url}`);
+      log.info(`[Zoho] Step 1: Navigating to ${url}`);
+      log.info(`[Zoho Reader] 🌐 Navigating to connector endpoint: ${url}`);
       const navResponse = await this.page.goto(url, {
         waitUntil: 'domcontentloaded',
         timeout: 45000,
       });
-      console.log(
+      log.info(
         `[Zoho] Step 1 ✅ Landed on ${this.page.url()} HTTP ${navResponse?.status() ?? 'unknown'}`
       );
-      console.log(
+      log.info(
         `[Zoho Reader] 🌐 Navigation response: HTTP ${navResponse?.status() ?? 'unknown'} ${
           navResponse?.statusText() ?? ''
         } | landed on: ${this.page.url()}`
@@ -307,9 +310,9 @@ class ZohoReaderService {
 
       // Check if sign-in form is present
       await this.performLoginIfNeeded(user, pass);
-      console.log('[Zoho Reader] ✅ Session ready and authenticated.');
+      log.info('[Zoho Reader] ✅ Session ready and authenticated.');
     } catch (err: any) {
-      console.error(`[Zoho Reader] ❌ Failed to setup session: ${err.message}`);
+      log.error(`[Zoho Reader] ❌ Failed to setup session: ${err.message}`);
       await this.cleanup();
       throw err;
     }
@@ -323,11 +326,11 @@ class ZohoReaderService {
     const passwordInput = this.page.locator('input[placeholder*="Password" i], input[name*="pass" i], input[type="password"]').first();
     const continueBtn = this.page.locator('button:has-text("Continue"), button[type="submit"]').first();
 
-    console.log('[Zoho] Step 2: Attempting login');
+    log.info('[Zoho] Step 2: Attempting login');
     const hasUsername = (await usernameInput.count()) > 0 && (await usernameInput.isVisible().catch(() => false));
 
     if (hasUsername) {
-      console.log(`[Zoho Reader] 🔑 Zoho: attempting login with ${user}`);
+      log.info(`[Zoho Reader] 🔑 Zoho: attempting login with ${user}`);
       await usernameInput.fill(user);
       await passwordInput.fill(pass);
 
@@ -340,11 +343,11 @@ class ZohoReaderService {
       ]);
 
       if (loginResponse) {
-        console.log(
+        log.info(
           `[Zoho Reader] 🔑 Login response: HTTP ${loginResponse.status()} ${loginResponse.statusText()} (${loginResponse.url()})`
         );
       } else {
-        console.log('[Zoho Reader] 🔑 Login response: no POST observed (form may submit client-side)');
+        log.info('[Zoho Reader] 🔑 Login response: no POST observed (form may submit client-side)');
       }
 
       // Wait for Mailbox connector dashboard to load
@@ -354,30 +357,30 @@ class ZohoReaderService {
         loaderMarker = 'input[placeholder*="Filter by email"]';
         await this.page?.waitForSelector('input[placeholder*="Filter by email" i]', { timeout: 30000 });
       });
-      console.log(`[Zoho Reader] ⌛ Post-login loader resolved via: ${loaderMarker}`);
+      log.info(`[Zoho Reader] ⌛ Post-login loader resolved via: ${loaderMarker}`);
 
       const stillShowingLogin = await usernameInput.isVisible().catch(() => false);
-      console.log(
+      log.info(
         `[Zoho Reader] ${stillShowingLogin ? '❌' : '✅'} Login ${
           stillShowingLogin ? 'FAILED — sign-in form still visible' : 'SUCCEEDED'
         } | url: ${this.page.url()}`
       );
     } else {
-      console.log('[Zoho Reader] ℹ️ Sign-In form not present; assuming already on dashboard.');
+      log.info('[Zoho Reader] ℹ️ Sign-In form not present; assuming already on dashboard.');
     }
 
     // Wait until Filter input is visible
     await this.page.waitForSelector('input[placeholder*="Filter by email" i]', { timeout: 20000 });
-    console.log('[Zoho Reader] ⌛ Dashboard filter input visible — ready to search.');
+    log.info('[Zoho Reader] ⌛ Dashboard filter input visible — ready to search.');
 
     // Record session-bearing cookies so auth persistence across login → search is verifiable
     const cookies = (await this.context?.cookies().catch(() => [])) || [];
-    console.log(
+    log.info(
       `[Zoho Reader] 🍪 Session cookies after login (${cookies.length}): ${
         cookies.map((c) => `${c.name}@${c.domain}`).join(', ') || 'none'
       }`
     );
-    console.log(`[Zoho] Step 2 ✅ Login complete | url: ${this.page.url()}`);
+    log.info(`[Zoho] Step 2 ✅ Login complete | url: ${this.page.url()}`);
   }
 
   /**
@@ -416,20 +419,20 @@ class ZohoReaderService {
     }
 
     const rootUrl = config.ZOHO_CONNECTOR_URL;
-    console.log(`[Zoho Reader] 🔄 Session reset before lookup for ${email}`);
-    console.log(`[Zoho] Step 1: Navigating to ${rootUrl}`);
+    log.info(`[Zoho Reader] 🔄 Session reset before lookup for ${email}`);
+    log.info(`[Zoho] Step 1: Navigating to ${rootUrl}`);
     const navResponse = await this.page.goto(rootUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
-    console.log(
+    log.info(
       `[Zoho] Step 1 ✅ Landed on ${this.page.url()} HTTP ${navResponse?.status() ?? 'unknown'}`
     );
     await this.page.waitForSelector('input[placeholder*="Filter by email"]', { timeout: 20000 });
 
-    console.log('[Zoho] Step 3: Waiting for user list to load');
+    log.info('[Zoho] Step 3: Waiting for user list to load');
     await this.page.waitForTimeout(5000);
-    console.log('[Zoho] Step 3 ✅ User list ready');
+    log.info('[Zoho] Step 3 ✅ User list ready');
 
     const filterInput = this.page.locator('#search, input[placeholder*="Filter by email" i]').first();
     await filterInput.waitFor({ state: 'visible', timeout: 10000 });
@@ -450,11 +453,11 @@ class ZohoReaderService {
     await filterInput.waitFor({ state: 'visible', timeout: 10000 });
     await filterInput.click({ clickCount: 3 }).catch(() => {});
     await filterInput.fill('');
-    console.log(`[Zoho] Step 4: Searching for ${normalizedEmail}`);
-    console.log(`[Zoho Reader] 🔎 Search query sent to filter input: "${normalizedEmail}"`);
+    log.info(`[Zoho] Step 4: Searching for ${normalizedEmail}`);
+    log.info(`[Zoho Reader] 🔎 Search query sent to filter input: "${normalizedEmail}"`);
     await filterInput.fill(normalizedEmail);
     await this.page.waitForTimeout(500);
-    console.log(`[Zoho] Step 4 ✅ Search query sent: ${normalizedEmail}`);
+    log.info(`[Zoho] Step 4 ✅ Search query sent: ${normalizedEmail}`);
   }
 
   /** Exact email row, then prefix-before-@ — null when the users list is empty. */
@@ -466,17 +469,17 @@ class ZohoReaderService {
     }
     const candidateItem = this.page.locator(`text="${normalizedEmail}"`).first();
     const count = await candidateItem.count();
-    console.log(`[Zoho Reader] 🔎 Exact-match user rows for "${normalizedEmail}": ${count}`);
+    log.info(`[Zoho Reader] 🔎 Exact-match user rows for "${normalizedEmail}": ${count}`);
     if (count > 0) {
-      console.log(`[Zoho] Step 4 rows found: ${count}`);
+      log.info(`[Zoho] Step 4 rows found: ${count}`);
       return { locator: candidateItem };
     }
 
     const prefix = normalizedEmail.split('@')[0];
     const partialItem = this.page.locator(`text="${prefix}"`).first();
     const partialCount = await partialItem.count();
-    console.log(`[Zoho Reader] 🔎 Falling back to prefix search "${prefix}" → ${partialCount} rows`);
-    console.log(`[Zoho] Step 4 rows found: ${partialCount}`);
+    log.info(`[Zoho Reader] 🔎 Falling back to prefix search "${prefix}" → ${partialCount} rows`);
+    log.info(`[Zoho] Step 4 rows found: ${partialCount}`);
     if (partialCount > 0) return { locator: partialItem };
     return null;
   }
@@ -517,10 +520,10 @@ class ZohoReaderService {
 
       await this.resetUiBeforeLookup(normalizedEmail);
 
-      console.log(`[Zoho Reader] 🔍 Looking up inbox for candidate: ${normalizedEmail}`);
+      log.info(`[Zoho Reader] 🔍 Looking up inbox for candidate: ${normalizedEmail}`);
 
       const searchCookies = (await this.context?.cookies().catch(() => [])) || [];
-      console.log(
+      log.info(
         `[Zoho Reader] 🍪 Auth state at search time | url: ${this.page.url()} | cookies (${searchCookies.length}): ${
           searchCookies.map((c) => c.name).join(', ') || 'none'
         }`
@@ -530,7 +533,7 @@ class ZohoReaderService {
       await this.typeEmailFilter(normalizedEmail);
       let userRow = await this.findCandidateUserRow(normalizedEmail);
       if (!userRow) {
-        console.log('[Zoho Reader] ⚠️ Zero rows after reset — retrying with full reload.');
+        log.info('[Zoho Reader] ⚠️ Zero rows after reset — retrying with full reload.');
         await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
         await this.page.waitForSelector('input[placeholder*="Filter by email"]', { timeout: 20000 });
         await this.typeEmailFilter(normalizedEmail);
@@ -539,12 +542,12 @@ class ZohoReaderService {
           throw new Error(`Candidate email '${normalizedEmail}' not found in Zoho users list.`);
         }
       }
-      console.log(`[Zoho] Step 5: Clicking user row for ${normalizedEmail}`);
+      log.info(`[Zoho] Step 5: Clicking user row for ${normalizedEmail}`);
       await userRow.locator.click();
-      console.log(`[Zoho] Step 5 ✅ User row clicked`);
+      log.info(`[Zoho] Step 5 ✅ User row clicked`);
 
       // Confirmed ~5s for the connector to load the selected user's mailbox
-      console.log('[Zoho Reader] ⌛ Waiting 5s for user mailbox to load...');
+      log.info('[Zoho Reader] ⌛ Waiting 5s for user mailbox to load...');
       await this.page.waitForTimeout(5000);
 
       // Wait for mailbox detail / readBlock to appear
@@ -552,14 +555,14 @@ class ZohoReaderService {
 
       // 3. Poll incoming messages by clicking "Read mails" every 5 seconds
       const pollInterval = config.ZOHO_CONNECTOR_POLL_INTERVAL_MS ?? 5000;
-      console.log(
+      log.info(
         `[Zoho Reader] ⏳ Polling messages for verification/security code every ${Math.round(pollInterval / 1000)}s (up to ${Math.round(
           timeoutMs / 1000
         )}s, window: ${new Date(sinceTimestamp).toLocaleTimeString()} → ${new Date(
           untilTimestamp
         ).toLocaleTimeString()})...`
       );
-      console.log(
+      log.info(
         `[Zoho Reader] 🛡️ OTP gate: sender must contain [${GREENHOUSE_OTP_SENDERS.join(
           ', '
         )}], subject must match ${OTP_SUBJECT_PATTERN}${
@@ -573,7 +576,7 @@ class ZohoReaderService {
       while (Date.now() - startTime < timeoutMs) {
         const cycleStart = Date.now();
         cycle += 1;
-        console.log(
+        log.info(
           `[Zoho Reader] 🔁 Poll cycle #${cycle} (elapsed ${Math.round((Date.now() - startTime) / 1000)}s / ${Math.round(
             timeoutMs / 1000
           )}s)`
@@ -584,15 +587,15 @@ class ZohoReaderService {
         if ((await readMailsBtn.count()) > 0 && (await readMailsBtn.isVisible().catch(() => false))) {
           const isDisabled = await readMailsBtn.isDisabled().catch(() => false);
           if (!isDisabled) {
-            console.log('[Zoho] Step 6: Clicking Read Mails button');
-            console.log('[Zoho Reader] 🔄 Clicking "Read mails" to fetch latest emails...');
+            log.info('[Zoho] Step 6: Clicking Read Mails button');
+            log.info('[Zoho Reader] 🔄 Clicking "Read mails" to fetch latest emails...');
             await readMailsBtn.click().catch(() => {});
-            console.log('[Zoho] Step 6 ✅ Read Mails clicked');
+            log.info('[Zoho] Step 6 ✅ Read Mails clicked');
           }
         }
 
         // Confirmed ~9s for the connector to pull and render the mail list
-        console.log('[Zoho Reader] ⌛ Waiting 9s for mail list to load...');
+        log.info('[Zoho Reader] ⌛ Waiting 9s for mail list to load...');
         await this.page.waitForTimeout(9000);
 
         // Inspect ONLY the latest mails (top messages in the list, ordered latest → older)
@@ -607,16 +610,16 @@ class ZohoReaderService {
             .innerText()
             .catch(() => '')
         ).trim();
-        console.log(
+        log.info(
           `[Zoho Reader] 📥 Raw message list (${itemCount} rows):\n${
             rawList ? rawList.slice(0, 1500) : '<empty>'
           }`
         );
 
-        console.log('[Zoho] Step 7: Reading mail list');
+        log.info('[Zoho] Step 7: Reading mail list');
         if (itemCount > 0) {
           const checkLimit = Math.min(itemCount, 15);
-          console.log(`[Zoho Reader] 📬 Found ${itemCount} emails; inspecting latest ${checkLimit}`);
+          log.info(`[Zoho Reader] 📬 Found ${itemCount} emails; inspecting latest ${checkLimit}`);
 
           for (let i = 0; i < checkLimit; i++) {
             const item = messageItems.nth(i);
@@ -631,10 +634,10 @@ class ZohoReaderService {
 
             // Same parser as the confirmation path — handles "Today, 11:25 AM" and relative formats
             const parsedTime = parseZohoEmailTimestamp(whenText, whenTitle);
-            console.log(
+            log.info(
               `[Zoho] Step 7 mail ${i}: subject=${subject} from=${from} time=${whenText}`
             );
-            console.log(
+            log.info(
               `[Zoho Reader] 📧 [${i + 1}/${checkLimit}] from="${from}" | subject="${subject}" | when="${whenText}" | parsed=${
                 parsedTime === null ? 'UNPARSEABLE' : new Date(parsedTime).toISOString()
               }`
@@ -643,7 +646,7 @@ class ZohoReaderService {
             // Since messages are ordered latest-first, if this message is older than the window,
             // all subsequent messages are even older. Skip opening stale emails.
             if (parsedTime !== null && parsedTime < sinceTimestamp) {
-              console.log(
+              log.info(
                 `[Zoho Reader] ⏭️ Email is older than window start (${new Date(
                   sinceTimestamp
                 ).toISOString()}) — stopping scan of older mail.`
@@ -652,7 +655,7 @@ class ZohoReaderService {
             }
 
             if (parsedTime !== null && parsedTime > untilTimestamp) {
-              console.log(
+              log.info(
                 `[Zoho Reader] ⏭️ Skip: newer than window end (${new Date(untilTimestamp).toISOString()}).`
               );
               continue;
@@ -661,11 +664,11 @@ class ZohoReaderService {
             // Gate on sender + subject BEFORE any regex runs
             const gate = isGreenhouseOtpEmail(from, subject, companyName);
             if (!gate.match) {
-              console.log(`[Zoho Reader] ⏭️ Skip: ${gate.failedOn}`);
+              log.info(`[Zoho Reader] ⏭️ Skip: ${gate.failedOn}`);
               continue;
             }
 
-            console.log(`[Zoho Reader] ✅ Passed OTP gate — opening "${subject}"`);
+            log.info(`[Zoho Reader] ✅ Passed OTP gate — opening "${subject}"`);
             otpCandidatesSeen += 1;
 
             // Click message to inspect in right pane
@@ -685,7 +688,7 @@ class ZohoReaderService {
               return bodyContainer ? (bodyContainer as HTMLElement).innerText || bodyContainer.textContent || '' : '';
             });
 
-            console.log(
+            log.info(
               `[Zoho Reader] 📄 Opened "${subject}" — body length ${bodyText.length} chars; preview: ${
                 bodyText.replace(/\s+/g, ' ').slice(0, 400) || '<empty>'
               }`
@@ -693,7 +696,7 @@ class ZohoReaderService {
 
             const extractedOtp = this.extractOtpCode(bodyText);
             if (extractedOtp) {
-              console.log(`[Zoho Reader] 🎯 Found OTP: ${extractedOtp} (subject: "${subject}", from: "${from}")`);
+              log.info(`[Zoho Reader] 🎯 Found OTP: ${extractedOtp} (subject: "${subject}", from: "${from}")`);
               return {
                 success: true,
                 otp: extractedOtp,
@@ -713,8 +716,8 @@ class ZohoReaderService {
       // Never fall through to unrelated emails: report that the gate matched nothing.
       if (otpCandidatesSeen === 0) {
         const reason = 'no matching greenhouse OTP email found';
-        console.log(`[Zoho] Step 8 ❌ No OTP found: ${reason}`);
-        console.warn(
+        log.info(`[Zoho] Step 8 ❌ No OTP found: ${reason}`);
+        log.warn(
           `[Zoho Reader] ⚠️ ${reason} for ${normalizedEmail} after ${Math.round(
             timeoutMs / 1000
           )}s (window ${new Date(sinceTimestamp).toISOString()} → ${new Date(untilTimestamp).toISOString()}${
@@ -730,7 +733,7 @@ class ZohoReaderService {
         };
       }
 
-      console.log(
+      log.info(
         `[Zoho] Step 8 ❌ No OTP found: Greenhouse OTP email(s) matched but no code could be extracted`
       );
       throw new Error(
@@ -739,7 +742,7 @@ class ZohoReaderService {
         )}s — ${otpCandidatesSeen} Greenhouse OTP email(s) matched but no code could be extracted.`
       );
     } catch (err: any) {
-      console.error(`[Zoho Reader] ❌ Failed to fetch OTP for ${candidateEmail}: ${err.message}`);
+      log.error(`[Zoho Reader] ❌ Failed to fetch OTP for ${candidateEmail}: ${err.message}`);
       return {
         success: false,
         errorMessage: err.message,
@@ -755,50 +758,50 @@ class ZohoReaderService {
    * Extracts an alphanumeric or numeric OTP code from email text body.
    */
   public extractOtpCode(text: string): string | null {
-    console.log('[Zoho] Step 8: Attempting OTP extraction');
+    log.info('[Zoho] Step 8: Attempting OTP extraction');
     if (!text) {
-      console.log('[Zoho Reader] 🔬 OTP extract: empty body, nothing to scan.');
-      console.log('[Zoho] Step 8 ❌ No OTP found: empty body');
+      log.info('[Zoho Reader] 🔬 OTP extract: empty body, nothing to scan.');
+      log.info('[Zoho] Step 8 ❌ No OTP found: empty body');
       return null;
     }
 
-    console.log(`[Zoho Reader] 🔬 OTP extract: scanning ${text.length} chars using 4 patterns.`);
+    log.info(`[Zoho Reader] 🔬 OTP extract: scanning ${text.length} chars using 4 patterns.`);
 
     // Pattern 0: Greenhouse's actual wording — "Copy and paste this code into the
     // security code field on your application: NgW4NT62". The label and the code are
     // separated by a clause, so an adjacency-based pattern misses it entirely.
     const greenhousePattern = /copy\s*and\s*paste\s*this\s*code[^:\n]{0,120}:\s*([A-Za-z0-9]{6,16})\b/i;
-    console.log(`[Zoho Reader] 🔬 Pattern 0 (Greenhouse copy-paste): ${greenhousePattern}`);
+    log.info(`[Zoho Reader] 🔬 Pattern 0 (Greenhouse copy-paste): ${greenhousePattern}`);
     const greenhouseMatch = text.match(greenhousePattern);
     if (greenhouseMatch && greenhouseMatch[1]) {
       const code = greenhouseMatch[1].trim();
-      console.log(`[Zoho Reader] 🔬 Pattern 0 MATCHED → "${code}"`);
-      console.log(`[Zoho] Step 8 pattern matched: Pattern 0 (Greenhouse copy-paste) → "${code}"`);
-      console.log(`[Zoho] Step 8 ✅ OTP extracted: ${code}`);
+      log.info(`[Zoho Reader] 🔬 Pattern 0 MATCHED → "${code}"`);
+      log.info(`[Zoho] Step 8 pattern matched: Pattern 0 (Greenhouse copy-paste) → "${code}"`);
+      log.info(`[Zoho] Step 8 ✅ OTP extracted: ${code}`);
       return code;
     }
-    console.log('[Zoho Reader] 🔬 Pattern 0 no match.');
+    log.info('[Zoho Reader] 🔬 Pattern 0 no match.');
 
     // Pattern 1: Explicit labeled OTP code, allowing an intervening clause before the
     // colon (e.g. "security code field on your application: CODE")
     const explicitPattern =
       /(?:security\s*code|verification\s*code|verify\s*your\s*account\s*with|one-time\s*(?:passcode|code|password)|your\s*(?:verification\s*)?code|enter\s*(?:the\s*)?(?:following\s*)?code|confirmation\s*code|temporary\s*code)[^:\n]{0,80}(?:\s+is|\s*:)[\s\r\n:=]*([A-Za-z0-9]{6,16})\b/i;
-    console.log(`[Zoho Reader] 🔬 Pattern 1 (labeled code): ${explicitPattern}`);
+    log.info(`[Zoho Reader] 🔬 Pattern 1 (labeled code): ${explicitPattern}`);
     const explicitMatch = text.match(explicitPattern);
     if (explicitMatch && explicitMatch[1]) {
       const code = explicitMatch[1].trim();
-      console.log(`[Zoho Reader] 🔬 Pattern 1 MATCHED → "${code}"`);
-      console.log(`[Zoho] Step 8 pattern matched: Pattern 1 (labeled code) → "${code}"`);
-      console.log(`[Zoho] Step 8 ✅ OTP extracted: ${code}`);
+      log.info(`[Zoho Reader] 🔬 Pattern 1 MATCHED → "${code}"`);
+      log.info(`[Zoho] Step 8 pattern matched: Pattern 1 (labeled code) → "${code}"`);
+      log.info(`[Zoho] Step 8 ✅ OTP extracted: ${code}`);
       return code;
     }
-    console.log('[Zoho Reader] 🔬 Pattern 1 no match.');
+    log.info('[Zoho Reader] 🔬 Pattern 1 no match.');
 
     // Pattern 2: 8-character alphanumeric code standalone (Greenhouse standard verification e.g. Aebf0aDc)
     const standalonePattern = /\b([A-Za-z0-9]{8})\b/g;
-    console.log(`[Zoho Reader] 🔬 Pattern 2 (standalone 8-char alphanumeric): ${standalonePattern}`);
+    log.info(`[Zoho Reader] 🔬 Pattern 2 (standalone 8-char alphanumeric): ${standalonePattern}`);
     const words = text.match(standalonePattern) || [];
-    console.log(`[Zoho Reader] 🔬 Pattern 2 candidates (${words.length}): ${words.slice(0, 20).join(', ') || 'none'}`);
+    log.info(`[Zoho Reader] 🔬 Pattern 2 candidates (${words.length}): ${words.slice(0, 20).join(', ') || 'none'}`);
     const stopWords = new Set([
       'security',
       'complete',
@@ -821,29 +824,29 @@ class ZohoReaderService {
         // Require BOTH a digit and a letter: mixed-case alone matches ordinary words
         // and proper nouns (observed: "Akshitha" returned instead of "NgW4NT62").
         if (/[0-9]/.test(w) && /[A-Za-z]/.test(w)) {
-          console.log(`[Zoho Reader] 🔬 Pattern 2 MATCHED → "${w}"`);
-          console.log(`[Zoho] Step 8 pattern matched: Pattern 2 (standalone 8-char) → "${w}"`);
-          console.log(`[Zoho] Step 8 ✅ OTP extracted: ${w}`);
+          log.info(`[Zoho Reader] 🔬 Pattern 2 MATCHED → "${w}"`);
+          log.info(`[Zoho] Step 8 pattern matched: Pattern 2 (standalone 8-char) → "${w}"`);
+          log.info(`[Zoho] Step 8 ✅ OTP extracted: ${w}`);
           return w;
         }
       }
     }
-    console.log('[Zoho Reader] 🔬 Pattern 2 no match (no candidate had both a digit and a letter).');
+    log.info('[Zoho Reader] 🔬 Pattern 2 no match (no candidate had both a digit and a letter).');
 
     // Pattern 3: 6-digit numeric code
     const sixDigitPattern = /\b(\d{6})\b/;
-    console.log(`[Zoho Reader] 🔬 Pattern 3 (6-digit numeric): ${sixDigitPattern}`);
+    log.info(`[Zoho Reader] 🔬 Pattern 3 (6-digit numeric): ${sixDigitPattern}`);
     const sixDigitMatch = text.match(sixDigitPattern);
     if (sixDigitMatch && sixDigitMatch[1]) {
       const code = sixDigitMatch[1].trim();
-      console.log(`[Zoho Reader] 🔬 Pattern 3 MATCHED → "${code}"`);
-      console.log(`[Zoho] Step 8 pattern matched: Pattern 3 (6-digit numeric) → "${code}"`);
-      console.log(`[Zoho] Step 8 ✅ OTP extracted: ${code}`);
+      log.info(`[Zoho Reader] 🔬 Pattern 3 MATCHED → "${code}"`);
+      log.info(`[Zoho] Step 8 pattern matched: Pattern 3 (6-digit numeric) → "${code}"`);
+      log.info(`[Zoho] Step 8 ✅ OTP extracted: ${code}`);
       return code;
     }
 
-    console.log('[Zoho Reader] 🔬 All 3 patterns failed — no OTP in this email body.');
-    console.log('[Zoho] Step 8 ❌ No OTP found: all patterns failed');
+    log.info('[Zoho Reader] 🔬 All 3 patterns failed — no OTP in this email body.');
+    log.info('[Zoho] Step 8 ❌ No OTP found: all patterns failed');
     return null;
   }
 
@@ -880,7 +883,7 @@ class ZohoReaderService {
         throw new Error('Zoho Reader page is unavailable.');
       }
 
-      console.log(
+      log.info(
         `[Zoho Reader] 📧 Looking up confirmation email for ${normalizedEmail} (company: "${targetCompany}", since: ${new Date(sinceTimestamp).toISOString()})...`
       );
 
@@ -940,7 +943,7 @@ class ZohoReaderService {
           const parsedTime = parseZohoEmailTimestamp(whenText, whenTitle);
           if (parsedTime === null || parsedTime < sinceTimestamp) {
             if (i === 0 && parsedTime !== null) {
-              console.log(
+              log.info(
                 `[Zoho Reader] ⏳ Latest email (${whenText}) is before apply window; waiting for new mail...`
               );
             }
@@ -967,7 +970,7 @@ class ZohoReaderService {
           }
 
           const receivedAt = new Date(parsedTime).toISOString();
-          console.log(`[Zoho Reader] 📧 Matched confirmation email: "${subject}" @ ${receivedAt}`);
+          log.info(`[Zoho Reader] 📧 Matched confirmation email: "${subject}" @ ${receivedAt}`);
 
           return {
             success: true,
@@ -987,7 +990,7 @@ class ZohoReaderService {
         `Timed out waiting for confirmation email for "${targetCompany}" after apply time.`
       );
     } catch (err: any) {
-      console.error(`[Zoho Reader] ❌ Confirmation email capture failed for ${candidateEmail}: ${err.message}`);
+      log.error(`[Zoho Reader] ❌ Confirmation email capture failed for ${candidateEmail}: ${err.message}`);
       return { success: false, errorMessage: err.message };
     } finally {
       await this.idlePage();

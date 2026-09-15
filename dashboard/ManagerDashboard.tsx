@@ -260,7 +260,13 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ apiBaseUrl =
     <main className="min-h-screen bg-[#FFF5EB] text-[#1A1A2E] p-4 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto">
         <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-7">
-          <div><p className="text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#64748B]">ApplyWizz / Control room</p><h1 className="text-3xl md:text-4xl font-black">Manager dashboard</h1></div>
+          <div className="flex items-center gap-3">
+            <img src="/logo.webp" alt="ApplyWizz" className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black" />
+            <div>
+              <p className="text-xs font-mono font-bold uppercase tracking-[0.2em] text-[#64748B]">ApplyWizz / Control room</p>
+              <h1 className="text-3xl md:text-4xl font-black">Manager dashboard</h1>
+            </div>
+          </div>
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-xs font-bold uppercase tracking-wider">Filter by Career Associate<select value={careerAssociate} onChange={(event) => setCareerAssociate(event.target.value)} className="block mt-1 min-w-48 bg-white border-2 border-[#1A1A2E] rounded px-2.5 py-2 text-sm shadow-[2px_2px_0px_#1A1A2E]"><option value="all">All</option>{dashboard.careerAssociates.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
             <label className="text-xs font-bold uppercase tracking-wider">Date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="block mt-1 bg-white border-2 border-[#1A1A2E] rounded px-2.5 py-2 text-sm font-mono shadow-[2px_2px_0px_#1A1A2E]" /></label>

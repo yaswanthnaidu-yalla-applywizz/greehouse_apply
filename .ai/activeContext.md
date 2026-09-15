@@ -1,14 +1,15 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step logs + dashboard field filter)_
+_Last updated: 2026-09-15 (role-based dashboards + logger + AW logo committed to main; apply migration 015)_
 
 ## Current Focus (Active Sprint)
 
-### 1. Manager / COO Analytics Dashboard
-- Separate from the operator dashboard
-- Needs visibility into: application throughput, success rates, candidate statuses, failure breakdown
-- Status: **early build** — API + static UI shipped: `GET /api/manager/dashboard`, operator link to **`/manager`**
-- Admin gate: `isUserAdmin()` in `auth.ts`; org-wide stats (no `careerassociatemanager_id` scoping)
+### 1. Role-based Admin / Manager / Dev dashboards
+- Strict isolation: operator `/`, manager `/manager`, admin `/admin`, dev `/dev` + switcher
+- Manager home keeps the existing client table with click-to-expand proofs and date/CA filters
+- Admin has org overview + ▶ Start ingest; Dev has health / runs / debugger
+- **Apply migration 015** (`audit_events`, `application_events`) in the Supabase SQL editor or Activity/audit tabs stay empty
+- Status: **on `main`; apply migration 015**
 
 ### 2. Resolution Engine — Semantic Search for Resume Parsing
 - Current Tier 2 (pdf-parse) + Tier 3 (Fuse.js fuzzy) sometimes miss relevant resume content
@@ -21,9 +22,9 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - **Confirmation path fixed:** forward-only window from `submitted_at`; OTP subjects rejected; `EMAIL_PROOF_PENDING`-only poller
 - **`EMAIL_UNVERIFIED` (on `main`, `cf50a45`):** after 10m with no confirmation mail → `EMAIL_UNVERIFIED`. Migration 013 — operator reported applied
 - **Session reset (`601d37d`):** each `fetchLatestOtp` goto-root + clear filter; empty user list → one `page.reload()` retry
-- **Uncommitted:** numbered `[Zoho] Step 1`–`8` verification logs + extra 5s wait after user-list selector
+- **Step logs on `main` (`8a44cf2`):** numbered `[Zoho] Step 1`–`8` + extra 5s wait after user-list selector
 - Remaining: not yet exercised against a live Greenhouse OTP challenge
-- Status: **reset/retry on `main`; step logs local; live OTP verification still pending**
+- Status: **reset/retry + step logs on `main`; live OTP verification still pending**
 
 ### 4. Submission Queue Integrity
 - Duplicate live submissions guarded on `main` (`cf50a45`): `IN_FLIGHT_STATUSES` includes `EMAIL_PROOF_PENDING`; PATCH ignores naked `QUEUED` while in-flight; `persist: false` on poll and submit-response paths
@@ -43,13 +44,13 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - Empty `resolved_fields` hydrated from `scanned_job_templates.fields_schema` (`applicationFieldHydration.ts`, `2bca544`) so the dashboard is not a blank form after segregator-only upserts
 - Status: **on `main`; apply migration 014 on Supabase if SKIPPED upserts fail the CHECK constraint**
 
-### 7. Uncommitted (this session, not on `main`)
-- `[Zoho] Step 1`–`8` verification logs + 5s user-list wait (`src/services/zohoReader.ts`)
-- Dashboard carousel: show identity + `unresolved`/`ai`/`manual`/`resume` only (`dashboard/public/index.html`); submit payload still uses full `fields`
-- Dropped `GET /api/candidates` totalJobs debug `console.log` (`src/server/index.ts`)
+### 7. Central logger + AW logo (shipped with dashboards)
+- **Central logger** — `src/utils/logger.ts` (`createLogger`); all `src/` `console.log`/`warn`/`error` swapped; format `[ISO] [LEVEL] [MODULE] message`
+- App logo: square AW mark at `dashboard/public/logo.webp` (favicon + header/auth); `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
 
 ## Immediate Blockers / Open Questions
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
+- [ ] **Migration 015** (`audit_events` + `application_events`) — apply in Supabase SQL Editor or Activity / audit / debugger timelines stay empty
 - [ ] Semantic search: choose approach (embeddings vs fuzzy tuning) before implementation
 - [ ] **`ZOHO_CONNECTOR_USER` holds a password-shaped value, not an email** — operator must confirm the username
 - [ ] **Migration 011** — `zoho_connected_profiles` still missing on the instance that logged the missing-table error (re-check)
@@ -59,9 +60,12 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - [ ] ▶ Start not yet completed end-to-end (would archive `test(Sheet1).csv`)
 - [ ] Duplicate-submission fix not yet exercised on a live submit
 - [ ] Email proof `EMAIL_UNVERIFIED` path not live-verified
+- [ ] **Skill-review apply** for open observations **0003, 0005, 0011** — listed 2026-09-15; user deferred to **end of week** (do not stage/action until then)
 
 ## Recent Decisions Made
-- CSV ingestion is **operator-triggered, not event-driven**
+- CSV ingestion is **admin-triggered from `/admin`**, not from the operator header
+- Roles are isolated: managers cannot open operator/admin/dev; admins cannot open manager/operator/dev; missing email is never admin
+- Manager dashboard currently shows **all clients** (`MANAGER_TEAM_SCOPE_ENABLED = false` in `clientDashboard.ts`). Re-enable team scoping once we know which `careerassociatemanager_id` maps to which manager email.
 - Long-running admin actions return `202` and expose a status endpoint
 - CAPTCHA automation is explicitly out of scope
 - Question cap is **35**, not 23 — further lifts need an explicit instruction (`AGENTS.md` rule 7)
@@ -73,6 +77,8 @@ _Last updated: 2026-09-15 (session end — main `b8b0276`; uncommitted Zoho Step
 - Queue ownership: in-flight statuses are never requeued; `persist: false` for poll/submit bookkeeping
 - Operator UI source of truth is **`dashboard/public/index.html`**
 - A reused Playwright page must be **reset to root and the filter cleared** before the next OTP lookup; one reload if the user list is empty
+- All `src/` stdout goes through **`createLogger`** (`src/utils/logger.ts`) — no new raw `console.*` in `src/`
+- Open skill observations **0003, 0005, 0011** stay open until an end-of-week apply (listing already done; do not restage this week unless asked)
 
 ## How to Update This File
 After each significant sprint or feature ship, update:

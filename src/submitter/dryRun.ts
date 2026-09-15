@@ -16,6 +16,9 @@ import {
   updateStatus,
   type ApplicationRow,
 } from '../db/applications.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Dry Run');
 
 export interface DryRunOptions {
   /** Launch browser in headless mode (default: false for visual inspection) */
@@ -77,7 +80,7 @@ export async function runDryRun(
     throw new Error(`Application ${applicationId} has no job_url specified.`);
   }
 
-  console.log(
+  log.info(
     `[Dry Run] 🚀 Starting dry-run for ${application.applywizz_id} [${targetUrl}] (headless: ${headless}, isContainer: ${isContainer})...`
   );
 
@@ -108,7 +111,7 @@ export async function runDryRun(
     page = await context.newPage();
 
     // 3. Navigate to the job application URL
-    console.log(`[Dry Run] 🌐 Navigating to ${targetUrl}...`);
+    log.info(`[Dry Run] 🌐 Navigating to ${targetUrl}...`);
     await page.goto(targetUrl, {
       waitUntil: 'domcontentloaded',
       timeout: timeoutMs,
@@ -125,7 +128,7 @@ export async function runDryRun(
     await page.waitForTimeout(1000);
 
     // 5. Capture full-page screenshot of filled form
-    console.log(`[Dry Run] 📸 Capturing dry-run form screenshot...`);
+    log.info(`[Dry Run] 📸 Capturing dry-run form screenshot...`);
     const screenshotBuffer = await page.screenshot({
       fullPage: true,
       type: 'png',
@@ -133,7 +136,7 @@ export async function runDryRun(
 
     // In headful mode: pause so the operator can see the filled form before the window closes
     if (!headless) {
-      console.log(`[Dry Run] 👁 Headful mode — pausing 3s for visual inspection...`);
+      log.info(`[Dry Run] 👁 Headful mode — pausing 3s for visual inspection...`);
       await page.waitForTimeout(3000);
     }
 
@@ -141,9 +144,9 @@ export async function runDryRun(
     let screenshotUrl = '';
     try {
       screenshotUrl = await uploadDryRunScreenshot(applicationId, screenshotBuffer);
-      console.log(`[Dry Run] ☁️ Uploaded dry-run screenshot to storage: ${screenshotUrl}`);
+      log.info(`[Dry Run] ☁️ Uploaded dry-run screenshot to storage: ${screenshotUrl}`);
     } catch (uploadErr: any) {
-      console.warn(`[Dry Run] ⚠️ Storage upload warning: ${uploadErr.message}`);
+      log.warn(`[Dry Run] ⚠️ Storage upload warning: ${uploadErr.message}`);
     }
 
     // 7. Update application state in Supabase
@@ -155,7 +158,7 @@ export async function runDryRun(
         }
         await updateStatus(targetAppId, 'DRY_RUN_COMPLETE', { job_url: application.job_url });
       } catch (dbErr: any) {
-        console.warn(`[Dry Run] ⚠️ Could not update DB status: ${dbErr.message}`);
+        log.warn(`[Dry Run] ⚠️ Could not update DB status: ${dbErr.message}`);
       }
     }
 
@@ -166,7 +169,7 @@ export async function runDryRun(
       summary: fillSummary,
     };
   } catch (err: any) {
-    console.error(`[Dry Run] ❌ Dry-run failed for application ${applicationId}:`, err);
+    log.error(`[Dry Run] ❌ Dry-run failed for application ${applicationId}:`, err);
     return {
       success: false,
       applicationId,
@@ -185,7 +188,7 @@ export async function runDryRun(
     if (page) await page.close().catch(() => {});
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
-    console.log(`[Dry Run] 🏁 Completed dry-run session for ${applicationId}.`);
+    log.info(`[Dry Run] 🏁 Completed dry-run session for ${applicationId}.`);
   }
 }
 

@@ -5,6 +5,9 @@
 
 import { config } from '../config/env.js';
 import { WORK_HISTORY_API_BASE_URL } from '../server/workHistoryAuth.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Work History Client');
 
 export const DEFAULT_WORK_HISTORY_API_URL = WORK_HISTORY_API_BASE_URL;
 
@@ -65,7 +68,7 @@ export function getISTDateString(daysAgo: number = 0): string {
 /** Returns yesterday's calendar date in Asia/Kolkata (IST, UTC+5:30), not UTC. */
 export function getYesterdayIST(): string {
   const date = getISTDateString(1);
-  console.log(`[WorkHistory] Computed yesterday in IST (UTC+5:30): ${date}`);
+  log.info(`[WorkHistory] Computed yesterday in IST (UTC+5:30): ${date}`);
   return date;
 }
 
@@ -98,7 +101,7 @@ async function fetchWorkHistoryWithRetry(
   let lastReason = 'unknown error';
 
   for (let attempt = 1; attempt <= WORK_HISTORY_MAX_ATTEMPTS; attempt++) {
-    console.log(`[WorkHistory] Fetching ${fullUrl}`);
+    log.info(`[WorkHistory] Fetching ${fullUrl}`);
     try {
       const response = await fetch(fullUrl, { signal: AbortSignal.timeout(timeoutMs) });
       return { ok: true, response };
@@ -106,18 +109,18 @@ async function fetchWorkHistoryWithRetry(
       lastReason = err instanceof Error ? err.message : String(err);
       const timedOut = isFetchTimeoutError(err);
       if (timedOut && attempt < WORK_HISTORY_MAX_ATTEMPTS) {
-        console.warn(
+        log.warn(
           `[WorkHistory] Failed ${fullUrl}: ${lastReason} (timeout, retry ${attempt + 1}/${WORK_HISTORY_MAX_ATTEMPTS} in ${WORK_HISTORY_RETRY_BACKOFF_MS}ms)`
         );
         await sleep(WORK_HISTORY_RETRY_BACKOFF_MS);
         continue;
       }
-      console.warn(`[WorkHistory] Failed ${fullUrl}: ${lastReason}`);
+      log.warn(`[WorkHistory] Failed ${fullUrl}: ${lastReason}`);
       return { ok: false, reason: lastReason };
     }
   }
 
-  console.warn(`[WorkHistory] Failed ${fullUrl}: ${lastReason}`);
+  log.warn(`[WorkHistory] Failed ${fullUrl}: ${lastReason}`);
   return { ok: false, reason: lastReason };
 }
 
@@ -150,12 +153,12 @@ async function fetchRecordsForDate(
 ): Promise<WorkHistoryCandidateRecord[] | null> {
   const normalizedEmail = (caEmail || '').trim().toLowerCase();
   if (!normalizedEmail) {
-    console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+    log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
     throw new Error('[WorkHistory] ❌ CA email missing — cannot proceed');
   }
 
   const fullUrl = buildCaWorkHistoryUrl(normalizedEmail, dateStr);
-  console.log(`[WorkHistory] Fetching ${fullUrl}`);
+  log.info(`[WorkHistory] Fetching ${fullUrl}`);
   const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
   if (!outcome.ok) {
     return null;
@@ -164,7 +167,7 @@ async function fetchRecordsForDate(
   const res = outcome.response;
   if (!res.ok) {
     const reason = `HTTP ${res.status}`;
-    console.warn(`[WorkHistory] Failed ${fullUrl}: ${reason}`);
+    log.warn(`[WorkHistory] Failed ${fullUrl}: ${reason}`);
     return null;
   }
 
@@ -172,16 +175,16 @@ async function fetchRecordsForDate(
     const data: any = await res.json();
     const records = parseWorkHistoryRecords(data);
     if (records === null) {
-      console.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
+      log.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
       return null;
     }
-    console.log(
+    log.info(
       `[WorkHistory] Success date=${dateStr} ca_email=${normalizedEmail} records=${records.length}`
     );
     return records;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
+    log.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
     return null;
   }
 }
@@ -231,7 +234,7 @@ export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<Wor
 
   const res = outcome.response;
   if (!res.ok) {
-    console.warn(`[WorkHistory] Failed ${fullUrl}: HTTP ${res.status}`);
+    log.warn(`[WorkHistory] Failed ${fullUrl}: HTTP ${res.status}`);
     return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
   }
 
@@ -239,10 +242,10 @@ export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<Wor
     const data: any = await res.json();
     const records = parseWorkHistoryRecords(data);
     if (records === null) {
-      console.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
+      log.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
       return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
     }
-    console.log(`[WorkHistory] Success date=${dateStr} ca_email=(admin) records=${records.length}`);
+    log.info(`[WorkHistory] Success date=${dateStr} ca_email=(admin) records=${records.length}`);
     return {
       records,
       candidateIds: records.map((r) => r.applywizzId),
@@ -251,7 +254,7 @@ export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<Wor
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
+    log.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
     return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
   }
 }

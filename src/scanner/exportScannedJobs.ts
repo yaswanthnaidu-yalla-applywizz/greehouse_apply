@@ -17,6 +17,9 @@ import { config } from '../config/env.js';
 import { upsertTemplate } from '../db/templates.js';
 import { isSupabaseConfigured } from '../db/client.js';
 import type { ScannedJobTemplate } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Export Scanned Jobs');
 
 /**
  * Result object returned by `exportScannedJobs` with absolute output paths.
@@ -74,13 +77,13 @@ export async function exportScannedJobs(
   const jsonPath = path.join(resolvedDir, 'scanned_jobs.json');
   const csvPath = path.join(resolvedDir, 'scanned_jobs.csv');
 
-  console.log(`[Export Scanned Jobs] 💾 Writing scanned job outputs to: ${resolvedDir}`);
+  log.info(`[Export Scanned Jobs] 💾 Writing scanned job outputs to: ${resolvedDir}`);
 
   // 1. Write Full Structured JSON
   const jsonContent = JSON.stringify(templates, null, 2);
   await fs.promises.writeFile(jsonPath, jsonContent, 'utf-8');
   const jsonStats = fs.statSync(jsonPath);
-  console.log(`[Export Scanned Jobs] ✅ JSON written: ${jsonPath} (${(jsonStats.size / 1024).toFixed(1)} KB)`);
+  log.info(`[Export Scanned Jobs] ✅ JSON written: ${jsonPath} (${(jsonStats.size / 1024).toFixed(1)} KB)`);
 
   if (isSupabaseConfigured() && templates.length > 0) {
     let persisted = 0;
@@ -96,12 +99,12 @@ export async function exportScannedJobs(
         });
         persisted++;
       } catch (err: any) {
-        console.warn(
+        log.warn(
           `[Export Scanned Jobs] ⚠️ Could not upsert scanned_job_templates for ${template.jobUrl}: ${err?.message || err}`
         );
       }
     }
-    console.log(
+    log.info(
       `[Export Scanned Jobs] ✅ Upserted ${persisted}/${templates.length} templates to scanned_job_templates (fields_schema)`
     );
   }
@@ -157,7 +160,7 @@ export async function exportScannedJobs(
   });
 
   const csvStats = fs.statSync(csvPath);
-  console.log(`[Export Scanned Jobs] ✅ CSV written: ${csvPath} (${csvRows.length.toLocaleString()} rows, ${(csvStats.size / 1024).toFixed(1)} KB)`);
+  log.info(`[Export Scanned Jobs] ✅ CSV written: ${csvPath} (${csvRows.length.toLocaleString()} rows, ${(csvStats.size / 1024).toFixed(1)} KB)`);
 
   return {
     jsonPath,

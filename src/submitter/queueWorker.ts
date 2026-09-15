@@ -3,6 +3,9 @@
  */
 
 import { SubmitterPool } from './submitterPool.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Queue Worker');
 
 export interface QueueDaemonOptions {
   concurrency?: number;
@@ -14,7 +17,7 @@ export class SubmissionQueueDaemon {
 
   public constructor(options: QueueDaemonOptions = {}) {
     if (options.concurrency !== undefined && options.concurrency !== 3) {
-      console.warn('[SubmissionQueueDaemon] Pool concurrency is fixed at 3 workers.');
+      log.warn('[SubmissionQueueDaemon] Pool concurrency is fixed at 3 workers.');
     }
     this.pool = new SubmitterPool({ pollIntervalMs: options.pollIntervalMs });
   }
@@ -25,6 +28,10 @@ export class SubmissionQueueDaemon {
 
   public async stop(): Promise<void> {
     await this.pool.stop();
+  }
+
+  public getSnapshot(): ReturnType<SubmitterPool['getSnapshot']> {
+    return this.pool.getSnapshot();
   }
 }
 

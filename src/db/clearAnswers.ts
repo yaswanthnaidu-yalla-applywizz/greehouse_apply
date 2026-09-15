@@ -10,20 +10,23 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Clear Answers');
 
 async function clearData() {
   const args = process.argv.slice(2);
   const candidateArg = args.find((a) => a.startsWith('--candidate='));
   const candidateId = candidateArg ? candidateArg.split('=')[1]?.trim() : null;
 
-  console.log('================================================================');
-  console.log(`🧹 Clearing Resolved Answers & Applications`);
+  log.info('================================================================');
+  log.info(`🧹 Clearing Resolved Answers & Applications`);
   if (candidateId) {
-    console.log(`🎯 Target Candidate: ${candidateId}`);
+    log.info(`🎯 Target Candidate: ${candidateId}`);
   } else {
-    console.log(`🎯 Target: ALL candidates`);
+    log.info(`🎯 Target: ALL candidates`);
   }
-  console.log('================================================================\n');
+  log.info('================================================================\n');
 
   // 1. Clear Supabase tables
   if (isSupabaseConfigured()) {
@@ -39,9 +42,9 @@ async function clearData() {
       }
       const { error: appErr } = await appQuery;
       if (appErr) {
-        console.warn(`⚠️ Supabase candidate_applications delete warning: ${appErr.message}`);
+        log.warn(`⚠️ Supabase candidate_applications delete warning: ${appErr.message}`);
       } else {
-        console.log('✅ Cleared Supabase table: candidate_applications');
+        log.info('✅ Cleared Supabase table: candidate_applications');
       }
 
       // Clear candidate_qa_bank
@@ -53,15 +56,15 @@ async function clearData() {
       }
       const { error: qaErr } = await qaQuery;
       if (qaErr) {
-        console.warn(`⚠️ Supabase candidate_qa_bank delete warning: ${qaErr.message}`);
+        log.warn(`⚠️ Supabase candidate_qa_bank delete warning: ${qaErr.message}`);
       } else {
-        console.log('✅ Cleared Supabase table: candidate_qa_bank');
+        log.info('✅ Cleared Supabase table: candidate_qa_bank');
       }
     } catch (err: any) {
-      console.warn(`⚠️ Supabase clear skipped or encountered error: ${err.message}`);
+      log.warn(`⚠️ Supabase clear skipped or encountered error: ${err.message}`);
     }
   } else {
-    console.log('ℹ️ Supabase not configured; skipping remote DB clear.');
+    log.info('ℹ️ Supabase not configured; skipping remote DB clear.');
   }
 
   // 2. Clear Local Output Files
@@ -77,7 +80,7 @@ async function clearData() {
           ? data.filter((item: any) => item.applywizzId !== candidateId && item.applywizz_id !== candidateId)
           : [];
         fs.writeFileSync(resolvedPath, JSON.stringify(filtered, null, 2));
-        console.log(`✅ Removed candidate ${candidateId} from output/resolved_applications.json`);
+        log.info(`✅ Removed candidate ${candidateId} from output/resolved_applications.json`);
       } catch {}
     }
 
@@ -88,25 +91,25 @@ async function clearData() {
           ? data.filter((item: any) => item.applywizzId !== candidateId && item.applywizz_id !== candidateId)
           : [];
         fs.writeFileSync(segmentsPath, JSON.stringify(filtered, null, 2));
-        console.log(`✅ Removed candidate ${candidateId} from output/candidate_segments.json`);
+        log.info(`✅ Removed candidate ${candidateId} from output/candidate_segments.json`);
       } catch {}
     }
   } else {
     // Remove entire files
     if (fs.existsSync(resolvedPath)) {
       fs.unlinkSync(resolvedPath);
-      console.log('✅ Deleted local file: output/resolved_applications.json');
+      log.info('✅ Deleted local file: output/resolved_applications.json');
     }
     if (fs.existsSync(segmentsPath)) {
       fs.unlinkSync(segmentsPath);
-      console.log('✅ Deleted local file: output/candidate_segments.json');
+      log.info('✅ Deleted local file: output/candidate_segments.json');
     }
   }
 
-  console.log('\n✨ Clear complete!\n');
+  log.info('\n✨ Clear complete!\n');
 }
 
 clearData().catch((err) => {
-  console.error('❌ Clear failed:', err);
+  log.error('❌ Clear failed:', err);
   process.exit(1);
 });

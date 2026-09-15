@@ -12,6 +12,9 @@ import { chromium } from 'playwright';
 import { fillForm } from './formFiller.js';
 import type { ResolvedField } from '../types/index.js';
 import { akshithaApplications, AKSHITHA_APPLYWIZZ_ID } from '../dashboard/akshithaDemoFixtures.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Run User Application');
 
 function getCliArg(name: string): string | undefined {
   const prefix = `${name}=`;
@@ -54,24 +57,24 @@ async function main() {
     }
     targetJobUrl = picked.jobUrl;
     resolvedFields = picked.resolvedFields;
-    console.log(`• Using AWL-31428 fixture: ${picked.companyName} — ${picked.jobTitle}`);
+    log.info(`• Using AWL-31428 fixture: ${picked.companyName} — ${picked.jobTitle}`);
   }
 
   const resumePath = path.resolve(process.cwd(), 'resumes/my-resume.pdf');
 
-  console.log('================================================================');
-  console.log('  🚀 Greenhouse Headful Application Filler Live Demo');
-  console.log('================================================================');
-  console.log(`• Candidate:  Yaswanth Naidu Yalla`);
-  console.log(`• Email:      yaswanthnaidu004@gmail.com`);
-  console.log(`• Phone:      +91 9573939153`);
-  console.log(`• Location:   Hyderabad, Telangana, India`);
-  console.log(`• Target URL: ${targetJobUrl}`);
-  console.log(`• Resume PDF: ${resumePath}`);
-  console.log('================================================================\n');
+  log.info('================================================================');
+  log.info('  🚀 Greenhouse Headful Application Filler Live Demo');
+  log.info('================================================================');
+  log.info(`• Candidate:  Yaswanth Naidu Yalla`);
+  log.info(`• Email:      yaswanthnaidu004@gmail.com`);
+  log.info(`• Phone:      +91 9573939153`);
+  log.info(`• Location:   Hyderabad, Telangana, India`);
+  log.info(`• Target URL: ${targetJobUrl}`);
+  log.info(`• Resume PDF: ${resumePath}`);
+  log.info('================================================================\n');
 
   if (!resolvedFields && !fs.existsSync(resumePath)) {
-    console.error(`❌ Resume file not found at ${resumePath}`);
+    log.error(`❌ Resume file not found at ${resumePath}`);
     process.exit(1);
   }
 
@@ -313,7 +316,7 @@ async function main() {
     resolvedFields = yaswanthResolvedFields;
   }
 
-  console.log('🌐 Launching Chromium browser in visible (headful) mode...');
+  log.info('🌐 Launching Chromium browser in visible (headful) mode...');
   const browser = await chromium.launch({
     headless: false,
     slowMo: 60, // Slower interaction so the user can easily observe the filling in real-time
@@ -333,13 +336,13 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    console.log(`🌐 Navigating to ${targetJobUrl}...`);
+    log.info(`🌐 Navigating to ${targetJobUrl}...`);
     await page.goto(targetJobUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 45000,
     });
 
-    console.log('📝 Starting automated form filling with human jitter (300ms - 800ms)...');
+    log.info('📝 Starting automated form filling with human jitter (300ms - 800ms)...');
 
     const appRecord = {
       id: `${applywizzId}-dry-run`,
@@ -355,10 +358,10 @@ async function main() {
       timeoutMs: 8000,
     });
 
-    console.log('\n================================================================');
-    console.log(`  ✅ Form Filling Complete! (${summary.filledFields}/${summary.totalFields} fields filled)`);
-    console.log('================================================================');
-    console.log('📸 Capturing screenshot of filled form...');
+    log.info('\n================================================================');
+    log.info(`  ✅ Form Filling Complete! (${summary.filledFields}/${summary.totalFields} fields filled)`);
+    log.info('================================================================');
+    log.info('📸 Capturing screenshot of filled form...');
     
     const screenshotPath = path.resolve(
       process.cwd(),
@@ -367,17 +370,17 @@ async function main() {
         : 'output/user_application_headful.png'
     );
     await page.screenshot({ fullPage: true, path: screenshotPath });
-    console.log(`🖼️ Screenshot saved to: ${screenshotPath}`);
+    log.info(`🖼️ Screenshot saved to: ${screenshotPath}`);
 
-    console.log('\n👀 Browser is left open for 30 seconds so you can view and inspect your filled form live!');
+    log.info('\n👀 Browser is left open for 30 seconds so you can view and inspect your filled form live!');
     await page.waitForTimeout(30000);
   } finally {
-    console.log('🏁 Closing headful browser session.');
+    log.info('🏁 Closing headful browser session.');
     await browser.close().catch(() => {});
   }
 }
 
 main().catch((err) => {
-  console.error('❌ Error executing headful demo:', err);
+  log.error('❌ Error executing headful demo:', err);
   process.exit(1);
 });

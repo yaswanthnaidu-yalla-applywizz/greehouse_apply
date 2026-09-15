@@ -13,6 +13,9 @@ import { upsertAnswer } from '../db/qaBank.js';
 import { generateFingerprint } from './fingerprint.js';
 import { profileRowToCandidateProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Tier5LLM');
 
 let synthesizerInstance: LLMSynthesizer | null = null;
 
@@ -98,7 +101,7 @@ export async function resolveTier5(
     const confidence = rawResult?.confidence ?? 0;
     if (rawResult && rawResult.value && rawResult.value.trim().length > 0) {
       if (confidence < LLM_MIN_CONFIDENCE) {
-        console.warn(
+        log.warn(
           `[Tier 5] Confidence ${confidence} < ${LLM_MIN_CONFIDENCE} for ${applywizzId} [${field.label}] — leaving unresolved (no qa_bank write)`
         );
         return null;
@@ -127,7 +130,7 @@ export async function resolveTier5(
           confidence: resolvedField.confidence,
         });
       } catch (writeErr: any) {
-        console.warn(
+        log.warn(
           `[Tier 5] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${writeErr.message}`
         );
       }
@@ -135,7 +138,7 @@ export async function resolveTier5(
       return resolvedField;
     }
   } catch (err: any) {
-    console.warn(`[Tier 5] LLM synthesis error for ${applywizzId} [${field.label}]: ${err.message}`);
+    log.warn(`[Tier 5] LLM synthesis error for ${applywizzId} [${field.label}]: ${err.message}`);
   }
 
   return null;

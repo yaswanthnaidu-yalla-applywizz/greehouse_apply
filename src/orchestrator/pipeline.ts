@@ -31,6 +31,9 @@ import type {
   CandidateSegment,
   ScannedJobTemplate,
 } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Pipeline');
 
 /**
  * Options configuring the End-to-End V1Pipeline execution.
@@ -109,15 +112,15 @@ export class V1Pipeline {
       throw new Error(`Input CSV file does not exist at: "${resolvedCsvPath}".`);
     }
 
-    console.log('================================================================');
-    console.log('  🟢 Greenhouse Automation V1: End-to-End Master Pipeline');
-    console.log('================================================================');
-    console.log(`• Input CSV:      ${resolvedCsvPath}`);
-    console.log(`• Output Dir:     ${resolvedOutputDir}`);
-    console.log(`• Row Limit:      ${options.limit ? options.limit : 'All rows'}`);
-    console.log(`• LLM Provider:   ${config.LLM_PROVIDER}`);
-    console.log(`• LLM Model:      ${config.OPENROUTER_MODEL || 'default'}`);
-    console.log('================================================================\n');
+    log.info('================================================================');
+    log.info('  🟢 Greenhouse Automation V1: End-to-End Master Pipeline');
+    log.info('================================================================');
+    log.info(`• Input CSV:      ${resolvedCsvPath}`);
+    log.info(`• Output Dir:     ${resolvedOutputDir}`);
+    log.info(`• Row Limit:      ${options.limit ? options.limit : 'All rows'}`);
+    log.info(`• LLM Provider:   ${config.LLM_PROVIDER}`);
+    log.info(`• LLM Model:      ${config.OPENROUTER_MODEL || 'default'}`);
+    log.info('================================================================\n');
 
     let uniqueUrls: string[] = [];
     let scannedTemplates: ScannedJobTemplate[] = [];
@@ -127,15 +130,15 @@ export class V1Pipeline {
     // -------------------------------------------------------------
     // Phase A: Ingestion & URL Deduplication (Branch 1)
     // -------------------------------------------------------------
-    console.log('[Pipeline Phase A] 🔍 Stream-parsing CSV & deduplicating Greenhouse URLs...');
+    log.info('[Pipeline Phase A] 🔍 Stream-parsing CSV & deduplicating Greenhouse URLs...');
     try {
       uniqueUrls = await readAndDeduplicateUrls(resolvedCsvPath, {
         limit: options.limit,
         concurrency: 25,
       });
-      console.log(`[Pipeline Phase A] ✅ Extracted ${uniqueUrls.length} unique canonical Greenhouse URLs.\n`);
+      log.info(`[Pipeline Phase A] ✅ Extracted ${uniqueUrls.length} unique canonical Greenhouse URLs.\n`);
     } catch (err: any) {
-      console.error(`[Pipeline Phase A] ❌ Failed to deduplicate URLs: ${err.message}`);
+      log.error(`[Pipeline Phase A] ❌ Failed to deduplicate URLs: ${err.message}`);
       throw err;
     }
 
@@ -144,18 +147,18 @@ export class V1Pipeline {
     // -------------------------------------------------------------
     const scannedJsonPath = path.join(resolvedOutputDir, 'scanned_jobs.json');
     if (options.skipScanIfCached && fs.existsSync(scannedJsonPath)) {
-      console.log('[Pipeline Phase B] ⚡ Found existing scanned_jobs.json cache, skipping browser scan.');
+      log.info('[Pipeline Phase B] ⚡ Found existing scanned_jobs.json cache, skipping browser scan.');
       try {
         const raw = await fs.promises.readFile(scannedJsonPath, 'utf-8');
         scannedTemplates = JSON.parse(raw);
-        console.log(`[Pipeline Phase B] ✅ Loaded ${scannedTemplates.length} cached job templates.\n`);
+        log.info(`[Pipeline Phase B] ✅ Loaded ${scannedTemplates.length} cached job templates.\n`);
       } catch {
         // Fall back to scanning if read fails
       }
     }
 
     if (scannedTemplates.length === 0) {
-      console.log(`[Pipeline Phase B] 🌐 Scanning ${uniqueUrls.length} unique URLs with Playwright pool...`);
+      log.info(`[Pipeline Phase B] 🌐 Scanning ${uniqueUrls.length} unique URLs with Playwright pool...`);
       try {
         const scanner = new PlaywrightScanner({
           workerPoolSize: options.concurrency ?? config.WORKER_POOL_SIZE,
@@ -166,16 +169,16 @@ export class V1Pipeline {
 
         scannedTemplates = await scanner.scanUniqueUrls(uniqueUrls);
         await exportScannedJobs(scannedTemplates, resolvedOutputDir);
-        console.log(`[Pipeline Phase B] ✅ Successfully scanned ${scannedTemplates.length} job form schemas.\n`);
+        log.info(`[Pipeline Phase B] ✅ Successfully scanned ${scannedTemplates.length} job form schemas.\n`);
       } catch (err: any) {
-        console.warn(`[Pipeline Phase B] ⚠️ Playwright scan encountered non-fatal error: ${err.message}. Continuing.`);
+        log.warn(`[Pipeline Phase B] ⚠️ Playwright scan encountered non-fatal error: ${err.message}. Continuing.`);
       }
     }
 
     // -------------------------------------------------------------
     // Phase C: Candidate Segregation & Profile Sync (Branch 2)
     // -------------------------------------------------------------
-    console.log('[Pipeline Phase C] 👥 Segregating candidates & syncing ApplyWizz profiles...');
+    log.info('[Pipeline Phase C] 👥 Segregating candidates & syncing ApplyWizz profiles...');
     try {
       const candidateMap = await segregateCandidatesByApplyWizzId(resolvedCsvPath, {
         limit: options.limit,
@@ -186,9 +189,9 @@ export class V1Pipeline {
 
       await exportCandidateSegments(candidateMap, resolvedOutputDir);
       candidateSegments = Array.from(candidateMap.values());
-      console.log(`[Pipeline Phase C] ✅ Synced ${candidateSegments.length} candidate profiles and master resumes.\n`);
+      log.info(`[Pipeline Phase C] ✅ Synced ${candidateSegments.length} candidate profiles and master resumes.\n`);
     } catch (err: any) {
-      console.error(`[Pipeline Phase C] ❌ Failed during candidate sync: ${err.message}`);
+      log.error(`[Pipeline Phase C] ❌ Failed during candidate sync: ${err.message}`);
       throw err;
     }
 
@@ -198,13 +201,13 @@ export class V1Pipeline {
         limit: options.limit,
       });
     } catch (err: any) {
-      console.warn(`[Pipeline Phase C] ⚠️ ensureApplicationRowsFromCsv: ${err.message}`);
+      log.warn(`[Pipeline Phase C] ⚠️ ensureApplicationRowsFromCsv: ${err.message}`);
     }
 
     // -------------------------------------------------------------
     // Phase D: Multi-Tier Answer Resolution Engine
     // -------------------------------------------------------------
-    console.log('[Pipeline Phase D] 🧠 Resolving form answers (supabase vs ai)...');
+    log.info('[Pipeline Phase D] 🧠 Resolving form answers (supabase vs ai)...');
     try {
       resolvedApplications = await this.resolver.resolveAllApplications(
         candidateSegments,
@@ -212,9 +215,9 @@ export class V1Pipeline {
       );
 
       await exportResolvedApplications(resolvedApplications, resolvedOutputDir);
-      console.log(`[Pipeline Phase D] ✅ Resolved ${resolvedApplications.length} candidate job applications.\n`);
+      log.info(`[Pipeline Phase D] ✅ Resolved ${resolvedApplications.length} candidate job applications.\n`);
     } catch (err: any) {
-      console.error(`[Pipeline Phase D] ❌ Error during answer resolution: ${err.message}`);
+      log.error(`[Pipeline Phase D] ❌ Error during answer resolution: ${err.message}`);
       throw err;
     }
 
@@ -255,22 +258,22 @@ export class V1Pipeline {
       },
     };
 
-    console.log('================================================================');
-    console.log('  🏁 End-to-End Pipeline Completed Successfully');
-    console.log('================================================================');
-    console.log(`• Duration:               ${elapsedSec}s`);
-    console.log(`• Unique Candidates:      ${result.uniqueCandidates}`);
-    console.log(`• Unique Job URLs:        ${result.uniqueUrls}`);
-    console.log(`• Applications Ready:     ${result.resolvedApplications} (< ${config.MAX_JOB_QUESTIONS} questions)`);
-    console.log(`• Total Fields Populated: ${result.scannedFields}`);
-    console.log(`  - 🟢 'supabase' Tagged: ${supabaseCount} (${totalFields ? ((supabaseCount / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`  - 🟣 'ai' Tagged:       ${aiCount} (${totalFields ? ((aiCount / totalFields) * 100).toFixed(1) : 0}%)`);
-    console.log(`• Output Files:`);
-    console.log(`  - ${result.outputFiles.scannedJobsJson}`);
-    console.log(`  - ${result.outputFiles.scannedJobsCsv}`);
-    console.log(`  - ${result.outputFiles.candidateSegmentsJson}`);
-    console.log(`  - ${result.outputFiles.resolvedApplicationsJson}`);
-    console.log('================================================================\n');
+    log.info('================================================================');
+    log.info('  🏁 End-to-End Pipeline Completed Successfully');
+    log.info('================================================================');
+    log.info(`• Duration:               ${elapsedSec}s`);
+    log.info(`• Unique Candidates:      ${result.uniqueCandidates}`);
+    log.info(`• Unique Job URLs:        ${result.uniqueUrls}`);
+    log.info(`• Applications Ready:     ${result.resolvedApplications} (< ${config.MAX_JOB_QUESTIONS} questions)`);
+    log.info(`• Total Fields Populated: ${result.scannedFields}`);
+    log.info(`  - 🟢 'supabase' Tagged: ${supabaseCount} (${totalFields ? ((supabaseCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    log.info(`  - 🟣 'ai' Tagged:       ${aiCount} (${totalFields ? ((aiCount / totalFields) * 100).toFixed(1) : 0}%)`);
+    log.info(`• Output Files:`);
+    log.info(`  - ${result.outputFiles.scannedJobsJson}`);
+    log.info(`  - ${result.outputFiles.scannedJobsCsv}`);
+    log.info(`  - ${result.outputFiles.candidateSegmentsJson}`);
+    log.info(`  - ${result.outputFiles.resolvedApplicationsJson}`);
+    log.info('================================================================\n');
 
     return result;
   }

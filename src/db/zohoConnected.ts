@@ -4,6 +4,9 @@
 
 import { getDbClient, isSupabaseConfigured } from './client.js';
 import { getProfile, type ProfileRow } from './profiles.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Zoho Connected');
 
 export const ZOHO_DEMO_BYPASS_APPLYWIZZ_IDS = new Set(['AWL-YASWANTH', 'AWL-31428', 'AWL-YASHANTH']);
 
@@ -38,13 +41,13 @@ export async function fetchZohoConnectedApplywizzIdSet(applywizzIds: string[]): 
       .in('applywizz_id', unique);
 
     if (error) {
-      console.warn(`[Zoho Connected] ⚠️ Could not load connected profiles: ${error.message}`);
+      log.warn(`[Zoho Connected] ⚠️ Could not load connected profiles: ${error.message}`);
       return new Set();
     }
 
     return new Set((data || []).map((row) => String(row.applywizz_id).trim().toUpperCase()));
   } catch (err: any) {
-    console.warn(`[Zoho Connected] ⚠️ fetchZohoConnectedApplywizzIdSet failed: ${err.message}`);
+    log.warn(`[Zoho Connected] ⚠️ fetchZohoConnectedApplywizzIdSet failed: ${err.message}`);
     return new Set();
   }
 }

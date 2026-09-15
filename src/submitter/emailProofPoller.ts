@@ -16,6 +16,9 @@ import {
   type ApplicationRow,
 } from '../db/applications.js';
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Email Proof Poller');
 
 export class EmailProofPoller {
   private activePollers = new Map<string, NodeJS.Timeout>();
@@ -26,7 +29,7 @@ export class EmailProofPoller {
     if (!appId) return;
 
     if (this.activePollers.has(appId)) {
-      console.log(`[Email Proof Poller] ℹ️ Poller already running for ${appId}`);
+      log.info(`[Email Proof Poller] ℹ️ Poller already running for ${appId}`);
       return;
     }
 
@@ -36,7 +39,7 @@ export class EmailProofPoller {
     const intervalMs = 30 * 1000; // 30 seconds
     const appliedIso = application.submitted_at || application.proof_captured_at || new Date().toISOString();
 
-    console.log(
+    log.info(
       `[Email Proof Poller] 🚀 Starting 30s background retry for ${appId} (company: "${application.company_name || 'unknown'}", up to 10 min)...`
     );
 
@@ -50,14 +53,14 @@ export class EmailProofPoller {
 
         // If already APPLIED or already has captured email proof, stop
         if (currentApp.status === 'APPLIED' || currentApp.proof_email_json) {
-          console.log(`[Email Proof Poller] ✅ Application ${appId} is already APPLIED / captured. Stopping poller.`);
+          log.info(`[Email Proof Poller] ✅ Application ${appId} is already APPLIED / captured. Stopping poller.`);
           this.stopPolling(appId);
           return;
         }
 
         // Check if 10 minutes have elapsed
         if (Date.now() - startTime >= maxDurationMs) {
-          console.warn(
+          log.warn(
             `[Email Proof Poller] ⏱️ 10 minutes elapsed with zero email matches for ${appId}. Transitioning to EMAIL_UNVERIFIED.`
           );
           const targetId = currentApp.id || appId;
@@ -75,7 +78,7 @@ export class EmailProofPoller {
         // While the application is still in the OTP / CAPTCHA flow the inbox only holds
         // security-code mail, which must never be captured as proof.
         if (currentApp.status !== 'EMAIL_PROOF_PENDING') {
-          console.log(
+          log.info(
             `[Email Proof Poller] ⏸️ ${appId} is not a confirmed submission yet (status: ${currentApp.status}). Skipping cycle.`
           );
           return;
@@ -85,14 +88,14 @@ export class EmailProofPoller {
         const profile = await getProfile(currentApp.applywizz_id);
         const companyEmail = profile ? getCompanyEmail(profile) : null;
         if (!companyEmail) {
-          console.warn(`[Email Proof Poller] ⚠️ No company email for ${appId}. Stopping poller.`);
+          log.warn(`[Email Proof Poller] ⚠️ No company email for ${appId}. Stopping poller.`);
           this.stopPolling(appId);
           return;
         }
 
         const companyName = (currentApp.company_name || '').trim();
         if (!companyName) {
-          console.warn(`[Email Proof Poller] ⚠️ Missing company_name on ${appId}. Skipping cycle.`);
+          log.warn(`[Email Proof Poller] ⚠️ Missing company_name on ${appId}. Skipping cycle.`);
           return;
         }
 
@@ -105,7 +108,7 @@ export class EmailProofPoller {
         });
 
         if (result.matched && result.email) {
-          console.log(
+          log.info(
             `[Email Proof Poller] 🎉 Proof email captured: ${result.email.subject} from ${result.email.from} at ${result.email.received_at} — transitioning ${appId} to APPLIED.`
           );
           const targetId = currentApp.id || appId;
@@ -126,12 +129,12 @@ export class EmailProofPoller {
           this.stopPolling(appId);
           return;
         } else {
-          console.log(
+          log.info(
             `[Email Proof Poller] ⏳ Zero matches on cycle for ${appId}. Next retry in 30s (${Math.round((Date.now() - startTime) / 1000)}s / 600s elapsed)...`
           );
         }
       } catch (err: any) {
-        console.warn(`[Email Proof Poller] ⚠️ Poller cycle warning for ${appId}: ${err.message}`);
+        log.warn(`[Email Proof Poller] ⚠️ Poller cycle warning for ${appId}: ${err.message}`);
       }
 
       // Schedule next poll attempt in 30 seconds
@@ -152,7 +155,7 @@ export class EmailProofPoller {
       clearTimeout(timer);
       this.activePollers.delete(appId);
       this.pollerStartTimes.delete(appId);
-      console.log(`[Email Proof Poller] 🛑 Stopped poller for ${appId}`);
+      log.info(`[Email Proof Poller] 🛑 Stopped poller for ${appId}`);
     }
   }
 

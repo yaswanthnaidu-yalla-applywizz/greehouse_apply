@@ -6,6 +6,9 @@ import { upsertApplication, type ApplicationStatus } from './applications.js';
 import { findTemplateByJobUrl } from './templates.js';
 import { isOverQuestionCap, upsertSkippedOverQuestionCap } from './skippedApplications.js';
 import type { CandidateSegment } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Ensure Candidate Application Rows');
 
 export interface EnsureApplicationRowResult {
   attempted: number;
@@ -54,7 +57,7 @@ export async function ensureApplicationRowsForSegment(
         result.skippedOverCap++;
       } catch (err: any) {
         result.failed++;
-        console.warn(
+        log.warn(
           `[Segregator] ⚠️ Could not upsert SKIPPED candidate_applications for ${segment.applywizzId} ${persistJobUrl}: ${err.message}`
         );
       }
@@ -77,7 +80,7 @@ export async function ensureApplicationRowsForSegment(
       result.upserted++;
     } catch (err: any) {
       result.failed++;
-      console.warn(
+      log.warn(
         `[Segregator] ⚠️ Could not upsert candidate_applications for ${segment.applywizzId} ${persistJobUrl}: ${err.message}`
       );
     }

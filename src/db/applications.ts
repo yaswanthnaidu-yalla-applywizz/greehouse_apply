@@ -17,6 +17,9 @@ import {
   emailProofStoragePath,
   isApplicationUuid,
 } from './storage.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Applications');
 
 export type ApplicationStatus =
   | 'READY_FOR_REVIEW'
@@ -166,10 +169,10 @@ export async function upsertApplication(
         return row;
       }
       if (error) {
-        console.error(`[DB] upsertApplication Supabase error (${app.applywizz_id}, ${app.job_url}):`, error.message);
+        log.error(`[DB] upsertApplication Supabase error (${app.applywizz_id}, ${app.job_url}):`, error.message);
       }
     } catch (err: any) {
-      console.warn(`[DB] upsertApplication exception:`, err);
+      log.warn(`[DB] upsertApplication exception:`, err);
     }
   }
 
@@ -372,10 +375,10 @@ export async function updateResolvedFields(
           .eq('applywizz_id', cleanApplywizz);
       }
       if (updateRes?.error) {
-        console.error(`[DB] updateResolvedFields Supabase error (${id}):`, updateRes.error.message);
+        log.error(`[DB] updateResolvedFields Supabase error (${id}):`, updateRes.error.message);
       }
     } catch (err: any) {
-      console.warn(`[DB] updateResolvedFields exception:`, err);
+      log.warn(`[DB] updateResolvedFields exception:`, err);
     }
   }
 
@@ -478,10 +481,10 @@ export async function updateStatus(
         updateRes = await query.eq('applywizz_id', cleanApplywizz);
       }
       if (updateRes?.error) {
-        console.error(`[DB] updateStatus Supabase error (${id}, ${status}):`, updateRes.error.message);
+        log.error(`[DB] updateStatus Supabase error (${id}, ${status}):`, updateRes.error.message);
       }
     } catch (err: any) {
-      console.warn(`[DB] updateStatus exception:`, err);
+      log.warn(`[DB] updateStatus exception:`, err);
     }
   }
 
@@ -499,9 +502,22 @@ export async function updateStatus(
   const statusChanged = previousStatus !== status;
   const appLabel = `${cleanApplywizz} ${id}`;
   if (statusChanged) {
-    console.log(`[DB] updateStatus ${appLabel}: ${previousStatus || 'UNKNOWN'} → ${status} (status changed, broadcast sent).`);
+    log.info(`[DB] updateStatus ${appLabel}: ${previousStatus || 'UNKNOWN'} → ${status} (status changed, broadcast sent).`);
+    const eventApplicationId = isUuid ? id : existing?.id || mem?.id;
+    if (eventApplicationId) {
+      const { insertApplicationEvent } = await import('./events.js');
+      void insertApplicationEvent({
+        applicationId: eventApplicationId,
+        applywizzId: mem?.applywizz_id || existing?.applywizz_id || (isUuid ? undefined : cleanApplywizz),
+        fromStatus: previousStatus || null,
+        toStatus: status,
+        detail: extra && typeof extra === 'object' && extra.error_message
+          ? { error_message: extra.error_message }
+          : {},
+      });
+    }
   } else {
-    console.log(`[DB] updateStatus: status unchanged, no broadcast. (${appLabel}: ${status})`);
+    log.info(`[DB] updateStatus: status unchanged, no broadcast. (${appLabel}: ${status})`);
   }
   return statusChanged;
 }
@@ -539,7 +555,7 @@ async function patchApplicationRecord(
         if (!error) {
           persisted = true;
         } else {
-          console.warn(
+          log.warn(
             `[DB] ⚠️ Could not update DB record (${contextLabel}) for id=${application.id}: ${error.message}`
           );
         }
@@ -554,13 +570,13 @@ async function patchApplicationRecord(
         if (!error) {
           persisted = true;
         } else {
-          console.warn(
+          log.warn(
             `[DB] ⚠️ Could not update DB record (${contextLabel}) for ${application.applywizz_id}: ${error.message}`
           );
         }
       }
     } catch (err: any) {
-      console.warn(`[DB] ⚠️ Could not update DB record (${contextLabel}): ${err.message}`);
+      log.warn(`[DB] ⚠️ Could not update DB record (${contextLabel}): ${err.message}`);
     }
   }
 
@@ -578,7 +594,7 @@ async function patchApplicationRecord(
   }
 
   if (!persisted) {
-    console.warn(
+    log.warn(
       `[DB] ⚠️ Could not update DB record (${contextLabel}): no row matched (id=${application.id || 'n/a'}, applywizz_id=${application.applywizz_id || 'n/a'})`
     );
   }
@@ -1132,7 +1148,7 @@ export async function logQueueStatusChange(
 ): Promise<void> {
   const queuedCount = await countApplicationsByStatus('QUEUED');
   const applyingCount = await countApplicationsByStatus('APPLYING');
-  console.log(
+  log.info(
     `[Queue] Status change: ${fromStatus} → ${toStatus} (app-${appRef}) | ${queuedCount} total queued, ${applyingCount} applying`
   );
 }
@@ -1170,7 +1186,7 @@ export async function enqueueApplication(
         maxOrder = data[0].submission_order;
       }
     } catch (err: any) {
-      console.warn(`[DB] Error querying MAX(submission_order): ${err.message}`);
+      log.warn(`[DB] Error querying MAX(submission_order): ${err.message}`);
     }
   }
 
@@ -1211,10 +1227,10 @@ export async function enqueueApplication(
           .eq('job_url', app.job_url);
       }
       if (queueRes?.error) {
-        console.error(`[DB] enqueueApplication Supabase error:`, queueRes.error.message);
+        log.error(`[DB] enqueueApplication Supabase error:`, queueRes.error.message);
       }
     } catch (err: any) {
-      console.warn(`[DB] Could not update application to QUEUED in Supabase: ${err.message}`);
+      log.warn(`[DB] Could not update application to QUEUED in Supabase: ${err.message}`);
     }
   }
 
@@ -1225,11 +1241,11 @@ export async function enqueueApplication(
 
   cacheApplicationLocally(updatedApp);
   const resolvedId = updatedApp.id || applicationIdOrApplywizzId;
-  console.log(`[API] Submit clicked → status = QUEUED (ready for queue daemon)`);
-  console.log(`[API] Status → QUEUED (application ${resolvedId}, submission_order=${nextOrder})`);
+  log.info(`[API] Submit clicked → status = QUEUED (ready for queue daemon)`);
+  log.info(`[API] Status → QUEUED (application ${resolvedId}, submission_order=${nextOrder})`);
   await logQueueStatusChange(resolvedId, previousStatus, 'QUEUED');
   if (process.env.ENABLE_QUEUE_WORKER !== 'true') {
-    console.warn(
+    log.warn(
       `[Queue] ENABLE_QUEUE_WORKER is not "true" — app ${resolvedId} will remain QUEUED until a submission worker runs`
     );
   }
@@ -1252,7 +1268,7 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
         const selected = data[0] as ApplicationRow;
         cacheApplicationLocally(selected);
         const appRef = selected.id || selected.applywizz_id;
-        console.log(`[API] Status → APPLYING (application ${appRef}, dequeued via RPC from QUEUED)`);
+        log.info(`[API] Status → APPLYING (application ${appRef}, dequeued via RPC from QUEUED)`);
         return selected;
       }
     } catch (rpcErr: any) {
@@ -1287,12 +1303,12 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
           };
           cacheApplicationLocally(applyingApp);
           const appRef = applyingApp.id || applyingApp.applywizz_id;
-          console.log(`[API] Status → APPLYING (application ${appRef}, dequeued from QUEUED)`);
+          log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from QUEUED)`);
           return applyingApp;
         }
       }
     } catch (queryErr: any) {
-      console.warn(`[DB] Fallback queue selection error: ${queryErr.message}`);
+      log.warn(`[DB] Fallback queue selection error: ${queryErr.message}`);
     }
   }
 
@@ -1306,7 +1322,7 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
     next.status = 'APPLYING';
     next.updated_at = new Date().toISOString();
     const appRef = next.id || next.applywizz_id;
-    console.log(`[API] Status → APPLYING (application ${appRef}, dequeued from in-memory QUEUED)`);
+    log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from in-memory QUEUED)`);
     return next;
   }
 
@@ -1449,7 +1465,7 @@ export async function getRecentNotifications(
         }
       }
     } catch (err: any) {
-      console.warn(`[DB] getRecentNotifications Supabase warning: ${err.message}`);
+      log.warn(`[DB] getRecentNotifications Supabase warning: ${err.message}`);
     }
   }
 

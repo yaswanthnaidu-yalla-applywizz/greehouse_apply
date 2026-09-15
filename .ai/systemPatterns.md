@@ -160,8 +160,29 @@ Tracks Zoho Mail accounts linked to candidates for email proof capture.
 | `proofs_web` | `proofs/{app_id}_web.png` | Confirmation screenshots |
 | `proofs_dry_run` | `dry-run/{app_id}_dryrun.png` | Dry-run screenshots |
 
-### DB Migrations (15 files, applied via `src/db/migrate.ts`)
-`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `latest` combined
+### `audit_events` (migration 015)
+Organization audit log written by the server (signup, login, logout, ingest start, assignment PATCH). Missing table is fail-closed (warn + continue).
+
+### `application_events` (migration 015)
+Status-change timeline written from `updateStatus()`. Used by manager Activity and the dev application debugger. Missing table is fail-closed.
+
+### DB Migrations (16 files, applied via `src/db/migrate.ts`)
+`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` audit_events + application_events | `latest` combined
+
+## Dashboard roles (email map — no DB)
+
+`resolveRoleFromEmail()` in `src/server/routes/auth.ts` is the single source of truth. Case-insensitive. Missing email is never treated as admin.
+
+| Role | Emails | Home | Can open |
+|---|---|---|---|
+| `dev` | `yaswanthnaiduyalla@applywizz.ai` | `/dev` | `/`, `/admin`, `/manager`, `/dev` (header switcher) |
+| `admin` | `ramakrishna@applywizz.ai`, `anushabandreddy@applywizz.ai` | `/admin` | `/admin` only |
+| `manager` | `balaji@applywizz.ai`, `ramakrishnaa.tejavath@applywizz.ai` | `/manager` | `/manager` only (all clients for now — `MANAGER_TEAM_SCOPE_ENABLED` is false until `careerassociatemanager_id` mapping is known) |
+| `operator` | any other signed-up email | `/` | `/` only |
+
+API guards: `/api/applications|candidates|notifications` → operator+dev; `/api/admin` → admin+dev; `/api/manager` → manager+dev; `/api/dev` → dev. Login returns `homePath`. CSV **▶ Start** lives on the Admin dashboard, not the operator header.
+
+On login, role is set on the returned `user.role`, written to Supabase `app_metadata.role` (JWT claim on later tokens), and stamped on `req.user.role` in `requireAuth` from the email map (map wins over a stale claim).
 
 ## Key Architectural Rules
 1. **Never re-parse a resume** — always check `candidate_resume_parsed` before calling pdf-parse
@@ -170,3 +191,4 @@ Tracks Zoho Mail accounts linked to candidates for email proof capture.
 4. **Idempotent upserts everywhere** — pipeline is safe to re-run; no duplicate rows
 5. **Supabase service key only** — no RLS enforced yet (V3 scope). Storage `list()` with an anon/publishable JWT returns `[]` and no error — probe every configured key (`listSupabaseKeyCandidates`) before treating the dropzone as empty.
 6. **RAILWAY_ENV=true** — disables headful mode, caps memory on Railway deployment
+7. **Stdout in `src/` goes through `createLogger`** (`src/utils/logger.ts`) — `[ISO timestamp] [LEVEL] [MODULE] message`. Do not add new `console.log` / `warn` / `error` in `src/`.

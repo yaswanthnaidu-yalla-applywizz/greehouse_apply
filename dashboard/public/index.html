@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" type="image/webp" href="/full_logo.webp">
+  <link rel="icon" type="image/webp" href="/logo.webp">
+  <link rel="apple-touch-icon" href="/logo.webp">
   <title>Apply Wizz</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -38,6 +39,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/dist/umd/supabase.js"></script>
+  <script src="/roleAccess.js"></script>
 
   <style>
     /* Custom scrollbars */
@@ -2045,6 +2047,11 @@
       return trimmed;
     }
 
+    function persistAuthSession(data) {
+      const role = ApplyWizzRoles.persistRole(data.role || data.user?.role || 'operator');
+      return ApplyWizzRoles.redirectToRoleHome(role);
+    }
+
     function AuthView({ onAuthSuccess }) {
       const [tab, setTab] = useState('signin'); // 'signin' | 'signup'
 
@@ -2203,11 +2210,7 @@
 
           localStorage.setItem('applywizz_auth_token', data.token);
           localStorage.setItem('applywizz_auth_user', JSON.stringify(verifiedUser));
-          if (data.isAdmin) {
-            localStorage.setItem('applywizz_is_admin', 'true');
-          } else {
-            localStorage.removeItem('applywizz_is_admin');
-          }
+          if (persistAuthSession(data)) return;
           if (data.workHistoryUnreachable) {
             localStorage.setItem('applywizz_wh_unreachable', 'true');
           } else {
@@ -2282,11 +2285,7 @@
 
           localStorage.setItem('applywizz_auth_token', data.token);
           localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
-          if (data.isAdmin) {
-            localStorage.setItem('applywizz_is_admin', 'true');
-          } else {
-            localStorage.removeItem('applywizz_is_admin');
-          }
+          if (persistAuthSession(data)) return;
           if (data.workHistoryUnreachable) {
             localStorage.setItem('applywizz_wh_unreachable', 'true');
           } else {
@@ -2304,9 +2303,11 @@
         return (
           <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl shadow-[6px_6px_0px_#1A1A2E] p-8">
             <div className="flex items-center justify-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-base border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
-                AW
-              </div>
+              <img
+                src="/logo.webp"
+                alt="ApplyWizz"
+                className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black"
+              />
               <div>
                 <h1 className="text-xl font-black text-[#1A1A2E] tracking-tight uppercase">ApplyWizz</h1>
                 <span className="text-[11px] block font-mono text-[#64748B] font-bold tracking-wider">
@@ -2400,9 +2401,11 @@
       return (
         <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl shadow-[6px_6px_0px_#1A1A2E] p-8">
           <div className="flex items-center justify-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-base border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
-              AW
-            </div>
+            <img
+              src="/logo.webp"
+              alt="ApplyWizz"
+              className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black"
+            />
             <div>
               <h1 className="text-xl font-black text-[#1A1A2E] tracking-tight uppercase">ApplyWizz</h1>
               <span className="text-[11px] block font-mono text-[#64748B] font-bold tracking-wider">
@@ -2912,6 +2915,11 @@
         }
       });
 
+      useEffect(() => {
+        if (!localStorage.getItem('applywizz_auth_token')) return;
+        ApplyWizzRoles.enforcePageAccess(['operator', 'dev']);
+      }, []);
+
       const getTodayIST = () => {
         const now = new Date();
         const istOffset = 5.5 * 60 * 60 * 1000;
@@ -2993,15 +3001,19 @@
         return token ? { Authorization: `Bearer ${token}` } : {};
       };
 
-      const isAdminSession = () => {
-        if (localStorage.getItem('applywizz_is_admin') === 'true') return true;
-        const email = (currentUser?.email || '').trim().toLowerCase();
-        return (
-          ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(email) ||
-          email.startsWith('yaswanth') ||
-          email.startsWith('admin@')
-        );
+      const sessionRole = () => {
+        const stored = (localStorage.getItem('applywizz_role') || currentUser?.role || '').trim().toLowerCase();
+        if (stored === 'dev' || stored === 'admin' || stored === 'manager' || stored === 'operator') return stored;
+        if (localStorage.getItem('applywizz_is_admin') === 'true') return 'admin';
+        return 'operator';
       };
+
+      const isAdminSession = () => {
+        const role = sessionRole();
+        return role === 'dev' || role === 'admin';
+      };
+
+      const canAccessManagerSession = () => sessionRole() === 'dev';
 
       const ensureAdminHydrated = useCallback(async () => {
         if (!isAdminSession()) return;
@@ -3079,6 +3091,7 @@
         localStorage.removeItem('applywizz_auth_user');
         localStorage.removeItem('applywizz_wh_unreachable');
         localStorage.removeItem('applywizz_is_admin');
+        localStorage.removeItem('applywizz_role');
         setWorkHistoryUnreachable(false);
         setWorkHistoryBannerDismissed(false);
         setNoCandidatesMessage(null);
@@ -3132,13 +3145,7 @@
         if (isRefreshing) return;
         setIsRefreshing(true);
         try {
-          const userEmail = (currentUser?.email || '').trim().toLowerCase();
-          const isAdminUser = Boolean(
-            ['yaswanthnaiduyalla@applywizz.ai', 'yaswanhnaiduyalla@applywizz.ai'].includes(userEmail) ||
-            userEmail.startsWith('yaswanth') ||
-            userEmail.startsWith('admin@') ||
-            (typeof localStorage !== 'undefined' && localStorage.getItem('applywizz_is_admin') === 'true')
-          );
+          const isAdminUser = isAdminSession();
           if (isAdminUser) {
             try {
               await fetch('/api/admin/refresh-artifacts', {
@@ -3641,9 +3648,11 @@
           <header className="h-16 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] flex items-center justify-between px-6 flex-shrink-0">
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-sm border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
-                  AW
-                </div>
+                <img
+                  src="/logo.webp"
+                  alt="ApplyWizz"
+                  className="w-8 h-8 rounded-md border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black"
+                />
                 <div>
                   <span className="text-sm font-black tracking-tight text-[#1A1A2E] uppercase">
                     ApplyWizz
@@ -3677,13 +3686,12 @@
                 >
                   Stats
                 </button>
-                {isAdminSession() && (
-                  <a
-                    href="/manager"
-                    className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB] border-l border-[#1A1A2E]/20 ml-1 pl-2"
-                  >
-                    Manager
-                  </a>
+                {sessionRole() === 'dev' && (
+                  <>
+                    <a href="/dev" className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB] border-l border-[#1A1A2E]/20 ml-1 pl-2">Dev</a>
+                    <a href="/admin" className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB]">Admin</a>
+                    <a href="/manager" className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB]">Manager</a>
+                  </>
                 )}
               </nav>
             </div>
@@ -3727,17 +3735,6 @@
                 </div>
               )}
 
-              {isAdminSession() && (
-                <button
-                  type="button"
-                  onClick={handleStartPipeline}
-                  disabled={Boolean(ingestRun?.running)}
-                  title="Ingest the latest CSV from Supabase Storage and run the full pipeline"
-                  className="text-xs bg-[#9AC89A] hover:bg-[#7FB87F] text-[#1E4620] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all disabled:opacity-60"
-                >
-                  {ingestRun?.running ? 'Running…' : '▶ Start'}
-                </button>
-              )}
 
               <button
                 type="button"

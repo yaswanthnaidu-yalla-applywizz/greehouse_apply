@@ -16,6 +16,9 @@ import { isUserAdmin } from './auth.js';
 import { getCachedWorkHistory, setCachedWorkHistory } from '../workHistoryCache.js';
 import { fetchWorkHistoryForDate, getYesterdayIST } from '../../services/workHistoryClient.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('Notifications');
 
 export const notificationsRouter = Router();
 
@@ -36,7 +39,7 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
     let allowedCandidateIds: string[] | undefined = undefined;
     if (!isAdmin) {
       if (!userEmail) {
-        console.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+        log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
@@ -62,7 +65,7 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
     });
     res.json(notifications);
   } catch (err: any) {
-    console.error('[Notifications Router] Failed to get notifications:', err);
+    log.error('[Notifications Router] Failed to get notifications:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch notifications' });
   }
 });
@@ -86,7 +89,7 @@ notificationsRouter.delete('/:id', async (req: Request, res: Response): Promise<
     dismissNotification(id);
     res.json({ success: true, id });
   } catch (err: any) {
-    console.error(`[Notifications Router] Failed to delete notification ${id}:`, err);
+    log.error(`[Notifications Router] Failed to delete notification ${id}:`, err);
     res.status(500).json({ error: err.message || 'Failed to delete notification' });
   }
 });
@@ -101,7 +104,7 @@ notificationsRouter.delete('/', async (_req: Request, res: Response): Promise<vo
     dismissAllNotifications(current.map((n) => n.id));
     res.json({ success: true, cleared: 'all' });
   } catch (err: any) {
-    console.error('[Notifications Router] Failed to clear all notifications:', err);
+    log.error('[Notifications Router] Failed to clear all notifications:', err);
     res.status(500).json({ error: err.message || 'Failed to clear notifications' });
   }
 });

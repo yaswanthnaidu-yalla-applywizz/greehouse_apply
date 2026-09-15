@@ -4,6 +4,9 @@ import os from 'os';
 import { getDbClient, isSupabaseConfigured } from './client.js';
 import { getProfile } from './profiles.js';
 import config from '../config/env.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Storage');
 
 export const PROOFS_BUCKET = config.SUPABASE_STORAGE_BUCKET_PROOFS || 'proofs_web';
 export const PROOFS_FAILED_BUCKET = 'proofs_failed';
@@ -55,7 +58,7 @@ export async function ensureBucketsExist(): Promise<void> {
 
     const { data: existingBuckets, error: listError } = await supabase.storage.listBuckets();
     if (listError) {
-      console.warn(`⚠️ Warning: Could not list storage buckets: ${listError.message}`);
+      log.warn(`⚠️ Warning: Could not list storage buckets: ${listError.message}`);
       return;
     }
 
@@ -67,14 +70,14 @@ export async function ensureBucketsExist(): Promise<void> {
           public: bucket.public,
         });
         if (createError && !createError.message.includes('already exists')) {
-          console.warn(`⚠️ Could not create bucket ${bucket.name}: ${createError.message}`);
+          log.warn(`⚠️ Could not create bucket ${bucket.name}: ${createError.message}`);
         } else {
-          console.log(`✅ Ensured private storage bucket '${bucket.name}' exists`);
+          log.info(`✅ Ensured private storage bucket '${bucket.name}' exists`);
         }
       }
     }
   } catch (err: any) {
-    console.warn(`⚠️ Storage buckets check skipped: ${err.message}`);
+    log.warn(`⚠️ Storage buckets check skipped: ${err.message}`);
   }
 }
 
@@ -306,7 +309,7 @@ async function downloadDemoResumeFromSupabaseBucket(): Promise<Buffer | null> {
       return Buffer.from(await data.arrayBuffer());
     }
   } catch (err: any) {
-    console.warn(`[Storage] Demo resume bucket fetch failed: ${err.message}`);
+    log.warn(`[Storage] Demo resume bucket fetch failed: ${err.message}`);
   }
   return null;
 }
@@ -335,7 +338,7 @@ async function loadProfileResumeUrl(applywizzId: string): Promise<string | null>
     const url = profile?.resume_url?.trim();
     if (url) return url;
   } catch (err: any) {
-    console.warn(`[Storage] Profile resume_url lookup failed for ${applywizzId}: ${err.message}`);
+    log.warn(`[Storage] Profile resume_url lookup failed for ${applywizzId}: ${err.message}`);
   }
   return null;
 }
@@ -385,7 +388,7 @@ export async function fetchResumePdfBuffer(applywizzId: string): Promise<Buffer>
     throw new Error(`No resume_url on profile for ${applywizzId}`);
   }
 
-  console.log('Resume fetched on-demand from profile.resume_url');
+  log.info('Resume fetched on-demand from profile.resume_url');
 
   const httpUrl = resolveResumeHttpUrl(resumeUrl);
   const response = await fetch(httpUrl, {
@@ -430,6 +433,6 @@ export async function deleteResumeTempFile(filePath: string): Promise<void> {
       await fs.promises.unlink(filePath);
     }
   } catch (err: any) {
-    console.warn(`[Storage] Failed to delete temp resume ${filePath}: ${err.message}`);
+    log.warn(`[Storage] Failed to delete temp resume ${filePath}: ${err.message}`);
   }
 }

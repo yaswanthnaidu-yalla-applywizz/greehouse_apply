@@ -18,6 +18,9 @@ import type {
   ResolvedField,
   ScannedField,
 } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Llm Synthesizer');
 
 /**
  * Job context metadata passed into LLM prompt synthesis.
@@ -365,7 +368,7 @@ export class LLMSynthesizer {
       if (choiceOptions && choiceOptions.length > 0) {
         const exact = matchExactOption(profileYesNo, choiceOptions);
         if (!exact) {
-          console.warn(
+          log.warn(
             `[LLM Synthesizer] Profile Yes/No "${profileYesNo}" is not an exact option for "${field.label}" — leaving unresolved`
           );
           return unresolvedField(field);
@@ -419,7 +422,7 @@ export class LLMSynthesizer {
               }
 
             } catch (modelErr: any) {
-              console.warn(`[LLM Synthesizer] ⚠️ Model "${modelId}" error (${modelErr.status || modelErr.message}). Trying fallback...`);
+              log.warn(`[LLM Synthesizer] ⚠️ Model "${modelId}" error (${modelErr.status || modelErr.message}). Trying fallback...`);
             }
           }
 
@@ -438,7 +441,7 @@ export class LLMSynthesizer {
           }
         }
       } catch (err: any) {
-        console.warn(`[LLM Synthesizer] ⚠️ LLM inference error for "${field.label}": ${err.message}. Falling back to heuristic answer.`);
+        log.warn(`[LLM Synthesizer] ⚠️ LLM inference error for "${field.label}": ${err.message}. Falling back to heuristic answer.`);
       }
     }
 
@@ -474,7 +477,7 @@ export class LLMSynthesizer {
     if (choiceOptions && choiceOptions.length > 0) {
       const exact = matchExactOption(answer, choiceOptions);
       if (!exact) {
-        console.warn(
+        log.warn(
           `[LLM Synthesizer] "${answer}" is not an exact option for "${field.label}" — leaving unresolved`
         );
         return unresolvedField(field);
@@ -487,7 +490,7 @@ export class LLMSynthesizer {
       return unresolvedField(field);
     }
     if (confidence == null || confidence < LLM_MIN_CONFIDENCE) {
-      console.warn(
+      log.warn(
         `[LLM Synthesizer] Confidence ${confidence ?? 'missing'} below ${LLM_MIN_CONFIDENCE} for "${field.label}" — leaving unresolved`
       );
       return unresolvedField(field);

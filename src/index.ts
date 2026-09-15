@@ -30,6 +30,9 @@ import {
 } from './candidate/segregator.js';
 import { AnswerResolver, exportResolvedApplications, resolutionSourceKey } from './resolver/answerResolver.js';
 import { createServer, loadArtifacts } from './server/index.js';
+import { createLogger } from './utils/logger.js';
+
+const log = createLogger('App');
 
 export * from './config/env.js';
 export * from './scanner/index.js';
@@ -114,26 +117,26 @@ export async function main(): Promise<void> {
   const options = parseCliArgs(process.argv.slice(2));
   const startTime = Date.now();
 
-  console.log('================================================================');
-  console.log('  🌟 Greenhouse Automation Platform — Master Pipeline (V2)');
-  console.log('================================================================');
-  console.log(`• Environment:        ${config.NODE_ENV}`);
-  console.log(`• Input CSV:          ${options.inputCsv}`);
-  console.log(`• Output Dir:         ${options.outputDir}`);
-  console.log(`• Express Port:       ${options.port}`);
+  log.info('================================================================');
+  log.info('  🌟 Greenhouse Automation Platform — Master Pipeline (V2)');
+  log.info('================================================================');
+  log.info(`• Environment:        ${config.NODE_ENV}`);
+  log.info(`• Input CSV:          ${options.inputCsv}`);
+  log.info(`• Output Dir:         ${options.outputDir}`);
+  log.info(`• Express Port:       ${options.port}`);
   if (options.candidateId) {
-    console.log(`• Target Candidate:   ${options.candidateId}`);
+    log.info(`• Target Candidate:   ${options.candidateId}`);
   }
   if (options.limit) {
-    console.log(`• Candidate Limit:    ${options.limit} candidate(s)`);
+    log.info(`• Candidate Limit:    ${options.limit} candidate(s)`);
   }
   if (options.maxJobs) {
-    console.log(`• Max Jobs / User:    ${options.maxJobs} job link(s)`);
+    log.info(`• Max Jobs / User:    ${options.maxJobs} job link(s)`);
   }
-  console.log(`• Verbose Telemetry:  ${options.verbose ? 'Enabled' : 'Disabled'}`);
-  console.log(`• Supabase Ready:     ${config.SUPABASE_URL ? 'Configured' : 'Missing'}`);
-  console.log(`• LLM Provider:       ${config.LLM_PROVIDER}`);
-  console.log('================================================================\n');
+  log.info(`• Verbose Telemetry:  ${options.verbose ? 'Enabled' : 'Disabled'}`);
+  log.info(`• Supabase Ready:     ${config.SUPABASE_URL ? 'Configured' : 'Missing'}`);
+  log.info(`• LLM Provider:       ${config.LLM_PROVIDER}`);
+  log.info('================================================================\n');
 
   try {
     // -------------------------------------------------------------------------
@@ -144,44 +147,44 @@ export async function main(): Promise<void> {
       try {
         const app = createServer(options.outputDir);
         serverInstance = app.listen(options.port, () => {
-          console.log(`🌐 [Live Dashboard] Server listening on http://localhost:${options.port}`);
-          console.log(`   (Operator can open the dashboard right now to watch candidates populate live)\n`);
+          log.info(`🌐 [Live Dashboard] Server listening on http://localhost:${options.port}`);
+          log.info(`   (Operator can open the dashboard right now to watch candidates populate live)\n`);
         });
         serverInstance.on('error', (e: any) => {
           if (e.code === 'EADDRINUSE') {
-            console.log(`🌐 [Live Dashboard] Port ${options.port} already running dashboard instance.\n`);
+            log.info(`🌐 [Live Dashboard] Port ${options.port} already running dashboard instance.\n`);
           } else {
-            console.warn(`[Dashboard] ⚠️ ${e.message}`);
+            log.warn(`[Dashboard] ⚠️ ${e.message}`);
           }
         });
       } catch (srvErr: any) {
-        console.warn(`[Dashboard] ⚠️ Failed to boot early server: ${srvErr.message}`);
+        log.warn(`[Dashboard] ⚠️ Failed to boot early server: ${srvErr.message}`);
       }
     }
 
     // -------------------------------------------------------------------------
     // Step 1: Storage & Pre-flight Provisioning
     // -------------------------------------------------------------------------
-    console.log('📦 [Step 1/5] Ensuring Supabase Storage buckets exist...');
+    log.info('📦 [Step 1/5] Ensuring Supabase Storage buckets exist...');
     try {
       await ensureBucketsExist();
     } catch (bucketErr: any) {
-      console.warn(`[Pre-flight] ⚠️ Storage bucket check warning: ${bucketErr.message}`);
+      log.warn(`[Pre-flight] ⚠️ Storage bucket check warning: ${bucketErr.message}`);
     }
 
     // -------------------------------------------------------------------------
     // Step 2: V1 Data Migration
     // -------------------------------------------------------------------------
     if (!options.skipMigrate && !options.limit && !options.candidateId) {
-      console.log('\n🔄 [Step 2/5] Checking V1 local cache data migration to Supabase...');
+      log.info('\n🔄 [Step 2/5] Checking V1 local cache data migration to Supabase...');
       try {
         await migrate();
-        console.log('✅ Migration check completed.');
+        log.info('✅ Migration check completed.');
       } catch (migrateErr: any) {
-        console.warn(`[Migration] ⚠️ Migration skipped or warning: ${migrateErr.message}`);
+        log.warn(`[Migration] ⚠️ Migration skipped or warning: ${migrateErr.message}`);
       }
     } else if (options.limit || options.candidateId) {
-      console.log('\n🔄 [Step 2/5] Skipping historical cache migration (sample/target candidate mode enabled).');
+      log.info('\n🔄 [Step 2/5] Skipping historical cache migration (sample/target candidate mode enabled).');
     }
 
     // -------------------------------------------------------------------------
@@ -189,8 +192,8 @@ export async function main(): Promise<void> {
     // -------------------------------------------------------------------------
     const resolvedCsv = path.resolve(process.cwd(), options.inputCsv);
     if (!fs.existsSync(resolvedCsv)) {
-      console.log(`ℹ️ Input CSV not found at "${resolvedCsv}".`);
-      console.log(`📂 Synthesizing candidate segments from local cache/profiles...`);
+      log.info(`ℹ️ Input CSV not found at "${resolvedCsv}".`);
+      log.info(`📂 Synthesizing candidate segments from local cache/profiles...`);
       const cacheProfilesDir = path.resolve(process.cwd(), 'cache/profiles');
       const scannedJobsPath = path.resolve(process.cwd(), 'output/scanned_jobs.json');
 
@@ -243,14 +246,14 @@ export async function main(): Promise<void> {
           'utf-8'
         );
         loadArtifacts(options.outputDir);
-        console.log(`✅ Loaded ${segments.length} candidate profiles from cache for ${availableJobs.length} scanned job(s).`);
+        log.info(`✅ Loaded ${segments.length} candidate profiles from cache for ${availableJobs.length} scanned job(s).`);
       }
     } else {
       let targetJobUrls: string[] = [];
 
       // Run Branch 2 (Candidate Sync) first so we know exact jobs needed for candidate batch
       if (!options.skipSync) {
-        console.log('\n👥 [Step 3a/5] Branch 2: Syncing Candidate Profiles & Uploading Master Resumes...');
+        log.info('\n👥 [Step 3a/5] Branch 2: Syncing Candidate Profiles & Uploading Master Resumes...');
         const candidateSegments = await segregateCandidatesByApplyWizzId(resolvedCsv, {
           syncProfiles: true,
           downloadResumes: true,
@@ -260,7 +263,7 @@ export async function main(): Promise<void> {
         });
         await exportCandidateSegments(candidateSegments, options.outputDir);
         loadArtifacts(options.outputDir);
-        console.log(`✅ Candidate sync completed. ${candidateSegments.size} candidate segment(s) synchronized.`);
+        log.info(`✅ Candidate sync completed. ${candidateSegments.size} candidate segment(s) synchronized.`);
 
         if ((options.limit || options.candidateId) && candidateSegments.size > 0) {
           const urlSet = new Set<string>();
@@ -272,13 +275,13 @@ export async function main(): Promise<void> {
             }
           }
           targetJobUrls = Array.from(urlSet);
-          console.log(`🎯 Targeted ${targetJobUrls.length} unique job URL(s) for the ${candidateSegments.size} selected candidate(s).`);
+          log.info(`🎯 Targeted ${targetJobUrls.length} unique job URL(s) for the ${candidateSegments.size} selected candidate(s).`);
         }
       }
 
       // Run Branch 1 (Form Scanning) for the targeted job URLs (or all URLs if no limit)
       if (!options.skipScan) {
-        console.log('\n🔍 [Step 3b/5] Branch 1: Checking Greenhouse Job Postings...');
+        log.info('\n🔍 [Step 3b/5] Branch 1: Checking Greenhouse Job Postings...');
 
         const scannedJobsPath = path.resolve(process.cwd(), options.outputDir, 'scanned_jobs.json');
         let existingTemplates: any[] = [];
@@ -298,9 +301,9 @@ export async function main(): Promise<void> {
         const urlsToScan = candidateJobUrls.filter((u) => !knownUrls.has(u));
 
         if (urlsToScan.length === 0) {
-          console.log(`✅ All ${candidateJobUrls.length} targeted job template(s) already cached. Skipping live scanning.`);
+          log.info(`✅ All ${candidateJobUrls.length} targeted job template(s) already cached. Skipping live scanning.`);
         } else {
-          console.log(`🚀 Scanning ${urlsToScan.length} new Greenhouse job posting(s) (${candidateJobUrls.length - urlsToScan.length} already cached)...`);
+          log.info(`🚀 Scanning ${urlsToScan.length} new Greenhouse job posting(s) (${candidateJobUrls.length - urlsToScan.length} already cached)...`);
           const scanner = new PlaywrightScanner({
             workerPoolSize: Math.min(config.WORKER_POOL_SIZE, urlsToScan.length),
             timeoutMs: config.PLAYWRIGHT_TIMEOUT,
@@ -313,7 +316,7 @@ export async function main(): Promise<void> {
 
           const allScanned = Array.from(mergedMap.values());
           await exportScannedJobs(allScanned, options.outputDir);
-          console.log(`✅ Form scanning completed. ${allScanned.length} job template(s) available.`);
+          log.info(`✅ Form scanning completed. ${allScanned.length} job template(s) available.`);
         }
 
         // CLI runs sync before scan — re-upsert application rows so scanned_job_templates metadata is applied.
@@ -324,7 +327,7 @@ export async function main(): Promise<void> {
             candidateId: options.candidateId,
           });
         } catch (err: any) {
-          console.warn(`⚠️ ensureApplicationRowsFromCsv after scan: ${err.message}`);
+          log.warn(`⚠️ ensureApplicationRowsFromCsv after scan: ${err.message}`);
         }
       }
     }
@@ -333,7 +336,7 @@ export async function main(): Promise<void> {
     // Step 4: 5-Tier Waterfall Answer Resolution
     // -------------------------------------------------------------------------
     if (!options.skipResolve) {
-      console.log('\n💡 [Step 4/5] Executing Answer Resolution (Supabase → Resume → LLM)...');
+      log.info('\n💡 [Step 4/5] Executing Answer Resolution (Supabase → Resume → LLM)...');
       const candidatesPath = path.join(options.outputDir, 'candidate_segments.json');
       const scannedPath = path.join(options.outputDir, 'scanned_jobs.json');
 
@@ -367,15 +370,15 @@ export async function main(): Promise<void> {
           }
         }
 
-        console.log(`✅ Resolution completed. Resolved ${resolvedApps.length} applications (${total} fields).`);
-        console.log(`  - 🟢 Supabase:  ${supabase} (${total ? ((supabase / total) * 100).toFixed(0) : 0}%)`);
-        console.log(`  - 🔵 Resume:    ${resume} (${total ? ((resume / total) * 100).toFixed(0) : 0}%)`);
-        console.log(`  - 🤖 LLM:       ${llm} (${total ? ((llm / total) * 100).toFixed(0) : 0}%)`);
+        log.info(`✅ Resolution completed. Resolved ${resolvedApps.length} applications (${total} fields).`);
+        log.info(`  - 🟢 Supabase:  ${supabase} (${total ? ((supabase / total) * 100).toFixed(0) : 0}%)`);
+        log.info(`  - 🔵 Resume:    ${resume} (${total ? ((resume / total) * 100).toFixed(0) : 0}%)`);
+        log.info(`  - 🤖 LLM:       ${llm} (${total ? ((llm / total) * 100).toFixed(0) : 0}%)`);
         if (unresolved > 0) {
-          console.log(`  - ⚪ Unresolved: ${unresolved} (${total ? ((unresolved / total) * 100).toFixed(0) : 0}%)`);
+          log.info(`  - ⚪ Unresolved: ${unresolved} (${total ? ((unresolved / total) * 100).toFixed(0) : 0}%)`);
         }
       } else {
-        console.log('ℹ️ Local segment/template cache files not present. Using Supabase database records.');
+        log.info('ℹ️ Local segment/template cache files not present. Using Supabase database records.');
       }
     }
 
@@ -383,27 +386,27 @@ export async function main(): Promise<void> {
     // Step 5: Operator Dashboard Status
     // -------------------------------------------------------------------------
     const totalDurationSec = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log('\n================================================================');
-    console.log(`  🎉 Pipeline Execution Complete in ${totalDurationSec}s!`);
-    console.log('================================================================');
+    log.info('\n================================================================');
+    log.info(`  🎉 Pipeline Execution Complete in ${totalDurationSec}s!`);
+    log.info('================================================================');
 
     if (!options.skipDashboard) {
       if (!serverInstance) {
-        console.log(`\n🚀 [Step 5/5] Launching Operator Dashboard Server on port ${options.port}...`);
+        log.info(`\n🚀 [Step 5/5] Launching Operator Dashboard Server on port ${options.port}...`);
         const app = createServer(options.outputDir);
         serverInstance = app.listen(options.port, () => {
-          console.log(`\n✅ Operator Dashboard is live and accessible at:`);
-          console.log(`   👉 http://localhost:${options.port}`);
-          console.log(`\nReady for operator review, inline editing, dry-runs, and live submissions!\n`);
+          log.info(`\n✅ Operator Dashboard is live and accessible at:`);
+          log.info(`   👉 http://localhost:${options.port}`);
+          log.info(`\nReady for operator review, inline editing, dry-runs, and live submissions!\n`);
         });
       } else {
-        console.log(`\n✅ Operator Dashboard is running and ready for review:`);
-        console.log(`   👉 http://localhost:${options.port}`);
-        console.log(`\nReady for operator review, inline editing, dry-runs, and live submissions!\n`);
+        log.info(`\n✅ Operator Dashboard is running and ready for review:`);
+        log.info(`   👉 http://localhost:${options.port}`);
+        log.info(`\nReady for operator review, inline editing, dry-runs, and live submissions!\n`);
       }
     }
   } catch (err: any) {
-    console.error(`\n❌ Fatal pipeline execution error: ${err.message}`);
+    log.error(`\n❌ Fatal pipeline execution error: ${err.message}`);
     process.exit(1);
   }
 }

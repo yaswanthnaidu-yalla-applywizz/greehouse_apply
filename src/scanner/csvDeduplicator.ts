@@ -12,6 +12,9 @@
 
 import fs from 'fs';
 import * as fastCsv from 'fast-csv';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Csv Deduplicator');
 
 /**
  * Options configuring the CSV deduplication and shortlink resolution pipeline.
@@ -227,7 +230,7 @@ export async function readAndDeduplicateUrls(
   const shortlinkSet = new Set<string>();
   let parsedRows = 0;
 
-  console.log(`[CSV Deduplicator] 📂 Stream-parsing input CSV: ${csvPath}`);
+  log.info(`[CSV Deduplicator] 📂 Stream-parsing input CSV: ${csvPath}`);
 
   await new Promise<void>((resolve, reject) => {
     const stream = fs.createReadStream(csvPath);
@@ -270,12 +273,12 @@ export async function readAndDeduplicateUrls(
       });
   });
 
-  console.log(`[CSV Deduplicator] 📊 Parsed ${parsedRows.toLocaleString()} rows. Found ${rawUrlsSet.size.toLocaleString()} distinct raw URLs.`);
+  log.info(`[CSV Deduplicator] 📊 Parsed ${parsedRows.toLocaleString()} rows. Found ${rawUrlsSet.size.toLocaleString()} distinct raw URLs.`);
 
   const finalUrlsSet = new Set<string>();
 
   if (resolveShortlinks && shortlinkSet.size > 0) {
-    console.log(`[CSV Deduplicator] 🔄 Resolving ${shortlinkSet.size.toLocaleString()} unique grnh.se shortlinks (concurrency: ${concurrency})...`);
+    log.info(`[CSV Deduplicator] 🔄 Resolving ${shortlinkSet.size.toLocaleString()} unique grnh.se shortlinks (concurrency: ${concurrency})...`);
     const shortlinkList = Array.from(shortlinkSet);
     const resolvedMap = await resolveShortlinksBatch(shortlinkList, concurrency);
 
@@ -294,7 +297,7 @@ export async function readAndDeduplicateUrls(
   }
 
   const uniqueCanonicalUrls = Array.from(finalUrlsSet).filter(Boolean);
-  console.log(`[CSV Deduplicator] ✅ Deduplication complete. Total unique canonical URLs: ${uniqueCanonicalUrls.length.toLocaleString()}`);
+  log.info(`[CSV Deduplicator] ✅ Deduplication complete. Total unique canonical URLs: ${uniqueCanonicalUrls.length.toLocaleString()}`);
 
   return uniqueCanonicalUrls;
 }

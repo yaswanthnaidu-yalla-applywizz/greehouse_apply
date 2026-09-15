@@ -13,6 +13,29 @@ import React, { useState, useEffect } from 'react';
 export interface AuthUser {
   id: string;
   email: string;
+  role?: string;
+}
+
+function homePathForRole(role: string): string {
+  if (role === 'dev') return '/dev';
+  if (role === 'admin') return '/admin';
+  if (role === 'manager') return '/manager';
+  return '/';
+}
+
+function persistAuthSession(data: { role?: string; user?: { role?: string }; isAdmin?: boolean }): boolean {
+  const role = String(data.role || data.user?.role || 'operator').trim().toLowerCase();
+  localStorage.setItem('applywizz_role', role);
+  if (role === 'admin' || role === 'dev') {
+    localStorage.setItem('applywizz_is_admin', 'true');
+  } else {
+    localStorage.removeItem('applywizz_is_admin');
+  }
+  if (typeof window !== 'undefined' && window.location.pathname !== homePathForRole(role)) {
+    window.location.replace(homePathForRole(role));
+    return true;
+  }
+  return false;
 }
 
 interface AuthViewProps {
@@ -207,11 +230,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
 
       localStorage.setItem('applywizz_auth_token', data.token);
       localStorage.setItem('applywizz_auth_user', JSON.stringify(verifiedUser));
-      if (data.isAdmin) {
-        localStorage.setItem('applywizz_is_admin', 'true');
-      } else {
-        localStorage.removeItem('applywizz_is_admin');
-      }
+      if (persistAuthSession(data)) return;
       if (data.workHistoryUnreachable) {
         localStorage.setItem('applywizz_wh_unreachable', 'true');
       } else {
@@ -290,11 +309,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
 
       localStorage.setItem('applywizz_auth_token', data.token);
       localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
-      if (data.isAdmin) {
-        localStorage.setItem('applywizz_is_admin', 'true');
-      } else {
-        localStorage.removeItem('applywizz_is_admin');
-      }
+      if (persistAuthSession(data)) return;
       if (data.workHistoryUnreachable) {
         localStorage.setItem('applywizz_wh_unreachable', 'true');
       } else {
@@ -315,9 +330,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
     return (
       <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl shadow-[6px_6px_0px_#1A1A2E] p-8">
         <div className="flex items-center justify-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-base border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
-            AW
-          </div>
+          <img
+            src="/logo.webp"
+            alt="ApplyWizz"
+            className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black"
+          />
           <div>
             <h1 className="text-xl font-black text-[#1A1A2E] tracking-tight uppercase">ApplyWizz</h1>
             <span className="text-[11px] block font-mono text-[#64748B] font-bold tracking-wider">
@@ -414,9 +431,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
   return (
     <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl shadow-[6px_6px_0px_#1A1A2E] p-8">
       <div className="flex items-center justify-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-full bg-[#1A1A2E] text-[#FFF5EB] flex items-center justify-center font-black text-base border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474]">
-          AW
-        </div>
+        <img
+          src="/logo.webp"
+          alt="ApplyWizz"
+          className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black"
+        />
         <div>
           <h1 className="text-xl font-black text-[#1A1A2E] tracking-tight uppercase">ApplyWizz</h1>
           <span className="text-[11px] block font-mono text-[#64748B] font-bold tracking-wider">

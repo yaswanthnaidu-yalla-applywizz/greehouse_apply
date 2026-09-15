@@ -8,6 +8,9 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Ws');
 
 export interface ApplicationFailedEvent {
   type: 'APPLICATION_FAILED';
@@ -45,23 +48,23 @@ class WebSocketManager {
 
     this.wss.on('connection', (ws: WebSocket) => {
       this.clients.add(ws);
-      console.log(`[WebSocket] 🔌 Operator dashboard connected. Active clients: ${this.clients.size}`);
+      log.info(`[WebSocket] 🔌 Operator dashboard connected. Active clients: ${this.clients.size}`);
 
       // Send initial heartbeat acknowledgment
       ws.send(JSON.stringify({ type: 'CONNECTED', timestamp: new Date().toISOString() }));
 
       ws.on('close', () => {
         this.clients.delete(ws);
-        console.log(`[WebSocket] 🔌 Operator dashboard disconnected. Active clients: ${this.clients.size}`);
+        log.info(`[WebSocket] 🔌 Operator dashboard disconnected. Active clients: ${this.clients.size}`);
       });
 
       ws.on('error', (err) => {
-        console.warn(`[WebSocket] ⚠️ Client socket error: ${err.message}`);
+        log.warn(`[WebSocket] ⚠️ Client socket error: ${err.message}`);
         this.clients.delete(ws);
       });
     });
 
-    console.log('[WebSocket] 🚀 WebSocket server attached to /ws');
+    log.info('[WebSocket] 🚀 WebSocket server attached to /ws');
   }
 
   /**
@@ -74,7 +77,7 @@ class WebSocketManager {
         try {
           client.send(payload);
         } catch (err: any) {
-          console.warn(`[WebSocket] ⚠️ Error broadcasting to client: ${err.message}`);
+          log.warn(`[WebSocket] ⚠️ Error broadcasting to client: ${err.message}`);
         }
       }
     }
@@ -104,7 +107,7 @@ class WebSocketManager {
       jobTitle: params.jobTitle,
       proofFailedUrl: params.proofFailedUrl,
     };
-    console.log(`[WebSocket] 📢 Broadcasting APPLICATION_FAILED for ${params.appId}: ${params.reason}`);
+    log.info(`[WebSocket] 📢 Broadcasting APPLICATION_FAILED for ${params.appId}: ${params.reason}`);
     this.broadcast(event);
   }
 

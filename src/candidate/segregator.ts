@@ -21,6 +21,9 @@ import { profileRowToCandidateProfile, upsertProfile, getProfile, updateResumeSt
 import { ensureApplicationRowsForSegment } from '../db/ensureCandidateApplicationRows.js';
 import { uploadResume } from '../db/storage.js';
 import type { CandidateSegment } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Segregator');
 
 export type CsvIngestFormat = 'OLD' | 'NEW' | 'UNKNOWN';
 
@@ -265,7 +268,7 @@ export async function segregateCandidatesByApplyWizzId(
     throw new Error(`Input CSV file not found at: "${csvPath}"`);
   }
 
-  console.log(`[Candidate Segregator] 📂 Ingesting candidate rows from: ${csvPath}`);
+  log.info(`[Candidate Segregator] 📂 Ingesting candidate rows from: ${csvPath}`);
 
   const segmentsMap = new Map<string, CandidateSegment>();
   let rowCount = 0;
@@ -287,7 +290,7 @@ export async function segregateCandidatesByApplyWizzId(
         if (csvFormat === null) {
           csvFormat = detectCsvFormat(Object.keys(row));
           if (!formatLogged) {
-            console.log(
+            log.info(
               `[Segregator] Format detected: ${csvFormat === 'UNKNOWN' ? 'UNKNOWN' : csvFormat}`
             );
             formatLogged = true;
@@ -297,7 +300,7 @@ export async function segregateCandidatesByApplyWizzId(
         if (csvFormat === 'UNKNOWN') {
           skippedUnknownFormatRows++;
           if (skippedUnknownFormatRows === 1) {
-            console.error(
+            log.error(
               '[Segregator] Unknown CSV format — expected OLD (Applywizz ID, Client Name, url, score) or NEW (company_job_url, applywizz_id, score, lead_name). Skipping rows.'
             );
           }
@@ -308,7 +311,7 @@ export async function segregateCandidatesByApplyWizzId(
         if (!parsed) {
           skippedInvalidRows++;
           if (skippedInvalidRows === 1) {
-            console.warn(
+            log.warn(
               `[Segregator] Invalid row for detected format (${csvFormat}) — skipping; summary logged after CSV ingest completes.`
             );
           }
@@ -320,7 +323,7 @@ export async function segregateCandidatesByApplyWizzId(
         if (score < 20 || score > 60) {
           droppedScoreRows++;
           if (droppedScoreRows === 1) {
-            console.log(
+            log.info(
               `[Segregator] Dropping jobs outside dashboard score range 20–60 (summary after ingest).`
             );
           }
@@ -366,22 +369,22 @@ export async function segregateCandidatesByApplyWizzId(
   });
 
   if (skippedUnknownFormatRows > 0) {
-    console.warn(
+    log.warn(
       `[Segregator] Skipped ${skippedUnknownFormatRows.toLocaleString()} row(s): unknown CSV format.`
     );
   }
   if (skippedInvalidRows > 0) {
-    console.warn(
+    log.warn(
       `[Segregator] Skipped ${skippedInvalidRows.toLocaleString()} row(s): missing applywizz id or job URL for format ${csvFormat ?? 'UNKNOWN'}.`
     );
   }
   if (droppedScoreRows > 0) {
-    console.log(
+    log.info(
       `[Segregator] Dropped ${droppedScoreRows.toLocaleString()} row(s) with score outside 20–60.`
     );
   }
 
-  console.log(
+  log.info(
     `[Candidate Segregator] 📊 Ingested ${rowCount.toLocaleString()} rows. Segregated ${segmentsMap.size.toLocaleString()} unique candidates.`
   );
 
@@ -389,7 +392,7 @@ export async function segregateCandidatesByApplyWizzId(
   if (syncProfiles && segmentsMap.size > 0) {
     const candidateIds = Array.from(segmentsMap.keys());
     const totalCandidates = candidateIds.length;
-    console.log(
+    log.info(
       `[Candidate Segregator] 🔄 Syncing ${totalCandidates.toLocaleString()} candidate profiles (Supabase-first, API only for new candidates) (Concurrency: ${concurrency})...`
     );
 
@@ -413,7 +416,7 @@ export async function segregateCandidatesByApplyWizzId(
           if (existingProfile) {
             if (!existingProfile.zoho_connected) {
               segmentsMap.delete(id);
-              console.log(`[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)`);
+              log.info(`[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)`);
               continue;
             }
 
@@ -424,18 +427,18 @@ export async function segregateCandidatesByApplyWizzId(
             fromSupabase++;
           } else {
             segmentsMap.delete(id);
-            console.log(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
+            log.info(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
 
             const isCached = client.isProfileCached(id);
             if (!isCached && !allowOutboundApi) {
-              console.log(
+              log.info(
                 `[Candidate Ingestion] ⚠️ Candidate ${id} not found in Supabase or local cache. Skipping unapproved outbound API request per Rule 1.`
               );
               continue;
             }
 
             // ONLY for candidates in local cache or allowed
-            console.log(
+            log.info(
               `[Candidate Ingestion] ℹ️ Candidate ${id} profile lookup (checking cache first)...`
             );
             const { profile, raw } = await client.fetchCandidateProfileWithRaw(id, false);
@@ -454,7 +457,7 @@ export async function segregateCandidatesByApplyWizzId(
                   resumeStoragePath = await uploadResume(id, buffer);
                 }
               } catch (uploadErr: any) {
-                console.warn(
+                log.warn(
                   `[Candidate Ingestion] ⚠️ Could not upload resume for ${id} to Supabase Storage: ${uploadErr.message}`
                 );
               }
@@ -491,14 +494,14 @@ export async function segregateCandidatesByApplyWizzId(
                 await updateResumeStoragePath(id, resumeStoragePath);
               }
             } catch (dbErr: any) {
-              console.warn(
+              log.warn(
                 `[Candidate Ingestion] ⚠️ Could not upsert new candidate profile ${id} to Supabase: ${dbErr.message}`
               );
             }
             fromApi++;
           }
         } catch (err: any) {
-          console.warn(`[Candidate Segregator] ⚠️ Failed to sync candidate ${id}: ${err.message}. Skipping profile sync.`);
+          log.warn(`[Candidate Segregator] ⚠️ Failed to sync candidate ${id}: ${err.message}. Skipping profile sync.`);
         } finally {
           completed++;
           if (onProgress) {
@@ -518,7 +521,7 @@ export async function segregateCandidatesByApplyWizzId(
     }
 
     await Promise.all(workers);
-    console.log(
+    log.info(
       `[Candidate Segregator] ✅ Profile sync complete: ${fromSupabase} from Supabase (0 API calls), ${fromApi} new via API (${completed}/${totalCandidates} total).`
     );
   }
@@ -528,7 +531,7 @@ export async function segregateCandidatesByApplyWizzId(
     for (const [id, segment] of Array.from(segmentsMap.entries())) {
       if (!segment.profile) {
         segmentsMap.delete(id);
-        console.log(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
+        log.info(`[Segregator] ⛔ Skipping candidate ${id} (profile unavailable or not Zoho connected)`);
       }
     }
   }
@@ -545,7 +548,7 @@ export async function segregateCandidatesByApplyWizzId(
     applicationUpsertFailed += rowResult.failed;
   }
   if (applicationJobsAttempted > 0) {
-    console.log(
+    log.info(
       `[Segregator] 💾 candidate_applications: attempted=${applicationJobsAttempted} upserted=${applicationRowsUpserted} ` +
         `skippedOverCap=${applicationSkippedOverCap} failed=${applicationUpsertFailed} (CSV jobs → DB rows for Zoho-connected candidates)`
     );
@@ -593,7 +596,7 @@ export async function exportCandidateSegments(
   await fs.promises.writeFile(jsonPath, serialized, 'utf-8');
   const stats = fs.statSync(jsonPath);
 
-  console.log(
+  log.info(
     `[Candidate Segregator] 💾 Exported ${segments.size.toLocaleString()} candidate segments to: ${jsonPath} (${(stats.size / 1024).toFixed(1)} KB)`
   );
 

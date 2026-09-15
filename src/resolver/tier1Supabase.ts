@@ -8,6 +8,9 @@ import { getProfile, type ProfileRow, getCompanyEmail } from '../db/profiles.js'
 import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Tier1Supabase');
 
 /**
  * Matches target value to the closest matching option in dropdown or radio group.
@@ -432,7 +435,7 @@ export async function resolveTier1(
       };
     }
   } catch (err: any) {
-    console.warn(`[Tier 1] QA Bank lookup error for ${applywizzId}: ${err.message}`);
+    log.warn(`[Tier 1] QA Bank lookup error for ${applywizzId}: ${err.message}`);
   }
 
   return null;

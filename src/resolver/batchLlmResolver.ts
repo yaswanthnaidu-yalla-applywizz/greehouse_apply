@@ -1,4 +1,7 @@
 import { LLMSynthesizer, type BatchQuestion } from './llmSynthesizer.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Batch Llm Resolver');
 
 export interface UnresolvedBatchField extends BatchQuestion {}
 
@@ -43,7 +46,7 @@ export async function resolveBatchLlmFields(
         confidence: 0.85 as const,
       }));
 
-      console.log(
+      log.info(
         `[LLM Batch] ${group.applywizzId} ${group.jobUrl}: ${fields.length} questions → 1 API call → ${fields.length} answers resolved.`
       );
       return { applywizzId: group.applywizzId, jobUrl: group.jobUrl, fields };

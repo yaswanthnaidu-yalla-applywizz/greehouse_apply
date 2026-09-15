@@ -9,6 +9,9 @@ import { getProfile, updateParsedResume } from '../db/profiles.js';
 import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
 import { normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Tier2Resume Parse');
 
 export interface ParsedResumeStructured {
   name?: string;
@@ -170,7 +173,7 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
       };
     }
   } catch (err: any) {
-    console.warn(`[Tier 2] Profile resume lookup failed for ${applywizzId}: ${err.message}`);
+    log.warn(`[Tier 2] Profile resume lookup failed for ${applywizzId}: ${err.message}`);
   }
 
   // 2. Download from profile.resume_url and parse
@@ -220,7 +223,7 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
     await updateParsedResume(applywizzId, rawText, structured);
     return record;
   } catch (err: any) {
-    console.warn(`[Tier 2] PDF parse failed for ${applywizzId}: ${err.message}`);
+    log.warn(`[Tier 2] PDF parse failed for ${applywizzId}: ${err.message}`);
     return null;
   } finally {
     if (tempPath) {
