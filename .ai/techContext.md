@@ -123,6 +123,8 @@ PORT=3001
 NODE_ENV=development
 ```
 
+Dashboard sessions last **7 days**: login returns a Supabase `refreshToken`; `POST /api/auth/refresh` rotates it; `dashboard/public/roleAccess.js` stores it and refreshes access tokens before they expire. Sign in once after this change lands — older tokens in localStorage have no refresh token.
+
 ## Optional Environment Variables
 ```env
 # Playwright tuning
@@ -215,7 +217,10 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Over-cap SKIPPED upserts | `src/db/skippedApplications.ts` |
 | Operator queue filters | `src/dashboard/candidateQueueFilter.ts` |
 | DB DDL | `src/db/schema.sql` |
-| Migrations dir | `src/db/migrations/` |
+| Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (apply in SQL editor) |
+| Audit / application events | `src/db/events.ts` — fail-closed if 015 tables missing |
+| Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = false`) |
+| Admin / Dev API | `src/server/routes/adminDashboard.ts`, `src/server/routes/devDashboard.ts` |
 | Form filler (largest file, 59KB) | `src/submitter/formFiller.ts` |
 | Live submit engine (69KB) | `src/submitter/liveSubmit.ts` |
 | Playwright scanner | `src/scanner/playwrightScanner.ts` |
@@ -226,7 +231,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Manager UI | `dashboard/public/manager.html` → `GET /manager` |
 | Admin UI | `dashboard/public/admin.html` → `GET /admin` |
 | Dev UI | `dashboard/public/dev.html` → `GET /dev` |
-| Shared role helper | `dashboard/public/roleAccess.js` |
+| Shared role helper | `dashboard/public/roleAccess.js` — 7-day session via refresh_token; wraps `/api/` fetch |
 | App logo / favicon | `dashboard/public/logo.webp` — served by `express.static(dashboard/public)` |
 | Bundled Akshitha demo | `src/dashboard/akshithaDemoFixtures.ts` |
 | Searchable select tests | `tests/searchableSelect.test.ts` |

@@ -215,6 +215,8 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ apiBaseUrl =
       const payload: unknown = await response.json();
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem('applywizz_auth_token');
+        localStorage.removeItem('applywizz_refresh_token');
+        localStorage.removeItem('applywizz_session_expires_at');
         localStorage.removeItem('applywizz_auth_user');
         setUser(null);
         return;
@@ -242,6 +244,8 @@ export const ManagerDashboard: React.FC<ManagerDashboardProps> = ({ apiBaseUrl =
       }).catch(() => {});
     }
     localStorage.removeItem('applywizz_auth_token');
+    localStorage.removeItem('applywizz_refresh_token');
+    localStorage.removeItem('applywizz_session_expires_at');
     localStorage.removeItem('applywizz_auth_user');
     setUser(null);
   };

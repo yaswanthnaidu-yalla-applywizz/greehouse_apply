@@ -161,13 +161,13 @@ Tracks Zoho Mail accounts linked to candidates for email proof capture.
 | `proofs_dry_run` | `dry-run/{app_id}_dryrun.png` | Dry-run screenshots |
 
 ### `audit_events` (migration 015)
-Organization audit log written by the server (signup, login, logout, ingest start, assignment PATCH). Missing table is fail-closed (warn + continue).
+Organization audit log written by the server (signup, login, logout, ingest start, assignment PATCH). Missing table is fail-closed (warn + continue). RLS on; `service_role` only — no anon/authenticated policies.
 
 ### `application_events` (migration 015)
-Status-change timeline written from `updateStatus()`. Used by manager Activity and the dev application debugger. Missing table is fail-closed.
+Status-change timeline written from `updateStatus()`. Used by manager Activity and the dev application debugger. Missing table is fail-closed. RLS on; `service_role` only.
 
 ### DB Migrations (16 files, applied via `src/db/migrate.ts`)
-`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` audit_events + application_events | `latest` combined
+`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` audit_events + application_events + service_role RLS | `latest` combined
 
 ## Dashboard roles (email map — no DB)
 
@@ -189,6 +189,6 @@ On login, role is set on the returned `user.role`, written to Supabase `app_meta
 2. **Always fingerprint questions** — never store answers by raw label string
 3. **LLM is last resort** — Tiers 1–4 must all miss before Tier 5 fires
 4. **Idempotent upserts everywhere** — pipeline is safe to re-run; no duplicate rows
-5. **Supabase service key only** — no RLS enforced yet (V3 scope). Storage `list()` with an anon/publishable JWT returns `[]` and no error — probe every configured key (`listSupabaseKeyCandidates`) before treating the dropzone as empty.
+5. **Supabase service key for data access** — Express uses `service_role`. Core tables still have open `USING (true)` policies (multi-tenant RLS is V3). **015 event tables** enable RLS with **service_role-only** policies — do not add anon/authenticated `USING (true)` there. Storage `list()` with an anon/publishable JWT returns `[]` and no error — probe every configured key (`listSupabaseKeyCandidates`) before treating the dropzone as empty.
 6. **RAILWAY_ENV=true** — disables headful mode, caps memory on Railway deployment
 7. **Stdout in `src/` goes through `createLogger`** (`src/utils/logger.ts`) — `[ISO timestamp] [LEVEL] [MODULE] message`. Do not add new `console.log` / `warn` / `error` in `src/`.

@@ -81,6 +81,49 @@ export function emailsForRole(role: Exclude<AppRole, 'operator'>): string[] {
     .map(([email]) => email);
 }
 
+/** Dashboard session stays valid for 7 days via refresh_token rotation. */
+export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+
+function tokensFromAuthPayload(
+  payload: {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    session?: { access_token?: string; refresh_token?: string; expires_in?: number };
+  } | null | undefined,
+  fallbackAccess?: string,
+): { token: string; refreshToken: string | null; expiresIn: number; sessionTtlSeconds: number } {
+  const nested = payload?.session;
+  return {
+    token: nested?.access_token || payload?.access_token || fallbackAccess || '',
+    refreshToken: nested?.refresh_token || payload?.refresh_token || null,
+    expiresIn: nested?.expires_in || payload?.expires_in || 3600,
+    sessionTtlSeconds: SESSION_TTL_SECONDS,
+  };
+}
+
+async function refreshSupabaseSession(refreshToken: string): Promise<{
+  token: string;
+  refreshToken: string | null;
+  expiresIn: number;
+  sessionTtlSeconds: number;
+}> {
+  const res = await fetch(`${config.SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: 'POST',
+    headers: {
+      apikey: getSupabaseServerApiKey(),
+      Authorization: `Bearer ${getSupabaseServerApiKey()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  const data: any = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.msg || data.error_description || data.error || 'Session refresh failed.');
+  }
+  return tokensFromAuthPayload(data);
+}
+
 /** Org-wide operator access (ingest, hydrate, no CA filter). Missing email is never admin. */
 export function isUserAdmin(userOrEmail?: any): boolean {
   const email = emailFromUserOrEmail(userOrEmail);
@@ -658,7 +701,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 
     res.json({
       success: true,
-      token: verifyData.access_token || tempToken,
+      ...tokensFromAuthPayload(verifyData, tempToken),
       user: sessionUser,
       role,
       homePath: homePathForRole(role),
@@ -818,7 +861,7 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
 
     res.json({
       success: true,
-      token: verifyData.access_token || token,
+      ...tokensFromAuthPayload(verifyData, token),
       user: attachResolvedRole(verifyData.user || { email: userEmail }, userEmail),
       role,
       homePath: homePathForRole(role),
@@ -870,6 +913,39 @@ authRouter.post('/hydrate-admin', async (req: Request, res: Response): Promise<v
     res.json({ success: true, hydratedCount, date: dateStr });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Admin hydration failed.' });
+  }
+});
+
+/**
+ * POST /api/auth/refresh
+ * Rotates a Supabase refresh_token into a new access token. Session cap is 7 days (client).
+ */
+authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> => {
+  const refreshToken =
+    (typeof req.body?.refreshToken === 'string' && req.body.refreshToken.trim()) ||
+    (typeof req.body?.refresh_token === 'string' && req.body.refresh_token.trim()) ||
+    '';
+
+  if (!refreshToken) {
+    res.status(400).json({ error: 'refreshToken is required.' });
+    return;
+  }
+
+  try {
+    if (!isSupabaseConfigured()) {
+      res.status(500).json({ error: 'Supabase is not configured on the server.' });
+      return;
+    }
+
+    const tokens = await refreshSupabaseSession(refreshToken);
+    if (!tokens.token) {
+      res.status(401).json({ error: 'Unauthorized: Invalid or expired session token.' });
+      return;
+    }
+
+    res.json({ success: true, ...tokens });
+  } catch (err: any) {
+    res.status(401).json({ error: err.message || 'Unauthorized: Invalid or expired session token.' });
   }
 });
 

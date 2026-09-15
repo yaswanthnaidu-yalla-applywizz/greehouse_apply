@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on `main`; apply migration 015; 0003/0005/0011 open until end of week)_
+_Last updated: 2026-09-15 (session end — 7-day sessions, email-map /dev home, Sign Out on all dashboards, 015 RLS; still apply 015 on Supabase; open 0003/0005/0011/0012)_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -23,7 +23,7 @@ _Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on
 
 ### Database
 - [x] Full Supabase schema: 5 core tables + storage buckets
-- [x] 16 files in `src/db/migrations/` (001–015 + `latest_supabase_migration.sql`). **015 (`audit_events` / `application_events`) needs apply** on Supabase. **014 (`SKIPPED`) may still need apply**. **013 (`EMAIL_UNVERIFIED`)** operator reported applied
+- [x] 16 files in `src/db/migrations/` (001–015 + `latest_supabase_migration.sql`). **015** creates `audit_events` / `application_events` and enables **service_role-only RLS** — **still needs apply** on Supabase. **014 (`SKIPPED`) may still need apply**. **013 (`EMAIL_UNVERIFIED`)** operator reported applied
 - [x] Idempotent upsert patterns throughout
 - [x] V1 → V2 migration runner (`db/migrate.ts`)
 
@@ -64,7 +64,7 @@ _Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on
 - [x] **Zoho OTP reader hardened** — verbose step-by-step logging across `zohoReader.ts` (navigation/login status, session cookies, search query, raw message list, per-email sender/subject/timestamp, active regex) and `zoho-connector.ts` (request URL, HTTP status, raw body before parsing, parsed message summary). New `isGreenhouseOtpEmail()` sender+subject+company gate runs before extraction; scan 3 → 15 rows; 10-min window; `parseZohoEmailTimestamp` unified with the confirmation path; `reason` field on failure. Verified live against AWL-31428 → `NgW4NT62`
 - [x] **Zoho OTP session reset** (`601d37d`) — `resetUiBeforeLookup` goto root + clear filter before each search; 0 user rows → one `page.reload()` retry
 - [x] **Zoho OTP step logs** (`8a44cf2`) — numbered `[Zoho] Step 1`–`8` + extra 5s user-list wait; dropped candidates `totalJobs` debug log
-- [x] **Operator dashboard title/favicon** (`b8b0276`) — title "Apply Wizz"; local uncommitted swap to square AW `/logo.webp` (replaces wide `/full_logo.webp`)
+- [x] **Operator dashboard title/favicon** (`b8b0276`, logo in `2d268a3`) — title "Apply Wizz"; square AW `/logo.webp` (replaces wide `/full_logo.webp`)
 - [x] **`EMAIL_UNVERIFIED` terminal status** — migration 013; poller after 10m timeout; dashboard badges + resubmit (`cf50a45`)
 - [x] **Supabase ingest credential resolution** — `supabaseKeyDiagnostics.ts`; prefer `service_role` JWT else `SUPABASE_SERVICE_ROLE_KEY` (incl. `sb_secret_`); normalize quoted/Bearer keys; ingest probes every key (`0d02593`); `GET /api/admin/supabase-storage-health` → `keyProbes`
 - [x] **Submission requeue hardening** — `EMAIL_PROOF_PENDING` in `IN_FLIGHT_STATUSES`; ignore PATCH `QUEUED` while in-flight; submit-response `persist: false`
@@ -74,7 +74,7 @@ _Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on
 
 - [x] **Central logger** — `src/utils/logger.ts`; all `src/` `console.log`/`warn`/`error` → `createLogger`; `[ISO] [LEVEL] [MODULE] message`
 - [x] **AW app logo** — `dashboard/public/logo.webp` as favicon + header/auth/manager mark; `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
-- [x] **Role-based dashboards** — Admin `/admin`, Manager `/manager` (expandable client table + tabs), Dev `/dev`; RBAC redirects; migration 015. **Apply 015 on Supabase** or Activity/audit/debugger timelines stay empty
+- [x] **Role-based dashboards** (`2d268a3` + follow-up) — Admin `/admin`, Manager `/manager`, Dev `/dev`; email-map role (dev is not admin); Sign Out on every header; 7-day refresh sessions; migration 015 (tables + service_role RLS). **Run 015 on Supabase** or Activity/audit/debugger timelines stay empty
 
 ### Beyond-V2-Docs Features (Already Shipped)
 - [x] Zoho Mail OTP auto-extraction (`zohoReader.ts`, `zoho-connector.ts`) — was V3 in docs
@@ -92,7 +92,7 @@ _Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on
 
 | Item | Status | Notes |
 |---|---|---|
-| Manager / COO analytics dashboard | On `main` | Client table home + Operators/Activity/Reports; team scoping off until CA-manager email map exists; apply migration 015 |
+| Manager / COO analytics dashboard | On `main` (`2d268a3`) | Client table home + Operators/Activity/Reports; team scoping off until CA-manager email map exists; apply 015 (tables + RLS) |
 | Resolution engine — semantic/fuzzy improvement | Investigating | Tier 2+3 miss rate; approach not yet decided |
 | Email proof / OTP reliability | Awaiting live verification | Reset+reload on `main` (`601d37d`); Step 1–8 logs on `main` (`8a44cf2`); 013 applied; no fresh Greenhouse OTP challenge yet |
 
@@ -103,8 +103,8 @@ _Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on
 | Item | Notes |
 |---|---|
 | CAPTCHA automated bypass | CapSolver/2Captcha; explicitly out of scope for now |
-| Multi-tenant RBAC / Row-Level Security | Supabase RLS; all access via service key currently |
-| Supabase Storage bucket access policies | Deferred with RLS |
+| Multi-tenant RLS on core tables | Core tables still `USING (true)`. `audit_events` / `application_events` have service_role-only RLS in 015 (apply on Supabase). App-level role dashboards shipped |
+| Supabase Storage bucket access policies | Deferred with core-table RLS |
 | Residential proxy pool | Anti-bot detection hardening |
 | Lift question cap beyond 35 | `MAX_JOB_QUESTIONS` default is 35; further lift needs explicit instruction |
 
@@ -114,7 +114,8 @@ _Last updated: 2026-09-15 (session end — role dashboards + logger + AW logo on
 - **✅ FIXED — CSV uploads to Storage never started the pipeline:** there was no webhook, no Realtime listener, no DB trigger and no poller; `ingestCsvFromStorage` was reachable only via the one-shot `npm run ingest:storage` CLI and an admin route the dashboard never called. Now admin-driven via the **▶ Start** button on `/admin`.
 - **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** anon/publishable keys get `[]` with no error from `listBuckets()` and `from(bucket).list()`. Ingest probes every configured key (`0d02593`), logs `jwt.role` + names, fails if all lists are empty. Local `service_role` JWT sees `test(Sheet1).csv`. **Railway still reports entries=0** — process keys are not a Storage-capable `service_role` JWT
 - **Gotcha — env vars set ≠ Storage can list:** `SUPABASE_SERVICE_KEY` = publishable and `SUPABASE_SERVICE_ROLE_KEY` = `sb_secret_` (or another anon) still yields empty lists. Need the legacy `eyJ…` `service_role` secret. Decode `role` from ingest `Probe` lines. Project ref: `dpwhgwdsfqzfwxlwvchp`
-- **Gotcha — ingest run state is in-process memory:** `ingest-status` is a closure variable in `createServer`, so a Railway restart mid-run reports `{running: false}` with no history — and the pipeline itself dies with the process. Only one run can be in flight per server instance
+- **Gotcha — ingest run state is in-process memory:** `ingest-status` lives in `src/server/runtimeState.ts`, so a Railway restart mid-run reports `{running: false}` with no history — and the pipeline itself dies with the process. Only one run can be in flight per server instance
+- **Gotcha — migration 015 is SQL-editor apply:** writers fail-closed if `audit_events` / `application_events` are missing. Re-run the full 015 file (tables + RLS) after `2d268a3`; skipping the RLS block leaves those tables readable by a publishable key
 - **✅ FIXED — Duplicate live submissions (same app on 2–3 workers):** `PATCH /api/applications/:id/status` rewrote `APPLYING → QUEUED` unconditionally, and the dashboard's `handleStatusChange` echoed back the status its 2s badge poll just read — so an application a worker was mid-fill on got thrown back in the queue and immediately re-dequeued into another lane. Observed 6 submit clicks for one app (`b1f7250c`, AWL-31428 Prometheus). Fixes: the route skips requeue when current status is in `IN_FLIGHT_STATUSES` (now includes `EMAIL_PROOF_PENDING`; also blocks naked `PATCH` with `QUEUED` while in-flight); `SubmitterPool` tracks `inFlightApplicationIds`; poll-originated updates and **submit HTTP response handlers** pass `{ persist: false }` (observation 0008). **Not** an OTP/CAPTCHA requeue bug — no requeue-on-failure path exists anywhere in the codebase. See observation 0003
 - **Gotcha — the dashboard `.tsx` tree is not the running UI:** `dashboard/public/index.html` (inline Babel/JSX) is what the server sends; `dashboard/App.tsx`, `FormRenderer.tsx`, `JobQueueView.tsx` and `components/*.tsx` are an unserved parallel copy. `tsconfig.json` is `"include": ["src/**/*"]` and `"build": "tsc"` has no bundler step, so those files are neither typechecked nor compiled. **Any operator-UI change must go in `index.html` to take effect**; edit the `.tsx` copies only to keep them from diverging further
 - **✅ FIXED (2026-09-15) — 35 type errors in the dashboard `.tsx` tree**, from four root causes: (1) `CandidateDetail['jobs']` lacked the `applywizz_id`/`applywizzId` tags that `filterJobsForCandidate` reads, and because `JobWithOptionalOwner` is an all-optional *weak type*, TS rejected the call and fell back to the constraint — which cascaded into ~22 property errors in `JobQueueView.tsx`; (2) three divergent `ApplicationStatus` unions — `dashboard/types.ts` now re-exports the canonical one from `src/db/applications.ts`; (3) `ResolvedField.isRequired` added to `src/types/index.ts`; (4) TDZ crash in `App.tsx` WebSocket effect moved below callbacks. **`src/types/index.ts` union includes `APPROVED`, `QUEUED`, `CAPTCHA_REQUIRED`, `EMAIL_UNVERIFIED`, `SKIPPED`**

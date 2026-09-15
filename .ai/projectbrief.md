@@ -21,7 +21,7 @@ Manually applying to hundreds of Greenhouse ATS postings per candidate is operat
 
 ## Explicit Out of Scope (V3+)
 - CAPTCHA automated bypass (CapSolver / 2Captcha) — currently operator-manual
-- Multi-tenant RBAC / Supabase Row-Level Security
+- Multi-tenant Supabase RLS on core tables (app-level role dashboards shipped; 015 event tables use service_role-only RLS)
 - Residential proxy pool
 - Further lifting the question cap (raise `MAX_JOB_QUESTIONS` when ready)
 
