@@ -126,7 +126,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `job_url` | TEXT UNIQUE | Normalized Greenhouse URL |
 | `company_name`, `job_title` | TEXT | |
 | `fields_schema` | JSONB | Array of `ScannedField` |
-| `field_count` | INTEGER | Computed; used for `< 23` filter |
+| `field_count` | INTEGER | Computed; compared to `MAX_JOB_QUESTIONS` |
 | `is_expired` | BOOLEAN | |
 
 ### `candidate_applications`

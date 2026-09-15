@@ -135,7 +135,7 @@ SCANNER_JITTER_MAX_MS=6000
 INPUT_CSV_PATH=./greenhouse_only_applywizz_prod(in).csv
 OUTPUT_DIR=./output
 RESUMES_DIR=./resumes
-MAX_JOB_QUESTIONS=23                  # Lift to 999 when < 23 restriction removed
+MAX_JOB_QUESTIONS=35                  # Skip jobs with field_count >= this value (allows 0–34 fields)
 
 # Supabase Storage bucket names
 SUPABASE_STORAGE_BUCKET_RESUMES=resumes

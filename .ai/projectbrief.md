@@ -13,7 +13,7 @@ Manually applying to hundreds of Greenhouse ATS postings per candidate is operat
 ## Hard Constraints (Non-Negotiable)
 - Target ATS: **Greenhouse only** (`boards.greenhouse.io`, `job-boards.greenhouse.io`, `app.greenhouse.io`, custom subdomains, `grnh.se` shortlinks)
 - Submission method: **Playwright browser automation only** — no Greenhouse API
-- Max questions per job: **< 23** (config: `MAX_JOB_QUESTIONS=23`) — jobs with ≥ 23 fields are skipped until explicitly lifted
+- Max questions per job: **< 35** (config: `MAX_JOB_QUESTIONS=35`) — jobs with ≥ 35 fields are skipped
 - Candidate identity source: **ApplyWizz API** (`https://www.apply-wizz.me/api/get-client-details?applywizz_id=AWL-****`)
 - Deployment: **Railway** (single service, Docker)
 
@@ -21,7 +21,7 @@ Manually applying to hundreds of Greenhouse ATS postings per candidate is operat
 - CAPTCHA automated bypass (CapSolver / 2Captcha) — currently operator-manual
 - Multi-tenant RBAC / Supabase Row-Level Security
 - Residential proxy pool
-- Lifting the `< 23` question restriction (one config flag when ready)
+- Further lifting the question cap (raise `MAX_JOB_QUESTIONS` when ready)
 
 ## Input / Output
 | Input | Output |
