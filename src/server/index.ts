@@ -45,7 +45,9 @@ import {
 import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHydrate.js';
 import { cacheApplicationLocally, getSubmissionOutcomeCounts, getApplication, upsertApplication, serializeApplicationDto } from '../db/applications.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
-import { isSupabaseConfigured, getDbClient } from '../db/client.js';
+import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials } from '../db/client.js';
+import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
+import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import {
   assertApplywizzZohoConnected,
   fetchZohoConnectedApplywizzIdSet,
@@ -591,6 +593,38 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
     res.json(ingestRun);
+  });
+
+  /**
+   * GET /api/admin/supabase-storage-health
+   * Safe credential + bucket probe for debugging Railway env (no secrets returned).
+   */
+  app.get('/api/admin/supabase-storage-health', async (req: AuthenticatedRequest, res: Response) => {
+    if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
+      res.status(403).json({ error: 'Forbidden: only admins can view storage health.' });
+      return;
+    }
+    if (!isSupabaseConfigured()) {
+      res.json({ configured: false, message: 'SUPABASE_URL and a service key are missing.' });
+      return;
+    }
+    const { url, serviceKey, serviceKeySource } = resolveSupabaseCredentials();
+    const diagnostics = getSupabaseKeyDiagnostics(url, serviceKey);
+    const supabase = getDbClient();
+    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets();
+    const bucketNames = (buckets || []).map((b) => b.name);
+    const { error: csvProbeError } = await supabase.storage.from(CSV_UPLOADS_BUCKET).list('', { limit: 1 });
+    res.json({
+      configured: true,
+      serviceKeySource,
+      diagnostics: diagnostics.summary,
+      jwtRole: diagnostics.jwtRole,
+      urlRefMatch: diagnostics.urlRefMatch,
+      listBucketsError: bucketsError?.message ?? null,
+      visibleBuckets: bucketNames,
+      csvUploadsDirectListOk: !csvProbeError,
+      csvUploadsDirectListError: csvProbeError?.message ?? null,
+    });
   });
 
   /**
@@ -1509,6 +1543,8 @@ export function startServer(
     console.log(`• Candidate List:     /api/candidates`);
     console.log(`• Master Resumes:     /resumes/`);
     console.log('================================================================\n');
+
+    logSupabaseCredentialIdentity('Server');
 
     if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
       zohoReader.init().catch((err: any) => {

@@ -1,6 +1,6 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (session end — duplicate-submission fix, dashboard typecheck enforcement)_
+_Last updated: 2026-09-15 (session end — EMAIL_UNVERIFIED, ingest JWT diagnostics, submit persist:false, requeue guards)_
 
 ## Current Focus (Active Sprint)
 
@@ -19,20 +19,23 @@ _Last updated: 2026-09-15 (session end — duplicate-submission fix, dashboard t
 ### 3. Email Proof / OTP Reliability
 - Email proof capture via Zoho Mail Reader (`zohoReader.ts`) and `emailProofPoller.ts` needs reliability improvements
 - **OTP path fixed (2026-09-15):** verbose step-by-step logging added to `zohoReader.ts` + `zoho-connector.ts`, which immediately exposed that `fetchLatestOtp` was returning wrong codes. Now gated on sender/subject/company before extraction; verified live against AWL-31428 → `NgW4NT62`
-- **Confirmation path fixed (2026-09-15):** proof capture was storing the OTP mail — the ±5min window reached backwards past the submit. Now forward-only from `submitted_at`, with a `greenhouse-mail.io` sender gate, a confirmation-subject gate, an explicit OTP-subject reject, and an `EMAIL_PROOF_PENDING`-only guard in `emailProofPoller.ts`
-- Remaining: not yet exercised against a live submission
-- Status: **OTP + proof filters resolved; live verification pending**
+- **Confirmation path fixed (2026-09-15):** proof capture was storing the OTP mail — the ±5min window reached backwards past the submit. Now forward-only from `submitted_at`, with a `greenhouse-mail.io` sender gate, an explicit OTP-subject reject, and an `EMAIL_PROOF_PENDING`-only guard in `emailProofPoller.ts`
+- **Subject patterns widened (uncommitted):** `CONFIRMATION_SUBJECT_PATTERN` also matches journey-started / application-submitted wording; company match can satisfy proof when subject names the company even if the pattern misses
+- **`EMAIL_UNVERIFIED` (uncommitted):** after 10m with no confirmation mail, poller moves `EMAIL_PROOF_PENDING → EMAIL_UNVERIFIED` (web screenshot kept; `email_proof_status=manual_review_needed`). Dashboard shows amber badge, allows resubmit, keeps View Proof. Migration `013_add_email_unverified_status.sql`
+- Remaining: not yet exercised against a live submission; migration 013 not applied on prod DB yet
+- Status: **OTP + proof filters + timeout terminal state coded; live verification + migration apply pending**
 
 ### 4. Submission Queue Integrity
-- **Duplicate live submissions fixed (2026-09-15):** one application ran on 2–3 workers concurrently and clicked submit 6 times (`b1f7250c`, AWL-31428 Prometheus). Three guards now: the `APPLYING → QUEUED` rewrite in `PATCH /:id/status` is skipped for in-flight statuses, `SubmitterPool` tracks `inFlightApplicationIds`, and the dashboard's 2s poll passes `persist: false` so it no longer echoes a polled status back as a write
+- **Duplicate live submissions fixed (2026-09-15):** one application ran on 2–3 workers concurrently and clicked submit 6 times (`b1f7250c`, AWL-31428 Prometheus). Guards: `IN_FLIGHT_STATUSES` now includes `EMAIL_PROOF_PENDING`; `PATCH /:id/status` skips requeue for any in-flight status on incoming `APPLYING` **or** `QUEUED` (direct PATCH `QUEUED` ignored — use `POST /:id/submit`); `SubmitterPool` tracks `inFlightApplicationIds`; badge poll and **submit-response** `onStatusChange` calls pass `persist: false`
 - Reported as an OTP/CAPTCHA requeue bug, but **no requeue-on-failure path exists in the codebase** — the OTP/CAPTCHA failures in that log were the duplicate browsers racing on one form
-- Status: **fixed; live verification pending**
+- Status: **extended guards uncommitted on top of `37bab44`; live verification pending**
 
 ### 5. CSV Ingestion Trigger
 - **Root-caused (2026-09-15):** uploading a CSV to the `csv_uploads` bucket triggered nothing because **no webhook and no poller exist** — `ingestCsvFromStorage` only had a one-shot CLI (`npm run ingest:storage`) and an admin HTTP route nothing called. Not a dead daemon: the queue worker is a separate concern and only runs in-process under `ENABLE_QUEUE_WORKER=true`
 - Fixed by making ingestion explicitly operator-driven: `POST /api/admin/trigger-ingest-from-storage` is now admin-gated, returns `202` and runs in the background (409 while in flight), paired with `GET /api/admin/ingest-status`; the dashboard has an admin-only **▶ Start** button that polls it
 - **Deployed run exposed a second defect (2026-09-15 12:34):** the Start button worked, but the run logged 4× `new row violates row-level security policy` and then "No pending CSV files" despite `test(Sheet1).csv` sitting in the bucket. Cause: the deployed `SUPABASE_SERVICE_KEY` is not a `service_role` key, so every storage read returns empty without an error. Ingestion now asserts bucket visibility and fails loudly, and no longer tries to provision buckets
-- Status: **shipped; blocked on the deployment's Supabase key** before an end-to-end run
+- **JWT credential diagnostics (local, not yet pushed):** `getSupabaseKeyDiagnostics()` logs `jwt.role`, `jwt.ref`, `urlRefMatch` on every ingest; `getDbClient()` trims URL/key. Use Railway log line `Credential identity:` after deploy to see whether `SUPABASE_SERVICE_KEY` is anon vs service_role or URL/ref mismatch
+- Status: **shipped on main through `37bab44`; ingest diagnostics commit pending** — blocked on correct Railway `SUPABASE_SERVICE_KEY` before end-to-end CSV run
 
 ## Immediate Blockers / Open Questions
 - [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
@@ -41,10 +44,12 @@ _Last updated: 2026-09-15 (session end — duplicate-submission fix, dashboard t
 - [ ] **`ZOHO_CONNECTOR_USER` holds a password-shaped value, not an email** (check `.env` directly; the literal is deliberately not repeated here) — needs an operator to confirm the correct username. Login yields 0 cookies and no POST, so a wrong value is currently undetectable
 - [ ] **Migration 011 not applied** on the current Supabase instance — `zoho_connected_profiles` table is missing (`Could not find the table 'public.zoho_connected_profiles'`)
 - [ ] OTP fix not yet exercised against a *fresh* Greenhouse OTP challenge — validated against existing security-code mail only (a live challenge needs an operator submission)
+- [ ] **Uncommitted session batch (not on `main` yet):** `supabaseKeyDiagnostics.ts`, migration 013 / `EMAIL_UNVERIFIED`, Zoho confirmation patterns, requeue + persist fixes, dashboard badges — commit and push before prod deploy
+- [ ] **Migration 013** (`EMAIL_UNVERIFIED`) not applied on Supabase — run `npm run db:migrate` after deploy
 - [ ] **Deployed `SUPABASE_SERVICE_KEY` is not the `service_role` secret** — replace it in Railway (project ref `dpwhgwdsfqzfwxlwvchp`, Supabase → Settings → API → `service_role` secret, not anon/publishable). Set the same value on the Railway service env var `SUPABASE_SERVICE_KEY`, confirm `SUPABASE_URL` is `https://dpwhgwdsfqzfwxlwvchp.supabase.co`, redeploy. Code fix `5d089d5` is on `main` (fails loudly + no bucket-create spam); until the key is fixed, **Start** will show a red error banner instead of false "no pending"
 - [ ] ▶ Start button not yet run end-to-end against a real CSV — the admin gate (403), status endpoint and UI were verified, but firing the pipeline processes and archives `test(Sheet1).csv` in Storage, so it needs operator go-ahead
 - [ ] Duplicate-submission fix not yet exercised against a live submission — confirm `[API] Status → QUEUED (PATCH ...)` never appears during an `APPLYING` window, and that one app never occupies two workers
-- [ ] **`src/types/index.ts` `ApplicationStatus` is missing `APPROVED`, `QUEUED` and `CAPTCHA_REQUIRED`** relative to the DB CHECK constraint. Nothing errors on it today, so it was left alone; widening it is a deliberate change to make, not a cleanup side effect. `src/db/applications.ts` is the canonical union
+- [x] ~~**`src/types/index.ts` `ApplicationStatus` drift**~~ — aligned with DB in uncommitted diff (`APPROVED`, `QUEUED`, `CAPTCHA_REQUIRED`, `EMAIL_UNVERIFIED`). `src/db/applications.ts` remains canonical for server code
 
 ## Recent Decisions Made
 - CSV ingestion is **operator-triggered, not event-driven** — no Supabase Storage webhook, no poller. A Storage webhook could not authenticate to `/api/admin/*` anyway (it is behind `requireAuth` + `isUserAdmin`)

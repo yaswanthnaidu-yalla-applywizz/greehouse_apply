@@ -271,14 +271,18 @@ export interface ResolvedField {
  */
 export type ApplicationStatus =
   | 'READY_FOR_REVIEW'
+  | 'APPROVED'
   | 'DRY_RUN_COMPLETE'
+  | 'QUEUED'
   | 'APPLYING'
   | 'APPLIED'
   | 'FAILED'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
   | 'CAPTCHA_TIMEOUT'
-  | 'EMAIL_PROOF_PENDING';
+  | 'CAPTCHA_REQUIRED'
+  | 'EMAIL_PROOF_PENDING'
+  | 'EMAIL_UNVERIFIED';
 
 /**
  * Segregated candidate job queue item rendered in the operator dashboard.

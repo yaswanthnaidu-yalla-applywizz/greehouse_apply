@@ -84,6 +84,9 @@ const envSchema = z.object({
   /** Supabase Service Role Secret Key */
   SUPABASE_SERVICE_KEY: z.string().optional(),
 
+  /** Alias used by Supabase docs / Railway templates — resolved in getDbClient() if SERVICE_KEY is anon */
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+
   /** Supabase anon key (browser Realtime only; safe to expose to authenticated dashboard clients) */
   SUPABASE_ANON_KEY: z.string().optional(),
 

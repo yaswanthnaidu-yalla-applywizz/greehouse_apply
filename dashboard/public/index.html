@@ -207,6 +207,7 @@
           status === 'QUEUED' ||
           status === 'OTP_REQUIRED' ||
           status === 'CAPTCHA_REQUIRED' ||
+          status === 'EMAIL_PROOF_PENDING' ||
           status === 'FAILED';
         const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
         if ((!shouldPollStatus && !shouldPollEmailProof) || !applicationId) return;
@@ -258,6 +259,23 @@
             <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Automated submission in progress">
               <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
               <span>Submitting... (Live)</span>
+            </span>
+          );
+        case 'EMAIL_PROOF_PENDING':
+          return (
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Web submission confirmed — verifying confirmation email...">
+              <span className="w-2 h-2 rounded-full border-2 border-[#0369A1] border-t-transparent animate-spin"></span>
+              <span>Email Pending...</span>
+            </span>
+          );
+        case 'EMAIL_UNVERIFIED':
+          return (
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+              title="Email Unverified: Form submitted on website with proof screenshot; thank-you email was not verified"
+            >
+              <span className="w-2 h-2 rounded-full bg-[#D97706]"></span>
+              <span>Email Unverified</span>
             </span>
           );
         case 'APPLIED':
@@ -388,10 +406,11 @@
       const hasUnresolved = unresolvedFieldsCount > 0;
       const isApplying = isSubmitting || SUBMIT_FLOW_STATUSES.has(String(applicationStatus));
       const isApplied = applicationStatus === 'APPLIED';
+      const isEmailUnverified = applicationStatus === 'EMAIL_UNVERIFIED';
       const isFailed = applicationStatus === 'FAILED';
       const hasProofActions =
         Boolean(dryRunScreenshotUrl) ||
-        Boolean(proofUrl || proofWebUrl || isApplied) ||
+        Boolean(proofUrl || proofWebUrl || isApplied || isEmailUnverified) ||
         Boolean(emailProofJsonState || proofEmailJson) ||
         Boolean(emailProof || proofEmailUrl) ||
         Boolean((proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl)) ||
@@ -471,7 +490,7 @@
         }
       };
 
-      const canSubmit = !hasUnresolved && !isApplying && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'DRY_RUN_COMPLETE' || applicationStatus === 'FAILED');
+      const canSubmit = !hasUnresolved && !isApplying && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'DRY_RUN_COMPLETE' || applicationStatus === 'FAILED' || applicationStatus === 'EMAIL_UNVERIFIED');
       const canDryRun = !isApplying && !isDryRunning;
 
       return (
@@ -554,6 +573,11 @@
                 <span>✅</span>
                 <span>Applied &amp; Verified</span>
               </>
+            ) : isEmailUnverified ? (
+              <>
+                <span>⚠️</span>
+                <span>Email Unverified (Resubmit)</span>
+              </>
             ) : (
               <>
                 <span>🚀</span>
@@ -578,7 +602,7 @@
             </button>
           )}
 
-          {(proofUrl || isApplied) && (
+          {(proofUrl || isApplied || isEmailUnverified) && (
             <button
               type="button"
               onClick={() => {
@@ -1466,7 +1490,8 @@
         currentStatus === 'APPLYING' ||
         currentStatus === 'QUEUED' ||
         currentStatus === 'OTP_REQUIRED' ||
-        currentStatus === 'CAPTCHA_REQUIRED';
+        currentStatus === 'CAPTCHA_REQUIRED' ||
+        currentStatus === 'EMAIL_PROOF_PENDING';
       const badgeStatus =
         currentStatus === 'OTP_REQUIRED' ||
         currentStatus === 'CAPTCHA_REQUIRED'
@@ -1474,7 +1499,7 @@
           : currentStatus;
 
       useEffect(() => {
-        if (currentStatus === 'APPLIED' || currentStatus === 'FAILED') {
+        if (currentStatus === 'APPLIED' || currentStatus === 'FAILED' || currentStatus === 'EMAIL_UNVERIFIED') {
           setIsSubmitting(false);
         }
       }, [currentStatus]);
@@ -1599,7 +1624,7 @@
               onStatusChange('FAILED', {
                 ...data,
                 error: data.error || data.error_message || 'Submit request failed',
-              });
+              }, { persist: false });
             }
             setIsSubmitting(false);
             return;
@@ -1621,7 +1646,7 @@
               } catch {}
             }
             if (onStatusChange) {
-              onStatusChange('APPLIED', { ...data, proofWebUrl, proofCapturedAt });
+              onStatusChange('APPLIED', { ...data, proofWebUrl, proofCapturedAt }, { persist: false });
             }
             if (proofWebUrl) {
               setViewerImageUrl(proofWebUrl);
@@ -1633,11 +1658,11 @@
           }
 
           if (onStatusChange) {
-            onStatusChange(data.status || 'QUEUED', data);
+            onStatusChange(data.status || 'QUEUED', data, { persist: false });
           }
         } catch (err) {
           console.error('Submission failed:', err);
-          if (onStatusChange) onStatusChange('FAILED', { error: err.message });
+          if (onStatusChange) onStatusChange('FAILED', { error: err.message }, { persist: false });
           setIsSubmitting(false);
         }
       };

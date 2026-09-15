@@ -58,12 +58,12 @@ export class EmailProofPoller {
         // Check if 10 minutes have elapsed
         if (Date.now() - startTime >= maxDurationMs) {
           console.warn(
-            `[Email Proof Poller] ⏱️ 10 minutes elapsed with zero email matches for ${appId}. Flagging for manual operator review.`
+            `[Email Proof Poller] ⏱️ 10 minutes elapsed with zero email matches for ${appId}. Transitioning to EMAIL_UNVERIFIED.`
           );
           const targetId = currentApp.id || appId;
-          await updateStatus(targetId, 'EMAIL_PROOF_PENDING', {
+          await updateStatus(targetId, 'EMAIL_UNVERIFIED', {
             email_proof_status: 'manual_review_needed',
-            error_message: 'Confirmation email not found after 10m automatic polling. Manual operator review required.',
+            error_message: 'Confirmation email not found after 10m automatic polling. Web submission succeeded with proof screenshot.',
             job_url: currentApp.job_url,
           }).catch(() => {});
 

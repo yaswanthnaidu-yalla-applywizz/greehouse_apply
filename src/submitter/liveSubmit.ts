@@ -1531,11 +1531,15 @@ export async function runLiveSubmit(
                 jobUrl: targetUrl,
               });
 
-              if (submitResult.status === 'APPLIED') {
+              if (
+                submitResult.status === 'APPLIED' ||
+                submitResult.status === 'EMAIL_PROOF_PENDING' ||
+                submitResult.status === 'EMAIL_UNVERIFIED'
+              ) {
                 keepSessionOpen = false; // session was completed & closed inside submitOtpToPausedSession
                 return {
                   success: true,
-                  status: 'APPLIED',
+                  status: submitResult.status,
                   applicationId,
                   proofWebUrl: submitResult.proofWebUrl,
                   proofCapturedAt: submitResult.proofCapturedAt,

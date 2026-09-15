@@ -17,7 +17,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { getDbClient, isSupabaseConfigured } from '../db/client.js';
+import { getDbClient, isSupabaseConfigured, resolveSupabaseCredentials } from '../db/client.js';
+import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
 import { config } from '../config/env.js';
@@ -44,6 +45,15 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     };
   }
 
+  const { url: supabaseUrl, serviceKey: rawServiceKey, serviceKeySource } = resolveSupabaseCredentials();
+  const keyDiag = getSupabaseKeyDiagnostics(supabaseUrl, rawServiceKey);
+  console.log(`[Storage CSV Ingestion] Credential identity: ${keyDiag.summary}`);
+  if (keyDiag.keyHadSurroundingWhitespace) {
+    console.warn(
+      '[Storage CSV Ingestion] SUPABASE_SERVICE_KEY has leading/trailing whitespace — trim the value in Railway.'
+    );
+  }
+
   const supabase = getDbClient();
 
   // Bucket provisioning belongs to `npm run db:migrate`, not to ingestion. Listing the
@@ -60,15 +70,38 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     };
   }
 
-  if (!(buckets || []).some((b) => b.name === CSV_UPLOADS_BUCKET)) {
-    const visible = (buckets || []).map((b) => b.name).join(', ') || 'none';
+  const bucketNames = (buckets || []).map((b) => b.name);
+  let bucketReady = bucketNames.includes(CSV_UPLOADS_BUCKET);
+
+  if (!bucketReady) {
+    const { error: probeError } = await supabase.storage.from(CSV_UPLOADS_BUCKET).list('', {
+      limit: 1,
+    });
+    if (!probeError) {
+      console.warn(
+        `[Storage CSV Ingestion] listBuckets omitted '${CSV_UPLOADS_BUCKET}' (visible: ${bucketNames.join(', ') || 'none'}) but direct bucket list succeeded — continuing.`
+      );
+      bucketReady = true;
+    }
+  }
+
+  if (!bucketReady) {
+    const visible = bucketNames.join(', ') || 'none';
+    const hint =
+      keyDiag.jwtRole && keyDiag.jwtRole !== 'service_role'
+        ? `JWT role is "${keyDiag.jwtRole}" (need service_role).`
+        : keyDiag.urlRefMatch === false
+          ? `SUPABASE_URL project ref (${keyDiag.urlProjectRef}) does not match JWT ref (${keyDiag.jwtRef}).`
+          : serviceKeySource === 'SUPABASE_SERVICE_KEY'
+            ? 'Use the legacy service_role secret (eyJ…) in SUPABASE_SERVICE_KEY, or set SUPABASE_SERVICE_ROLE_KEY if the publishable key is in SUPABASE_SERVICE_KEY.'
+            : 'Set SUPABASE_SERVICE_KEY to the service_role secret for this project.';
     console.error(
-      `[Storage CSV Ingestion] ❌ Bucket '${CSV_UPLOADS_BUCKET}' is not visible to these credentials (visible buckets: ${visible}). SUPABASE_SERVICE_KEY is likely an anon key rather than the service_role secret, or points at another project.`
+      `[Storage CSV Ingestion] ❌ Bucket '${CSV_UPLOADS_BUCKET}' is not accessible (listBuckets visible: ${visible}). ${hint} Identity: ${keyDiag.summary}`
     );
     return {
       success: false,
       processedCount: 0,
-      message: `Storage bucket '${CSV_UPLOADS_BUCKET}' is not visible to these Supabase credentials (visible buckets: ${visible}). Check that SUPABASE_SERVICE_KEY is the service_role secret for the right project.`,
+      message: `Storage bucket '${CSV_UPLOADS_BUCKET}' is not accessible (listBuckets visible: ${visible}). ${hint} [${keyDiag.summary}]`,
     };
   }
 
