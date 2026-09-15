@@ -114,12 +114,9 @@ export function inferYesNoFromProfile(
 
   if (/authorized to work|legally authorized|work authorization|legal right to work|eligible to work/i.test(combined)) {
     const auth = (profile.workAuthorization || '').trim();
-    if (/^no|false|not authorized|requires sponsorship/i.test(auth)) {
+    if (!auth) return null;
+    if (/^(no|false)$/i.test(auth) || /not authorized|unauthorized/i.test(auth)) {
       return 'No';
-    }
-    if (auth.length > 0 && !/^yes$/i.test(auth)) {
-      // e.g. H1B, OPT — authorized to work in US for most forms
-      return 'Yes';
     }
     return 'Yes';
   }
@@ -149,30 +146,70 @@ export function inferYesNoFromProfile(
 }
 
 function buildProfileDecisionContext(field: ScannedField, profile: ApplyWizzCandidateProfile): string {
-  if (!isBinaryYesNoQuestion(field) && !fieldHasChoiceOptions(field)) {
-    return '';
-  }
+  const sponsorshipRaw = profile.requiresSponsorship === true ? 'true' : 'false';
+  const sponsorshipYesNo = profile.requiresSponsorship ? 'Yes' : 'No';
+  const authRaw = (profile.workAuthorization || '').trim() || '(not provided)';
 
-  const sponsorshipAnswer = profile.requiresSponsorship ? 'Yes' : 'No';
   const lines = [
-    'Profile facts for Yes/No and choice questions (use these as ground truth):',
-    `- requires_sponsorship (needs visa sponsorship now or in the future): ${sponsorshipAnswer}`,
-    `- work_authorization: ${profile.workAuthorization || 'not specified'}`,
-    `- For "legally authorized to work" style questions: if work_authorization indicates US work eligibility (e.g. Citizen, GC, H1B, OPT, EAD), answer Yes unless the profile explicitly says otherwise.`,
-    `- For "require sponsorship" style questions: answer ${sponsorshipAnswer} based on requires_sponsorship above.`,
+    'Yes/No mapping from candidate profile — use these exact values, do not guess:',
+    `- requires_sponsorship: ${sponsorshipRaw} (exact profile value). For sponsorship / visa-sponsorship questions, map true → Yes, false → No. Mapped answer: ${sponsorshipYesNo}.`,
+    `- work_authorization: ${authRaw} (exact profile value). For work-authorization / legally-authorized-to-work questions, decide Yes or No from this value only. If it is not provided, do not invent an answer.`,
   ];
 
   const inferred = inferYesNoFromProfile(field, profile);
   if (inferred) {
-    lines.push(`- Recommended answer for this question label from profile rules: ${inferred}`);
+    lines.push(`- Mapped answer for this question from the profile fields above: ${inferred}`);
   }
 
   return `\n${lines.join('\n')}\n`;
 }
 
+export const LLM_MIN_CONFIDENCE = 0.65;
+
 function formatAvailableOptionsLine(options: string[]): string {
-  const list = options.map((o) => `"${o}"`).join(', ');
-  return `\nThe available options are: [${list}]. You MUST pick exactly one of these options verbatim — no free-text answer.\n`;
+  const list = options.join(', ');
+  return `\nYou MUST respond with exactly one of these options, no other text: [${list}]\n`;
+}
+
+function unresolvedField(field: ScannedField): ResolvedField {
+  return {
+    fieldId: field.fieldId,
+    name: field.name,
+    type: field.type,
+    label: field.label,
+    value: '',
+    source: 'unresolved',
+    resolvedByTier: null,
+    confidence: 0,
+  };
+}
+
+function aiField(field: ScannedField, value: string, confidence: number): ResolvedField {
+  return {
+    fieldId: field.fieldId,
+    name: field.name,
+    type: field.type,
+    label: field.label,
+    value,
+    source: 'ai',
+    resolvedByTier: 5,
+    confidence,
+  };
+}
+
+function parseLlmResponse(raw: string): { answer: string; confidence: number | null } {
+  const cleaned = cleanLLMOutput(raw);
+  try {
+    const parsed = JSON.parse(cleaned) as { answer?: unknown; value?: unknown; confidence?: unknown };
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const answer = String(parsed.answer ?? parsed.value ?? '').trim();
+      const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : null;
+      return { answer, confidence };
+    }
+  } catch {
+    // plain-text answer
+  }
+  return { answer: cleaned, confidence: null };
 }
 
 /**
@@ -235,55 +272,18 @@ export function cleanLLMOutput(raw: string): string {
 }
 
 /**
- * Matches synthesized text to the closest valid option from a select/radio options list.
- *
- * @param text - Raw output string from LLM.
- * @param options - Available options on the form control.
- * @returns Best matching option string.
+ * Exact option match only (trim + case-insensitive). Returns null instead of guessing.
  */
-function alignToOption(text: string, options?: string[]): string {
-  if (!options || options.length === 0) {
-    return text.trim();
-  }
-
+export function matchExactOption(text: string, options?: string[]): string | null {
+  if (!options || options.length === 0) return null;
   const cleanText = text.replace(/^["']|["']$/g, '').trim().toLowerCase();
-
-  // 1. Exact match
+  if (!cleanText) return null;
   for (const opt of options) {
     if (opt.toLowerCase().trim() === cleanText) {
       return opt;
     }
   }
-
-  // 2. Substring / contains match
-  for (const opt of options) {
-    const optLower = opt.toLowerCase().trim();
-    if (optLower.includes(cleanText) || cleanText.includes(optLower)) {
-      return opt;
-    }
-  }
-
-  // 3. Boolean fallback
-  if (cleanText.includes('yes') || cleanText === 'true') {
-    const yesOpt = options.find((o) => /^yes/i.test(o.trim()) || o.trim() === '1');
-    if (yesOpt) return yesOpt;
-  }
-  if (cleanText.includes('no') || cleanText === 'false') {
-    const noOpt = options.find((o) => /^no/i.test(o.trim()) || o.trim() === '0');
-    if (noOpt) return noOpt;
-  }
-
-  // 4. Default to first option
-  return options[0];
-}
-
-/**
- * Applies strict Yes/No coercion and option alignment for binary questions.
- */
-function finalizeBinaryAnswer(rawAnswer: string, field: ScannedField): string {
-  const coerced = coerceBinaryYesNo(rawAnswer, field);
-  const options = getEffectiveFieldOptions(field);
-  return options ? alignToOption(coerced, options) : coerced;
+  return null;
 }
 
 /**
@@ -362,25 +362,23 @@ export class LLMSynthesizer {
 
     const profileYesNo = isBinary ? inferYesNoFromProfile(field, profile) : null;
     if (profileYesNo) {
-      const aligned = choiceOptions ? alignToOption(profileYesNo, choiceOptions) : profileYesNo;
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: aligned,
-        source: 'ai',
-        resolvedByTier: 5,
-        confidence: 0.95,
-      };
+      if (choiceOptions && choiceOptions.length > 0) {
+        const exact = matchExactOption(profileYesNo, choiceOptions);
+        if (!exact) {
+          console.warn(
+            `[LLM Synthesizer] Profile Yes/No "${profileYesNo}" is not an exact option for "${field.label}" — leaving unresolved`
+          );
+          return unresolvedField(field);
+        }
+        return aiField(field, exact, 0.95);
+      }
+      return aiField(field, profileYesNo, 0.95);
     }
 
     const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
-    const systemMessage = isBinary
-      ? 'You are an automated job application assistant. CRITICAL: This is a Yes/No question. You MUST reply with ONLY the word "Yes" or "No" (or the exact Yes/No option string from the available options list). Absolutely NO additional words, explanations, location names, or prose.'
-      : isChoiceField
-        ? 'You are an automated job application assistant. The user message lists available options. You MUST reply with exactly one option string from that list, copied verbatim. No free-text answers, no reasoning, no preamble.'
-        : 'You are an automated job application assistant. You must output ONLY the direct answer text. Absolutely NO reasoning, NO thinking process, NO prefixes like "Here is a thinking process", and NO preamble.';
+    const systemMessage = isChoiceField
+      ? 'You are an automated job application assistant. You MUST respond with exactly one of the provided options, copied verbatim, and no other text.'
+      : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}.';
 
     // If API key is configured or provider is ollama, execute real LLM call
     if (this.apiKey || this.provider === 'ollama') {
@@ -426,26 +424,7 @@ export class LLMSynthesizer {
           }
 
           if (rawAnswer && rawAnswer.length > 0) {
-            let finalAnswer = isBinary
-              ? finalizeBinaryAnswer(rawAnswer, field)
-              : choiceOptions
-                ? alignToOption(rawAnswer, choiceOptions)
-                : rawAnswer;
-            if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
-              if (!/^https?:\/\//i.test(finalAnswer) && !/linkedin\.com|github\.com/i.test(finalAnswer)) {
-                finalAnswer = this.generateFallbackAnswer(field, profile, jobContext);
-              }
-            }
-            return {
-              fieldId: field.fieldId,
-              name: field.name,
-              type: field.type,
-              label: field.label,
-              value: finalAnswer,
-              source: 'ai',
-              resolvedByTier: 5,
-              confidence: 0.9,
-            };
+            return this.finalizeLlmAnswer(rawAnswer, field, profile, jobContext, choiceOptions);
           }
         }
 
@@ -455,26 +434,7 @@ export class LLMSynthesizer {
           const content = result.response.text().trim();
           const cleaned = cleanLLMOutput(content);
           if (cleaned && cleaned.length > 0) {
-            let finalAnswer = isBinary
-              ? finalizeBinaryAnswer(cleaned, field)
-              : choiceOptions
-                ? alignToOption(cleaned, choiceOptions)
-                : cleaned;
-            if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
-              if (!/^https?:\/\//i.test(finalAnswer) && !/linkedin\.com|github\.com/i.test(finalAnswer)) {
-                finalAnswer = this.generateFallbackAnswer(field, profile, jobContext);
-              }
-            }
-            return {
-              fieldId: field.fieldId,
-              name: field.name,
-              type: field.type,
-              label: field.label,
-              value: finalAnswer,
-              source: 'ai',
-              resolvedByTier: 5,
-              confidence: 0.9,
-            };
+            return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
           }
         }
       } catch (err: any) {
@@ -482,19 +442,58 @@ export class LLMSynthesizer {
       }
     }
 
-    // Heuristic fallback for development when LLM key is absent or network fails
     const fallbackAnswer = this.generateFallbackAnswer(field, profile, jobContext);
+    if (!fallbackAnswer) {
+      return unresolvedField(field);
+    }
+    return aiField(field, fallbackAnswer, 0.9);
+  }
 
-    return {
-      fieldId: field.fieldId,
-      name: field.name,
-      type: field.type,
-      label: field.label,
-      value: fallbackAnswer,
-      source: 'ai',
-      resolvedByTier: 5,
-      confidence: 0.8,
-    };
+  /**
+   * Accepts an exact option or a free-text JSON answer. Non-matching options and
+   * confidence below LLM_MIN_CONFIDENCE become unresolved — never guessed.
+   */
+  private finalizeLlmAnswer(
+    raw: string,
+    field: ScannedField,
+    profile: ApplyWizzCandidateProfile,
+    jobContext: JobContext,
+    choiceOptions: string[] | undefined
+  ): ResolvedField {
+    const parsed = parseLlmResponse(raw);
+    let answer = parsed.answer;
+    let confidence = parsed.confidence;
+
+    if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
+      if (!/^https?:\/\//i.test(answer) && !/linkedin\.com|github\.com/i.test(answer)) {
+        answer = this.generateFallbackAnswer(field, profile, jobContext);
+        confidence = answer ? 0.9 : null;
+      }
+    }
+
+    if (choiceOptions && choiceOptions.length > 0) {
+      const exact = matchExactOption(answer, choiceOptions);
+      if (!exact) {
+        console.warn(
+          `[LLM Synthesizer] "${answer}" is not an exact option for "${field.label}" — leaving unresolved`
+        );
+        return unresolvedField(field);
+      }
+      answer = exact;
+      if (confidence == null) confidence = 0.9;
+    }
+
+    if (!answer) {
+      return unresolvedField(field);
+    }
+    if (confidence == null || confidence < LLM_MIN_CONFIDENCE) {
+      console.warn(
+        `[LLM Synthesizer] Confidence ${confidence ?? 'missing'} below ${LLM_MIN_CONFIDENCE} for "${field.label}" — leaving unresolved`
+      );
+      return unresolvedField(field);
+    }
+
+    return aiField(field, answer, confidence);
   }
 
   /**
@@ -606,31 +605,25 @@ ${resumeText.slice(0, 3000)}`;
     const optionsSection =
       choiceOptions && choiceOptions.length > 0 ? formatAvailableOptionsLine(choiceOptions) : '';
 
-    const profileDecisionBlock = buildProfileDecisionContext(field, profile);
-
-    const binaryRule = isBinaryYesNoQuestion(field)
-      ? `\nCRITICAL: This is a Yes/No question. You MUST reply with ONLY the word "Yes" or "No" (or the exact matching option from the available options list). Absolutely NO additional words, explanations, location names, or prose.`
+    const profileDecisionBlock = isBinaryYesNoQuestion(field)
+      ? buildProfileDecisionContext(field, profile)
       : '';
 
     const instructions = isBinaryYesNoQuestion(field)
       ? `Instructions:
-1. Use the Profile facts section and requires_sponsorship / work_authorization to decide Yes vs No.
-2. Reply with ONLY "Yes" or "No" — pick the single best option from the available options list if provided.
-3. Do NOT include the candidate's city, state, location, or any explanatory sentences.
-4. Output ONLY the raw final answer text.`
+1. Use the exact requires_sponsorship and work_authorization values from the profile. Do not guess.
+2. You MUST respond with exactly one of the provided options, no other text.`
       : choiceOptions && choiceOptions.length > 0
-        ? `Strict Instructions:
-1. The available options are listed above — your response MUST be EXACTLY ONE of those strings, copied verbatim.
-2. Do NOT invent new options or write free-text sentences.
-3. Base your choice on the candidate profile, resume facts, and question label.
-4. Output ONLY the raw final answer text. No reasoning or preamble.`
+        ? `Instructions:
+1. You MUST respond with exactly one of these options, no other text.
+2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.`
         : `Strict Instructions:
-1. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
-2. CRITICAL GROUNDING: You MUST base your answer strictly on the candidate's verified resume facts and experience.
-3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer". Always cite their ACTUAL past companies, verified project names, or specific tools (e.g., Jenkins, Docker, GitHub Actions, AWS, Python) found in their resume.
+1. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile.
+2. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
+3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer". Always cite their ACTUAL past companies, verified project names, or specific tools found in their resume.
 4. If the candidate's resume does not mention the exact requested tool/technology, write honestly: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
 5. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
-6. Output ONLY the raw final answer text. Absolutely NO thinking process, NO "Here is a thinking process", NO markdown fences, and NO conversational filler.`;
+6. Respond as JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. If you are not at least 0.65 confident, set confidence below 0.65.`;
 
     const resumeFactsBlock = this.buildResumeFactsBlock(resumeFacts, resumeText);
 
@@ -642,8 +635,8 @@ Candidate Information:
 - Years of Experience: ${profile.demographics?.yearsOfExperience || '5+ years'}
 - Education: ${profile.education?.map((e) => `${e.degree} in ${e.fieldOfStudy} from ${e.institution} (${e.graduationYear})`).join(', ') || 'Degree on file'}
 - Location: ${profile.location}
-- Work Authorization: ${profile.workAuthorization}
-- Requires Sponsorship (requires_sponsorship): ${profile.requiresSponsorship ? 'Yes' : 'No'}
+- Work Authorization (work_authorization, exact): ${profile.workAuthorization || '(not provided)'}
+- Requires Sponsorship (requires_sponsorship, exact): ${profile.requiresSponsorship === true ? 'true' : 'false'}
 ${profileDecisionBlock}
 ${resumeFactsBlock}
 
@@ -653,7 +646,7 @@ Target Job:
 
 Question to Answer:
 - Question Label: "${field.label}"
-- Input Type: ${field.type}${optionsSection}${binaryRule}
+- Input Type: ${field.type}${optionsSection}
 
 ${instructions}`;
   }
@@ -669,7 +662,7 @@ ${instructions}`;
   private generateFallbackAnswer(
     field: ScannedField,
     profile: ApplyWizzCandidateProfile,
-    jobContext: JobContext
+    _jobContext: JobContext
   ): string {
     const combined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`.toLowerCase();
 
@@ -691,42 +684,43 @@ ${instructions}`;
 
     if (isBinaryYesNoQuestion(field)) {
       const fromProfile = inferYesNoFromProfile(field, profile);
-      const answer = fromProfile ?? coerceBinaryYesNo('', field);
+      if (!fromProfile) return '';
       const options = getEffectiveFieldOptions(field);
-      return options ? alignToOption(answer, options) : answer;
+      if (options && options.length > 0) {
+        return matchExactOption(fromProfile, options) || '';
+      }
+      return fromProfile;
     }
 
     const choiceOptions = getEffectiveFieldOptions(field);
     if (choiceOptions && choiceOptions.length > 0) {
-      const yesOpt = choiceOptions.find((o) => /^yes/i.test(o));
-      if (yesOpt) return yesOpt;
-      return choiceOptions[0];
+      return '';
     }
 
     const lowerLabel = (field.label || '').toLowerCase();
 
     if (lowerLabel.includes('hear about') || lowerLabel.includes('source') || lowerLabel.includes('referral')) {
-      return 'LinkedIn';
+      return '';
     }
 
     if (lowerLabel.includes('why') || lowerLabel.includes('interest')) {
-      return `I am excited to apply for the ${jobContext.title} position at ${jobContext.company}. My extensive experience in building scalable software systems aligns well with your team's mission.`;
+      return '';
     }
 
     if (lowerLabel.includes('describe') || lowerLabel.includes('experience') || lowerLabel.includes('project')) {
-      return `Throughout my career as a ${profile.demographics?.currentRole || 'Software Engineer'}, I have led end-to-end development of high-impact applications, collaborating closely with cross-functional teams to deliver robust solutions.`;
+      return '';
     }
 
     if (lowerLabel.includes('start date') || lowerLabel.includes('availability')) {
-      return 'Within 2 weeks of offer acceptance';
+      return '';
     }
 
     if (lowerLabel.includes('salary') || lowerLabel.includes('compensation')) {
-      return profile.demographics?.salaryRange || 'Competitive / Open to negotiation';
+      return profile.demographics?.salaryRange || '';
     }
 
     if (lowerLabel.includes('unique') || lowerLabel.includes('stand out')) {
-      return `My depth of experience as a ${profile.demographics?.currentRole || 'Software Engineer'}, combined with my passion for problem-solving and rapid learning, allows me to contribute meaningfully from day one.`;
+      return '';
     }
 
     if (/subsidiaries|worked for|affiliate|previous employee/i.test(lowerLabel)) {
@@ -737,6 +731,6 @@ ${instructions}`;
       return 'N/A';
     }
 
-    return `I possess relevant professional expertise matching the requirements for ${jobContext.title} at ${jobContext.company}.`;
+    return '';
   }
 }

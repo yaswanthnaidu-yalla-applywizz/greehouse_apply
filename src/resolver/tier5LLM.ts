@@ -5,6 +5,7 @@
 
 import {
   LLMSynthesizer,
+  LLM_MIN_CONFIDENCE,
   getEffectiveFieldOptions,
   type JobContext,
 } from './llmSynthesizer.js';
@@ -90,7 +91,19 @@ export async function resolveTier5(
       resumeFacts
     );
 
+    if (rawResult && rawResult.source === 'unresolved') {
+      return null;
+    }
+
+    const confidence = rawResult?.confidence ?? 0;
     if (rawResult && rawResult.value && rawResult.value.trim().length > 0) {
+      if (confidence < LLM_MIN_CONFIDENCE) {
+        console.warn(
+          `[Tier 5] Confidence ${confidence} < ${LLM_MIN_CONFIDENCE} for ${applywizzId} [${field.label}] — leaving unresolved (no qa_bank write)`
+        );
+        return null;
+      }
+
       const resolvedField: ResolvedField = {
         fieldId: field.fieldId,
         name: field.name,
@@ -99,7 +112,7 @@ export async function resolveTier5(
         value: rawResult.value.trim(),
         source: 'ai',
         resolvedByTier: 5,
-        confidence: rawResult.confidence || 0.85,
+        confidence,
       };
 
       // Write-back to persistent candidate QA bank
