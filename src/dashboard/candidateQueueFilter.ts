@@ -32,6 +32,11 @@ export function filterJobsForCandidate<T extends JobWithOptionalOwner>(
   });
 }
 
+/** SKIPPED applications must not appear in the operator application queue. */
+export function excludeSkippedApplicationJobs<T extends { status?: string | null }>(jobs: T[]): T[] {
+  return jobs.filter((job) => (job.status || '').toUpperCase() !== 'SKIPPED');
+}
+
 export function candidateDetailMatchesSelection(
   detail: { applywizzId?: string; applywizz_id?: string } | null | undefined,
   selectedApplywizzId: string | null | undefined

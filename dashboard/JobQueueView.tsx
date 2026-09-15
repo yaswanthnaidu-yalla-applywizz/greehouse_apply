@@ -14,6 +14,7 @@ import { DifficultyBadge } from './components/DifficultyBadge.js';
 import type { CandidateDetail } from './types.js';
 import {
   candidateDetailMatchesSelection,
+  excludeSkippedApplicationJobs,
   filterJobsForCandidate,
   jobCardCompanyLabel,
   jobCardTitleLabel,
@@ -42,7 +43,8 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
     if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
       return [];
     }
-    return filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
+    const owned = filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
+    return excludeSkippedApplicationJobs(owned);
   }, [candidate, selectedApplywizzId]);
   const handleJobCardClick = (job: CandidateJob) => {
     const jobKey = job.canonicalUrl || job.rawUrl;
