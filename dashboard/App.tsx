@@ -322,82 +322,6 @@ export const App: React.FC = () => {
     return () => clearInterval(pollInterval);
   }, [currentUser, selectedDate, fetchInitialData, fetchNotifications]);
 
-  // Connect to WebSocket /ws for real-time application failure toasts
-  useEffect(() => {
-    if (!currentUser || typeof window === 'undefined') return;
-    let ws: WebSocket | null = null;
-    let reconnectTimeout: any = null;
-    let isDisposed = false;
-
-    const connectWs = () => {
-      if (isDisposed) return;
-      try {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
-        ws = new WebSocket(wsUrl);
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.type === 'APPLICATION_FAILED') {
-              console.log('[Dashboard WS] ⚠️ Received APPLICATION_FAILED:', data);
-              setFailureAlert({
-                appId: data.appId,
-                reason: data.reason || 'Submission failed.',
-                timestamp: data.timestamp || new Date().toISOString(),
-                companyName: data.companyName,
-                jobTitle: data.jobTitle,
-              });
-
-              // Auto-dismiss alert after 10 seconds
-              setTimeout(() => {
-                setFailureAlert((curr) => (curr?.appId === data.appId ? null : curr));
-              }, 10000);
-
-              // Instantly refresh data & notifications
-              fetchInitialData(true, selectedDate);
-              fetchNotifications(selectedDate);
-              if (selectedCandidateId) {
-                fetchCandidateDetail(selectedCandidateId);
-              }
-              if (selectedCandidateId && selectedJobUrl) {
-                fetchJobApplication(selectedCandidateId, selectedJobUrl);
-              }
-            }
-          } catch (e) {
-            console.warn('[Dashboard WS] Message parse error:', e);
-          }
-        };
-
-        ws.onclose = () => {
-          if (!isDisposed) {
-            reconnectTimeout = setTimeout(connectWs, 5000);
-          }
-        };
-
-        ws.onerror = () => {
-          if (ws) ws.close();
-        };
-      } catch (err) {
-        console.warn('[Dashboard WS] Connection error:', err);
-        if (!isDisposed) {
-          reconnectTimeout = setTimeout(connectWs, 5000);
-        }
-      }
-    };
-
-    connectWs();
-
-    return () => {
-      isDisposed = true;
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) {
-        ws.onclose = null;
-        ws.close();
-      }
-    };
-  }, [currentUser, selectedDate, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
-
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
     const requestedId = normalizeApplywizzId(applywizzId);
@@ -443,7 +367,9 @@ export const App: React.FC = () => {
           );
         }
 
-        const rawJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
+        const rawJobs: CandidateDetail['jobs'] = Array.isArray(jobsPayload?.jobs)
+          ? jobsPayload.jobs
+          : [];
         const candidateJobs = filterJobsForCandidate(rawJobs, requestedId);
         setCandidateDetail({
           ...detail,
@@ -524,6 +450,84 @@ export const App: React.FC = () => {
     fetchJobApplication(selectedCandidateId, selectedJobUrl);
   }, [selectedCandidateId, selectedJobUrl, fetchJobApplication]);
 
+  // Connect to WebSocket /ws for real-time application failure toasts.
+  // Declared after the fetch callbacks it lists as dependencies — the dependency
+  // array is evaluated during render, so an earlier position throws on first mount.
+  useEffect(() => {
+    if (!currentUser || typeof window === 'undefined') return;
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: any = null;
+    let isDisposed = false;
+
+    const connectWs = () => {
+      if (isDisposed) return;
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'APPLICATION_FAILED') {
+              console.log('[Dashboard WS] ⚠️ Received APPLICATION_FAILED:', data);
+              setFailureAlert({
+                appId: data.appId,
+                reason: data.reason || 'Submission failed.',
+                timestamp: data.timestamp || new Date().toISOString(),
+                companyName: data.companyName,
+                jobTitle: data.jobTitle,
+              });
+
+              // Auto-dismiss alert after 10 seconds
+              setTimeout(() => {
+                setFailureAlert((curr) => (curr?.appId === data.appId ? null : curr));
+              }, 10000);
+
+              // Instantly refresh data & notifications
+              fetchInitialData(true, selectedDate);
+              fetchNotifications(selectedDate);
+              if (selectedCandidateId) {
+                fetchCandidateDetail(selectedCandidateId);
+              }
+              if (selectedCandidateId && selectedJobUrl) {
+                fetchJobApplication(selectedCandidateId, selectedJobUrl);
+              }
+            }
+          } catch (e) {
+            console.warn('[Dashboard WS] Message parse error:', e);
+          }
+        };
+
+        ws.onclose = () => {
+          if (!isDisposed) {
+            reconnectTimeout = setTimeout(connectWs, 5000);
+          }
+        };
+
+        ws.onerror = () => {
+          if (ws) ws.close();
+        };
+      } catch (err) {
+        console.warn('[Dashboard WS] Connection error:', err);
+        if (!isDisposed) {
+          reconnectTimeout = setTimeout(connectWs, 5000);
+        }
+      }
+    };
+
+    connectWs();
+
+    return () => {
+      isDisposed = true;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
+    };
+  }, [currentUser, selectedDate, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
+
   const handleRealtimeApplicationRow = useCallback(
     (row: Record<string, unknown>) => {
       const selectedId = selectedCandidateRef.current;
@@ -562,8 +566,16 @@ export const App: React.FC = () => {
   };
 
   // Status Change Handler (from Submissions, Dry Run, or Polling)
-  const handleStatusChange = async (newStatus: ApplicationStatus, updatedPayload?: any) => {
+  const handleStatusChange = async (
+    newStatus: ApplicationStatus,
+    updatedPayload?: any,
+    options: { persist?: boolean } = {}
+  ) => {
     if (!application) return;
+
+    // Poll-originated updates only refresh the display — echoing a polled status
+    // back would requeue a submission a worker is still running.
+    const persist = options.persist !== false;
 
     setApplication((prev: any) => ({
       ...prev,
@@ -633,31 +645,33 @@ export const App: React.FC = () => {
     }
 
     // Persist status change to Supabase immediately
-    const appId = application.id || application.applywizzId || application.applywizz_id;
-    const targetJobUrl = application.jobUrl || application.job_url || selectedJobUrl;
-    try {
-      await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          status: newStatus,
-          jobUrl: targetJobUrl,
-          proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url,
-          proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at,
-          proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url,
-          proof_email_captured_at:
-            updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
-          email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
-          proof_email_json: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json,
-          proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
-          proof_failed_captured_at:
-            updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
-          dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url,
-          error_message: updatedPayload?.error || updatedPayload?.errorMessage || updatedPayload?.error_message,
-        }),
-      });
-    } catch (err) {
-      console.warn(`[App] Failed to persist status change ${newStatus} to backend:`, err);
+    if (persist) {
+      const appId = application.id || application.applywizzId || application.applywizz_id;
+      const targetJobUrl = application.jobUrl || application.job_url || selectedJobUrl;
+      try {
+        await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({
+            status: newStatus,
+            jobUrl: targetJobUrl,
+            proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url,
+            proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at,
+            proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url,
+            proof_email_captured_at:
+              updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
+            email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
+            proof_email_json: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json,
+            proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
+            proof_failed_captured_at:
+              updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
+            dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url,
+            error_message: updatedPayload?.error || updatedPayload?.errorMessage || updatedPayload?.error_message,
+          }),
+        });
+      } catch (err) {
+        console.warn(`[App] Failed to persist status change ${newStatus} to backend:`, err);
+      }
     }
 
     if (newStatus === 'APPLIED' || newStatus === 'FAILED' || newStatus === 'APPLYING') {

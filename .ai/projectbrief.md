@@ -1,0 +1,31 @@
+# Project Brief — ApplyWizz Greenhouse Automation
+
+## What This Is
+Internal bulk job-application automation platform. Operators upload a CSV of candidate→job-URL mappings; the system scans Greenhouse forms, resolves answers per candidate, and submits applications autonomously via Playwright. Operators review and approve via a split-screen dashboard.
+
+## Target Users
+- **Operators** — primary users; review/approve/submit applications via dashboard
+- **Managers / COO** — analytics dashboard (in progress); need visibility into throughput, success rates, candidate statuses
+
+## Core Problem Solved
+Manually applying to hundreds of Greenhouse ATS postings per candidate is operationally unscalable. This system automates scanning form structure, resolving per-candidate answers, and submitting — with operator oversight at the review gate.
+
+## Hard Constraints (Non-Negotiable)
+- Target ATS: **Greenhouse only** (`boards.greenhouse.io`, `job-boards.greenhouse.io`, `app.greenhouse.io`, custom subdomains, `grnh.se` shortlinks)
+- Submission method: **Playwright browser automation only** — no Greenhouse API
+- Max questions per job: **< 23** (config: `MAX_JOB_QUESTIONS=23`) — jobs with ≥ 23 fields are skipped until explicitly lifted
+- Candidate identity source: **ApplyWizz API** (`https://www.apply-wizz.me/api/get-client-details?applywizz_id=AWL-****`)
+- Deployment: **Railway** (single service, Docker)
+
+## Explicit Out of Scope (V3+)
+- CAPTCHA automated bypass (CapSolver / 2Captcha) — currently operator-manual
+- Multi-tenant RBAC / Supabase Row-Level Security
+- Residential proxy pool
+- Lifting the `< 23` question restriction (one config flag when ready)
+
+## Input / Output
+| Input | Output |
+|---|---|
+| CSV: `applywizz_id, job_url` pairs | `candidate_applications` rows in Supabase |
+| ApplyWizz API (candidate profile JSON + resume PDF) | Web proof screenshots in `proofs_web` Supabase bucket |
+| Greenhouse ATS pages (DOM via Playwright) | Status: `APPLIED` / `FAILED` / `CAPTCHA_REQUIRED` |

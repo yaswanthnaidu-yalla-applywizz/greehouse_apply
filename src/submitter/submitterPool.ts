@@ -28,6 +28,7 @@ interface QueuedSubmission {
 export class SubmitterPool {
   private readonly pollIntervalMs: number;
   private readonly lanes: QueuedSubmission[][] = [[], [], []];
+  private readonly inFlightApplicationIds = new Set<string>();
   private nextWorkerIndex = 0;
   private pendingAssignments = 0;
   private isRunning = false;
@@ -72,10 +73,17 @@ export class SubmitterPool {
         const application = await getNextQueuedApplicationForRoundRobin();
         if (application) {
           const appRef = application.id || application.applywizz_id;
-          console.log(`[Queue] Dequeued app-${appRef} for submitter pool`);
-          void this.enqueue(application).catch((error: Error) => {
-            console.error(`[Submitter] Queue assignment failed: ${error.message}`);
-          });
+          if (this.inFlightApplicationIds.has(appRef)) {
+            console.warn(
+              `[Queue] Skipping app-${appRef} — already in flight on another worker (duplicate dequeue).`
+            );
+          } else {
+            console.log(`[Queue] Dequeued app-${appRef} for submitter pool`);
+            this.inFlightApplicationIds.add(appRef);
+            void this.enqueue(application).catch((error: Error) => {
+              console.error(`[Submitter] Queue assignment failed: ${error.message}`);
+            });
+          }
           continue;
         }
       } catch (error) {
@@ -130,6 +138,7 @@ export class SubmitterPool {
         this.emitFailure(application, message);
         work.reject(error instanceof Error ? error : new Error(message));
       } finally {
+        this.inFlightApplicationIds.delete(applicationId);
         this.pendingAssignments -= 1;
         console.log(`[Submitter] Worker ${workerNumber} released ${applicationId} | ${this.getIdleCount()} idle.`);
       }

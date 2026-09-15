@@ -3,12 +3,15 @@
  *
  * Directly queries Zoho Mail inbox via the connector REST API:
  * 1. Filters messages by submission timestamp window:
- *    (received_time >= submission_time - 5min AND received_time <= submission_time + 5min)
- * 2. Filters by company:
+ *    (received_time >= submission_time AND received_time <= submission_time + 10min)
+ * 2. Filters to Greenhouse confirmation mail only:
+ *    from CONTAINS greenhouse-mail.io AND subject looks like an application confirmation.
+ *    OTP / security-code mail is always rejected.
+ * 3. Filters by company:
  *    (from_address CONTAINS company_email OR subject CONTAINS company_name)
- * 3. Extracts structured JSON (from, to, subject, received_at, body_text, body_html).
+ * 4. Extracts structured JSON (from, to, subject, received_at, body_text, body_html).
  *    NEVER takes screenshots — returns pure email JSON payload.
- * 4. Gracefully handles zero-match cases.
+ * 5. Gracefully handles zero-match cases.
  */
 
 import { config } from '../config/env.js';
@@ -66,6 +69,15 @@ interface RawZohoMessageResponse {
   };
 }
 
+/** Greenhouse sends both confirmation and OTP mail from this domain. */
+const GREENHOUSE_PROOF_SENDER = 'greenhouse-mail.io';
+
+/** Subject shapes that identify an application confirmation email. */
+const CONFIRMATION_SUBJECT_PATTERN = /thank you|application received|application confirmed/i;
+
+/** Subject shapes that identify an OTP / security-code email — never valid proof. */
+const OTP_SUBJECT_PATTERN = /security code|\botp\b|one[-\s]?time (pass)?code/i;
+
 function stripHtml(html: string): string {
   if (!html) return '';
   return html
@@ -95,9 +107,11 @@ function normalizeCompanyName(name: string): string {
 
 /**
  * Queries Zoho Mail connector API to find an application confirmation email
- * matching both:
- * 1. Timestamp window: [submission_time - 5min, submission_time + 5min]
- * 2. Company criteria: (from_address CONTAINS company_email OR subject CONTAINS company_name)
+ * matching all of:
+ * 1. Timestamp window: [submission_time, submission_time + 10min]
+ * 2. Greenhouse confirmation mail: from CONTAINS greenhouse-mail.io AND a confirmation
+ *    subject; OTP / security-code subjects are rejected.
+ * 3. Company criteria: (from_address CONTAINS company_email OR subject CONTAINS company_name)
  */
 export async function queryZohoConfirmationEmail(
   options: ZohoEmailQueryOptions
@@ -124,11 +138,14 @@ export async function queryZohoConfirmationEmail(
     };
   }
 
-  // Parse submission time and calculate strict +/- 5 minute window
+  // Parse submission time. Proof mail must arrive at or after submission — never before,
+  // otherwise the OTP mail that preceded the submit gets captured as proof.
   const subDate = new Date(options.submissionTime);
   const submissionMs = !Number.isNaN(subDate.getTime()) ? subDate.getTime() : Date.now();
-  const WINDOW_MS = 5 * 60 * 1000; // 5 minutes
-  const minTimeMs = submissionMs - WINDOW_MS;
+  // Matches the 10-minute retry budget of emailProofPoller, so a late confirmation
+  // that still arrives while the poller is running is accepted.
+  const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+  const minTimeMs = submissionMs;
   const maxTimeMs = submissionMs + WINDOW_MS;
 
   const minTimeIso = new Date(minTimeMs).toISOString();
@@ -210,8 +227,9 @@ export async function queryZohoConfirmationEmail(
       };
     }
 
-    // Iterate through messages to find an exact match satisfying BOTH conditions:
-    // (received_time >= submission_time - 5min AND received_time <= submission_time + 5min)
+    // Iterate through messages to find an exact match satisfying ALL conditions:
+    // (received_time >= submission_time AND received_time <= submission_time + 10min)
+    // AND from CONTAINS greenhouse-mail.io AND subject is a confirmation (not an OTP)
     // AND (from_address CONTAINS company_email OR subject CONTAINS company_name)
     let matchingMsg: RawZohoInboxMessage | null = null;
     let matchingReceivedMs = 0;
@@ -222,17 +240,31 @@ export async function queryZohoConfirmationEmail(
         continue;
       }
 
-      // 1. Strict Timestamp Filter: within +/- 5 minutes of submission
+      const fromAddress = (msg.from || '').toLowerCase();
+      const subject = (msg.subject || '').toLowerCase();
+      const normSubject = normalizeCompanyName(msg.subject || '');
+
+      // 1. Never accept OTP / security-code mail as proof
+      if (OTP_SUBJECT_PATTERN.test(subject)) {
+        console.log(`[Zoho Connector] 🚫 Rejected email (OTP/security code): ${msg.subject || ''}`);
+        continue;
+      }
+
+      // 2. Sender + subject gate: Greenhouse confirmation mail only
+      if (!fromAddress.includes(GREENHOUSE_PROOF_SENDER)) {
+        continue;
+      }
+      if (!CONFIRMATION_SUBJECT_PATTERN.test(subject)) {
+        continue;
+      }
+
+      // 3. Strict Timestamp Filter: at or after submission, within 10 minutes
       const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
       if (!isTimeMatch) {
         continue;
       }
 
-      const fromAddress = (msg.from || '').toLowerCase();
-      const subject = (msg.subject || '').toLowerCase();
-      const normSubject = normalizeCompanyName(msg.subject || '');
-
-      // 2. Company Filter:
+      // 4. Company Filter:
       // from_address CONTAINS company_email OR subject CONTAINS company_name
       const fromContainsCompanyEmail = Boolean(
         companyEmail && companyEmail.length > 3 && fromAddress.includes(companyEmail)
@@ -260,14 +292,14 @@ export async function queryZohoConfirmationEmail(
     // Zero-match case handled gracefully
     if (!matchingMsg) {
       console.log(
-        `[Zoho Connector] ⚠️ Zero matches found for ${candidateEmail} among ${messages.length} messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
+        `[Zoho Connector] ⚠️ Zero confirmation matches for ${candidateEmail} among ${messages.length} messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
       );
       return {
         success: false,
         matched: false,
         email: null,
         scannedCount: messages.length,
-        errorMessage: `Confirmation email not found within 5 minutes of submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
+        errorMessage: `Greenhouse confirmation email not found within 10 minutes after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
         window: { minTimeIso, maxTimeIso, submissionTimeIso },
       };
     }
@@ -315,7 +347,7 @@ export async function queryZohoConfirmationEmail(
     const receivedAtIso = new Date(matchingReceivedMs).toISOString();
 
     console.log(
-      `[Zoho Connector] 🎉 Verified confirmation email: "${fullSubject}" from <${fullFrom}> received at ${receivedAtIso}`
+      `[Zoho Connector] 🎉 Proof email captured: ${fullSubject} from ${fullFrom} at ${receivedAtIso}`
     );
 
     const emailResult: EmailProofJson = {

@@ -1,0 +1,14 @@
+2026-09-14 session-start scan: files=0 parsed=0
+2026-09-15 session-end: docs updated (progress, activeContext, systemPatterns, techContext); observation 0001 logged
+2026-09-15 session-start scan: files=1 parsed=1
+2026-09-15 session-start scan: files=1 parsed=1
+2026-09-15 deliverable flush: no observations (sponsorship debug run)
+2026-09-15 deliverable flush: observation 0002 actioned (Zoho OTP gate + extractor patterns); evidence saved to skill-observations/evidence/
+2026-09-15 session-start scan: files=2 parsed=2
+2026-09-15 deliverable flush: observation 0003 logged (double-submission diagnosis contradicts prescribed fix)
+2026-09-15 deliverable flush: duplicate-submission fix shipped (route in-flight guard + pool inFlightApplicationIds); docs updated
+2026-09-15 deliverable flush: poll write-back removed (persist flag, both pollers); no new observations (0003 already covers the diagnosis finding)
+2026-09-15 deliverable flush: dashboard .tsx tree 35 -> 0 type errors (4 root causes); src typecheck clean; no new observations
+2026-09-15 deliverable flush: dashboard typecheck enforced (dashboard/tsconfig.json + chained script, positive control verified); docs updated
+2026-09-15 session end: .ai docs updated per AGENTS.md (activeContext focus/blockers/decisions, progress shipped + In Progress row, techContext commands + key files, systemPatterns submission rules)
+2026-09-15 session end: observations 0004 and 0005 logged; 0001-0003 unchanged (0001/0002 actioned today, archive tomorrow; 0003 open)

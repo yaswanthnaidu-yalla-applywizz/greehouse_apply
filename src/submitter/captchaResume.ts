@@ -139,7 +139,6 @@ export async function resumeSubmission(applicationId: string): Promise<LiveSubmi
       console.log(`[Captcha Resume] 📧 Checking for immediate confirmation email after CAPTCHA resume...`);
       const emailProof = await captureAndSaveEmailProof(application, {
         timeoutMs: 15000,
-        sinceTimestamp: new Date(submittedAt).getTime() - 2 * 60 * 1000,
       }).catch(() => null);
 
       if (emailProof) {

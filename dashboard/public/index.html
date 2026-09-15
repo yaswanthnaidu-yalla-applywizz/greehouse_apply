@@ -231,7 +231,7 @@
               const statusChanged = appData.status && appData.status !== statusRef.current;
               if (statusChanged || emailStatusChanged || emailProofArrived || webProofArrived || failedProofArrived) {
                 if (onStatusChange) {
-                  onStatusChange(appData.status || statusRef.current, appData);
+                  onStatusChange(appData.status || statusRef.current, appData, { persist: false });
                 }
               }
             }
@@ -414,7 +414,7 @@
               setEmailProof(resolvedEmail);
             }
             if (onStatusChange) {
-              onStatusChange(appData.status || applicationStatus, appData);
+              onStatusChange(appData.status || applicationStatus, appData, { persist: false });
             }
           }
         } catch (err) {
@@ -2717,6 +2717,7 @@
       const [failureAlert, setFailureAlert] = useState(null);
 
       const [isRefreshing, setIsRefreshing] = useState(false);
+      const [ingestRun, setIngestRun] = useState(null);
       const [notifications, setNotifications] = useState([]);
       const [readNotifIds, setReadNotifIds] = useState(() => {
         try {
@@ -2928,6 +2929,48 @@
           setIsRefreshing(false);
         }
       };
+
+      const handleStartPipeline = async () => {
+        if (ingestRun?.running) return;
+        setIngestRun({ running: true, startedAt: new Date().toISOString() });
+        try {
+          const res = await fetch('/api/admin/trigger-ingest-from-storage', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setIngestRun({ ...data, running: Boolean(data.running), error: data.error || `Start failed (HTTP ${res.status})` });
+          }
+        } catch (err) {
+          setIngestRun({ running: false, error: err.message || 'Could not reach the server.' });
+        }
+      };
+
+      // Poll the ingestion status while a run is in flight; the pipeline takes minutes.
+      useEffect(() => {
+        if (!ingestRun?.running) return;
+        let cancelled = false;
+        const checkStatus = async () => {
+          try {
+            const res = await fetch('/api/admin/ingest-status', { headers: getAuthHeaders() });
+            if (!res.ok || cancelled) return;
+            const status = await res.json();
+            if (cancelled) return;
+            setIngestRun(status);
+            if (!status.running) {
+              await fetchInitialData(false);
+            }
+          } catch (err) {
+            console.warn('Ingest status poll failed:', err);
+          }
+        };
+        const interval = setInterval(checkStatus, 5000);
+        return () => {
+          cancelled = true;
+          clearInterval(interval);
+        };
+      }, [ingestRun?.running, fetchInitialData]);
 
       useEffect(() => {
         if (!currentUser) return;
@@ -3222,8 +3265,11 @@
         });
       };
 
-      const handleStatusChange = async (newStatus, updatedPayload) => {
+      const handleStatusChange = async (newStatus, updatedPayload, options = {}) => {
         if (!application) return;
+        // Poll-originated updates only refresh the display — echoing a polled status
+        // back would requeue a submission a worker is still running.
+        const persist = options.persist !== false;
         setApplication((prev) => ({
           ...prev,
           status: newStatus,
@@ -3267,29 +3313,31 @@
         }
 
         // Persist status change to Supabase immediately
-        const appId = application.id || application.applywizzId || application.applywizz_id;
-        const targetJobUrl = application.jobUrl || application.job_url || selectedJobUrl;
-        try {
-          await fetch(`/api/applications/${encodeURIComponent(appId)}/status`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-            body: JSON.stringify({
-              status: newStatus,
-              jobUrl: targetJobUrl,
-              proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url,
-              proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at,
-              proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url,
-              proof_email_captured_at: updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
-              email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
-              proof_email_json: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json,
-              proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
-              proof_failed_captured_at: updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
-              dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url,
-              error_message: updatedPayload?.error || updatedPayload?.errorMessage || updatedPayload?.error_message,
-            }),
-          });
-        } catch (err) {
-          console.warn('[App] Failed to persist status change to backend:', err);
+        if (persist) {
+          const appId = application.id || application.applywizzId || application.applywizz_id;
+          const targetJobUrl = application.jobUrl || application.job_url || selectedJobUrl;
+          try {
+            await fetch(`/api/applications/${encodeURIComponent(appId)}/status`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({
+                status: newStatus,
+                jobUrl: targetJobUrl,
+                proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url,
+                proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at,
+                proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url,
+                proof_email_captured_at: updatedPayload?.proofEmailCapturedAt || updatedPayload?.proof_email_captured_at,
+                email_proof_status: updatedPayload?.emailProofStatus || updatedPayload?.email_proof_status,
+                proof_email_json: updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json,
+                proof_failed_url: updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url,
+                proof_failed_captured_at: updatedPayload?.proofFailedCapturedAt || updatedPayload?.proof_failed_captured_at,
+                dry_run_screenshot_url: updatedPayload?.screenshotUrl || updatedPayload?.dry_run_screenshot_url,
+                error_message: updatedPayload?.error || updatedPayload?.errorMessage || updatedPayload?.error_message,
+              }),
+            });
+          } catch (err) {
+            console.warn('[App] Failed to persist status change to backend:', err);
+          }
         }
 
         if (newStatus === 'APPLIED' || newStatus === 'FAILED' || newStatus === 'APPLYING') {
@@ -3394,6 +3442,18 @@
                     <span>🔮 ai: {stats.aiPercentage}%</span>
                   </div>
                 </div>
+              )}
+
+              {isAdminSession() && (
+                <button
+                  type="button"
+                  onClick={handleStartPipeline}
+                  disabled={Boolean(ingestRun?.running)}
+                  title="Ingest the latest CSV from Supabase Storage and run the full pipeline"
+                  className="text-xs bg-[#9AC89A] hover:bg-[#7FB87F] text-[#1E4620] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all disabled:opacity-60"
+                >
+                  {ingestRun?.running ? 'Running…' : '▶ Start'}
+                </button>
               )}
 
               <button
@@ -3610,6 +3670,36 @@
               >
                 ✕
               </button>
+            </div>
+          )}
+
+          {/* Storage CSV Ingestion Banner (admin "Start" run) */}
+          {ingestRun && (ingestRun.running || ingestRun.message || ingestRun.error) && (
+            <div
+              className={`border-b-2 border-[#1A1A2E] px-6 py-2 text-xs font-bold flex items-center justify-between shadow-sm flex-shrink-0 ${
+                ingestRun.error ? 'bg-[#FEE2E2] text-[#991B1B]' : 'bg-[#E0F2E9] text-[#1E4620]'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={ingestRun.running ? 'inline-block animate-spin' : 'inline-block'}>
+                  {ingestRun.running ? '◌' : ingestRun.error ? '🚨' : '✅'}
+                </span>
+                <span>
+                  {ingestRun.running
+                    ? 'Pipeline running — ingesting the latest CSV from Supabase Storage…'
+                    : ingestRun.error || ingestRun.message}
+                </span>
+              </div>
+              {!ingestRun.running && (
+                <button
+                  type="button"
+                  onClick={() => setIngestRun(null)}
+                  className="text-sm font-black px-1.5 py-0.5 rounded hover:bg-white/50 transition-colors"
+                  title="Dismiss"
+                >
+                  ✕
+                </button>
+              )}
             </div>
           )}
 

@@ -34,7 +34,11 @@ export interface FormRendererProps {
   /** Callback fired when an operator manually modifies a field */
   onFieldUpdate?: (updatedField: ResolvedField) => void;
   /** Callback fired when status transitions (e.g. from polling or submission) */
-  onStatusChange?: (newStatus: ApplicationStatus, updatedApp?: any) => void;
+  onStatusChange?: (
+    newStatus: ApplicationStatus,
+    updatedApp?: any,
+    options?: { persist?: boolean }
+  ) => void;
 }
 
 export const FormRenderer: React.FC<FormRendererProps> = ({

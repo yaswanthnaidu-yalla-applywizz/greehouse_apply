@@ -17,7 +17,11 @@ export interface ApplicationStatusBadgeProps {
   emailProofStatus?: 'pending' | 'captured' | 'timed_out' | null;
   applicationId?: string;
   jobUrl?: string;
-  onStatusChange?: (newStatus: ApplicationStatus, updatedApp: any) => void;
+  onStatusChange?: (
+    newStatus: ApplicationStatus,
+    updatedApp: any,
+    options?: { persist?: boolean }
+  ) => void;
   className?: string;
   apiBaseUrl?: string;
 }
@@ -94,7 +98,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
               );
             }
             if (onStatusChange) {
-              onStatusChange((appData.status || statusRef.current) as ApplicationStatus, appData);
+              onStatusChange((appData.status || statusRef.current) as ApplicationStatus, appData, {
+                persist: false,
+              });
             }
           }
         }

@@ -360,6 +360,17 @@ export function loadArtifacts(
   }
 }
 
+/** Outcome of the most recent operator-triggered storage CSV ingestion. */
+interface IngestRunState {
+  running: boolean;
+  startedAt?: string;
+  finishedAt?: string;
+  processedCount?: number;
+  processedFile?: string;
+  message?: string;
+  error?: string;
+}
+
 /**
  * Creates and configures the Express application instance.
  *
@@ -368,6 +379,9 @@ export function loadArtifacts(
 export function createServer(outputDir: string = config.OUTPUT_DIR): express.Application {
   loadArtifacts(outputDir, { log: true });
   const app = express();
+
+  // State of the operator-triggered storage CSV ingestion run (one at a time).
+  let ingestRun: IngestRunState = { running: false };
 
   app.use(cors());
   app.use(express.json());
@@ -512,19 +526,66 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   /**
    * POST /api/admin/trigger-ingest-from-storage
    * Ingests newly uploaded CSV files from the Supabase Storage dropzone.
+   *
+   * The pipeline takes minutes, so the run happens in the background and the caller
+   * polls GET /api/admin/ingest-status for the outcome.
    */
-  app.post('/api/admin/trigger-ingest-from-storage', async (_req: Request, res: Response) => {
+  app.post('/api/admin/trigger-ingest-from-storage', async (req: AuthenticatedRequest, res: Response) => {
+    if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
+      res.status(403).json({ error: 'Forbidden: only admins can start the pipeline.' });
+      return;
+    }
+
+    if (ingestRun.running) {
+      res.status(409).json({
+        error: 'Ingestion is already running.',
+        ...ingestRun,
+      });
+      return;
+    }
+
+    const startedAt = new Date().toISOString();
+    ingestRun = { running: true, startedAt };
+    console.log(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
+    res.status(202).json({ started: true, startedAt });
+
     try {
       const { ingestCsvFromStorage } = await import('../scanner/storageCsvIngestion.js');
       const result = await ingestCsvFromStorage();
       if (result.processedCount > 0) {
         loadArtifacts(outputDir);
       }
-      res.json(result);
+      ingestRun = {
+        running: false,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        processedCount: result.processedCount,
+        processedFile: result.processedFile,
+        message: result.message,
+      };
+      console.log(`[Admin] ✅ Storage CSV ingestion finished: ${result.message}`);
     } catch (err: any) {
-      console.error('[Admin] Storage CSV ingestion failed:', err);
-      res.status(500).json({ error: err.message || 'Storage ingestion failed' });
+      const message = err.message || 'Storage ingestion failed';
+      ingestRun = {
+        running: false,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        error: message,
+      };
+      console.error('[Admin] ❌ Storage CSV ingestion failed:', err);
     }
+  });
+
+  /**
+   * GET /api/admin/ingest-status
+   * Reports the state of the most recent storage CSV ingestion run.
+   */
+  app.get('/api/admin/ingest-status', (req: AuthenticatedRequest, res: Response) => {
+    if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
+      res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
+      return;
+    }
+    res.json(ingestRun);
   });
 
   /**

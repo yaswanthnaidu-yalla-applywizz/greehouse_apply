@@ -272,7 +272,7 @@ export async function captureJobSubmittedScreenshot(
  */
 export async function captureAndSaveEmailProof(
   application: ApplicationRow | string,
-  options: { timeoutMs?: number; isManual?: boolean; sinceTimestamp?: number } = {}
+  options: { timeoutMs?: number; isManual?: boolean } = {}
 ): Promise<EmailProofJson | null> {
   const storageKey = resolveStorageKey(application);
   let appRow: ApplicationRow | null = null;
@@ -378,7 +378,7 @@ export async function captureAndSaveEmailProof(
       return result.email;
     } else {
       console.warn(
-        `[Email Proof] ⚠️ Confirmation email not found within ±5m window for ${storageKey}: ${result.errorMessage}`
+        `[Email Proof] ⚠️ Confirmation email not found within 10m post-submit window for ${storageKey}: ${result.errorMessage}`
       );
       await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
       return null;
