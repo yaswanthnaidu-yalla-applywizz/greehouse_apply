@@ -101,7 +101,9 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
             'EXPIRED',
             'OTP_REQUIRED',
             'CAPTCHA_TIMEOUT',
-            'EMAIL_PROOF_PENDING'
+            'EMAIL_PROOF_PENDING',
+            'EMAIL_UNVERIFIED',
+            'SKIPPED'
         )),
     submission_order INTEGER,                            -- Global FIFO sequence number for daemon queue
     assigned_ca_email TEXT,                              -- Assigned Campus Ambassador email for user isolation

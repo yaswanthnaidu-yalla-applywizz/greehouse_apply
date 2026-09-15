@@ -70,7 +70,8 @@ ALTER TABLE candidate_applications
     'CAPTCHA_TIMEOUT',
     'CAPTCHA_REQUIRED',
     'EMAIL_PROOF_PENDING',
-    'EMAIL_UNVERIFIED'
+    'EMAIL_UNVERIFIED',
+    'SKIPPED'
   ));
 
 -- ----------------------------------------------------------------------------

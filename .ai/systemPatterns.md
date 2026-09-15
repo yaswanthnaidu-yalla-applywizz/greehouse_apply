@@ -58,8 +58,9 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
                                         → OTP_REQUIRED (renamed from CAPTCHA in migration 002)
                 → DRY_RUN_COMPLETE
                 → EXPIRED
+                → SKIPPED (field_count >= MAX_JOB_QUESTIONS; migration 014)
 ```
-`EMAIL_UNVERIFIED` added in migration **013** — operator may resubmit from dashboard; not a hard failure.
+`EMAIL_UNVERIFIED` added in migration **013** — operator may resubmit from dashboard; not a hard failure. `SKIPPED` (014) is written at resolve time for over-cap jobs.
 
 ## Answer Source Tags (Dashboard Badges)
 | Tag | Color | Meaning |

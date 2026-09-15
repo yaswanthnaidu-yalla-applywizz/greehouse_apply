@@ -31,7 +31,8 @@ export type ApplicationStatus =
   | 'CAPTCHA_TIMEOUT'
   | 'CAPTCHA_REQUIRED'
   | 'EMAIL_PROOF_PENDING'
-  | 'EMAIL_UNVERIFIED';
+  | 'EMAIL_UNVERIFIED'
+  | 'SKIPPED';
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
 
@@ -117,8 +118,9 @@ export async function upsertApplication(
     updated_at: new Date().toISOString(),
   };
 
-  // Segregator upserts with resolved_fields: [] — never wipe a populated snapshot.
+  // Segregator upserts with resolved_fields: [] — never wipe a populated snapshot (except explicit SKIPPED).
   if (
+    payload.status !== 'SKIPPED' &&
     Array.isArray(payload.resolved_fields) &&
     payload.resolved_fields.length === 0 &&
     payload.applywizz_id &&
