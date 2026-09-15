@@ -15,6 +15,8 @@ import {
   updateStatus,
   hydrateApplicationProofUrls,
   serializeApplicationDto,
+  hydrateAndPersistApplicationFields,
+  type ApplicationRow,
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { upsertAnswer } from '../../db/qaBank.js';
@@ -612,6 +614,7 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
     }
 
     app = await hydrateApplicationProofUrls(app);
+    app = await hydrateAndPersistApplicationFields(app as ApplicationRow);
 
     const companyName = app.company_name || app.companyName || null;
     const jobTitle = app.job_title || app.jobTitle || null;

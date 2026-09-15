@@ -15,6 +15,8 @@ import type { CandidateDetail } from './types.js';
 import {
   candidateDetailMatchesSelection,
   filterJobsForCandidate,
+  jobCardCompanyLabel,
+  jobCardTitleLabel,
 } from '../src/dashboard/candidateQueueFilter.js';
 
 export interface JobQueueViewProps {
@@ -124,7 +126,9 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             selectedJobUrl === job.rawUrl ||
             selectedJobUrl === job.canonicalUrl;
 
-          const initial = job.companyName ? job.companyName[0].toUpperCase() : 'G';
+          const cardCompany = jobCardCompanyLabel(job);
+          const cardTitle = jobCardTitleLabel(job);
+          const initial = cardCompany ? cardCompany[0].toUpperCase() : 'G';
 
           return (
             <button
@@ -144,7 +148,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                     {initial}
                   </span>
                   <span className="text-xs font-bold text-[#1A1A2E] truncate">
-                    {job.companyName || 'Company'}
+                    {cardCompany}
                   </span>
                 </div>
 
@@ -154,7 +158,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
               {/* Job Title & Queue Priority Badge */}
               <div className="flex items-center justify-between gap-1.5 mb-1">
                 <div className="text-xs text-[#1A1A2E] font-medium truncate">
-                  {job.jobTitle || 'Job Application'}
+                  {cardTitle}
                 </div>
                 {Boolean((job as any).has_manual_edits || job.hasManualEdits) && (
                   <span

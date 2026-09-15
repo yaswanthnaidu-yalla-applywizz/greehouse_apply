@@ -40,3 +40,39 @@ export function candidateDetailMatchesSelection(
   const detailId = detail.applywizzId || detail.applywizz_id;
   return isSameApplywizzId(detailId, selectedApplywizzId);
 }
+
+type JobCardTemplateFields = {
+  companyName?: string | null;
+  company_name?: string | null;
+  jobTitle?: string | null;
+  job_title?: string | null;
+  scannedCompanyName?: string | null;
+  scanned_company_name?: string | null;
+  scannedJobTitle?: string | null;
+  scanned_job_title?: string | null;
+  templateCompanyName?: string | null;
+  template_company_name?: string | null;
+  templateJobTitle?: string | null;
+  template_job_title?: string | null;
+};
+
+/** Prefer scanned_job_templates fields enriched on the job row (see dashboard index.html). */
+export function jobCardCompanyLabel(job: JobCardTemplateFields): string {
+  const fromTemplate =
+    job.scannedCompanyName ||
+    job.scanned_company_name ||
+    job.templateCompanyName ||
+    job.template_company_name;
+  if (fromTemplate) return fromTemplate;
+  return job.companyName || job.company_name || 'Company';
+}
+
+export function jobCardTitleLabel(job: JobCardTemplateFields): string {
+  const fromTemplate =
+    job.scannedJobTitle ||
+    job.scanned_job_title ||
+    job.templateJobTitle ||
+    job.template_job_title;
+  if (fromTemplate) return fromTemplate;
+  return job.jobTitle || job.job_title || 'Job Application';
+}

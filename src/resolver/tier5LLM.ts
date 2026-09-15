@@ -3,7 +3,11 @@
  * Source Tag: 'ai', resolvedByTier: 5
  */
 
-import { LLMSynthesizer, type JobContext } from './llmSynthesizer.js';
+import {
+  LLMSynthesizer,
+  getEffectiveFieldOptions,
+  type JobContext,
+} from './llmSynthesizer.js';
 import { upsertAnswer } from '../db/qaBank.js';
 import { generateFingerprint } from './fingerprint.js';
 import { profileRowToCandidateProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
@@ -45,6 +49,11 @@ export async function resolveTier5(
   };
 
   const adaptedProfile = toCandidateProfile(candidateProfile);
+  const effectiveOptions = getEffectiveFieldOptions(field);
+  const fieldForLlm: ScannedField =
+    effectiveOptions && (!field.options || field.options.length === 0)
+      ? { ...field, options: effectiveOptions }
+      : field;
   const fingerprint = generateFingerprint(field.label, field.type);
   const combined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`;
 
@@ -74,7 +83,7 @@ export async function resolveTier5(
         : undefined);
 
     const rawResult = await synthesizer.synthesizeAnswer(
-      field,
+      fieldForLlm,
       adaptedProfile,
       resumeText,
       context,

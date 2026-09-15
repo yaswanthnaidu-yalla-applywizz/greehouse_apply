@@ -1351,7 +1351,9 @@
             }).map((job, idx) => {
               const jobKey = job.canonicalUrl || job.rawUrl;
               const isSelected = selectedJobUrl === jobKey || selectedJobUrl === job.rawUrl || selectedJobUrl === job.canonicalUrl;
-              const initial = job.companyName ? job.companyName[0].toUpperCase() : 'G';
+              const cardCompany = jobCardCompanyLabel(job);
+              const cardTitle = jobCardTitleLabel(job);
+              const initial = cardCompany ? cardCompany[0].toUpperCase() : 'G';
 
               return (
                 <button
@@ -1370,14 +1372,14 @@
                         {initial}
                       </span>
                       <span className="text-xs font-bold text-[#1A1A2E] truncate">
-                        {job.companyName || 'Company'}
+                        {cardCompany}
                       </span>
                     </div>
                     <DifficultyBadge fieldsCount={job.fieldsCount} />
                   </div>
 
                   <div className="text-xs text-[#1A1A2E] font-medium truncate mb-1">
-                    {job.jobTitle || 'Job Application'}
+                    {cardTitle}
                   </div>
 
                   <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#1A1A2E]/20">
@@ -2607,6 +2609,119 @@
       return isSameApplywizzId(detailId, selectedApplywizzId);
     }
 
+    /** Job card labels: prefer scanned_job_templates (by job_url), not candidate_applications.company_name. */
+    function jobCardCompanyLabel(job) {
+      const fromTemplate =
+        job.scannedCompanyName ||
+        job.scanned_company_name ||
+        job.templateCompanyName ||
+        job.template_company_name;
+      if (fromTemplate) return fromTemplate;
+      return job.companyName || job.company_name || 'Company';
+    }
+
+    function jobCardTitleLabel(job) {
+      const fromTemplate =
+        job.scannedJobTitle ||
+        job.scanned_job_title ||
+        job.templateJobTitle ||
+        job.template_job_title;
+      if (fromTemplate) return fromTemplate;
+      return job.jobTitle || job.job_title || 'Job Application';
+    }
+
+    async function getSupabaseBrowserClient(authHeaders) {
+      if (!window.supabase?.createClient) return null;
+      try {
+        const res = await fetch('/api/config/supabase-realtime', { headers: authHeaders || {} });
+        if (!res.ok) return null;
+        const cfg = await res.json();
+        if (!cfg.enabled || !cfg.url || !cfg.anonKey) return null;
+        const clientKey = `${cfg.url}::${cfg.anonKey.slice(0, 8)}`;
+        if (!supabaseRealtimeClient || supabaseRealtimeClientKey !== clientKey) {
+          supabaseRealtimeClient = window.supabase.createClient(cfg.url, cfg.anonKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+            realtime: { params: { eventsPerSecond: 10 } },
+          });
+          supabaseRealtimeClientKey = clientKey;
+        }
+        return supabaseRealtimeClient;
+      } catch (err) {
+        console.warn('[Dashboard] Supabase browser client unavailable:', err);
+        return null;
+      }
+    }
+
+    function collectJobUrlVariants(job) {
+      const urls = [];
+      for (const u of [job.canonicalUrl, job.rawUrl, job.job_url, job.jobUrl]) {
+        if (!u) continue;
+        urls.push(u);
+        try {
+          urls.push(decodeURIComponent(u));
+        } catch {
+          /* ignore */
+        }
+      }
+      return urls;
+    }
+
+    function resolveScannedTemplateForJob(job, byUrl) {
+      const jobUrls = collectJobUrlVariants(job);
+      for (const u of jobUrls) {
+        const hit = byUrl.get(u);
+        if (hit) return hit;
+      }
+      for (const [tUrl, row] of byUrl) {
+        if (jobUrls.some((ju) => ju && (ju === tUrl || ju.includes(tUrl) || tUrl.includes(ju)))) {
+          return row;
+        }
+      }
+      return null;
+    }
+
+    async function enrichJobsWithScannedTemplates(jobs, authHeaders) {
+      if (!Array.isArray(jobs) || jobs.length === 0) return jobs;
+      const client = await getSupabaseBrowserClient(authHeaders);
+      if (!client) return jobs;
+
+      const urlSet = new Set();
+      for (const job of jobs) {
+        for (const u of collectJobUrlVariants(job)) {
+          urlSet.add(u);
+        }
+      }
+      const urls = [...urlSet].filter(Boolean);
+      if (urls.length === 0) return jobs;
+
+      const { data, error } = await client
+        .from('scanned_job_templates')
+        .select('id, job_url, company_name, job_title')
+        .in('job_url', urls);
+
+      if (error) {
+        console.warn('[Dashboard] scanned_job_templates lookup failed:', error.message);
+        return jobs;
+      }
+      if (!data?.length) return jobs;
+
+      const byUrl = new Map();
+      for (const row of data) {
+        if (row.job_url) byUrl.set(row.job_url, row);
+      }
+
+      return jobs.map((job) => {
+        const template = resolveScannedTemplateForJob(job, byUrl);
+        if (!template) return job;
+        return {
+          ...job,
+          templateId: template.id ?? job.templateId ?? job.template_id,
+          scannedCompanyName: template.company_name || null,
+          scannedJobTitle: template.job_title || null,
+        };
+      });
+    }
+
     // -------------------------------------------------------------
     // Supabase Realtime merge helpers (candidate_applications)
     // -------------------------------------------------------------
@@ -3129,10 +3244,15 @@
 
             const rawJobs = Array.isArray(jobsPayload?.jobs) ? jobsPayload.jobs : [];
             const candidateJobs = filterJobsForCandidate(rawJobs, requestedId);
+            const jobsWithTemplates = await enrichJobsWithScannedTemplates(
+              candidateJobs,
+              getAuthHeaders()
+            );
+            if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
             setCandidateDetail({
               ...detail,
               applywizzId: requestedId,
-              jobs: candidateJobs,
+              jobs: jobsWithTemplates,
             });
 
             setSelectedJobUrl(null);
@@ -3234,7 +3354,9 @@
             const cfg = await res.json();
             if (!cfg.enabled || !cfg.url || !cfg.anonKey) {
               if (!cfg.enabled) {
-                console.warn('[Realtime] Supabase Realtime not configured (missing SUPABASE_ANON_KEY).');
+                console.warn(
+                  '[Realtime] Supabase browser client not configured (set publishable/anon key in SUPABASE_SERVICE_KEY, or SUPABASE_ANON_KEY).'
+                );
               }
               return;
             }

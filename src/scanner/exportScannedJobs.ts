@@ -14,6 +14,8 @@ import fs from 'fs';
 import path from 'path';
 import * as fastCsv from 'fast-csv';
 import { config } from '../config/env.js';
+import { upsertTemplate } from '../db/templates.js';
+import { isSupabaseConfigured } from '../db/client.js';
 import type { ScannedJobTemplate } from '../types/index.js';
 
 /**
@@ -79,6 +81,30 @@ export async function exportScannedJobs(
   await fs.promises.writeFile(jsonPath, jsonContent, 'utf-8');
   const jsonStats = fs.statSync(jsonPath);
   console.log(`[Export Scanned Jobs] ✅ JSON written: ${jsonPath} (${(jsonStats.size / 1024).toFixed(1)} KB)`);
+
+  if (isSupabaseConfigured() && templates.length > 0) {
+    let persisted = 0;
+    for (const template of templates) {
+      try {
+        await upsertTemplate({
+          job_url: template.jobUrl,
+          company_name: template.companyName || null,
+          job_title: template.jobTitle || null,
+          fields_schema: template.fields || [],
+          is_expired: Boolean(template.isExpired),
+          scanned_at: template.scannedAt || new Date().toISOString(),
+        });
+        persisted++;
+      } catch (err: any) {
+        console.warn(
+          `[Export Scanned Jobs] ⚠️ Could not upsert scanned_job_templates for ${template.jobUrl}: ${err?.message || err}`
+        );
+      }
+    }
+    console.log(
+      `[Export Scanned Jobs] ✅ Upserted ${persisted}/${templates.length} templates to scanned_job_templates (fields_schema)`
+    );
+  }
 
   // 2. Flatten Templates to CSV Rows
   const csvRows: ScannedJobCsvRow[] = [];

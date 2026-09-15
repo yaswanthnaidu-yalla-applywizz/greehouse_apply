@@ -43,7 +43,15 @@ import {
   type WorkHistoryCandidateRecord,
 } from '../services/workHistoryClient.js';
 import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHydrate.js';
-import { cacheApplicationLocally, getSubmissionOutcomeCounts, getApplication, upsertApplication, serializeApplicationDto } from '../db/applications.js';
+import {
+  cacheApplicationLocally,
+  getSubmissionOutcomeCounts,
+  getApplication,
+  upsertApplication,
+  serializeApplicationDto,
+  hydrateAndPersistApplicationFields,
+  type ApplicationRow,
+} from '../db/applications.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
 import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient } from '../db/client.js';
 import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
@@ -1377,22 +1385,27 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     // If Supabase record exists, return it immediately as source of truth
     if (supabaseRecord) {
-      const resolvedFields = supabaseRecord.resolved_fields || appItem?.resolvedFields || [];
-      const status = supabaseRecord.status;
-      const companyName = supabaseRecord.company_name || appItem?.companyName || '';
-      const jobTitle = supabaseRecord.job_title || appItem?.jobTitle || '';
+      let row = supabaseRecord as ApplicationRow;
+      row = await hydrateAndPersistApplicationFields(row);
+
+      const resolvedFields = row.resolved_fields?.length
+        ? row.resolved_fields
+        : appItem?.resolvedFields || [];
+      const status = row.status;
+      const companyName = row.company_name || appItem?.companyName || '';
+      const jobTitle = row.job_title || appItem?.jobTitle || '';
       const candidateName = (appItem as any)?.candidateName || '';
 
       cacheApplicationLocally({
-        ...supabaseRecord,
+        ...row,
         company_name: companyName,
         job_title: jobTitle,
       });
 
       res.json(
-        serializeApplicationDto(supabaseRecord, {
+        serializeApplicationDto(row, {
           applywizz_id: applywizzId,
-          job_url: supabaseRecord.job_url || decodedUrl,
+          job_url: row.job_url || decodedUrl,
           company_name: companyName,
           job_title: jobTitle,
           candidate_name: candidateName,
