@@ -77,19 +77,18 @@ import { sanitizeHttpHeaderValue } from './httpHeaders.js';
 import { mergeWorkHistoryForIstDates } from './workHistorySpan.js';
 import {
   applicationAssignedCaAllowed,
-  applywizzIdsForManagerTeamProfiles,
   hasUnrestrictedDashboardAccess,
   resolveRequestAppRole,
   resolveTeamCandidateIdsForManager,
   resolveViewAsOperatorManagerEmail,
 } from './managerTeamScope.js';
-import { listOperatorEmailsForManager } from '../db/users.js';
 import {
   computeEligibleForSubmissionDisplay,
   parseCsvJobScore,
 } from '../submission/submissionEligibilityGate.js';
 import { usersRouter } from './routes/users.js';
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
+import { fetchProfileListingFieldsByApplywizzIds } from '../db/profiles.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
 import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient } from '../db/client.js';
 import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
@@ -549,8 +548,12 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         return;
       }
       if (viewAsManagerEmail) {
-        const profileIds = await applywizzIdsForManagerTeamProfiles(viewAsManagerEmail);
-        allowedCandidateIds = profileIds;
+        const team = await resolveTeamCandidateIdsForManager(
+          viewAsManagerEmail,
+          istDatesForWorkHistory(parsedRange),
+          createdAtRange
+        );
+        allowedCandidateIds = team.candidateIds;
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(
           userEmail!,
@@ -798,8 +801,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       workHistoryRecords = merged.records;
     } else if (viewAsManagerEmail) {
       res.setHeader('X-View-As-Active', 'true');
-      const profileIds = await applywizzIdsForManagerTeamProfiles(viewAsManagerEmail);
-      allowedIds = new Set(profileIds.map((id) => id.toUpperCase()));
+      const team = await resolveTeamCandidateIdsForManager(viewAsManagerEmail, whDates, createdAtRange);
+      workHistoryUnreachable = team.unreachable;
+      workHistoryRecords = team.records;
+      allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
     } else if (isManager && userEmail) {
       const team = await resolveTeamCandidateIdsForManager(userEmail, whDates, createdAtRange);
       workHistoryUnreachable = team.unreachable;
@@ -879,6 +884,34 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
             clientName: rec.clientName,
             email: rec.clientEmail,
             location: '',
+            totalJobs: 0,
+            job_count: 0,
+            queue_status: 'NO_APPLICATIONS',
+            readyCount: 0,
+            expiredCount: 0,
+            status: 'PENDING',
+            resumeAvailable: fs.existsSync(resumePath),
+          });
+          existingIds.add(idUpper);
+        }
+      }
+    }
+
+    if (allowedIds && !unrestricted) {
+      const existingIds = new Set(candidateSummaries.map((c) => c.applywizzId.toUpperCase()));
+      const missingIds = [...allowedIds].filter((id) => !existingIds.has(id));
+      if (missingIds.length > 0) {
+        const profileFields = await fetchProfileListingFieldsByApplywizzIds(missingIds);
+        for (const idUpper of missingIds) {
+          if (existingIds.has(idUpper)) continue;
+          const fields = profileFields.get(idUpper);
+          const applywizzId = fields?.applywizzId || idUpper;
+          const resumePath = path.join(config.RESUMES_DIR, `${applywizzId}_resume.pdf`);
+          candidateSummaries.push({
+            applywizzId,
+            clientName: fields?.clientName || applywizzId,
+            email: fields?.email || '',
+            location: fields?.location || '',
             totalJobs: 0,
             job_count: 0,
             queue_status: 'NO_APPLICATIONS',
@@ -1014,8 +1047,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       caWorkHistoryEmail = userEmail ?? undefined;
       let allowedIds: Set<string>;
       if (viewAsManagerEmail) {
-        const profileIds = await applywizzIdsForManagerTeamProfiles(viewAsManagerEmail);
-        allowedIds = new Set(profileIds.map((id) => id.toUpperCase()));
+        const team = await resolveTeamCandidateIdsForManager(viewAsManagerEmail, [getYesterdayIST()]);
+        allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(userEmail!, [getYesterdayIST()]);
         allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
@@ -1205,8 +1238,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       let candidateIds: string[] = [];
       if (viewAsManagerEmail) {
         res.setHeader('X-View-As-Active', 'true');
-        teamOperatorEmails = await listOperatorEmailsForManager(viewAsManagerEmail);
-        candidateIds = await applywizzIdsForManagerTeamProfiles(viewAsManagerEmail);
+        const team = await resolveTeamCandidateIdsForManager(
+          viewAsManagerEmail,
+          istDatesForWorkHistory(parsedRange),
+          createdAtRange
+        );
+        candidateIds = team.candidateIds;
+        teamOperatorEmails = team.operatorEmails;
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(
           userEmail!,
@@ -1359,8 +1397,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
       let allowedIds: Set<string>;
       if (viewAsManagerEmail) {
-        const profileIds = await applywizzIdsForManagerTeamProfiles(viewAsManagerEmail);
-        allowedIds = new Set(profileIds.map((id) => id.toUpperCase()));
+        const team = await resolveTeamCandidateIdsForManager(viewAsManagerEmail, [getYesterdayIST()]);
+        allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(userEmail!, [getYesterdayIST()]);
         allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
@@ -1436,8 +1474,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
       let allowedIds: Set<string>;
       if (viewAsManagerEmail) {
-        const profileIds = await applywizzIdsForManagerTeamProfiles(viewAsManagerEmail);
-        allowedIds = new Set(profileIds.map((id) => id.toUpperCase()));
+        const team = await resolveTeamCandidateIdsForManager(viewAsManagerEmail, [getYesterdayIST()]);
+        allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(userEmail!, [getYesterdayIST()]);
         allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));

@@ -62,16 +62,24 @@ export function isManagerViewAsOperator(req: AuthenticatedRequest): boolean {
   return isViewAsOperatorHeaderValue(req.headers[VIEW_AS_OPERATOR_HEADER]);
 }
 
-export async function resolveManagerViewAsOperatorScope(managerEmail: string): Promise<{
+export async function resolveManagerViewAsOperatorScope(
+  managerEmail: string,
+  createdAtRange?: CreatedAtRangeFilter
+): Promise<{
   allowedIds: Set<string>;
   teamOperatorEmails: string[];
 }> {
   const manager = managerEmail.trim().toLowerCase();
   const teamOperatorEmails = await listOperatorEmailsForManager(manager);
   const profileIds = await applywizzIdsForManagerTeamProfiles(manager);
+  const dbIds = await distinctApplywizzIdsForOperatorEmails(teamOperatorEmails, createdAtRange);
+  const allowedIds = new Set<string>();
+  for (const id of [...profileIds, ...dbIds]) {
+    allowedIds.add(id.trim().toUpperCase());
+  }
   return {
     teamOperatorEmails,
-    allowedIds: new Set(profileIds.map((id) => id.trim().toUpperCase())),
+    allowedIds,
   };
 }
 

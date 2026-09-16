@@ -519,7 +519,10 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
       }
 
       if (viewAsManagerEmail) {
-        const scope = await resolveManagerViewAsOperatorScope(viewAsManagerEmail);
+        const scope = await resolveManagerViewAsOperatorScope(viewAsManagerEmail, {
+          startIso: parsedRange.startIso,
+          endIso: parsedRange.endIso,
+        });
         allowedIds = scope.allowedIds;
         teamOperatorEmails = scope.teamOperatorEmails;
       } else {
