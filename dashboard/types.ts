@@ -14,7 +14,11 @@ import type {
 } from '../src/types/index.js';
 // Re-exported rather than redeclared: the DB CHECK constraint is the source of
 // truth for these unions, and a local copy silently drifts from it.
-import type { ApplicationStatus, EmailProofStatus } from '../src/db/applications.js';
+import type {
+  ApplicationStatus,
+  CandidateQueueStatus,
+  EmailProofStatus,
+} from '../src/db/applications.js';
 
 export type { ApplyWizzCandidateProfile, CandidateJobApplication, ResolvedField, SourceTag };
 
@@ -27,6 +31,8 @@ export interface CandidateSummary {
   email: string;
   location: string;
   totalJobs: number;
+  job_count: number;
+  queue_status: CandidateQueueStatus;
   readyCount: number;
   expiredCount: number;
   status: 'READY' | 'PENDING' | 'EXPIRED';

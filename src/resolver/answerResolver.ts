@@ -33,6 +33,7 @@ import type {
 import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnectionError } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
+import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 
 const log = createLogger('Answer Resolver');
 
@@ -321,13 +322,17 @@ export class AnswerResolver {
             (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
           );
 
+        const persistJobUrl = job.canonicalUrl || job.rawUrl || template?.jobUrl || '';
+
         if (!template) {
           noTemplate++;
+          log.info(
+            `[Resolver] ⏭️ Skipping candidate_applications upsert for ${seg.applywizzId} ${persistJobUrl} — no scan template`
+          );
           continue;
         }
 
         const questionCount = template.fields?.length || 0;
-        const persistJobUrl = job.canonicalUrl || job.rawUrl || template.jobUrl;
         if (isOverQuestionCap(questionCount)) {
           try {
             await upsertSkippedOverQuestionCap(seg.applywizzId, persistJobUrl, template, questionCount);
@@ -387,31 +392,40 @@ export class AnswerResolver {
         applications.push(app);
         resolvedCount++;
 
-        // Persist resolved application record to Supabase (candidate_applications table)
-        try {
-          await upsertApplication({
-            applywizz_id: app.applywizzId,
-            job_url: persistJobUrl,
-            company_name: app.companyName,
-            job_title: app.jobTitle,
-            resolved_fields: app.resolvedFields,
-          });
-        } catch (dbErr: any) {
-          if (isMissingTableError(dbErr)) {
-            haltWithDevAlert(
-              'Migration',
-              'required migration not applied (e.g. missing table error)',
-              dbErr
-            );
+        if (app.status === 'EXPIRED' || template.isExpired) {
+          log.info(
+            `[Resolver] ⏭️ Skipping candidate_applications upsert for ${seg.applywizzId} ${persistJobUrl} — job expired or scan failed`
+          );
+        } else if (!hasAnyNonEmptyResolvedField(app.resolvedFields)) {
+          log.info(
+            `[Resolver] ⏭️ Skipping candidate_applications upsert for ${seg.applywizzId} ${persistJobUrl} — no fields resolved`
+          );
+        } else {
+          try {
+            await upsertApplication({
+              applywizz_id: app.applywizzId,
+              job_url: persistJobUrl,
+              company_name: app.companyName,
+              job_title: app.jobTitle,
+              resolved_fields: app.resolvedFields,
+            });
+          } catch (dbErr: any) {
+            if (isMissingTableError(dbErr)) {
+              haltWithDevAlert(
+                'Migration',
+                'required migration not applied (e.g. missing table error)',
+                dbErr
+              );
+            }
+            if (isSupabaseConnectionError(dbErr)) {
+              haltWithDevAlert(
+                'Supabase',
+                'Supabase connection failure — bad credentials, unreachable, or empty key probe',
+                dbErr
+              );
+            }
+            log.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
           }
-          if (isSupabaseConnectionError(dbErr)) {
-            haltWithDevAlert(
-              'Supabase',
-              'Supabase connection failure — bad credentials, unreachable, or empty key probe',
-              dbErr
-            );
-          }
-          log.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
         }
 
         if (!compact) {

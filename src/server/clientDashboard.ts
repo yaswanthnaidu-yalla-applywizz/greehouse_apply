@@ -29,6 +29,7 @@ export interface ManagerApplicationRow extends ApplicationRow {
   profiles?: {
     applywizz_id?: string | null;
     client_name?: string | null;
+    ca_email?: string | null;
   } | null;
 }
 
@@ -54,6 +55,10 @@ export interface ManagerClientRow {
   waitingForEmail: number;
   assignedTo: string;
   assignedToEmail: string;
+  /** CA email from `candidate_applications.assigned_ca_email` */
+  ca_email: string;
+  /** CA email from `profiles.ca_email` (work-history backfill) */
+  assigned_ca: string;
   completedApplications: ApplicationDetail[];
   pendingApplications: ApplicationDetail[];
   failedApplications: ApplicationDetail[];
@@ -87,6 +92,10 @@ function clientName(row: ManagerApplicationRow): string {
 
 function assignedCaEmail(row: ManagerApplicationRow): string {
   return (row.assigned_ca_email || '').trim().toLowerCase();
+}
+
+function profileCaEmail(row: ManagerApplicationRow): string {
+  return (row.profiles?.ca_email || '').trim().toLowerCase();
 }
 
 function isWaitingForEmail(row: ManagerApplicationRow): boolean {
@@ -200,7 +209,7 @@ export async function loadClientDashboard(options: {
 
   let query = getDbClient()
     .from('candidate_applications')
-    .select('*, profiles!inner(applywizz_id, client_name)');
+    .select('*, profiles!inner(applywizz_id, client_name, ca_email)');
   query = applyCreatedAtRangeFilter(query, createdAtRange);
 
   let warning: string | undefined;
@@ -233,6 +242,7 @@ export async function loadClientDashboard(options: {
 
   for (const application of hydrated) {
     const email = assignedCaEmail(application);
+    const profileCa = profileCaEmail(application);
     const assignedName = nameMap.get(email) || (email ? email.split('@')[0] : '—');
     if (requestedCa.toLowerCase() !== 'all') {
       const needle = requestedCa.toLowerCase();
@@ -250,6 +260,8 @@ export async function loadClientDashboard(options: {
       waitingForEmail: 0,
       assignedTo: assignedName,
       assignedToEmail: email,
+      ca_email: email,
+      assigned_ca: profileCa,
       completedApplications: [],
       pendingApplications: [],
       failedApplications: [],
@@ -258,6 +270,8 @@ export async function loadClientDashboard(options: {
     row.applications += 1;
     row.assignedTo = assignedName || row.assignedTo;
     row.assignedToEmail = email || row.assignedToEmail;
+    row.ca_email = email || row.ca_email;
+    row.assigned_ca = profileCa || row.assigned_ca;
 
     if (application.status === 'APPLIED') {
       row.completed += 1;

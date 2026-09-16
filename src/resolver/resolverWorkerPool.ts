@@ -13,6 +13,7 @@ import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveBatchLlmFields, type UnresolvedFieldGroup } from './batchLlmResolver.js';
 import type { ResolvedField, ScannedField, ScannedFieldType } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
+import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 
 const log = createLogger('Resolver Worker Pool');
 
@@ -153,6 +154,13 @@ export class ResolverWorkerPool {
       resolvedByTier: null,
       confidence: 0,
     });
+
+    if (!hasAnyNonEmptyResolvedField(finalFields)) {
+      log.info(
+        `[Resolver] ⏭️ Skipping candidate_applications upsert for ${application.applywizz_id} ${application.job_url} — no fields resolved`
+      );
+      return;
+    }
 
     await upsertApplication({
       id: application.id,

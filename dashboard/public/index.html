@@ -1230,20 +1230,24 @@
                         </span>
                       </div>
 
-                      {c.status === 'READY' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#1E4620] bg-[#9AC89A] px-2 py-0.5 rounded border border-[#1A1A2E]">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#1E4620] animate-pulse"></span>
+                      {c.queue_status === 'NO_APPLICATIONS' && (
+                        <span className="inline-flex items-center text-[10px] font-bold text-[#475569] bg-[#E2E8F0] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                          No Applications
+                        </span>
+                      )}
+                      {c.queue_status === 'READY' && (
+                        <span className="inline-flex items-center text-[10px] font-bold text-[#5C4A0A] bg-[#F4D66B] px-2 py-0.5 rounded border border-[#1A1A2E]">
                           Ready
                         </span>
                       )}
-                      {c.status === 'PENDING' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#5C4A0A] bg-[#F4D66B] px-2 py-0.5 rounded border border-[#1A1A2E]">
-                          Pending
+                      {c.queue_status === 'IN_PROGRESS' && (
+                        <span className="inline-flex items-center text-[10px] font-bold text-[#1E3A5F] bg-[#B8D4E8] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                          In Progress
                         </span>
                       )}
-                      {c.status === 'EXPIRED' && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#475569] bg-[#E2E8F0] px-2 py-0.5 rounded border border-[#1A1A2E]">
-                          Expired
+                      {c.queue_status === 'DONE' && (
+                        <span className="inline-flex items-center text-[10px] font-bold text-[#1E4620] bg-[#9AC89A] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                          Done
                         </span>
                       )}
                     </div>
@@ -1257,7 +1261,7 @@
                         {c.email || c.location || 'Profile Synced'}
                       </span>
                       <span className="bg-[#FAF4EB] border border-[#1A1A2E] text-[#1A1A2E] px-2 py-0.5 rounded text-[10px] font-bold font-mono">
-                        {c.totalJobs} {c.totalJobs === 1 ? 'Job' : 'Jobs'}
+                        {c.job_count} {c.job_count === 1 ? 'Job' : 'Jobs'}
                       </span>
                     </div>
                   </button>
