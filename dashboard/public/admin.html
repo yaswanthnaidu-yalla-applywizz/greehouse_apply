@@ -160,7 +160,7 @@
         setLoading(true);
         setError('');
         try {
-          if (tab === 'overview') setOverview(await loadJson('/api/admin/overview'));
+          if (tab === 'overview') setOverview(await loadJson(`/api/admin/overview?date=${encodeURIComponent(date)}`));
           if (tab === 'managers') {
             const payload = await loadJson(`/api/admin/managers?date=${encodeURIComponent(date)}`);
             setManagers(payload.managers || []);
@@ -303,6 +303,7 @@
                     ['Operators', overview.operators],
                     ['Active operators', overview.activeOperators],
                     ['Inactive operators', overview.inactiveOperators],
+                    ['Submit clicks (day)', overview.submitClicks],
                     ['Processed', overview.applicationsProcessed],
                     ['Running', overview.applicationsRunning],
                     ['Queued', overview.applicationsQueued],

@@ -151,6 +151,46 @@ export async function insertApplicationEvent(event: ApplicationEventInput): Prom
   }
 }
 
+export const SUBMIT_CLICK_AUDIT_ACTION = 'application.submit_clicked';
+
+export async function countAuditEventsByActionInRange(options: {
+  action: string;
+  startIso: string;
+  endIso: string | null;
+  actorEmails?: string[];
+}): Promise<number> {
+  if (!isSupabaseConfigured()) return 0;
+  const actorEmails = options.actorEmails
+    ?.map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  if (actorEmails && actorEmails.length === 0) return 0;
+
+  try {
+    let query = getDbClient()
+      .from('audit_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('action', options.action)
+      .gte('created_at', options.startIso)
+      .lt('created_at', options.endIso ?? new Date().toISOString());
+    if (actorEmails && actorEmails.length > 0) {
+      query = query.in('actor_email', actorEmails);
+    }
+    const { count, error } = await query;
+    if (error) {
+      if (isMissingTable(error, 'audit_events')) {
+        warnMissingOnce('audit_events', error);
+        return 0;
+      }
+      log.warn(`[Events] countAuditEventsByActionInRange failed: ${error.message}`);
+      return 0;
+    }
+    return count ?? 0;
+  } catch (err: any) {
+    log.warn(`[Events] countAuditEventsByActionInRange exception: ${err?.message}`);
+    return 0;
+  }
+}
+
 export async function listAuditEvents(options: {
   limit?: number;
   action?: string;

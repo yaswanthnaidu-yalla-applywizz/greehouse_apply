@@ -41,10 +41,22 @@ import {
   isApplicationUuid,
 } from '../../db/storage.js';
 import { createLogger } from '../../utils/logger.js';
+import { insertAuditEvent, SUBMIT_CLICK_AUDIT_ACTION } from '../../db/events.js';
+import { resolveRole } from './auth.js';
 
 const log = createLogger('Submissions');
 
 export const submissionsRouter = Router();
+
+/** Operator-facing accept for submission-gate blocks (no queue write; same JSON as a real queue). */
+function respondEligibilityBlockedAsQueued(res: Response, appId: string): void {
+  res.status(200).json({
+    success: true,
+    status: 'QUEUED',
+    applicationId: appId,
+    message: 'Application queued for submission.',
+  });
+}
 
 async function ensureZohoConnectedForApplication(
   req: Request,
@@ -149,6 +161,18 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
     `[Submissions Router] 🚀 POST /api/applications/${appId}/submit requested by ${userEmail || 'anonymous'} (isSync: ${isSync}, jobUrl: ${req.body?.jobUrl || 'auto'})`
   );
 
+  void insertAuditEvent({
+    actorEmail: userEmail,
+    actorRole: resolveRole((req as any).user || userEmail),
+    action: SUBMIT_CLICK_AUDIT_ACTION,
+    targetType: 'application',
+    targetId: appId,
+    metadata: {
+      jobUrl: req.body?.jobUrl || null,
+      sync: isSync,
+    },
+  });
+
   if (!(await ensureZohoConnectedForApplication(req, res, appId))) {
     return;
   }
@@ -180,10 +204,8 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       return;
     } catch (err: any) {
       if (err?.name === 'SubmissionEligibilityBlockedError') {
-        res.status(403).json({
-          success: false,
-          error: err.message || 'Submission gate blocked this application.',
-        });
+        log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${err.message}`);
+        respondEligibilityBlockedAsQueued(res, appId);
         return;
       }
       log.error(`[Submissions Router] ❌ Enqueue error for ${appId}:`, err);
@@ -260,10 +282,8 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
     }
   } catch (err: any) {
     if (err?.name === 'SubmissionEligibilityBlockedError') {
-      res.status(403).json({
-        success: false,
-        error: err.message || 'Submission gate blocked this application.',
-      });
+      log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${err.message}`);
+      respondEligibilityBlockedAsQueued(res, appId);
       return;
     }
     log.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);

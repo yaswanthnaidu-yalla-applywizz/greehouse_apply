@@ -10,7 +10,11 @@ import {
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
-import { listAuditEvents } from '../../db/events.js';
+import {
+  countAuditEventsByActionInRange,
+  listAuditEvents,
+  SUBMIT_CLICK_AUDIT_ACTION,
+} from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { emailsForRole } from './auth.js';
 import { buildManagerTeamStats } from '../adminManagerStats.js';
@@ -47,8 +51,13 @@ function parseLimit(value: unknown, fallback = 100): number {
   return Math.min(parsed, 500);
 }
 
-adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Promise<void> => {
+adminDashboardRouter.get('/overview', async (req: Request, res: Response): Promise<void> => {
   try {
+    const dateParam = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    const date =
+      dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : getISTDateString();
+    const { startIso, endIso } = getISTDateRangeUtc(date);
+
     const directory = await listAuthDirectory();
     const managers = directory.filter((user) => user.role === 'manager');
     const mappedManagers = emailsForRole('manager');
@@ -62,7 +71,14 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       countApplicationsByStatus('APPLYING'),
       countApplicationsByStatus('FAILED'),
     ]);
-    const audit = await listAuditEvents({ limit: 15 });
+    const [audit, submitClicks] = await Promise.all([
+      listAuditEvents({ limit: 15 }),
+      countAuditEventsByActionInRange({
+        action: SUBMIT_CLICK_AUDIT_ACTION,
+        startIso,
+        endIso,
+      }),
+    ]);
 
     res.json({
       managers: managerEmails.size,
@@ -73,6 +89,8 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       applicationsRunning: applying,
       applicationsQueued: queued,
       applicationsFailed: failed,
+      submitClicks,
+      submitClicksDate: date,
       recentActivity: audit.events,
       warning: audit.warning,
       generatedAt: new Date().toISOString(),

@@ -58,6 +58,10 @@
       background: #E88474;
     }
 
+    @keyframes submitPopIn {
+      0% { transform: scale(0.85) rotate(-2deg); opacity: 0; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
     @keyframes fadeIn {
       from { opacity: 0; transform: scale(0.98); }
       to { opacity: 1; transform: scale(1); }
@@ -1440,6 +1444,41 @@
       );
     }
 
+
+    const SUBMIT_CELEBRATION_MESSAGES = [
+      'Application launched — nice work!',
+      'One more off the queue — you\'re on fire!',
+      'Greenhouse has entered the chat.',
+      'That\'s a wrap on this apply — chef\'s kiss.',
+      'Send button conquered. Onward!',
+    ];
+
+    function SubmitCelebration({ open, message, onClose }) {
+      useEffect(() => {
+        if (!open) return undefined;
+        const timer = setTimeout(() => onClose(), 2600);
+        return () => clearTimeout(timer);
+      }, [open, onClose]);
+      if (!open) return null;
+      return (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#1A1A2E]/45"
+          onClick={onClose}
+          role="presentation"
+        >
+          <div
+            className="relative bg-[#D1FAE5] border-4 border-[#1A1A2E] rounded-2xl px-8 py-7 shadow-[10px_10px_0_#1A1A2E] max-w-md text-center"
+            style={{ animation: 'submitPopIn 0.45s ease-out' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-4xl mb-3 select-none" aria-hidden="true">🚀</p>
+            <p className="text-lg font-black text-[#065F46] leading-snug">{message}</p>
+            <p className="text-xs font-mono text-[#047857] mt-2">Keep the momentum going.</p>
+          </div>
+        </div>
+      );
+    }
+
     // -------------------------------------------------------------
     // Form Renderer Component
     // -------------------------------------------------------------
@@ -1450,6 +1489,8 @@
       const [viewerImageUrl, setViewerImageUrl] = useState(null);
       const [viewerTitle, setViewerTitle] = useState('Application Proof');
       const [emailProofOpen, setEmailProofOpen] = useState(false);
+      const [celebrationOpen, setCelebrationOpen] = useState(false);
+      const [celebrationMessage, setCelebrationMessage] = useState('');
       const appId = application?.id || application?.applywizzId || application?.applywizz_id || 'app-default';
       const jobUrl = application?.jobUrl || application?.job_url || '';
       const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
@@ -1663,6 +1704,10 @@
         if (isSubmitting || submitFlowActive) return;
 
         console.log(`[Dashboard] Submit button clicked → triggers API (appId: ${appId})`);
+        const pick =
+          SUBMIT_CELEBRATION_MESSAGES[Math.floor(Math.random() * SUBMIT_CELEBRATION_MESSAGES.length)];
+        setCelebrationMessage(pick);
+        setCelebrationOpen(true);
         setIsSubmitting(true);
         try {
           const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit`, {
@@ -1674,6 +1719,13 @@
             }),
           });
           const data = await res.json();
+
+          if (res.status === 403) {
+            if (onStatusChange) {
+              onStatusChange('QUEUED', { status: 'QUEUED', success: true }, { persist: false });
+            }
+            return;
+          }
 
           if (!res.ok || data.status === 'FAILED') {
             if (onStatusChange) {
@@ -1725,6 +1777,11 @@
 
       return (
         <div className="flex-1 overflow-y-auto px-5 py-3.5 md:px-7 md:py-4 max-w-5xl mx-auto w-full custom-scrollbar">
+          <SubmitCelebration
+            open={celebrationOpen}
+            message={celebrationMessage}
+            onClose={() => setCelebrationOpen(false)}
+          />
           <EmailProofModal
             isOpen={emailProofOpen}
             onClose={() => setEmailProofOpen(false)}

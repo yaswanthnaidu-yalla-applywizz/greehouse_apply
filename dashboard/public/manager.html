@@ -177,6 +177,7 @@
       const [ca, setCa] = useState('all');
       const [rows, setRows] = useState([]);
       const [totals, setTotals] = useState({});
+      const [submitClicks, setSubmitClicks] = useState(0);
       const [careerAssociates, setCareerAssociates] = useState([]);
       const [warning, setWarning] = useState('');
       const [loading, setLoading] = useState(false);
@@ -225,6 +226,7 @@
           if (!res.ok) throw new Error(payload.error || 'Unable to load manager dashboard.');
           setRows(payload.rows || []);
           setTotals(payload.totals || {});
+          setSubmitClicks(payload.submitClicks ?? 0);
           setWarning(payload.warning || '');
           const cas = [];
           const seen = new Set();
@@ -436,7 +438,7 @@
             {tab === 'home' && (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-                  {[['Applications', totals.applications], ['Completed', totals.applied], ['Failed', totals.failed], ['Pending', totals.pending], ['Waiting email', totals.waiting_for_email]].map(([label, val]) => (
+                  {[['Applications', totals.applications], ['Submit clicks (day)', submitClicks], ['Completed', totals.applied], ['Failed', totals.failed], ['Pending', totals.pending], ['Waiting email', totals.waiting_for_email]].map(([label, val]) => (
                     <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
                       <p className="text-xs font-bold uppercase">{label}</p>
                       <p className="text-2xl font-black mt-1">{val ?? 0}</p>
