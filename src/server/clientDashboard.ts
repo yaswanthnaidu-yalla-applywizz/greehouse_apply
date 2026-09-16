@@ -174,6 +174,8 @@ export async function loadClientDashboard(options: {
   createdAtRange?: CreatedAtRangeFilter;
   dateRangeMeta?: ClientDashboardResult['dateRange'];
   ca?: string;
+  /** Dev/admin on manager UI: all applications and operators, not manager_email team. */
+  teamScopeUnrestricted?: boolean;
 }): Promise<ClientDashboardResult> {
   const date = options.date || getISTDateString();
   const dateRange = options.dateRangeMeta || {
@@ -202,7 +204,8 @@ export async function loadClientDashboard(options: {
   query = applyCreatedAtRangeFilter(query, createdAtRange);
 
   let warning: string | undefined;
-  if (MANAGER_TEAM_SCOPE_ENABLED) {
+  const applyManagerTeamScope = MANAGER_TEAM_SCOPE_ENABLED && !options.teamScopeUnrestricted;
+  if (applyManagerTeamScope) {
     const operatorEmails = await listOperatorEmailsForManager(managerEmail);
     if (operatorEmails.length === 0) {
       return emptyClientDashboard(

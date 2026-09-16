@@ -15,6 +15,7 @@ _Last updated: 2026-09-16_
 - **`MANAGER_TEAM_SCOPE_ENABLED = true`**: manager dashboard + `GET /api/candidates`, `/jobs`, `/stats`, **`GET /api/users`** scoped to operators where `manager_email =` signed-in manager.
 - Dev/admin see all; dev bypasses role guards as before.
 - **Next:** confirm operators have `manager_email` after login; smoke-test manager `/manager` and any shared list APIs.
+- **Sign-in audit logs (shipped):** every login logs `[Auth]` upsert `{ data, error }`, manager-mapping gate, WH CA manager id + map outcome; mapping skipped if upsert fails; try multiple candidates for manager id.
 
 ### 3. Resolution engine (background)
 - Semantic / fuzzy Tier 2+3 improvement — approach not chosen.

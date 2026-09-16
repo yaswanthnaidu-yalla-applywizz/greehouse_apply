@@ -2070,7 +2070,14 @@
     }
 
     function persistAuthSession(data) {
+      if (!data) return false;
       const role = ApplyWizzRoles.persistSession(data, true);
+      const home =
+        (typeof data.homePath === 'string' && data.homePath) || ApplyWizzRoles.homePathForRole(role);
+      if (window.location.pathname !== home) {
+        window.location.replace(home);
+        return true;
+      }
       return ApplyWizzRoles.redirectToRoleHome(role);
     }
 
@@ -2230,8 +2237,6 @@
             email: signUpEmail.trim(),
           };
 
-          localStorage.setItem('applywizz_auth_token', data.token);
-          localStorage.setItem('applywizz_auth_user', JSON.stringify(verifiedUser));
           if (persistAuthSession(data)) return;
           if (data.workHistoryUnreachable) {
             localStorage.setItem('applywizz_wh_unreachable', 'true');
@@ -2250,7 +2255,7 @@
         if (e) e.preventDefault();
         setSignInError('');
         setSignInSuccessMsg('');
-        const trimmedEmail = signInEmail.trim();
+        const trimmedEmail = signInEmail.trim().toLowerCase();
         if (!trimmedEmail || !trimmedEmail.includes('@')) {
           setSignInError('Please enter your email address.');
           return;
@@ -2305,8 +2310,6 @@
             return;
           }
 
-          localStorage.setItem('applywizz_auth_token', data.token);
-          localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
           if (persistAuthSession(data)) return;
           if (data.workHistoryUnreachable) {
             localStorage.setItem('applywizz_wh_unreachable', 'true');
@@ -3066,6 +3069,11 @@
 
       useEffect(() => {
         if (!localStorage.getItem('applywizz_auth_token')) return;
+        const role = ApplyWizzRoles.sessionRole();
+        if (role === 'manager' || role === 'admin') {
+          ApplyWizzRoles.redirectToRoleHome(role);
+          return;
+        }
         ApplyWizzRoles.enforcePageAccess(['operator', 'dev']);
       }, []);
 

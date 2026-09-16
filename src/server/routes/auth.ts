@@ -146,7 +146,69 @@ export function canAccessManagerDashboard(userOrEmail?: any): boolean {
 export function logAuthLogin(email: string, role: AppRole): void {
   const normalized = normalizeAuthEmail(email);
   if (!normalized) return;
-  log.info(`[Auth] ✅ ${normalized} logged in → ${role.toUpperCase()}`);
+  log.info(`[Auth] ✅ ${normalized} signed in as ${role}`);
+}
+
+/** Only operators use ApplyWizz work_history on sign-in (CA assignment + manager mapping). */
+export function shouldFetchOperatorWorkHistoryOnSignIn(role: AppRole): boolean {
+  return role === 'operator';
+}
+
+export function shouldHydrateAdminProfilesOnSignIn(role: AppRole): boolean {
+  return role === 'dev' || role === 'admin';
+}
+
+async function finalizeSuccessfulSignIn(input: {
+  normalizedEmail: string;
+  role: AppRole;
+  userId: string;
+  authUser: { email?: string | null; user_metadata?: Record<string, unknown> | null };
+}): Promise<{ allowedCandidateIds: string[]; workHistoryUnreachable: boolean }> {
+  let allowedCandidateIds: string[] = [];
+  let workHistoryUnreachable = false;
+  let whResult: WorkHistoryResult | undefined;
+
+  if (shouldFetchOperatorWorkHistoryOnSignIn(input.role)) {
+    whResult = await fetchAllowedCandidates(input.normalizedEmail);
+    allowedCandidateIds = whResult.candidateIds;
+    workHistoryUnreachable = whResult.unreachable;
+    setCachedWorkHistory(
+      input.normalizedEmail,
+      whResult.records,
+      whResult.candidateIds,
+      workHistoryUnreachable,
+      whResult.resolvedDate
+    );
+  } else if (shouldHydrateAdminProfilesOnSignIn(input.role)) {
+    try {
+      await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
+    } catch (hydrateErr: any) {
+      log.warn('[Auth] Admin profile hydration on sign-in failed:', hydrateErr?.message);
+    }
+  }
+
+  log.info(
+    `[Auth] finalizeSuccessfulSignIn — email: ${input.normalizedEmail}, role: ${input.role}, workHistoryFetched: ${shouldFetchOperatorWorkHistoryOnSignIn(input.role)}`
+  );
+
+  await syncDashboardUserAfterSignIn({
+    email: input.normalizedEmail,
+    role: input.role,
+    authUser: input.authUser,
+    whResult,
+  });
+
+  await persistRoleClaim(input.userId, input.role);
+  logAuthLogin(input.normalizedEmail, input.role);
+  void insertAuditEvent({
+    actorEmail: input.normalizedEmail,
+    actorRole: input.role,
+    action: 'login',
+    targetType: 'user',
+    targetId: input.userId,
+  });
+
+  return { allowedCandidateIds, workHistoryUnreachable };
 }
 
 /** One-line logout audit log (call from POST /api/auth/logout). */
@@ -670,41 +732,13 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Fetch work-history for CA filtering (skip for admins)
-    let allowedCandidateIds: string[] = [];
-    let workHistoryUnreachable = false;
-    let whResult: WorkHistoryResult | undefined;
     const role = resolveRoleFromEmail(normalizedEmail);
     const isAdmin = role === 'dev' || role === 'admin';
-
-    if (!isAdmin && normalizedEmail) {
-      whResult = await fetchAllowedCandidates(normalizedEmail);
-      allowedCandidateIds = whResult.candidateIds;
-      workHistoryUnreachable = whResult.unreachable;
-      setCachedWorkHistory(normalizedEmail, whResult.records, whResult.candidateIds, workHistoryUnreachable, whResult.resolvedDate);
-    } else {
-      try {
-        await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
-      } catch (hydrateErr: any) {
-        log.warn('[Auth] Admin profile hydration on login failed:', hydrateErr?.message);
-      }
-    }
-
-    await syncDashboardUserAfterSignIn({
-      email: normalizedEmail,
+    const { allowedCandidateIds, workHistoryUnreachable } = await finalizeSuccessfulSignIn({
+      normalizedEmail,
       role,
+      userId: user.id,
       authUser: verifyData.user || user,
-      whResult,
-    });
-
-    await persistRoleClaim(user.id, role);
-    logAuthLogin(normalizedEmail, role);
-    void insertAuditEvent({
-      actorEmail: normalizedEmail,
-      actorRole: role,
-      action: 'login',
-      targetType: 'user',
-      targetId: user.id,
     });
 
     const sessionUser = attachResolvedRole(verifyData.user || { id: user.id, email: user.email }, normalizedEmail);
@@ -838,43 +872,21 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const userEmail = (verifyData.user?.email || '').trim().toLowerCase();
-    let allowedCandidateIds: string[] = [];
-    let workHistoryUnreachable = false;
-    let whResult: WorkHistoryResult | undefined;
+    const userEmail = normalizeAuthEmail(verifyData.user?.email);
     const role = resolveRoleFromEmail(userEmail);
     const isAdmin = role === 'dev' || role === 'admin';
+    let allowedCandidateIds: string[] = [];
+    let workHistoryUnreachable = false;
 
-    if (userEmail && !isAdmin) {
-      whResult = await fetchAllowedCandidates(userEmail);
-      allowedCandidateIds = whResult.candidateIds;
-      workHistoryUnreachable = whResult.unreachable;
-      setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, workHistoryUnreachable, whResult.resolvedDate);
-    } else if (isAdmin) {
-      try {
-        await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
-      } catch (hydrateErr: any) {
-        log.warn('[Auth] Admin profile hydration on MFA verify failed:', hydrateErr?.message);
-      }
-    }
-
-    if (userEmail) {
-      await syncDashboardUserAfterSignIn({
-        email: userEmail,
+    if (userEmail && verifyData.user?.id) {
+      const finalized = await finalizeSuccessfulSignIn({
+        normalizedEmail: userEmail,
         role,
+        userId: verifyData.user.id,
         authUser: verifyData.user,
-        whResult,
       });
-
-      await persistRoleClaim(verifyData.user?.id, role);
-      logAuthLogin(userEmail, role);
-      void insertAuditEvent({
-        actorEmail: userEmail,
-        actorRole: role,
-        action: 'login',
-        targetType: 'user',
-        targetId: verifyData.user?.id,
-      });
+      allowedCandidateIds = finalized.allowedCandidateIds;
+      workHistoryUnreachable = finalized.workHistoryUnreachable;
     }
 
     res.json({

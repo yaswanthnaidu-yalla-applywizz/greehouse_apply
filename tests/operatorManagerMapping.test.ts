@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   CAREER_ASSOCIATE_MANAGER_ID_TO_EMAIL,
   extractCareerAssociateManagerIdFromPayload,
+  isManagerEmailUnset,
   managerEmailForCareerAssociateManagerId,
 } from '../src/services/operatorManagerMapping.js';
 
@@ -12,6 +13,14 @@ describe('operatorManagerMapping', () => {
       records: [{ applywizz_id: 'AWL-1', careerassociatemanagerid: '9DC9376E-FBC5-440B-932F-38DA10B89A70' }],
     });
     assert.equal(id, '9dc9376e-fbc5-440b-932f-38da10b89a70');
+  });
+
+  it('isManagerEmailUnset treats null, undefined, and blank as unset', () => {
+    assert.equal(isManagerEmailUnset(null), true);
+    assert.equal(isManagerEmailUnset(undefined), true);
+    assert.equal(isManagerEmailUnset(''), true);
+    assert.equal(isManagerEmailUnset('  '), true);
+    assert.equal(isManagerEmailUnset('mgr@applywizz.ai'), false);
   });
 
   it('maps known manager ids to emails', () => {

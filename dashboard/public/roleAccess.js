@@ -87,9 +87,18 @@
       localStorage.setItem('applywizz_session_expires_at', String(Date.now() + ttlMs));
     }
     var email = (data.user && data.user.email) || data.email || sessionUserEmail();
+    if (data.role) {
+      var serverRole = persistRole(data.role);
+      if (data.user) {
+        try {
+          var merged = Object.assign({}, data.user, { role: serverRole, email: String(email || data.user.email || '').trim().toLowerCase() });
+          localStorage.setItem('applywizz_auth_user', JSON.stringify(merged));
+        } catch (e) { /* ignore */ }
+      }
+      return serverRole;
+    }
     var fromEmail = resolveRoleFromEmail(email);
     if (fromEmail) return persistRole(fromEmail);
-    if (data.role) return persistRole(data.role);
     return sessionRole();
   }
 

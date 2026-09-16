@@ -27,6 +27,13 @@ export interface DashboardUserRow {
   manager_email: string | null;
 }
 
+export type UpsertDashboardUserError = { message: string; code?: string };
+
+export type UpsertDashboardUserResult = {
+  data: DashboardUserRow | null;
+  error: UpsertDashboardUserError | null;
+};
+
 export async function getDashboardUserByEmail(email: string): Promise<DashboardUserRow | null> {
   const normalized = email.trim().toLowerCase();
   if (!normalized || !isSupabaseConfigured()) return null;
@@ -54,9 +61,14 @@ export async function upsertDashboardUserOnSignIn(input: {
   email: string;
   name: string;
   role: string;
-}): Promise<DashboardUserRow | null> {
+}): Promise<UpsertDashboardUserResult> {
   const normalized = input.email.trim().toLowerCase();
-  if (!normalized || !isSupabaseConfigured()) return null;
+  if (!normalized) {
+    return { data: null, error: { message: 'email missing' } };
+  }
+  if (!isSupabaseConfigured()) {
+    return { data: null, error: { message: 'Supabase not configured' } };
+  }
 
   const existing = await getDashboardUserByEmail(normalized);
   const row = {
@@ -77,13 +89,19 @@ export async function upsertDashboardUserOnSignIn(input: {
   if (error) {
     if (isMissingUsersTable(error)) {
       warnMissingUsersTable(error);
-      return null;
+    } else {
+      log.warn(
+        `[Users] upsertDashboardUserOnSignIn failed: ${error.message}${error.code ? ` (code ${error.code})` : ''}`
+      );
     }
-    log.warn(`[Users] upsertDashboardUserOnSignIn failed: ${error.message}`);
-    return null;
+    return {
+      data: null,
+      error: { message: error.message, code: error.code },
+    };
   }
 
-  return (data as DashboardUserRow | null) ?? { ...row, name: row.name };
+  const resolved = (data as DashboardUserRow | null) ?? { ...row, name: row.name };
+  return { data: resolved, error: null };
 }
 
 export async function listOperatorEmailsForManager(managerEmail: string): Promise<string[]> {
