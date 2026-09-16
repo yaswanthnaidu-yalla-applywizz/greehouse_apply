@@ -30,7 +30,7 @@ const AUTHORIZED_EMAILS_API = config.AUTHORIZED_EMAILS_API || 'https://applywizz
 
 export type AppRole = 'dev' | 'admin' | 'manager' | 'operator';
 
-/** Email → role. Case-insensitive. Operators are any other signed-up email (not listed). */
+/** Privileged emails → role (keys stored lowercase; lookup always normalizes email first). */
 const ROLE_BY_EMAIL: Record<string, Exclude<AppRole, 'operator'>> = {
   'yaswanthnaiduyalla@applywizz.ai': 'dev',
   'ramakrishna@applywizz.ai': 'admin',
@@ -142,11 +142,11 @@ export function canAccessManagerDashboard(userOrEmail?: any): boolean {
   return role === 'dev' || role === 'manager';
 }
 
-/** One-line login audit log (call only on successful sign-in). */
-export function logAuthLogin(email: string, role: AppRole): void {
+/** After JWT/session is issued — confirms role map (lowercase email). */
+export function logAuthRoleResolved(email: string, role: AppRole): void {
   const normalized = normalizeAuthEmail(email);
   if (!normalized) return;
-  log.info(`[Auth] ✅ ${normalized} signed in as ${role}`);
+  log.info(`[Auth] ✅ ${normalized} resolved as ${role}`);
 }
 
 /** Only operators use ApplyWizz work_history on sign-in (CA assignment + manager mapping). */
@@ -154,8 +154,11 @@ export function shouldFetchOperatorWorkHistoryOnSignIn(role: AppRole): boolean {
   return role === 'operator';
 }
 
-export function shouldHydrateAdminProfilesOnSignIn(role: AppRole): boolean {
-  return role === 'dev' || role === 'admin';
+/** Resolve role from normalized email (single entry for sign-in handlers). */
+export function resolveSignInRole(email: string): { normalizedEmail: string; role: AppRole } {
+  const normalizedEmail = normalizeAuthEmail(email);
+  const role = resolveRoleFromEmail(normalizedEmail);
+  return { normalizedEmail, role };
 }
 
 async function finalizeSuccessfulSignIn(input: {
@@ -168,7 +171,7 @@ async function finalizeSuccessfulSignIn(input: {
   let workHistoryUnreachable = false;
   let whResult: WorkHistoryResult | undefined;
 
-  if (shouldFetchOperatorWorkHistoryOnSignIn(input.role)) {
+  if (input.role === 'operator') {
     whResult = await fetchAllowedCandidates(input.normalizedEmail);
     allowedCandidateIds = whResult.candidateIds;
     workHistoryUnreachable = whResult.unreachable;
@@ -179,18 +182,13 @@ async function finalizeSuccessfulSignIn(input: {
       workHistoryUnreachable,
       whResult.resolvedDate
     );
-  } else if (shouldHydrateAdminProfilesOnSignIn(input.role)) {
-    try {
-      await hydrateAdminProfilesFromWorkHistory(getYesterdayIST());
-    } catch (hydrateErr: any) {
-      log.warn('[Auth] Admin profile hydration on sign-in failed:', hydrateErr?.message);
-    }
   }
 
   log.info(
     `[Auth] finalizeSuccessfulSignIn — email: ${input.normalizedEmail}, role: ${input.role}, workHistoryFetched: ${shouldFetchOperatorWorkHistoryOnSignIn(input.role)}`
   );
 
+  // upsertDashboardUserOnSignIn runs inside syncDashboardUserAfterSignIn (users table).
   await syncDashboardUserAfterSignIn({
     email: input.normalizedEmail,
     role: input.role,
@@ -199,7 +197,6 @@ async function finalizeSuccessfulSignIn(input: {
   });
 
   await persistRoleClaim(input.userId, input.role);
-  logAuthLogin(input.normalizedEmail, input.role);
   void insertAuditEvent({
     actorEmail: input.normalizedEmail,
     actorRole: input.role,
@@ -213,7 +210,7 @@ async function finalizeSuccessfulSignIn(input: {
 
 /** One-line logout audit log (call from POST /api/auth/logout). */
 export function logAuthLogout(email: string): void {
-  const normalized = email.trim().toLowerCase();
+  const normalized = normalizeAuthEmail(email);
   if (!normalized) return;
   log.info(`[Auth] 👋 ${normalized} logged out`);
 }
@@ -239,7 +236,7 @@ async function persistRoleClaim(userId: string | undefined, role: AppRole): Prom
  * or returned by the CA management authorized emails API.
  */
 export function isEmailAuthorized(email: string, authorizedList: string[]): boolean {
-  const normalized = email.trim().toLowerCase();
+  const normalized = normalizeAuthEmail(email);
   if (resolveRoleFromEmail(normalized) !== 'operator') {
     return true;
   }
@@ -299,7 +296,7 @@ authRouter.post('/verify-email', async (req: Request, res: Response): Promise<vo
     return;
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = normalizeAuthEmail(email);
 
   try {
     if (!isSupabaseConfigured()) {
@@ -332,7 +329,7 @@ authRouter.post('/verify-email', async (req: Request, res: Response): Promise<vo
     }
 
     const existingUser = usersData?.users?.find(
-      (u) => u.email?.trim().toLowerCase() === normalizedEmail
+      (u) => normalizeAuthEmail(u.email) === normalizedEmail
     );
 
     if (existingUser) {
@@ -368,7 +365,7 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
     return;
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = normalizeAuthEmail(email);
 
   try {
     if (!isSupabaseConfigured()) {
@@ -399,7 +396,7 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
     }
 
     const existingUser = usersData?.users?.find(
-      (u) => u.email?.trim().toLowerCase() === normalizedEmail
+      (u) => normalizeAuthEmail(u.email) === normalizedEmail
     );
 
     if (existingUser) {
@@ -461,7 +458,7 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
     return;
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = normalizeAuthEmail(email);
 
   try {
     if (!isSupabaseConfigured()) {
@@ -479,7 +476,7 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
     // 2. Ensure user exists in Supabase Auth (create without password)
     const supabase = getDbClient();
     const { data: usersData } = await supabase.auth.admin.listUsers();
-    let user = usersData?.users?.find((u) => u.email?.trim().toLowerCase() === normalizedEmail);
+    let user = usersData?.users?.find((u) => normalizeAuthEmail(u.email) === normalizedEmail);
 
     if (!user) {
       const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
@@ -607,7 +604,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmail = normalizeAuthEmail(email);
 
   try {
     if (!isSupabaseConfigured()) {
@@ -625,7 +622,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     }
 
     const user = usersData?.users?.find(
-      (u) => u.email?.trim().toLowerCase() === normalizedEmail
+      (u) => normalizeAuthEmail(u.email) === normalizedEmail
     );
 
     if (!user) {
@@ -732,16 +729,17 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const role = resolveRoleFromEmail(normalizedEmail);
+    const { normalizedEmail: signInEmail, role } = resolveSignInRole(normalizedEmail);
+    logAuthRoleResolved(signInEmail, role);
     const isAdmin = role === 'dev' || role === 'admin';
     const { allowedCandidateIds, workHistoryUnreachable } = await finalizeSuccessfulSignIn({
-      normalizedEmail,
+      normalizedEmail: signInEmail,
       role,
       userId: user.id,
       authUser: verifyData.user || user,
     });
 
-    const sessionUser = attachResolvedRole(verifyData.user || { id: user.id, email: user.email }, normalizedEmail);
+    const sessionUser = attachResolvedRole(verifyData.user || { id: user.id, email: user.email }, signInEmail);
 
     res.json({
       success: true,
@@ -872,8 +870,8 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const userEmail = normalizeAuthEmail(verifyData.user?.email);
-    const role = resolveRoleFromEmail(userEmail);
+    const { normalizedEmail: userEmail, role } = resolveSignInRole(verifyData.user?.email || '');
+    logAuthRoleResolved(userEmail, role);
     const isAdmin = role === 'dev' || role === 'admin';
     let allowedCandidateIds: string[] = [];
     let workHistoryUnreachable = false;

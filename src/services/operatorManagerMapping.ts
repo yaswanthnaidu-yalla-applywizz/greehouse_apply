@@ -52,18 +52,12 @@ export function displayNameFromAuthUser(user?: {
 export const extractCareerAssociateManagerIdFromPayload =
   extractCareerAssociateManagerIdFromWorkHistoryPayload;
 
-function logUpsertResultForAuth(email: string, result: UpsertDashboardUserResult): DashboardUserRow | null {
-  const errPayload = result.error
-    ? { message: result.error.message, code: result.error.code ?? null }
-    : null;
-  log.info(
-    `[Auth] users upsert result — email: ${email}, data: ${JSON.stringify(result.data)}, error: ${JSON.stringify(errPayload)}`
-  );
+function warnUpsertFailureForAuth(email: string, result: UpsertDashboardUserResult): DashboardUserRow | null {
   if (result.error) {
     log.warn(`[Auth] users upsert failed — email: ${email}, code: ${result.error.code ?? 'n/a'}, message: ${result.error.message}`);
     const msg = (result.error.message || '').toLowerCase();
     if (result.error.code === '42501' || msg.includes('row-level security') || msg.includes('permission denied')) {
-      log.warn(`[Auth] users upsert permission/RLS error — email: ${email} (check DB policy if unexpected)`);
+      log.warn(`[Auth] users upsert permission/RLS error — email: ${email} (apply migration 018 to disable RLS on users if needed)`);
     }
   }
   return result.data;
@@ -149,7 +143,7 @@ export async function syncDashboardUserAfterSignIn(input: {
     name,
     role: input.role,
   });
-  const row = logUpsertResultForAuth(normalizedEmail, upsertResult);
+  const row = warnUpsertFailureForAuth(normalizedEmail, upsertResult);
 
   if (upsertResult.error || !row) {
     log.warn(
