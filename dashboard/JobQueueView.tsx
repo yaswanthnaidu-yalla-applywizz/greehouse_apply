@@ -16,6 +16,7 @@ import {
   candidateDetailMatchesSelection,
   filterOperatorApplicationJobs,
   filterJobsForCandidate,
+  isUnresolvedApplicationJob,
   jobCardCompanyLabel,
   jobCardTitleLabel,
 } from '../src/dashboard/candidateQueueFilter.js';
@@ -173,51 +174,66 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
               </div>
 
               {/* Bottom Row: Status Pill & Question Count */}
-              <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#1A1A2E]/20">
-                <span className="font-mono text-[#64748B]">
+              <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#1A1A2E]/20 gap-1">
+                <span className="font-mono text-[#64748B] shrink-0">
                   {job.fieldsCount ? `${job.fieldsCount} Qs` : 'Scanned'}
                 </span>
 
-                {job.status === 'APPLIED' && (
-                  <span className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    ✅ Applied
-                  </span>
-                )}
-                {job.status === 'APPLYING' && (
-                  <span className="text-[10px] font-mono text-white font-bold bg-[#E88474] border border-[#1A1A2E] px-1.5 py-0.2 rounded animate-pulse">
-                    ⏳ Submitting
-                  </span>
-                )}
-                {job.status === 'DRY_RUN_COMPLETE' && (
-                  <span className="text-[10px] font-mono text-[#1E3A5F] font-bold bg-[#B8D4E8] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    🚀 Dry-Run
-                  </span>
-                )}
-                {job.status === 'OTP_REQUIRED' && (
-                  <span className="text-[10px] font-mono text-white font-bold bg-[#F59E0B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    🔒 OTP
-                  </span>
-                )}
-                {job.status === 'FAILED' && (
-                  <span className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    ❌ Failed
-                  </span>
-                )}
-                {job.status === 'READY_FOR_REVIEW' && (
-                  <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    🟡 Ready
-                  </span>
-                )}
-                {job.status === 'EXPIRED' && (
-                  <span className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    Closed
-                  </span>
-                )}
-                {job.status === 'PENDING' && (
-                  <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                    Pending
-                  </span>
-                )}
+                <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                  {isUnresolvedApplicationJob(job) && (
+                    <span
+                      className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded"
+                      title="Resolver has not finished or required fields are still unresolved"
+                    >
+                      ⚠️ Unresolved
+                    </span>
+                  )}
+                  {job.status === 'SKIPPED' && (
+                    <span className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      ⏭ Skipped
+                    </span>
+                  )}
+                  {job.status === 'APPLIED' && (
+                    <span className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      ✅ Applied
+                    </span>
+                  )}
+                  {job.status === 'APPLYING' && (
+                    <span className="text-[10px] font-mono text-white font-bold bg-[#E88474] border border-[#1A1A2E] px-1.5 py-0.2 rounded animate-pulse">
+                      ⏳ Submitting
+                    </span>
+                  )}
+                  {job.status === 'DRY_RUN_COMPLETE' && (
+                    <span className="text-[10px] font-mono text-[#1E3A5F] font-bold bg-[#B8D4E8] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      🚀 Dry-Run
+                    </span>
+                  )}
+                  {job.status === 'OTP_REQUIRED' && (
+                    <span className="text-[10px] font-mono text-white font-bold bg-[#F59E0B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      🔒 OTP
+                    </span>
+                  )}
+                  {job.status === 'FAILED' && (
+                    <span className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      ❌ Failed
+                    </span>
+                  )}
+                  {job.status === 'READY_FOR_REVIEW' && (
+                    <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      🟡 Ready
+                    </span>
+                  )}
+                  {job.status === 'EXPIRED' && (
+                    <span className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      Closed
+                    </span>
+                  )}
+                  {job.status === 'PENDING' && (
+                    <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                      Pending
+                    </span>
+                  )}
+                </div>
               </div>
             </button>
           );

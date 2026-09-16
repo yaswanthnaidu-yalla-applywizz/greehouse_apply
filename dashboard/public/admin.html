@@ -255,7 +255,7 @@
         );
       }
 
-      const tabs = ['overview', 'managers', 'operators', 'applications', 'activity', 'system'];
+      const tabs = ['overview', 'managers', 'operators', 'applications', 'activity', 'system', 'guide'];
       const lightClass = (status) => status === 'ok' ? 'bg-[#9AC89A]' : status === 'degraded' ? 'bg-[#F4D66B]' : status === 'not_configured' ? 'bg-[#E2E8F0]' : 'bg-[#FECACA]';
 
       return (
@@ -448,6 +448,61 @@
                   <p className="mt-1">Ingest: {ingestRun?.running ? 'running' : ingestRun?.error ? `failed — ${ingestRun.error}` : ingestRun?.message || 'idle'}</p>
                   <p className="mt-1">Workers: {system.workersRunning ? 'running' : 'stopped'}</p>
                 </div>
+              </div>
+            )}
+
+            {tab === 'guide' && (
+              <div className="max-w-3xl space-y-6">
+                <div>
+                  <h2 className="text-2xl font-black text-[#1A1A2E]">Admin Guide</h2>
+                  <p className="text-xs text-[#64748B] font-mono mt-0.5">Org-wide visibility, ingest control, and operational oversight.</p>
+                </div>
+
+                <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-2">What you can do</h3>
+                  <p className="text-sm text-[#1A1A2E] leading-relaxed">
+                    View <span className="font-bold">all</span> managers, operators, and applications. Start or stop CSV ingest from Storage. Inspect system health and audit activity. Application submission still happens on the <span className="font-bold">Operator</span> dashboard — not here.
+                  </p>
+                </section>
+
+                <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tabs</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li><span className="font-bold">Overview</span> — org-wide counts and a recent activity snapshot.</li>
+                    <li><span className="font-bold">Managers</span> — click a manager name to open their client table for the header <span className="font-bold">Date</span>; use ← All managers to go back.</li>
+                    <li><span className="font-bold">Operators</span> — search; filter active/inactive or by manager.</li>
+                    <li><span className="font-bold">Applications</span> — search client, job, or operator; optional status filter for the selected date.</li>
+                    <li><span className="font-bold">Activity</span> — audit-style events (who did what, when).</li>
+                    <li><span className="font-bold">System</span> — status lights, queue, workers, and ingest state.</li>
+                  </ul>
+                </section>
+
+                <section className="bg-[#FEE2E2] border-2 border-[#991B1B] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black text-[#991B1B] uppercase tracking-wide mb-2">Header: Date, Refresh, Start, Stop</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li><span className="font-bold">Date</span> drives managers, operators, and applications views that use a calendar day.</li>
+                    <li><span className="font-bold">▶ Start</span> triggers ingest from Storage; watch progress on System.</li>
+                    <li><span className="font-bold">⏹ Stop</span> requests a graceful stop — use only when you mean to interrupt a run.</li>
+                  </ul>
+                </section>
+
+                <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-3">Important notes</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li>Ingest or Storage failures often need env credentials — check System and the Dev dashboard if stuck.</li>
+                    <li>Operator–manager links are set when operators sign in; use Operators/Managers views to verify coverage.</li>
+                    <li>Empty Activity may mean audit events are not recorded yet (migration 015).</li>
+                  </ul>
+                </section>
+
+                <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E] text-center">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-2">Need help?</h3>
+                  <p className="text-sm text-[#64748B] leading-relaxed">
+                    Contact{' '}
+                    <a href="mailto:yaswanthnaiduyalla@applywizz.ai" className="font-bold text-[#1A1A2E] underline hover:text-[#E88474]">yaswanthnaiduyalla@applywizz.ai</a>{' '}
+                    on Microsoft Teams.
+                  </p>
+                </section>
               </div>
             )}
           </div>

@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-15 (session — ingest `haltWithDevAlert` for systemic failures)_
+_Last updated: 2026-09-16_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -44,7 +44,11 @@ _Last updated: 2026-09-15 (session — ingest `haltWithDevAlert` for systemic fa
 - [x] Dry-run / Approve & Submit / View Proof controls in dashboard
 
 ### V2.5 Dashboard & Ops (This Release)
-- [x] Manager `GET /api/manager/dashboard` — expandable completed/pending/failed details; date + CA filters. **Team scoping off for now** (`MANAGER_TEAM_SCOPE_ENABLED = false`) because `careerassociatemanager_id` ↔ manager email mapping is unknown
+- [x] Manager `GET /api/manager/dashboard` — expandable completed/pending/failed details; date + CA filters. **Team scoping on** via `users.manager_email` → operator `assigned_ca_email` (`MANAGER_TEAM_SCOPE_ENABLED = true`, 2026-09-16)
+- [x] **Dashboard default date range** — stats/lists default to today + yesterday (IST); optional `?from=&to=`; UI label "Today & Yesterday" (2026-09-16)
+- [x] **Operator queue UX** — show SKIPPED / pre-resolve rows; unresolved + skipped badges; blocked form panel + operator-friendly `error_message` copy (2026-09-16)
+- [x] **Operator → manager mapping on login** — upsert `users`, set `manager_email` from work-history CA manager UUID map; migration **017** (2026-09-16)
+- [x] **Manager list API scoping** — `GET /api/candidates`, `/jobs`, `/stats`, `GET /api/users` team-filtered for managers; dev/admin unrestricted (2026-09-16)
 - [x] Manager UI at **`/manager`** (managers + dev). Secondary tabs: Operators, Activity, Reports (volume only)
 - [x] Admin dashboard at **`/admin`** — org overview, managers, operators, applications, audit, system status, **▶ Start** ingest
 - [x] Dev dashboard at **`/dev`** — health, runs, errors, queue, integrations, application debugger
@@ -68,7 +72,7 @@ _Last updated: 2026-09-15 (session — ingest `haltWithDevAlert` for systemic fa
 - [x] **`EMAIL_UNVERIFIED` terminal status** — migration 013; poller after 10m timeout; dashboard badges + resubmit (`cf50a45`)
 - [x] **Supabase ingest credential resolution** — `supabaseKeyDiagnostics.ts`; prefer `service_role` JWT else `SUPABASE_SERVICE_ROLE_KEY` (incl. `sb_secret_`); normalize quoted/Bearer keys; ingest probes every key (`0d02593`); `GET /api/admin/supabase-storage-health` → `keyProbes`
 - [x] **Submission requeue hardening** — `EMAIL_PROOF_PENDING` in `IN_FLIGHT_STATUSES`; ignore PATCH `QUEUED` while in-flight; submit-response `persist: false`
-- [x] **Question cap 35 + `SKIPPED`** — `MAX_JOB_QUESTIONS` default 35; over-cap jobs upsert `SKIPPED` (migration 014); operator queue hides them
+- [x] **Question cap 35 + `SKIPPED`** — `MAX_JOB_QUESTIONS` default 35; over-cap jobs upsert `SKIPPED` (migration 014); operator queue **shows** SKIPPED with badge (2026-09-16)
 - [x] **Form hydration from `fields_schema`** — empty `resolved_fields` filled from scanned templates (`applicationFieldHydration.ts`)
 - [x] **Tier 5 fail-closed + SMS skip** — LLM option mismatch / low confidence → `unresolved`; SMS/marketing opt-in always No at fill (`31b830e`)
 
@@ -92,10 +96,8 @@ _Last updated: 2026-09-15 (session — ingest `haltWithDevAlert` for systemic fa
 
 | Item | Status | Notes |
 |---|---|---|
-| Ingest `haltWithDevAlert` | Code ready, not committed | Systemic only: Playwright launch, Supabase, ApplyWizz 5xx/timeout, missing table, first LLM call, bad CSV. Per-job / CAPTCHA / OTP stay WARN |
-| Manager / COO analytics dashboard | On `main` (`7f91c59`) | Client table home + Operators/Activity/Reports; team scoping off; 015 applied; ApplyWizz health 400 = reachable |
+| **Role assignment authorities** | Not started | On sign-in/sign-up: prefer `users.role`; hardcoded email map overrides; CA API only when no `users` row; JWT `app_metadata.role` from resolved role |
 | Resolution engine — semantic/fuzzy improvement | Investigating | Tier 2+3 miss rate; approach not yet decided |
-| Email proof / OTP reliability | Awaiting live verification | Reset+reload on `main` (`601d37d`); Step 1–8 logs on `main` (`8a44cf2`); 013 applied; no fresh Greenhouse OTP challenge yet |
 
 ---
 

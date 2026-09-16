@@ -19,6 +19,8 @@ import { ProofViewer } from './components/ProofViewer.js';
 import { EmailProofModal } from './components/EmailProofModal.js';
 import type { EmailProofJson } from './components/EmailProofRenderer.js';
 import type { ResolvedField, ApplicationStatus } from './types.js';
+import { isOperatorFormPanelBlocked } from '../src/dashboard/candidateQueueFilter.js';
+import { OperatorFormBlockedPanel } from './components/OperatorFormBlockedPanel.js';
 
 export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
 
@@ -212,6 +214,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         </p>
       </div>
     );
+  }
+
+  if (isOperatorFormPanelBlocked(currentStatus)) {
+    return <OperatorFormBlockedPanel application={application} />;
   }
 
   const getAuthHeaders = (): Record<string, string> => {

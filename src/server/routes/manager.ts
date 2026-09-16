@@ -8,8 +8,10 @@
 import { Router, type Request, type Response } from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
+  applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
   listApplications,
+  rowCreatedAtInRange,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../../db/applications.js';
@@ -17,7 +19,10 @@ import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { insertAuditEvent, listApplicationEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { canAccessManagerDashboard, resolveRole } from './auth.js';
-import { fetchLinkedCaIds, loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
+import { loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
+import { listOperatorEmailsForManager } from '../../db/users.js';
+import { distinctApplywizzIdsForOperatorEmails, hasUnrestrictedDashboardAccess, resolveRequestAppRole } from '../managerTeamScope.js';
+import { parseDashboardCreatedAtRange, serializeDateRange } from '../dashboardDateRange.js';
 import { displayNameMapForEmails, isActiveWithin, listAuthDirectory } from '../authDirectory.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -82,15 +87,26 @@ function parseLimit(value: unknown, fallback = 100): number {
 
 async function scopedApplywizzIds(req: Request): Promise<{
   ids: string[] | null;
+  operatorEmails: string[] | null;
   warning?: string;
   managerEmail: string;
 }> {
   const managerEmail = managerEmailForRequest(req);
-  if (!MANAGER_TEAM_SCOPE_ENABLED) {
-    return { ids: null, managerEmail };
+  const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
+  if (!MANAGER_TEAM_SCOPE_ENABLED || hasUnrestrictedDashboardAccess(role)) {
+    return { ids: null, operatorEmails: null, managerEmail };
   }
-  const linked = await fetchLinkedCaIds(managerEmail);
-  return { ...linked, managerEmail };
+  const operatorEmails = await listOperatorEmailsForManager(managerEmail);
+  if (operatorEmails.length === 0) {
+    return {
+      ids: [],
+      operatorEmails: [],
+      managerEmail,
+      warning: 'No operators are assigned to this manager yet.',
+    };
+  }
+  const ids = await distinctApplywizzIdsForOperatorEmails(operatorEmails);
+  return { ids, operatorEmails, managerEmail };
 }
 
 function inScope(application: Pick<ApplicationRow, 'applywizz_id'>, ids: string[] | null): boolean {
@@ -108,9 +124,9 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
     return;
   }
 
-  const requestedDate = typeof req.query.date === 'string' ? req.query.date : undefined;
-  if (requestedDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
-    res.status(400).json({ error: 'date must use YYYY-MM-DD format.' });
+  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  if ('error' in parsedRange) {
+    res.status(400).json({ error: parsedRange.error });
     return;
   }
   const requestedCa = typeof req.query.ca === 'string' ? req.query.ca.trim() : 'all';
@@ -118,7 +134,9 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
   try {
     const payload = await loadClientDashboard({
       managerEmail,
-      date: requestedDate,
+      date: parsedRange.fromDate || parsedRange.toDate || getISTDateString(),
+      createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
+      dateRangeMeta: serializeDateRange(parsedRange),
       ca: requestedCa,
     });
     res.json(payload);
@@ -130,17 +148,19 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
 
 managerRouter.get('/operators', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
-  const requestedDate = typeof req.query.date === 'string' ? req.query.date : undefined;
-  if (requestedDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
-    res.status(400).json({ error: 'date must use YYYY-MM-DD format.' });
+  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  if ('error' in parsedRange) {
+    res.status(400).json({ error: parsedRange.error });
     return;
   }
-  const date = requestedDate || getISTDateString();
+  const date = parsedRange.fromDate || parsedRange.toDate || getISTDateString();
 
   try {
     const dashboard = await loadClientDashboard({
       managerEmail: managerEmailForRequest(req),
       date,
+      createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
+      dateRangeMeta: serializeDateRange(parsedRange),
     });
     const directory = await listAuthDirectory();
     const byEmail = new Map(directory.map((user) => [user.email, user]));
@@ -190,6 +210,7 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
 
     res.json({
       date,
+      dateRange: serializeDateRange(parsedRange),
       operators: items,
       totals: {
         assigned: items.length,
@@ -303,9 +324,29 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
 managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
+  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  if ('error' in parsedRange) {
+    res.status(400).json({ error: parsedRange.error });
+    return;
+  }
+  const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
+
   try {
     const scoped = await scopedApplywizzIds(req);
-    const applications = (await listApplications()).filter((application) => inScope(application, scoped.ids));
+    let applications: ApplicationRow[] = [];
+    if (isSupabaseConfigured()) {
+      let query = getDbClient().from('candidate_applications').select('*');
+      if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
+      query = applyCreatedAtRangeFilter(query, createdAtRange);
+      const { data, error } = await query;
+      if (!error && data) {
+        applications = (data as ApplicationRow[]).filter((application) => inScope(application, scoped.ids));
+      }
+    } else {
+      applications = (await listApplications())
+        .filter((application) => inScope(application, scoped.ids))
+        .filter((application) => rowCreatedAtInRange(application, createdAtRange));
+    }
     const statusCounts: Record<string, number> = {};
     for (const status of APPLICATION_STATUSES) {
       statusCounts[status] = applications.filter((application) => application.status === status).length;
@@ -315,6 +356,7 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
     res.json({
       candidates: candidateIds.size,
       applications: applications.length,
+      dateRange: serializeDateRange(parsedRange),
       statusCounts,
       queue: {
         queued: statusCounts.QUEUED ?? 0,

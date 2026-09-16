@@ -3,14 +3,17 @@
  */
 
 import {
+  applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
   hydrateApplicationProofUrls,
   type ApplicationRow,
+  type CreatedAtRangeFilter,
 } from '../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { config } from '../config/env.js';
 import { getISTDateString } from '../services/workHistoryClient.js';
 import { displayNameMapForEmails } from './authDirectory.js';
+import { listOperatorEmailsForManager } from '../db/users.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Client Dashboard');
@@ -20,7 +23,7 @@ const log = createLogger('Client Dashboard');
  * which manager email maps to which CA manager id. Flip this to true to restore
  * per-manager client lists.
  */
-export const MANAGER_TEAM_SCOPE_ENABLED = false;
+export const MANAGER_TEAM_SCOPE_ENABLED = true;
 
 export interface ManagerApplicationRow extends ApplicationRow {
   profiles?: {
@@ -63,6 +66,7 @@ export interface ManagerClientRow {
 
 export interface ClientDashboardResult {
   date: string;
+  dateRange: { preset: string; from: string | null; to: string | null; label: string };
   ca: string;
   managerEmail: string;
   rows: ManagerClientRow[];
@@ -147,12 +151,14 @@ export async function fetchLinkedCaIds(managerEmail: string): Promise<{ ids: str
 
 export function emptyClientDashboard(
   date: string,
+  dateRange: ClientDashboardResult['dateRange'],
   managerEmail: string,
   ca: string,
   warning?: string
 ): ClientDashboardResult {
   return {
     date,
+    dateRange,
     ca,
     managerEmail,
     rows: [],
@@ -165,31 +171,49 @@ export function emptyClientDashboard(
 export async function loadClientDashboard(options: {
   managerEmail: string;
   date?: string;
+  createdAtRange?: CreatedAtRangeFilter;
+  dateRangeMeta?: ClientDashboardResult['dateRange'];
   ca?: string;
 }): Promise<ClientDashboardResult> {
   const date = options.date || getISTDateString();
+  const dateRange = options.dateRangeMeta || {
+    preset: 'legacy_day',
+    from: date,
+    to: date,
+    label: date,
+  };
   const requestedCa = (options.ca || 'all').trim() || 'all';
   const managerEmail = options.managerEmail.trim().toLowerCase();
 
   if (!isSupabaseConfigured()) {
-    return emptyClientDashboard(date, managerEmail, requestedCa, 'Manager dashboard requires Supabase.');
+    return emptyClientDashboard(date, dateRange, managerEmail, requestedCa, 'Manager dashboard requires Supabase.');
   }
 
-  const { startIso, endIso } = getISTDateRangeUtc(date);
+  const createdAtRange =
+    options.createdAtRange ??
+    (() => {
+      const { startIso, endIso } = getISTDateRangeUtc(date);
+      return { startIso, endIso };
+    })();
+
   let query = getDbClient()
     .from('candidate_applications')
-    .select('*, profiles!inner(applywizz_id, client_name)')
-    .gte('created_at', startIso)
-    .lte('created_at', endIso);
+    .select('*, profiles!inner(applywizz_id, client_name)');
+  query = applyCreatedAtRangeFilter(query, createdAtRange);
 
   let warning: string | undefined;
   if (MANAGER_TEAM_SCOPE_ENABLED) {
-    const linked = await fetchLinkedCaIds(managerEmail);
-    if (linked.ids.length === 0) {
-      return emptyClientDashboard(date, managerEmail, requestedCa, linked.warning || 'No clients linked to this manager.');
+    const operatorEmails = await listOperatorEmailsForManager(managerEmail);
+    if (operatorEmails.length === 0) {
+      return emptyClientDashboard(
+        date,
+        dateRange,
+        managerEmail,
+        requestedCa,
+        'No operators are assigned to this manager yet.'
+      );
     }
-    query = query.in('applywizz_id', linked.ids);
-    warning = linked.warning;
+    query = query.in('assigned_ca_email', operatorEmails);
   }
 
   const { data, error } = await query;
@@ -266,6 +290,7 @@ export async function loadClientDashboard(options: {
 
   return {
     date,
+    dateRange,
     ca: requestedCa.toLowerCase() === 'all' ? 'all' : requestedCa,
     managerEmail,
     rows,

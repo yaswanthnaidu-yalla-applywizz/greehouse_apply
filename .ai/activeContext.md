@@ -1,106 +1,31 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-15 (session — profiles.country missing on live schema)_
+_Last updated: 2026-09-16_
 
-## Current Focus (Active Sprint)
+## Current Focus
 
-### 0. Ingest halt — systemic failures stop the process
-- **`haltWithDevAlert(module, message, error?)`** in `src/utils/logger.ts` logs `[HALT]` + `🚨 DEV ACTION REQUIRED` and `process.exit(1)`
-- Wired for Playwright launch, Supabase probe / empty key, ApplyWizz 5xx/timeout, missing required tables, first LLM provider call, malformed/zero-row CSV
-- Recoverable: single job scan, single candidate resolve, CAPTCHA/OTP, individual submit — `[WARN]` and continue
-- Status: **code ready, not committed** — `npm run typecheck` clean
+### 1. Role assignment authorities (in progress)
+- Sign-in should read **`users.role`** when present and embed in JWT; hardcoded dev/admin/manager emails still win.
+- If no `users` row: CA emails API gate → create operator row in `users`.
+- Existing row bypasses CA API for authorization.
+- **Not shipped yet** — today role still comes from `ROLE_BY_EMAIL` + `persistRoleClaim` on login only.
 
-### 1. CSV ingest FK — no `profiles` row before application upsert
-- **Symptom:** `upsertApplication` ERROR `candidate_applications_applywizz_id_fkey` (e.g. AWL-39218 Fanatics)
-- **Cause (original):** Phase C skipped IDs not already in `profiles`. `ensureApplicationRowsFromCsv` then upserted every CSV pair with `syncProfiles: false`
-- **Cause (2026-09-15 logs):** ApplyWizz fetch succeeds, then `upsertProfile` fails: `Could not find the 'country' column of 'profiles' in the schema cache`. Code writes `country`/`country_code`; `schema.sql` and every migration through 015 never added them. `upsertProfile` swallows the error and writes local JSON, so `hasSupabaseProfile` stays false → skip `ApplyWizz profile was not written to Supabase profiles` (AWL-39777, AWL-39218, AWL-36146, …)
-- **Fix:** Phase C `ensureSupabaseProfile` (already in tree) + migration **016** (`country`, `country_code`) + `upsertProfile` / profile patches retry by stripping any column PostgREST reports missing from the `profiles` schema cache (not country-only)
-- Status: **shipped on main (pending deploy)** — apply `src/db/migrations/016_profiles_country.sql` in Supabase SQL Editor, then re-run ▶ Start so country persists (creates work even before 016 via schema-cache column stripping)
+### 2. Manager CA / team filtering (shipped this session — verify in prod)
+- **`users.manager_email`** populated on operator login via work-history + CA manager UUID map (migration **017**).
+- **`MANAGER_TEAM_SCOPE_ENABLED = true`**: manager dashboard + `GET /api/candidates`, `/jobs`, `/stats`, **`GET /api/users`** scoped to operators where `manager_email =` signed-in manager.
+- Dev/admin see all; dev bypasses role guards as before.
+- **Next:** confirm operators have `manager_email` after login; smoke-test manager `/manager` and any shared list APIs.
 
-### 2. Role-based Admin / Manager / Dev dashboards
-- Migration **015 applied** on Supabase (`audit_events` + `application_events` + service_role RLS). Activity/audit/debugger can fill from here
-- Login home: operator `/`, manager `/manager`, admin `/admin`, **dev `/dev`** (switcher still opens the others)
-- Sign Out is top-right on operator, manager, admin, and dev
-- Dashboard sessions persist **7 days** (`refreshToken` + `POST /api/auth/refresh`)
-- Status: **on `main` (`7f91c59`)**
-- Dev System **ApplyWizz** tile: GET `get-client-details` with no id. HTTP 400 means reachable (id required); only timeouts / 5xx are errors
-
-### 3. Resolution Engine — Semantic Search for Resume Parsing
-- Current Tier 2 (pdf-parse) + Tier 3 (Fuse.js fuzzy) sometimes miss relevant resume content
-- **Shipped (2026-09-15, `31b830e`):** Tier 5 fail-closed — LLM answers that are not an exact option (or below min confidence) stay `unresolved`. SMS/recruiting/marketing opt-in questions are always filled **No** at submit time (`isConsentSmsMarketingField`)
-- Open question: use vector embeddings vs. smarter Fuse.js tuning vs. structured extraction pre-pass
-- Status: **semantic search still investigating**; fail-closed + SMS skip on `main`
-
-### 4. Email Proof / OTP Reliability
-- **OTP path fixed (2026-09-15):** `isGreenhouseOtpEmail` gate before extraction; verified live AWL-31428 → `NgW4NT62`
-- **Confirmation path fixed:** forward-only window from `submitted_at`; OTP subjects rejected; `EMAIL_PROOF_PENDING`-only poller
-- **`EMAIL_UNVERIFIED` (on `main`, `cf50a45`):** after 10m with no confirmation mail → `EMAIL_UNVERIFIED`. Migration 013 — operator reported applied
-- **Session reset (`601d37d`):** each `fetchLatestOtp` goto-root + clear filter; empty user list → one `page.reload()` retry
-- **Step logs on `main` (`8a44cf2`):** numbered `[Zoho] Step 1`–`8` + extra 5s wait after user-list selector
-- Remaining: not yet exercised against a live Greenhouse OTP challenge
-- Status: **reset/retry + step logs on `main`; live OTP verification still pending**
-
-### 5. Submission Queue Integrity
-- Duplicate live submissions guarded on `main` (`cf50a45`): `IN_FLIGHT_STATUSES` includes `EMAIL_PROOF_PENDING`; PATCH ignores naked `QUEUED` while in-flight; `persist: false` on poll and submit-response paths
-- Status: **shipped; live verification pending**
-
-### 6. CSV Ingestion Trigger
-- Operator-driven: dashboard **▶ Start** → `POST /api/admin/trigger-ingest-from-storage` (202 + poll `ingest-status`). No Storage webhook
-- Credential resolution (`src/db/client.ts`): prefer `service_role` JWT, else `SUPABASE_SERVICE_ROLE_KEY` (including `sb_secret_`); normalize quoted/Bearer/whitespace secrets
-- Ingest (`0d02593`) probes **every** configured key with a fresh client and logs `jwt.role` + entry names. Empty list is a failed run
-- Local `.env` with a `service_role` JWT lists `test(Sheet1).csv` at bucket root. Railway ▶ Start after `0d02593` still reported `entries=0` / `(none)` — **the process keys cannot see Storage objects** (anon/publishable behaviour)
-- Admin probe: `GET /api/admin/supabase-storage-health` returns `keyProbes[]`
-- Status: **code on `main`; Railway still cannot list the dropzone — put the legacy `eyJ…` service_role JWT in `SUPABASE_SERVICE_ROLE_KEY`**
-
-### 7. Question cap + SKIPPED + empty forms
-- **`MAX_JOB_QUESTIONS` default raised 23 → 35** (`716b42d`). Jobs with `field_count >= 35` upsert `SKIPPED` (`skippedApplications.ts`, migration **014**)
-- Operator queue hides `SKIPPED` (`excludeSkippedApplicationJobs`)
-- Empty `resolved_fields` hydrated from `scanned_job_templates.fields_schema` (`applicationFieldHydration.ts`, `2bca544`) so the dashboard is not a blank form after segregator-only upserts
-- Status: **on `main`; apply migration 014 on Supabase if SKIPPED upserts fail the CHECK constraint**
-
-### 8. Central logger + AW logo (shipped with dashboards)
-- **Central logger** — `src/utils/logger.ts` (`createLogger`); all `src/` `console.log`/`warn`/`error` swapped; format `[ISO] [LEVEL] [MODULE] message`
-- App logo: square AW mark at `dashboard/public/logo.webp` (favicon + header/auth); `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
+### 3. Resolution engine (background)
+- Semantic / fuzzy Tier 2+3 improvement — approach not chosen.
 
 ## Immediate Blockers / Open Questions
-- [ ] **AWL-39218 / new-profile create** — ApplyWizz fetch works; Supabase insert dies on missing `profiles.country`. Apply migration **016**, deploy the upsert retry, re-run ingest. Confirm `upsertProfile wrote … without country` goes away after 016, and skipped IDs become `created`
-- [ ] Manager dashboard: additional metrics/views beyond date/client rollup? (needs product decision)
-- [x] **Migration 015** — operator applied 2026-09-15 (`audit_events` + `application_events` + service_role RLS)
-- [ ] Semantic search: choose approach (embeddings vs fuzzy tuning) before implementation
-- [ ] **`ZOHO_CONNECTOR_USER` holds a password-shaped value, not an email** — operator must confirm the username
-- [ ] **Migration 011** — `zoho_connected_profiles` still missing on the instance that logged the missing-table error (re-check)
-- [ ] OTP fix not yet exercised against a *fresh* Greenhouse OTP challenge
-- [ ] **Migration 014** (`SKIPPED`) — run in Supabase SQL Editor if not applied
-- [ ] **Railway ingest still lists zero objects** after `0d02593` — both process keys behave like anon for Storage. Need legacy `service_role` JWT in `SUPABASE_SERVICE_ROLE_KEY`. After Start, read `Probe SUPABASE_… jwt.role=` lines
-- [ ] ▶ Start not yet completed end-to-end (would archive `test(Sheet1).csv`)
-- [ ] Duplicate-submission fix not yet exercised on a live submit
-- [ ] Email proof `EMAIL_UNVERIFIED` path not live-verified
-- [ ] **Skill-review apply** for open observations **0003, 0005, 0011, 0012** — listed 2026-09-15; user deferred **0003/0005/0011** to **end of week** (do not stage/action those until then)
+- [ ] Apply migration **017** (`users` table) in Supabase if not applied.
+- [ ] Apply migration **016** (`profiles.country`) if ingest/profile create still fails.
+- [ ] Railway Storage ingest keys (`service_role` JWT) — still open if ▶ Start lists zero files.
+- [ ] Role-from-`users` sign-up/login flow (item 1 above).
 
 ## Recent Decisions Made
-- CSV ingestion is **admin-triggered from `/admin`**, not from the operator header
-- Roles are isolated: managers cannot open operator/admin/dev; admins cannot open manager/operator/dev; missing email is never admin. **Role comes from the email map**, not `applywizz_is_admin` (that flag sent the dev user to `/admin`)
-- Dashboard sessions persist **7 days** (`refreshToken` + `POST /api/auth/refresh`); existing localStorage tokens without a refresh token must sign in once
-- Sign Out is on every dashboard header (operator already had it; admin/manager/dev added)
-- Manager dashboard currently shows **all clients** (`MANAGER_TEAM_SCOPE_ENABLED = false` in `clientDashboard.ts`). Re-enable team scoping once we know which `careerassociatemanager_id` maps to which manager email.
-- `audit_events` / `application_events` RLS is **service_role only** — do not copy the core-table `USING (true)` policies onto these. Core tables remain open `USING (true)` (multi-tenant RLS still V3).
-- Long-running admin actions return `202` and expose a status endpoint
-- CAPTCHA automation is explicitly out of scope
-- Question cap is **35**, not 23 — further lifts need an explicit instruction (`AGENTS.md` rule 7)
-- Over-cap jobs are persisted as `SKIPPED`, not silently omitted
-- Tier 5 must **fail closed** on option mismatch — never write a guessed dropdown value
-- SMS/recruiting opt-in is always **No** at fill time
-- Empty storage lists with no error mean **wrong JWT role**, not an empty bucket
-- Prefer probing every env key over trusting `listBuckets()` or a singleton client
-- Queue ownership: in-flight statuses are never requeued; `persist: false` for poll/submit bookkeeping
-- Operator UI source of truth is **`dashboard/public/index.html`**
-- A reused Playwright page must be **reset to root and the filter cleared** before the next OTP lookup; one reload if the user list is empty
-- All `src/` stdout goes through **`createLogger`** (`src/utils/logger.ts`) — no new raw `console.*` in `src/`
-- Open skill observations **0003, 0005, 0011** stay open until an end-of-week apply; **0012** logged this session (privilege flag ≠ role)
-- Ingest `haltWithDevAlert` exits the process on systemic failures only — never on CAPTCHA, OTP, or a single job/candidate/application failure
-
-## How to Update This File
-After each significant sprint or feature ship, update:
-1. Move completed items to `progress.md` under "What Works"
-2. Add new items to "Current Focus"
-3. Update "Immediate Blockers" with fresh blockers/decisions needed
+- Manager team scope uses **`users.manager_email` → operator emails → `assigned_ca_email` / work-history union**, not ApplyWizz `careerassociatemanager_id` API alone.
+- Operator queue shows **all** application rows (including SKIPPED); blocked statuses use operator-friendly **`error_message`** in the form panel.
+- Default dashboard date window: **Today & Yesterday** (IST) unless `?from=&to=` override.

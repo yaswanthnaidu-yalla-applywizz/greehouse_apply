@@ -158,7 +158,22 @@
     function ManagerApp() {
       const access = ApplyWizzRoles.enforcePageAccess(['manager']);
       const [tab, setTab] = useState('home');
-      const [date, setDate] = useState(ApplyWizzRoles.getTodayIST);
+      const [dateFilterMode, setDateFilterMode] = useState('default');
+      const [customFrom, setCustomFrom] = useState(() => {
+        const today = ApplyWizzRoles.getTodayIST();
+        const d = new Date(`${today}T00:00:00+05:30`);
+        d.setDate(d.getDate() - 1);
+        return d.toISOString().slice(0, 10);
+      });
+      const [customTo, setCustomTo] = useState(ApplyWizzRoles.getTodayIST);
+      const dateRangeLabel =
+        dateFilterMode === 'custom' && customFrom && customTo
+          ? (customFrom === customTo ? customFrom : `${customFrom} – ${customTo}`)
+          : 'Today & Yesterday';
+      const dateQuery =
+        dateFilterMode === 'custom' && customFrom && customTo
+          ? `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`
+          : '';
       const [ca, setCa] = useState('all');
       const [rows, setRows] = useState([]);
       const [totals, setTotals] = useState({});
@@ -190,7 +205,11 @@
         setLoading(true);
         setError('');
         try {
-          const params = new URLSearchParams({ date, ca });
+          const params = new URLSearchParams({ ca });
+          if (dateQuery) {
+            params.set('from', customFrom);
+            params.set('to', customTo);
+          }
           const res = await fetch(`/api/manager/dashboard?${params}`, { headers: ApplyWizzRoles.getAuthHeaders() });
           const payload = await res.json();
           if (res.status === 401 || res.status === 403) {
@@ -217,16 +236,17 @@
         } finally {
           setLoading(false);
         }
-      }, [date, ca]);
+      }, [dateFilterMode, customFrom, customTo, ca]);
 
       const loadOperators = useCallback(async () => {
-        const res = await fetch(`/api/manager/operators?date=${encodeURIComponent(date)}`, { headers: ApplyWizzRoles.getAuthHeaders() });
+        const opParams = dateQuery ? `?${dateQuery}` : '';
+        const res = await fetch(`/api/manager/operators${opParams}`, { headers: ApplyWizzRoles.getAuthHeaders() });
         const payload = await res.json();
         if (res.ok) {
           setOperators(payload.operators || []);
           setOperatorTotals(payload.totals || {});
         }
-      }, [date]);
+      }, [dateQuery]);
 
       const loadActivity = useCallback(async () => {
         const res = await fetch('/api/manager/activity?limit=100', { headers: ApplyWizzRoles.getAuthHeaders() });
@@ -265,6 +285,7 @@
         { id: 'operators', label: 'Operators' },
         { id: 'activity', label: 'Activity' },
         { id: 'reports', label: 'Reports' },
+        { id: 'guide', label: 'Guide' },
       ];
 
       return (
@@ -288,9 +309,22 @@
                     {careerAssociates.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
                 </label>
-                <label className="text-xs font-bold uppercase">Date
-                  <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
-                </label>
+                <div className="text-xs font-bold uppercase">
+                  Date range
+                  <div className="mt-1 flex flex-wrap items-center gap-2 font-mono normal-case">
+                    <span className="text-sm font-black">{dateRangeLabel}</span>
+                    {dateFilterMode !== 'custom' ? (
+                      <button type="button" className="underline text-[#64748B]" onClick={() => setDateFilterMode('custom')}>Custom</button>
+                    ) : (
+                      <>
+                        <input type="date" value={customFrom} onChange={(e) => e.target.value && setCustomFrom(e.target.value)} className="border-2 border-[#1A1A2E] rounded px-2 py-1 text-sm bg-white" />
+                        <span>–</span>
+                        <input type="date" value={customTo} onChange={(e) => e.target.value && setCustomTo(e.target.value)} className="border-2 border-[#1A1A2E] rounded px-2 py-1 text-sm bg-white" />
+                        <button type="button" className="underline text-[#64748B]" onClick={() => setDateFilterMode('default')}>Reset</button>
+                      </>
+                    )}
+                  </div>
+                </div>
                 <button type="button" onClick={load} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
                 <HeaderSignOut />
               </div>
@@ -396,6 +430,60 @@
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {tab === 'guide' && (
+              <div className="max-w-3xl space-y-6">
+                <div>
+                  <h2 className="text-2xl font-black text-[#1A1A2E]">Manager Guide</h2>
+                  <p className="text-xs text-[#64748B] font-mono mt-0.5">Oversee your team&apos;s applications — read-only monitoring, not submitting jobs.</p>
+                </div>
+
+                <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-2">What you see</h3>
+                  <p className="text-sm text-[#1A1A2E] leading-relaxed">
+                    This dashboard shows <span className="font-bold">only your team</span>: operators linked to you when they sign in. You do not see other managers&apos; operators or clients. To submit applications, operators use the main <span className="font-bold">Operator</span> dashboard at <span className="font-mono">/</span>.
+                  </p>
+                </section>
+
+                <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-3">Home</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li>Summary cards: Applications, Completed, Failed, Pending, Waiting email — scoped to your date range.</li>
+                    <li>Client table: click underlined <span className="font-bold">Completed</span>, <span className="font-bold">Pending</span>, or <span className="font-bold">Failed</span> counts to expand job links, proofs, or failure reasons.</li>
+                    <li><span className="font-bold">Filter by Career Associate</span> narrows the table to one operator.</li>
+                    <li>Default date range is <span className="font-bold">Today &amp; Yesterday</span>; use Custom / Reset and Refresh in the header.</li>
+                  </ul>
+                </section>
+
+                <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-3">Operators, Activity, Reports</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li><span className="font-bold">Operators</span> — roster with status, apps, workload, last sign-in. Click an operator name to open Home filtered to that CA.</li>
+                    <li><span className="font-bold">Activity</span> — recent application status changes for your team.</li>
+                    <li><span className="font-bold">Reports</span> — daily, weekly, or monthly application totals by period and per operator.</li>
+                  </ul>
+                </section>
+
+                <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-3">Important notes</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li>Yellow warnings may mean no operators are assigned yet or work history was temporarily unreachable.</li>
+                    <li>Completed rows may show web or email proof links — use these for QA, not for re-submitting.</li>
+                    <li>Skipped jobs (35+ questions, Zoho not connected, expired postings, etc.) appear with plain-language reasons — same rules as the operator dashboard.</li>
+                    <li>Operator-to-manager assignment happens on operator sign-in; this UI does not reassign teams.</li>
+                  </ul>
+                </section>
+
+                <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E] text-center">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-2">Need help?</h3>
+                  <p className="text-sm text-[#64748B] leading-relaxed">
+                    Contact{' '}
+                    <a href="mailto:yaswanthnaiduyalla@applywizz.ai" className="font-bold text-[#1A1A2E] underline hover:text-[#E88474]">yaswanthnaiduyalla@applywizz.ai</a>{' '}
+                    on Microsoft Teams.
+                  </p>
+                </section>
               </div>
             )}
           </div>

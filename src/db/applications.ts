@@ -19,6 +19,11 @@ import {
 } from './storage.js';
 import { createLogger } from '../utils/logger.js';
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
+import {
+  normalizeOperatorErrorMessage,
+  OperatorErrors,
+  statusShouldPersistOperatorError,
+} from '../operator/operatorErrorMessages.js';
 
 const log = createLogger('Applications');
 
@@ -92,6 +97,39 @@ export function getISTDateRangeUtc(dateStr: string): { startIso: string; endIso:
   };
 }
 
+export interface CreatedAtRangeFilter {
+  startIso: string;
+  endIso: string | null;
+}
+
+type GteLteQuery = {
+  gte(column: string, value: string): GteLteQuery;
+  lte(column: string, value: string): GteLteQuery;
+};
+
+export function applyCreatedAtRangeFilter<T extends GteLteQuery>(
+  query: T,
+  range: CreatedAtRangeFilter
+): T {
+  let q = query.gte('created_at', range.startIso) as T;
+  if (range.endIso) {
+    q = q.lte('created_at', range.endIso) as T;
+  }
+  return q;
+}
+
+export function rowCreatedAtInRange(
+  row: { created_at?: string | null },
+  range: CreatedAtRangeFilter
+): boolean {
+  const ts = row.created_at;
+  if (!ts) return false;
+  const time = new Date(ts).getTime();
+  if (time < new Date(range.startIso).getTime()) return false;
+  if (range.endIso && time > new Date(range.endIso).getTime()) return false;
+  return true;
+}
+
 const memoryApplications = new Map<string, ApplicationRow>();
 
 /**
@@ -122,7 +160,6 @@ export async function upsertApplication(
     updated_at: new Date().toISOString(),
   };
 
-  // Segregator upserts with resolved_fields: [] — never wipe a populated snapshot (except explicit SKIPPED).
   if (
     payload.status !== 'SKIPPED' &&
     Array.isArray(payload.resolved_fields) &&
@@ -145,6 +182,21 @@ export async function upsertApplication(
     } catch {
       /* fall through — empty payload is acceptable for brand-new rows */
     }
+  }
+
+  if (payload.status === 'SKIPPED' && !payload.error_message) {
+    payload.error_message = OperatorErrors.TOO_MANY_QUESTIONS;
+  } else if (payload.error_message !== undefined && payload.error_message !== null && payload.error_message !== '') {
+    payload.error_message = normalizeOperatorErrorMessage(payload.error_message, payload.status);
+  } else if (statusShouldPersistOperatorError(payload.status)) {
+    payload.error_message = normalizeOperatorErrorMessage(null, payload.status);
+  } else if (
+    payload.status === 'READY_FOR_REVIEW' &&
+    (payload.error_message === undefined || payload.error_message === null) &&
+    Array.isArray(payload.resolved_fields) &&
+    payload.resolved_fields.length === 0
+  ) {
+    payload.error_message = OperatorErrors.RESOLUTION_PENDING;
   }
 
   // Only pass id to Supabase if it's already a valid UUID
@@ -434,9 +486,11 @@ export async function updateStatus(
   };
 
   if (typeof extra === 'string') {
-    updatePayload.error_message = extra;
+    updatePayload.error_message = normalizeOperatorErrorMessage(extra, status);
   } else if (extra && typeof extra === 'object') {
-    if (extra.error_message !== undefined) updatePayload.error_message = extra.error_message;
+    if (extra.error_message !== undefined) {
+      updatePayload.error_message = normalizeOperatorErrorMessage(extra.error_message, status);
+    }
     if (extra.proof_web_url !== undefined) updatePayload.proof_web_url = extra.proof_web_url;
     if (extra.proof_captured_at !== undefined) updatePayload.proof_captured_at = extra.proof_captured_at;
     if (extra.proof_failed_url !== undefined) updatePayload.proof_failed_url = extra.proof_failed_url;
@@ -452,6 +506,10 @@ export async function updateStatus(
 
   if (status === 'APPLIED') {
     updatePayload.submitted_at = new Date().toISOString();
+  }
+
+  if (statusShouldPersistOperatorError(status) && updatePayload.error_message === undefined) {
+    updatePayload.error_message = normalizeOperatorErrorMessage(null, status);
   }
 
   if (status === 'FAILED' && updatePayload.proof_failed_url && !updatePayload.proof_failed_captured_at) {
@@ -873,7 +931,11 @@ export function serializeApplicationDto(
   const proofFailedUrl = merged.proof_failed_url || merged.proofFailedUrl || null;
   const proofFailedCapturedAt = merged.proof_failed_captured_at || merged.proofFailedCapturedAt || null;
   const dryRunScreenshotUrl = merged.dry_run_screenshot_url || merged.dryRunScreenshotUrl || merged.screenshotUrl || null;
-  const errorMessage = merged.error_message || merged.errorMessage || null;
+  const rawErrorMessage = merged.error_message || merged.errorMessage || null;
+  const errorMessage =
+    rawErrorMessage || statusShouldPersistOperatorError(status)
+      ? normalizeOperatorErrorMessage(rawErrorMessage, status)
+      : null;
   const hasManualEdits = Boolean(merged.has_manual_edits ?? merged.hasManualEdits ?? false);
   const reviewedAt = merged.reviewed_at || merged.reviewedAt || null;
   const submittedAt = merged.submitted_at || merged.submittedAt || null;
@@ -943,6 +1005,7 @@ export function serializeApplicationDto(
  */
 export async function getSubmissionOutcomeCounts(options?: {
   date?: string;
+  createdAtRange?: CreatedAtRangeFilter;
   allowedCandidateIds?: string[];
 }): Promise<{
   successfulApplications: number;
@@ -952,9 +1015,11 @@ export async function getSubmissionOutcomeCounts(options?: {
     ? new Set(options.allowedCandidateIds.map((id) => id.toUpperCase()))
     : null;
 
-  const dateBounds = options?.date && /^\d{4}-\d{2}-\d{2}$/.test(options.date)
-    ? getISTDateRangeUtc(options.date)
-    : null;
+  const legacyDay =
+    options?.date && /^\d{4}-\d{2}-\d{2}$/.test(options.date) ? getISTDateRangeUtc(options.date) : null;
+  const createdAtRange =
+    options?.createdAtRange ??
+    (legacyDay ? { startIso: legacyDay.startIso, endIso: legacyDay.endIso } : null);
 
   if (isSupabaseConfigured()) {
     try {
@@ -974,13 +1039,9 @@ export async function getSubmissionOutcomeCounts(options?: {
         failedQuery = failedQuery.in('applywizz_id', options.allowedCandidateIds);
       }
 
-      if (dateBounds) {
-        appliedQuery = appliedQuery
-          .gte('updated_at', dateBounds.startIso)
-          .lte('updated_at', dateBounds.endIso);
-        failedQuery = failedQuery
-          .gte('updated_at', dateBounds.startIso)
-          .lte('updated_at', dateBounds.endIso);
+      if (createdAtRange) {
+        appliedQuery = applyCreatedAtRangeFilter(appliedQuery, createdAtRange);
+        failedQuery = applyCreatedAtRangeFilter(failedQuery, createdAtRange);
       }
 
       const [appliedRes, failedRes] = await Promise.all([appliedQuery, failedQuery]);
@@ -1003,16 +1064,8 @@ export async function getSubmissionOutcomeCounts(options?: {
       continue;
     }
 
-    if (dateBounds) {
-      const ts = row.submitted_at || row.updated_at || row.created_at;
-      if (ts) {
-        const time = new Date(ts).getTime();
-        const startTime = new Date(dateBounds.startIso).getTime();
-        const endTime = new Date(dateBounds.endIso).getTime();
-        if (time < startTime || time > endTime) {
-          continue;
-        }
-      }
+    if (createdAtRange && !rowCreatedAtInRange(row, createdAtRange)) {
+      continue;
     }
 
     const key = `${row.applywizz_id}::${row.job_url}`;
@@ -1022,6 +1075,90 @@ export async function getSubmissionOutcomeCounts(options?: {
     else if (row.status === 'FAILED') failedApplications++;
   }
   return { successfulApplications, failedApplications };
+}
+
+export async function getDashboardApplicationMetrics(options?: {
+  createdAtRange?: CreatedAtRangeFilter;
+  allowedCandidateIds?: string[];
+}): Promise<{
+  totalApplications: number;
+  totalCandidates: number;
+  uniqueScannedJobs: number;
+  totalFieldsPopulated: number;
+  supabaseTaggedCount: number;
+  aiTaggedCount: number;
+}> {
+  const allowedSet =
+    options?.allowedCandidateIds && options.allowedCandidateIds.length > 0
+      ? new Set(options.allowedCandidateIds.map((id) => id.toUpperCase()))
+      : null;
+  const range = options?.createdAtRange;
+
+  let totalApplications = 0;
+  let totalFieldsPopulated = 0;
+  let supabaseTaggedCount = 0;
+  let aiTaggedCount = 0;
+  const candidateIds = new Set<string>();
+  const jobUrls = new Set<string>();
+
+  const tallyRow = (row: ApplicationRow) => {
+    if (allowedSet && !allowedSet.has(row.applywizz_id.toUpperCase())) return;
+    if (range && !rowCreatedAtInRange(row, range)) return;
+    if (row.status === 'SKIPPED') return;
+    totalApplications += 1;
+    candidateIds.add(row.applywizz_id.toUpperCase());
+    if (row.job_url) jobUrls.add(row.job_url);
+    const fields = Array.isArray(row.resolved_fields) ? row.resolved_fields : [];
+    for (const f of fields) {
+      totalFieldsPopulated += 1;
+      if (f?.source === 'supabase') supabaseTaggedCount += 1;
+      if (f?.source === 'ai') aiTaggedCount += 1;
+    }
+  };
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      let query = supabase
+        .from('candidate_applications')
+        .select('applywizz_id, job_url, status, resolved_fields, created_at');
+      if (allowedSet && options?.allowedCandidateIds) {
+        query = query.in('applywizz_id', options.allowedCandidateIds);
+      }
+      if (range) {
+        query = applyCreatedAtRangeFilter(query, range);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        for (const row of data as ApplicationRow[]) {
+          tallyRow(row);
+        }
+        return {
+          totalApplications,
+          totalCandidates: candidateIds.size,
+          uniqueScannedJobs: jobUrls.size,
+          totalFieldsPopulated,
+          supabaseTaggedCount,
+          aiTaggedCount,
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  for (const row of memoryApplications.values()) {
+    tallyRow(row);
+  }
+
+  return {
+    totalApplications,
+    totalCandidates: candidateIds.size,
+    uniqueScannedJobs: jobUrls.size,
+    totalFieldsPopulated,
+    supabaseTaggedCount,
+    aiTaggedCount,
+  };
 }
 
 /**
@@ -1088,7 +1225,8 @@ export async function listApplications(filter?: {
  * Count candidate_applications per applywizz_id, excluding SKIPPED and unresolved placeholders (dashboard queue size).
  */
 export async function countNonSkippedApplicationsByApplywizzIds(
-  applywizzIds: string[]
+  applywizzIds: string[],
+  createdAtRange?: CreatedAtRangeFilter
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   const ids = [...new Set(applywizzIds.map((id) => id.trim()).filter(Boolean))];
@@ -1099,10 +1237,14 @@ export async function countNonSkippedApplicationsByApplywizzIds(
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const { data, error } = await supabase
+      let query = supabase
         .from('candidate_applications')
-        .select('applywizz_id, status, resolved_fields')
+        .select('applywizz_id, status, resolved_fields, created_at')
         .in('applywizz_id', ids);
+      if (createdAtRange) {
+        query = applyCreatedAtRangeFilter(query, createdAtRange);
+      }
+      const { data, error } = await query;
       if (!error && data) {
         for (const row of data) {
           if (row.status === 'SKIPPED') continue;
@@ -1121,6 +1263,7 @@ export async function countNonSkippedApplicationsByApplywizzIds(
   for (const app of memoryApplications.values()) {
     if (app.status === 'SKIPPED') continue;
     if (!applicationRowHasPersistedResolution(app)) continue;
+    if (createdAtRange && !rowCreatedAtInRange(app, createdAtRange)) continue;
     const key = app.applywizz_id.trim().toUpperCase();
     if (!ids.some((id) => id.toUpperCase() === key)) continue;
     counts.set(key, (counts.get(key) || 0) + 1);
@@ -1417,7 +1560,7 @@ function resolveCandidateName(applywizzId: string): string {
  */
 export async function getRecentNotifications(
   limit = 50,
-  filter?: { date?: string; allowedCandidateIds?: string[] }
+  filter?: { date?: string; createdAtRange?: CreatedAtRangeFilter; allowedCandidateIds?: string[] }
 ): Promise<NotificationItem[]> {
   const notifications: NotificationItem[] = [];
 
@@ -1425,16 +1568,18 @@ export async function getRecentNotifications(
     ? new Set(filter.allowedCandidateIds.map((id) => id.toUpperCase()))
     : null;
 
-  const dateBounds = filter?.date && /^\d{4}-\d{2}-\d{2}$/.test(filter.date)
-    ? getISTDateRangeUtc(filter.date)
-    : null;
+  const legacyDay =
+    filter?.date && /^\d{4}-\d{2}-\d{2}$/.test(filter.date) ? getISTDateRangeUtc(filter.date) : null;
+  const createdAtRange =
+    filter?.createdAtRange ??
+    (legacyDay ? { startIso: legacyDay.startIso, endIso: legacyDay.endIso } : null);
 
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
       let query = supabase
         .from('candidate_applications')
-        .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, proof_web_url, proof_failed_url, updated_at, submitted_at')
+        .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, proof_web_url, proof_failed_url, updated_at, submitted_at, created_at')
         .in('status', ['APPLYING', 'APPLIED', 'FAILED'])
         .neq('applywizz_id', 'AWL-YASWANTH');
 
@@ -1442,10 +1587,8 @@ export async function getRecentNotifications(
         query = query.in('applywizz_id', filter.allowedCandidateIds);
       }
 
-      if (dateBounds) {
-        query = query
-          .gte('updated_at', dateBounds.startIso)
-          .lte('updated_at', dateBounds.endIso);
+      if (createdAtRange) {
+        query = applyCreatedAtRangeFilter(query, createdAtRange);
       }
 
       const { data, error } = await query
@@ -1489,14 +1632,8 @@ export async function getRecentNotifications(
         continue;
       }
 
-      const ts = app.updated_at || app.submitted_at || app.created_at;
-      if (dateBounds && ts) {
-        const time = new Date(ts).getTime();
-        const startTime = new Date(dateBounds.startIso).getTime();
-        const endTime = new Date(dateBounds.endIso).getTime();
-        if (time < startTime || time > endTime) {
-          continue;
-        }
+      if (createdAtRange && !rowCreatedAtInRange(app, createdAtRange)) {
+        continue;
       }
 
       const id = app.id || `notif-${app.applywizz_id}-${Buffer.from(app.job_url || '').toString('base64url').slice(0, 16)}`;

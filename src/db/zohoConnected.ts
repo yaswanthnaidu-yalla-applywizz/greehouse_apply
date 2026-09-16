@@ -5,6 +5,7 @@
 import { getDbClient, isSupabaseConfigured } from './client.js';
 import { getProfile, type ProfileRow } from './profiles.js';
 import { createLogger } from '../utils/logger.js';
+import { OperatorErrors } from '../operator/operatorErrorMessages.js';
 
 const log = createLogger('Zoho Connected');
 
@@ -71,13 +72,13 @@ export async function assertApplywizzZohoConnected(
 
   const profile = await getProfile(id);
   if (!profile) {
-    return { allowed: false, error: `Candidate profile '${id}' was not found.` };
+    return { allowed: false, error: OperatorErrors.PROFILE_NOT_RETRIEVED };
   }
 
   if (!isProfileZohoConnected(profile)) {
     return {
       allowed: false,
-      error: `Candidate '${id}' is not Zoho Mail connected. Automation is disabled for this profile.`,
+      error: OperatorErrors.ZOHO_NOT_CONNECTED,
     };
   }
 
