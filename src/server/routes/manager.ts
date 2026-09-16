@@ -17,7 +17,13 @@ import {
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
-import { insertAuditEvent, listApplicationEvents, type ApplicationEventRow } from '../../db/events.js';
+import {
+  countAuditEventsByActionInRange,
+  insertAuditEvent,
+  listApplicationEvents,
+  SUBMIT_CLICK_AUDIT_ACTION,
+  type ApplicationEventRow,
+} from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { canAccessManagerDashboard, resolveRole } from './auth.js';
 import { loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
@@ -267,16 +273,27 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
 
   try {
     const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
     const payload = await loadClientDashboard({
       managerEmail,
       date: parsedRange.fromDate || parsedRange.toDate || getISTDateString(),
       createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
       dateRangeMeta: serializeDateRange(parsedRange),
       ca: requestedCa,
-      teamScopeUnrestricted: hasUnrestrictedDashboardAccess(role),
+      teamScopeUnrestricted: unrestricted,
+    });
+    const operatorEmails = unrestricted
+      ? undefined
+      : await listOperatorEmailsForManager(managerEmail);
+    const submitClicks = await countAuditEventsByActionInRange({
+      action: SUBMIT_CLICK_AUDIT_ACTION,
+      startIso: parsedRange.startIso,
+      endIso: parsedRange.endIso,
+      actorEmails: operatorEmails,
     });
     res.json({
       ...payload,
+      submitClicks,
       rows: payload.rows.map((row) => ({
         ...row,
         assigned_ca: (row.assigned_ca || '').trim(),

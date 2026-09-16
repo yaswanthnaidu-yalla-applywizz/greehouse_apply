@@ -172,7 +172,8 @@ OPENROUTER_HTTP_REFERER=https://apply-wizz.me
 RAILWAY_ENV=true                      # Disables headful mode, caps memory; also enables cooperative pipeline stop
 ENABLE_PIPELINE_STOP=false            # Allow admin ⏹ Stop + CLI SIGINT (also auto-on when NODE_ENV=development or RAILWAY_ENV)
 RESOLVER_WORKER_POOL_SIZE=3           # Parallel candidate×job resolution workers during ingest (max 5)
-PIPELINE_VERBOSE=false                # Per-URL scan + per-field resolve logs; default is one summary line per phase/candidate
+PIPELINE_VERBOSE=false
+# Audit: application.submit_clicked logged on each POST /applications/:id/submit; Admin/Manager/Dev show submitClicks for IST day                # Per-URL scan + per-field resolve logs; default is one summary line per phase/candidate
 ```
 
 ## Deployment

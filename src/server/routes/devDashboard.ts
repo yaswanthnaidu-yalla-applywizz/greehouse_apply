@@ -22,6 +22,10 @@ import {
   setSubmissionEligibilityGateEnabled,
 } from '../runtimeState.js';
 import { submissionGateCriteria } from '../../submission/submissionEligibilityGate.js';
+import {
+  countAuditEventsByActionInRange,
+  SUBMIT_CLICK_AUDIT_ACTION,
+} from '../../db/events.js';
 
 const log = createLogger('Dev Dashboard');
 
@@ -56,9 +60,18 @@ devDashboardRouter.patch('/submission-gate', (req: Request, res: Response): void
   });
 });
 
-devDashboardRouter.get('/health', async (_req: Request, res: Response): Promise<void> => {
+devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<void> => {
   try {
-    res.json(await collectHealthSnapshot());
+    const dateParam = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+    const date =
+      dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : getISTDateString();
+    const { startIso, endIso } = getISTDateRangeUtc(date);
+    const submitClicks = await countAuditEventsByActionInRange({
+      action: SUBMIT_CLICK_AUDIT_ACTION,
+      startIso,
+      endIso,
+    });
+    res.json({ ...(await collectHealthSnapshot()), submitClicks, submitClicksDate: date });
   } catch (error) {
     log.error('[Dev] health failed:', error);
     res.status(500).json({ error: 'Unable to load health snapshot.' });
