@@ -17,7 +17,7 @@ import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboa
 import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
-import { isManagerViewAsOperator, resolveManagerViewAsOperatorScope } from '../managerTeamScope.js';
+import { resolveManagerViewAsOperatorScope, resolveViewAsOperatorManagerEmail } from '../managerTeamScope.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('Notifications');
@@ -39,21 +39,23 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
 
     const userEmail = getAuthenticatedCaEmail(req);
     const isAdmin = isUserAdmin((req as any).user || userEmail);
+    const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(req as AuthenticatedRequest);
+    const adminBypass = isAdmin && !viewAsManagerEmail;
 
     let allowedCandidateIds: string[] | undefined = undefined;
-    if (!isAdmin) {
-      if (!userEmail) {
+    if (!adminBypass) {
+      if (!userEmail && !viewAsManagerEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      if (isManagerViewAsOperator(req as AuthenticatedRequest)) {
-        const scope = await resolveManagerViewAsOperatorScope(userEmail);
+      if (viewAsManagerEmail) {
+        const scope = await resolveManagerViewAsOperatorScope(viewAsManagerEmail);
         allowedCandidateIds = Array.from(scope.allowedIds);
       } else {
         const merged = await mergeWorkHistoryForIstDates({
           mode: 'ca',
-          caEmail: userEmail,
+          caEmail: userEmail!,
           dates: istDatesForWorkHistory(parsedRange),
         });
         allowedCandidateIds = merged.candidateIds;

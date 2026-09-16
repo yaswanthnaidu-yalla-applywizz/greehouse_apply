@@ -29,7 +29,7 @@ import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
   applicationAssignedCaAllowed,
-  isManagerViewAsOperator,
+  resolveViewAsOperatorManagerEmail,
   resolveManagerViewAsOperatorScope,
 } from '../managerTeamScope.js';
 import { isUserAdmin } from './auth.js';
@@ -508,28 +508,30 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let allowedIds: Set<string> | null = null;
     let teamOperatorEmails: string[] | null = null;
     const authReq = req as AuthenticatedRequest;
-    const managerViewAsOperator = isManagerViewAsOperator(authReq);
+    const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(authReq);
+    const adminBypass = isAdmin && !viewAsManagerEmail;
 
-    if (!isAdmin) {
-      if (!userEmail) {
+    if (!adminBypass) {
+      if (!userEmail && !viewAsManagerEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
 
-      if (managerViewAsOperator) {
-        const scope = await resolveManagerViewAsOperatorScope(userEmail);
+      if (viewAsManagerEmail) {
+        const scope = await resolveManagerViewAsOperatorScope(viewAsManagerEmail);
         allowedIds = scope.allowedIds;
         teamOperatorEmails = scope.teamOperatorEmails;
       } else {
+        const caEmail = userEmail!;
         const merged = await mergeWorkHistoryForIstDates({
           mode: 'ca',
-          caEmail: userEmail,
+          caEmail,
           dates: istDatesForWorkHistory(parsedRange),
         });
         let candidateIds = merged.candidateIds;
         if (candidateIds.length === 0 && parsedRange.preset === 'default') {
-          const allowedResult = await fetchAllowedCandidates(userEmail);
+          const allowedResult = await fetchAllowedCandidates(caEmail);
           if (allowedResult.candidateIds.length > 0) {
             candidateIds = allowedResult.candidateIds;
           }
@@ -569,8 +571,8 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
       }
       applications = (data || []).filter((app: any) => {
         if (!applicationRowHasPersistedResolution(app)) return false;
-        if (!isAdmin && userEmail) {
-          if (managerViewAsOperator && teamOperatorEmails) {
+        if (!adminBypass && userEmail) {
+          if (viewAsManagerEmail && teamOperatorEmails) {
             return applicationAssignedCaAllowed(
               app.assigned_ca_email,
               userEmail,

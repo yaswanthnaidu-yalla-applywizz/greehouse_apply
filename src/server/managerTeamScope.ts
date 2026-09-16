@@ -10,6 +10,7 @@ import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { listOperatorEmailsForManager } from '../db/users.js';
 import type { AuthenticatedRequest } from './middleware/auth.js';
 import { isUserAdmin, resolveRoleFromEmail } from './routes/auth.js';
+import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
 import { resolveRoleFromRequest, type AppRole } from './routes/requireRole.js';
 import type { WorkHistoryCandidateRecord } from '../services/workHistoryClient.js';
 import { mergeWorkHistoryForCaEmails } from './workHistorySpan.js';
@@ -18,11 +19,41 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('ManagerTeamScope');
 
 export const VIEW_AS_OPERATOR_HEADER = 'x-view-as';
+export const VIEW_AS_MANAGER_EMAIL_HEADER = 'x-view-as-manager-email';
 
 /** True when header value is `operator` (case-insensitive). */
 export function isViewAsOperatorHeaderValue(raw: string | string[] | undefined): boolean {
   const v = Array.isArray(raw) ? raw[0] : raw;
   return typeof v === 'string' && v.trim().toLowerCase() === 'operator';
+}
+
+function headerString(raw: string | string[] | undefined): string {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return typeof v === 'string' ? v.trim().toLowerCase() : '';
+}
+
+/**
+ * Manager email whose team is scoped when X-View-As: operator is active.
+ * Manager JWT → own email (ignores X-View-As-Manager-Email). Dev → header email if manager role.
+ */
+export function resolveViewAsOperatorManagerEmail(req: AuthenticatedRequest): string | null {
+  if (!isViewAsOperatorHeaderValue(req.headers[VIEW_AS_OPERATOR_HEADER])) return null;
+  const role = resolveRoleFromRequest(req);
+  if (role === 'manager') {
+    const email = getAuthenticatedCaEmail(req);
+    return email ? email.trim().toLowerCase() : null;
+  }
+  if (role === 'dev') {
+    const email = headerString(req.headers[VIEW_AS_MANAGER_EMAIL_HEADER]);
+    if (!email.includes('@')) return null;
+    if (resolveRoleFromEmail(email) !== 'manager') return null;
+    return email;
+  }
+  return null;
+}
+
+export function isViewAsOperatorTeamScope(req: AuthenticatedRequest): boolean {
+  return resolveViewAsOperatorManagerEmail(req) != null;
 }
 
 /** Manager session with X-View-As: operator — operator-style candidate APIs scoped to their team. */
