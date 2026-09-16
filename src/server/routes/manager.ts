@@ -20,7 +20,7 @@ import { insertAuditEvent, listApplicationEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { canAccessManagerDashboard, resolveRole } from './auth.js';
 import { loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
-import { listOperatorEmailsForManager } from '../../db/users.js';
+import { listAllDashboardUsers, listOperatorEmailsForManager } from '../../db/users.js';
 import { distinctApplywizzIdsForOperatorEmails, hasUnrestrictedDashboardAccess, resolveRequestAppRole } from '../managerTeamScope.js';
 import { parseDashboardCreatedAtRange, serializeDateRange } from '../dashboardDateRange.js';
 import { displayNameMapForEmails, isActiveWithin, listAuthDirectory } from '../authDirectory.js';
@@ -132,12 +132,14 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
   const requestedCa = typeof req.query.ca === 'string' ? req.query.ca.trim() : 'all';
 
   try {
+    const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
     const payload = await loadClientDashboard({
       managerEmail,
       date: parsedRange.fromDate || parsedRange.toDate || getISTDateString(),
       createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
       dateRangeMeta: serializeDateRange(parsedRange),
       ca: requestedCa,
+      teamScopeUnrestricted: hasUnrestrictedDashboardAccess(role),
     });
     res.json(payload);
   } catch (error) {
@@ -156,11 +158,15 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
   const date = parsedRange.fromDate || parsedRange.toDate || getISTDateString();
 
   try {
+    const managerEmail = managerEmailForRequest(req);
+    const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
     const dashboard = await loadClientDashboard({
-      managerEmail: managerEmailForRequest(req),
+      managerEmail,
       date,
       createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
       dateRangeMeta: serializeDateRange(parsedRange),
+      teamScopeUnrestricted: unrestricted,
     });
     const directory = await listAuthDirectory();
     const byEmail = new Map(directory.map((user) => [user.email, user]));
@@ -190,6 +196,36 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       current.pending += row.pending;
       current.failed += row.failed;
       operators.set(email, current);
+    }
+
+    if (unrestricted) {
+      const registered = await listAllDashboardUsers();
+      for (const user of registered) {
+        if ((user.role || '').trim().toLowerCase() !== 'operator') continue;
+        const email = user.email.trim().toLowerCase();
+        if (!email || operators.has(email)) continue;
+        operators.set(email, {
+          email,
+          name: user.name || email.split('@')[0],
+          applications: 0,
+          completed: 0,
+          pending: 0,
+          failed: 0,
+        });
+      }
+      for (const user of directory) {
+        const email = (user.email || '').trim().toLowerCase();
+        if (!email || operators.has(email)) continue;
+        if (user.role !== 'operator') continue;
+        operators.set(email, {
+          email,
+          name: user.displayName || email.split('@')[0],
+          applications: 0,
+          completed: 0,
+          pending: 0,
+          failed: 0,
+        });
+      }
     }
 
     const items = Array.from(operators.values()).map((operator) => {
