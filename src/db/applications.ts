@@ -1202,6 +1202,37 @@ export async function getDashboardApplicationMetrics(options?: {
   };
 }
 
+/** Distinct applywizz IDs with non-SKIPPED applications in the dashboard date range (dev/admin list hydration). */
+export async function distinctApplywizzIdsForCreatedAtRange(
+  createdAtRange: CreatedAtRangeFilter
+): Promise<string[]> {
+  if (!isSupabaseConfigured()) return [];
+
+  try {
+    let query = getDbClient()
+      .from('candidate_applications')
+      .select('applywizz_id, status, created_at')
+      .neq('status', 'SKIPPED');
+    query = applyCreatedAtRangeFilter(query, createdAtRange);
+    const { data, error } = await query;
+    if (error) {
+      log.warn(`[Applications] distinctApplywizzIdsForCreatedAtRange failed: ${error.message}`);
+      return [];
+    }
+    const ids = new Set<string>();
+    for (const row of (data || []) as ApplicationRow[]) {
+      if (!rowCreatedAtInRange(row, createdAtRange)) continue;
+      if (row.status === 'SKIPPED') continue;
+      const id = String(row.applywizz_id || '').trim().toUpperCase();
+      if (id) ids.add(id);
+    }
+    return Array.from(ids);
+  } catch (err: any) {
+    log.warn(`[Applications] distinctApplywizzIdsForCreatedAtRange exception: ${err?.message || err}`);
+    return [];
+  }
+}
+
 /**
  * Lists candidate applications with optional status and candidate filters.
  */

@@ -11,7 +11,10 @@ import {
   isViewAsOperatorHeaderValue,
   resolveViewAsOperatorManagerEmail,
 } from '../src/server/managerTeamScope.js';
-import { requireOperatorDashboardAccess } from '../src/server/routes/requireRole.js';
+import {
+  requireOperatorDashboardAccess,
+  resolveRoleFromRequest,
+} from '../src/server/routes/requireRole.js';
 import type { AuthenticatedRequest } from '../src/server/middleware/auth.js';
 
 describe('dashboardRoleResolution', () => {
@@ -49,6 +52,19 @@ describe('dashboardRoleResolution', () => {
       isEmailAuthorizedForSignupSync('newca@applywizz.ai', ['newca@applywizz.ai'], false),
       true
     );
+  });
+});
+
+describe('resolveRoleFromRequest', () => {
+  it('prefers ROLE_BY_EMAIL over JWT app_metadata operator (dev account)', () => {
+    const req = {
+      headers: {},
+      user: {
+        email: 'yaswanthnaiduyalla@applywizz.ai',
+        app_metadata: { role: 'operator' },
+      },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(resolveRoleFromRequest(req), 'dev');
   });
 });
 
