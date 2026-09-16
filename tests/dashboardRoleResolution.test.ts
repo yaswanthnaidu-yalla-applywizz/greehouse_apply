@@ -6,6 +6,7 @@ import {
   resolveSignInRoleFromSources,
 } from '../src/server/routes/auth.js';
 import {
+  applicationAssignedCaAllowedForRequest,
   isManagerViewAsOperator,
   isViewAsOperatorHeaderValue,
   resolveViewAsOperatorManagerEmail,
@@ -114,6 +115,56 @@ describe('managerViewAsOperator', () => {
       user: { app_metadata: { role: 'manager' } },
     } as unknown as AuthenticatedRequest;
     assert.equal(isManagerViewAsOperator(noHeader), false);
+  });
+});
+
+describe('applicationAssignedCaAllowedForRequest', () => {
+  const teamOps = ['ca1@applywizz.ai', 'ca2@applywizz.ai'];
+
+  it('ops dev: uses team operator set, not dev unrestricted bypass', () => {
+    assert.equal(
+      applicationAssignedCaAllowedForRequest(
+        'ca1@applywizz.ai',
+        'yaswanthnaiduyalla@applywizz.ai',
+        'dev',
+        teamOps,
+        'manager@applywizz.ai'
+      ),
+      true
+    );
+    assert.equal(
+      applicationAssignedCaAllowedForRequest(
+        'other@applywizz.ai',
+        'yaswanthnaiduyalla@applywizz.ai',
+        'dev',
+        teamOps,
+        'manager@applywizz.ai'
+      ),
+      false
+    );
+  });
+
+  it('manager team: allows assigned CA in teamOperatorEmails', () => {
+    assert.equal(
+      applicationAssignedCaAllowedForRequest(
+        'ca2@applywizz.ai',
+        'manager@applywizz.ai',
+        'manager',
+        teamOps,
+        null
+      ),
+      true
+    );
+    assert.equal(
+      applicationAssignedCaAllowedForRequest(
+        'outsider@applywizz.ai',
+        'manager@applywizz.ai',
+        'manager',
+        teamOps,
+        null
+      ),
+      false
+    );
   });
 });
 

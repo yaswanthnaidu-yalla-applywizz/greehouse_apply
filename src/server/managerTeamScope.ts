@@ -12,8 +12,15 @@ import type { AuthenticatedRequest } from './middleware/auth.js';
 import { isUserAdmin, resolveRoleFromEmail } from './routes/auth.js';
 import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
 import { resolveRoleFromRequest, type AppRole } from './routes/requireRole.js';
-import type { WorkHistoryCandidateRecord } from '../services/workHistoryClient.js';
-import { mergeWorkHistoryForCaEmails } from './workHistorySpan.js';
+import {
+  fetchAllowedCandidates,
+  type WorkHistoryCandidateRecord,
+} from '../services/workHistoryClient.js';
+import type { DashboardCreatedAtRange } from './dashboardDateRange.js';
+import { istDatesForWorkHistory } from './dashboardDateRange.js';
+import { mergeWorkHistoryForCaEmails, mergeWorkHistoryForIstDates } from './workHistorySpan.js';
+import { setCachedWorkHistory } from './workHistoryCache.js';
+import type { Response } from 'express';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('ManagerTeamScope');
@@ -200,4 +207,148 @@ export function applicationAssignedCaAllowed(
   if (!viewerEmail) return false;
   if (!assigned) return true;
   return assigned === viewerEmail.trim().toLowerCase();
+}
+
+/** Ops mode (X-View-As): dev/admin must not bypass CA filters; use manager team operator set. */
+export function applicationAssignedCaAllowedForRequest(
+  assignedCaEmail: string | null | undefined,
+  viewerEmail: string,
+  role: AppRole | null,
+  teamOperatorEmails: string[] | null,
+  viewAsManagerEmail: string | null
+): boolean {
+  if (viewAsManagerEmail) {
+    return applicationAssignedCaAllowed(
+      assignedCaEmail,
+      viewerEmail,
+      'manager',
+      teamOperatorEmails
+    );
+  }
+  return applicationAssignedCaAllowed(assignedCaEmail, viewerEmail, role, teamOperatorEmails);
+}
+
+export interface DashboardCandidateAccess {
+  unrestricted: boolean;
+  viewAsManagerEmail: string | null;
+  role: AppRole | null;
+  userEmail: string | null;
+  allowedIds: Set<string> | null;
+  teamOperatorEmails: string[] | null;
+  workHistoryRecords: WorkHistoryCandidateRecord[];
+  workHistoryUnreachable: boolean;
+  createdAtRange: CreatedAtRangeFilter;
+  authError?: string;
+}
+
+/**
+ * Resolves allowed candidate IDs for per-candidate dashboard routes (detail, jobs, resume).
+ * Mirrors GET /api/candidates list scoping for the same date query.
+ */
+export async function resolveDashboardCandidateAccess(
+  req: AuthenticatedRequest,
+  parsedRange: DashboardCreatedAtRange,
+  res?: Response
+): Promise<DashboardCandidateAccess> {
+  const userEmail = getAuthenticatedCaEmail(req);
+  const role = resolveRequestAppRole(req, userEmail);
+  const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(req);
+  const unrestricted = hasUnrestrictedDashboardAccess(role) && !viewAsManagerEmail;
+  const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
+  const whDates = istDatesForWorkHistory(parsedRange);
+
+  if (unrestricted) {
+    return {
+      unrestricted: true,
+      viewAsManagerEmail,
+      role,
+      userEmail,
+      allowedIds: null,
+      teamOperatorEmails: null,
+      workHistoryRecords: [],
+      workHistoryUnreachable: false,
+      createdAtRange,
+    };
+  }
+
+  if (!userEmail && !viewAsManagerEmail) {
+    return {
+      unrestricted: false,
+      viewAsManagerEmail,
+      role,
+      userEmail,
+      allowedIds: new Set(),
+      teamOperatorEmails: null,
+      workHistoryRecords: [],
+      workHistoryUnreachable: false,
+      createdAtRange,
+      authError: 'Unauthorized: CA email missing — cannot proceed',
+    };
+  }
+
+  let candidateIds: string[] = [];
+  let teamOperatorEmails: string[] | null = null;
+  let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
+  let workHistoryUnreachable = false;
+
+  if (viewAsManagerEmail) {
+    res?.setHeader('X-View-As-Active', 'true');
+    const team = await resolveTeamCandidateIdsForManager(
+      viewAsManagerEmail,
+      whDates,
+      createdAtRange
+    );
+    candidateIds = team.candidateIds;
+    teamOperatorEmails = team.operatorEmails;
+    workHistoryRecords = team.records;
+    workHistoryUnreachable = team.unreachable;
+  } else if (role === 'manager' && userEmail) {
+    const team = await resolveTeamCandidateIdsForManager(userEmail, whDates, createdAtRange);
+    candidateIds = team.candidateIds;
+    teamOperatorEmails = team.operatorEmails;
+    workHistoryRecords = team.records;
+    workHistoryUnreachable = team.unreachable;
+  } else if (userEmail) {
+    const caEmail = userEmail;
+    const merged = await mergeWorkHistoryForIstDates({
+      mode: 'ca',
+      caEmail,
+      dates: whDates,
+    });
+    candidateIds = merged.candidateIds;
+    workHistoryRecords = merged.records;
+    workHistoryUnreachable = merged.unreachable;
+    if (candidateIds.length === 0 && parsedRange.preset === 'default') {
+      const allowedResult = await fetchAllowedCandidates(caEmail);
+      if (allowedResult.candidateIds.length > 0) {
+        candidateIds = allowedResult.candidateIds;
+        workHistoryRecords = allowedResult.records;
+        workHistoryUnreachable = allowedResult.unreachable;
+        setCachedWorkHistory(
+          caEmail,
+          allowedResult.records,
+          allowedResult.candidateIds,
+          allowedResult.unreachable,
+          allowedResult.resolvedDate
+        );
+      }
+    }
+  }
+
+  return {
+    unrestricted: false,
+    viewAsManagerEmail,
+    role,
+    userEmail,
+    allowedIds: new Set(candidateIds.map((id) => id.toUpperCase())),
+    teamOperatorEmails,
+    workHistoryRecords,
+    workHistoryUnreachable,
+    createdAtRange,
+  };
+}
+
+export function isApplywizzIdInDashboardAccess(applywizzId: string, access: DashboardCandidateAccess): boolean {
+  if (access.unrestricted) return true;
+  return access.allowedIds?.has(applywizzId.toUpperCase()) ?? false;
 }

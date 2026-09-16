@@ -1313,11 +1313,24 @@ export interface CandidateApplicationAggregate {
   queue_status: CandidateQueueStatus;
 }
 
+export type CandidateApplicationAggregateRow = {
+  applywizz_id: string;
+  status: ApplicationStatus;
+  assigned_ca_email?: string | null;
+  resolved_fields?: unknown;
+  created_at?: string;
+};
+
 /**
  * job_count = COUNT(*) of candidate_applications rows per applywizz_id (all statuses).
+ * Optional scope matches dashboard GET .../jobs (created_at range + per-row includeRow).
  */
 export async function fetchCandidateApplicationAggregatesByApplywizzIds(
-  applywizzIds: string[]
+  applywizzIds: string[],
+  options?: {
+    createdAtRange?: CreatedAtRangeFilter;
+    includeRow?: (row: CandidateApplicationAggregateRow) => boolean;
+  }
 ): Promise<Map<string, CandidateApplicationAggregate>> {
   const aggregates = new Map<string, CandidateApplicationAggregate>();
   const ids = [...new Set(applywizzIds.map((id) => id.trim()).filter(Boolean))];
@@ -1327,21 +1340,32 @@ export async function fetchCandidateApplicationAggregatesByApplywizzIds(
 
   const statusesByKey = new Map<string, ApplicationStatus[]>();
   let loadedFromSupabase = false;
+  const scoped = Boolean(options?.createdAtRange || options?.includeRow);
 
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const { data, error } = await supabase
+      let query = supabase
         .from('candidate_applications')
-        .select('applywizz_id, status')
+        .select(
+          scoped
+            ? 'applywizz_id, status, assigned_ca_email, resolved_fields, created_at'
+            : 'applywizz_id, status'
+        )
         .in('applywizz_id', ids);
+      if (options?.createdAtRange) {
+        query = applyCreatedAtRangeFilter(query, options.createdAtRange);
+      }
+      const { data, error } = await query;
       if (!error && data) {
         loadedFromSupabase = true;
         for (const row of data) {
-          const key = String(row.applywizz_id || '').trim().toUpperCase();
+          const aggregateRow = row as unknown as CandidateApplicationAggregateRow;
+          if (options?.includeRow && !options.includeRow(aggregateRow)) continue;
+          const key = String(aggregateRow.applywizz_id || '').trim().toUpperCase();
           if (!key) continue;
           const list = statusesByKey.get(key) || [];
-          list.push(row.status as ApplicationStatus);
+          list.push(aggregateRow.status as ApplicationStatus);
           statusesByKey.set(key, list);
         }
       }
@@ -1354,6 +1378,15 @@ export async function fetchCandidateApplicationAggregatesByApplywizzIds(
     for (const app of memoryApplications.values()) {
       const key = app.applywizz_id.trim().toUpperCase();
       if (!ids.some((id) => id.toUpperCase() === key)) continue;
+      const aggregateRow: CandidateApplicationAggregateRow = {
+        applywizz_id: app.applywizz_id,
+        status: app.status,
+        assigned_ca_email: app.assigned_ca_email,
+        resolved_fields: app.resolved_fields,
+        created_at: app.created_at,
+      };
+      if (options?.createdAtRange && !rowCreatedAtInRange(app, options.createdAtRange)) continue;
+      if (options?.includeRow && !options.includeRow(aggregateRow)) continue;
       const list = statusesByKey.get(key) || [];
       list.push(app.status);
       statusesByKey.set(key, list);
