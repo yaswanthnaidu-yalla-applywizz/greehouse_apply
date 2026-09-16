@@ -7,6 +7,7 @@ import {
   LLMSynthesizer,
   LLM_MIN_CONFIDENCE,
   getEffectiveFieldOptions,
+  type BatchQuestion,
   type JobContext,
 } from './llmSynthesizer.js';
 import { upsertAnswer } from '../db/qaBank.js';
@@ -142,6 +143,132 @@ export async function resolveTier5(
   }
 
   return null;
+}
+
+/** Max LLM fields per batch API call within one candidate×job resolution. */
+export const TIER5_BATCH_CHUNK_SIZE = 15;
+
+/**
+ * Tier 5 batch path: one LLM request per chunk, with the same post-validation as single-field synthesis.
+ */
+export async function resolveTier5Batch(
+  applywizzId: string,
+  fields: ScannedField[],
+  candidateProfile: ProfileRow,
+  jobContext: { companyName: string; jobTitle: string },
+  resumeText: string = '',
+  jobDescription: string = ''
+): Promise<(ResolvedField | null)[]> {
+  if (fields.length === 0) return [];
+
+  const synthesizer = getSynthesizer();
+  const context: JobContext = {
+    title: jobContext.jobTitle || 'Position',
+    company: jobContext.companyName || 'Company',
+  };
+  const adaptedProfile = toCandidateProfile(candidateProfile);
+  const jd =
+    jobDescription.trim() ||
+    `Role: ${context.title}\nCompany: ${context.company}`;
+
+  const results: (ResolvedField | null)[] = new Array(fields.length).fill(null);
+  const llmFields: ScannedField[] = [];
+  const llmIndices: number[] = [];
+
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const combined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`;
+    if (/email/i.test(combined)) {
+      const compEmail = getCompanyEmail(candidateProfile);
+      if (compEmail) {
+        results[i] = {
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: compEmail,
+          source: 'supabase',
+          resolvedByTier: 1,
+          confidence: 1.0,
+        };
+      }
+      continue;
+    }
+    llmFields.push(field);
+    llmIndices.push(i);
+  }
+
+  if (llmFields.length === 0) return results;
+
+  try {
+    const batchQuestions: BatchQuestion[] = llmFields.map((field) => {
+      const effectiveOptions = getEffectiveFieldOptions(field);
+      return {
+        label: field.label,
+        type: field.type,
+        options: effectiveOptions,
+      };
+    });
+
+    const rawAnswers = await synthesizer.synthesizeBatchAnswers(batchQuestions, resumeText, jd);
+
+    for (let j = 0; j < llmFields.length; j++) {
+      const field = llmFields[j];
+      const effectiveOptions = getEffectiveFieldOptions(field);
+      const fieldForLlm: ScannedField =
+        effectiveOptions && (!field.options || field.options.length === 0)
+          ? { ...field, options: effectiveOptions }
+          : field;
+      const fingerprint = generateFingerprint(field.label, field.type);
+      const raw = rawAnswers[j] ?? '';
+
+      const finalized = synthesizer.finalizeRawAnswer(raw, fieldForLlm, adaptedProfile, context, {
+        defaultConfidenceIfMissing: 0.85,
+      });
+
+      if (finalized.source === 'unresolved' || !finalized.value?.trim()) {
+        continue;
+      }
+
+      const confidence = finalized.confidence ?? 0;
+      if (confidence < LLM_MIN_CONFIDENCE) {
+        continue;
+      }
+
+      const resolvedField: ResolvedField = {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: finalized.value.trim(),
+        source: 'ai',
+        resolvedByTier: 5,
+        confidence,
+      };
+
+      try {
+        await upsertAnswer({
+          applywizz_id: applywizzId,
+          question_fingerprint: fingerprint,
+          question_label: field.label,
+          field_type: field.type,
+          value: resolvedField.value,
+          source: 'ai',
+          confidence: resolvedField.confidence,
+        });
+      } catch (writeErr: any) {
+        log.warn(
+          `[Tier 5 Batch] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${writeErr.message}`
+        );
+      }
+
+      results[llmIndices[j]] = resolvedField;
+    }
+  } catch (err: any) {
+    log.warn(`[Tier 5 Batch] LLM batch error for ${applywizzId}: ${err.message}`);
+  }
+
+  return results;
 }
 
 export default resolveTier5;

@@ -15,7 +15,11 @@ let abortRequested = false;
 
 /** True when POST /api/admin/stop-ingest (or SIGINT on CLI) is allowed. */
 export function isPipelineStopEnabled(): boolean {
-  return config.ENABLE_PIPELINE_STOP || config.NODE_ENV === 'development';
+  return (
+    config.ENABLE_PIPELINE_STOP ||
+    config.NODE_ENV === 'development' ||
+    config.RAILWAY_ENV
+  );
 }
 
 export function resetPipelineAbort(): void {

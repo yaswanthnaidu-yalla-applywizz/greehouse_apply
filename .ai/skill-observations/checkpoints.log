@@ -65,3 +65,4 @@
 2026-09-16 session-end: admin operators manager filter + manager operator view UI shipped (c018d50); no new skill observations
 2026-09-16 session-start scan: files=14 parsed=14 suspect=0 (AGENTS session start)
 2026-09-16 session: Manager/Dev Ops mode UI + X-View-As-Manager-Email scoping; no new skill observations
+2026-09-17 session-end | Ops/operator job scope fix pushed 5b70d04 | docs activeContext+progress updated | no new observation-log entries

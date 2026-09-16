@@ -228,6 +228,9 @@ export class PlaywrightScanner {
     let expiredJobs = 0;
     let totalFields = 0;
     const scanStartedAt = Date.now();
+    let lastCompactProgressLogAt = scanStartedAt;
+    const compactProgressEvery = 100;
+    const compactProgressMinIntervalMs = 120_000;
 
     let browser: Browser | null = null;
 
@@ -283,6 +286,21 @@ export class PlaywrightScanner {
 
               if (this.onJobScanned) {
                 this.onJobScanned(template, completedCount, total);
+              }
+
+              if (compact) {
+                const now = Date.now();
+                const milestone =
+                  completedCount === total ||
+                  completedCount % compactProgressEvery === 0;
+                const heartbeat = now - lastCompactProgressLogAt >= compactProgressMinIntervalMs;
+                if (milestone || heartbeat) {
+                  lastCompactProgressLogAt = now;
+                  const elapsedSec = ((now - scanStartedAt) / 1000).toFixed(0);
+                  log.info(
+                    `[Playwright Scanner] progress ${completedCount}/${total} active=${activeJobs} expired=${expiredJobs} elapsed=${elapsedSec}s`
+                  );
+                }
               }
 
               if (!compact) {

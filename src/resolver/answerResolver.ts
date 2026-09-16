@@ -18,7 +18,7 @@ import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
 import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
-import { resolveTier5 } from './tier5LLM.js';
+import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE } from './tier5LLM.js';
 import { upsertApplication } from '../db/applications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
 import type {
@@ -158,10 +158,6 @@ export class AnswerResolver {
       return tier2;
     }
 
-    // ------------------------------------------------------------------------
-    // Tier 5: Local LLM Synthesis with QA Bank Writeback
-    // Streamlined Flow: Supabase ➔ Resume Parse (Supabase Storage) ➔ Local Ollama LLM
-    // ------------------------------------------------------------------------
     if (profile) {
       const tier5 = await resolveTier5(
         applywizzId,
@@ -175,9 +171,10 @@ export class AnswerResolver {
       }
     }
 
-    // ------------------------------------------------------------------------
-    // Fallback: Unresolved Field
-    // ------------------------------------------------------------------------
+    return this.unresolvedField(field);
+  }
+
+  private unresolvedField(field: ScannedField): ResolvedField {
     return {
       fieldId: field.fieldId,
       name: field.name,
@@ -188,6 +185,66 @@ export class AnswerResolver {
       resolvedByTier: null,
       confidence: 0,
     };
+  }
+
+  /**
+   * Tier 1–2 only (used before batched Tier 5 within resolveJobApplication).
+   */
+  private async resolveFieldThroughTier2(
+    applywizzId: string,
+    field: ScannedField,
+    context: {
+      profile?: ProfileRow | null;
+      parsedResume?: ResumeParsedRow | null;
+      qaEntries?: QABankRow[];
+      jobContext?: { companyName: string; jobTitle: string };
+    }
+  ): Promise<ResolvedField> {
+    const profile = context.profile || (await getProfile(applywizzId));
+    const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+
+    if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: '',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
+
+    const tier1 = await resolveTier1(applywizzId, field, profile);
+    if (tier1) {
+      return tier1;
+    }
+
+    if (!isRequired) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: '',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
+
+    const parsedResume =
+      context.parsedResume !== undefined
+        ? context.parsedResume
+        : await getOrParseResume(applywizzId);
+
+    const tier2 = await resolveTier2(applywizzId, field, parsedResume);
+    if (tier2) {
+      return tier2;
+    }
+
+    return this.unresolvedField(field);
   }
 
   /**
@@ -227,14 +284,22 @@ export class AnswerResolver {
       );
     }
 
+    const tier5Pending: ScannedField[] = [];
+    const tier5Slots: number[] = [];
+
     for (const field of template.fields) {
-      const resolved = await this.resolveField(applywizzId, field, {
+      const resolved = await this.resolveFieldThroughTier2(applywizzId, field, {
         profile,
         parsedResume,
         qaEntries,
         jobContext,
       });
       resolvedFields.push(resolved);
+
+      if (resolved.source === 'unresolved' && profile) {
+        tier5Slots.push(resolvedFields.length - 1);
+        tier5Pending.push(field);
+      }
 
       if (verbose) {
         const preview = resolved.value
@@ -243,6 +308,37 @@ export class AnswerResolver {
             : resolved.value
           : '<blank>';
         log.info(`  • [${formatResolutionSource(resolved)}] "${field.label}" ➔ "${preview}"`);
+      }
+    }
+
+    const resumeText = parsedResume?.raw_text || '';
+    const jobDescription = '';
+
+    for (let offset = 0; offset < tier5Pending.length; offset += TIER5_BATCH_CHUNK_SIZE) {
+      throwIfPipelineAborted('Answer resolution');
+      const chunkFields = tier5Pending.slice(offset, offset + TIER5_BATCH_CHUNK_SIZE);
+      const chunkSlots = tier5Slots.slice(offset, offset + TIER5_BATCH_CHUNK_SIZE);
+      if (!profile || chunkFields.length === 0) continue;
+
+      const batchResults = await resolveTier5Batch(
+        applywizzId,
+        chunkFields,
+        profile,
+        jobContext,
+        resumeText,
+        jobDescription
+      );
+
+      for (let i = 0; i < chunkFields.length; i++) {
+        const tier5 = batchResults[i];
+        if (tier5) {
+          resolvedFields[chunkSlots[i]] = tier5;
+          if (verbose) {
+            const preview =
+              tier5.value.length > 35 ? tier5.value.slice(0, 32) + '...' : tier5.value;
+            log.info(`  • [${formatResolutionSource(tier5)}] "${chunkFields[i].label}" ➔ "${preview}"`);
+          }
+        }
       }
     }
 
@@ -300,18 +396,47 @@ export class AnswerResolver {
       await resolveShortlinksBatch(Array.from(shortlinksToResolve), 50);
     }
 
+    type ResolveJobTask = { seg: CandidateSegment; job: CandidateSegment['jobs'][number] };
+    const tasks: ResolveJobTask[] = [];
+    for (const seg of segments) {
+      for (const job of seg.jobs) {
+        tasks.push({ seg, job });
+      }
+    }
+
+    const poolSize = Math.max(1, Math.min(5, config.RESOLVER_WORKER_POOL_SIZE));
+    if (compact) {
+      log.info(`[Answer Resolver] resolve workers=${poolSize}`);
+    }
+
+    const segStats = new Map<
+      string,
+      { successful: number; unsuccessful: number; noTemplate: number; failed: number; total: number }
+    >();
+    for (const seg of segments) {
+      segStats.set(seg.applywizzId, {
+        successful: 0,
+        unsuccessful: 0,
+        noTemplate: 0,
+        failed: 0,
+        total: seg.jobs.length,
+      });
+    }
+
+    let nextTaskIndex = 0;
     let resolvedCount = 0;
     let totalSuccessful = 0;
     let totalUnsuccessful = 0;
 
-    for (const seg of segments) {
-      let successful = 0;
-      let unsuccessful = 0;
-      let noTemplate = 0;
-      let failed = 0;
-
-      for (const job of seg.jobs) {
+    const processResolveTask = async (): Promise<void> => {
+      while (true) {
         throwIfPipelineAborted('Answer resolution');
+        const taskIndex = nextTaskIndex++;
+        if (taskIndex >= tasks.length) break;
+
+        const { seg, job } = tasks[taskIndex];
+        const stats = segStats.get(seg.applywizzId)!;
+
         let canonical = job.canonicalUrl || job.rawUrl;
         if (canonical.includes('grnh.se')) {
           canonical = await resolveShortlink(canonical);
@@ -328,7 +453,7 @@ export class AnswerResolver {
         const persistJobUrl = job.canonicalUrl || job.rawUrl || template?.jobUrl || '';
 
         if (!template) {
-          noTemplate++;
+          stats.noTemplate++;
           log.info(
             `[Resolver] ⏭️ Skipping candidate_applications upsert for ${seg.applywizzId} ${persistJobUrl} — no scan template`
           );
@@ -355,7 +480,7 @@ export class AnswerResolver {
               resolveErr
             );
           }
-          failed++;
+          stats.failed++;
           if (!compact) {
             log.warn(
               `[Answer Resolver] ⚠️ Failed to resolve ${seg.applywizzId} ${persistJobUrl}: ${resolveErr.message}`
@@ -364,8 +489,13 @@ export class AnswerResolver {
           continue;
         }
 
-        if (isResolvedApplicationSuccessful(app)) successful++;
-        else unsuccessful++;
+        if (isResolvedApplicationSuccessful(app)) {
+          stats.successful++;
+          totalSuccessful++;
+        } else {
+          stats.unsuccessful++;
+          totalUnsuccessful++;
+        }
 
         applications.push(app);
         resolvedCount++;
@@ -418,13 +548,15 @@ export class AnswerResolver {
           );
         }
       }
+    };
 
-      totalSuccessful += successful;
-      totalUnsuccessful += unsuccessful;
+    await Promise.all(Array.from({ length: poolSize }, () => processResolveTask()));
 
-      if (compact && seg.jobs.length > 0) {
+    for (const seg of segments) {
+      const stats = segStats.get(seg.applywizzId)!;
+      if (compact && stats.total > 0) {
         log.info(
-          `[Answer Resolver] ${seg.applywizzId} resolved successful=${successful} unsuccessful=${unsuccessful} no_template=${noTemplate} failed=${failed}`
+          `[Answer Resolver] ${seg.applywizzId} resolved successful=${stats.successful} unsuccessful=${stats.unsuccessful} no_template=${stats.noTemplate} failed=${stats.failed}`
         );
       }
     }

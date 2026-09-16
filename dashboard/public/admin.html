@@ -186,7 +186,11 @@
           }
           if (tab === 'system') {
             setSystem(await loadJson('/api/admin/system-status'));
-            try { setIngestRun(await loadJson('/api/admin/ingest-status')); } catch (e) { setIngestRun(null); }
+          }
+          try {
+            setIngestRun(await loadJson('/api/admin/ingest-status'));
+          } catch (e) {
+            if (tab === 'system') setIngestRun(null);
           }
         } catch (e) {
           setError(e.message || 'Load failed');
@@ -277,8 +281,8 @@
                 </label>
                 <button type="button" onClick={refresh} className="bg-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
                 <button type="button" onClick={handleStart} disabled={Boolean(ingestRun?.running)} className="bg-[#9AC89A] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded disabled:opacity-60">{ingestRun?.running ? 'Running…' : '▶ Start'}</button>
-                {ingestRun?.running && ingestRun?.stopEnabled ? (
-                  <button type="button" onClick={handleStop} className="bg-[#FECACA] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">⏹ Stop</button>
+                {ingestRun?.running ? (
+                  <button type="button" onClick={handleStop} disabled={ingestRun?.stopEnabled === false} className="bg-[#FECACA] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded disabled:opacity-50">⏹ Stop</button>
                 ) : null}
                 <HeaderSignOut />
               </div>

@@ -681,7 +681,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   /**
    * POST /api/admin/stop-ingest
-   * Requests cooperative stop of the in-flight storage CSV pipeline (dev only).
+   * Requests cooperative stop of the in-flight storage CSV pipeline (admin; enabled on Railway/dev).
    */
   app.post('/api/admin/stop-ingest', (req: AuthenticatedRequest, res: Response) => {
     if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {

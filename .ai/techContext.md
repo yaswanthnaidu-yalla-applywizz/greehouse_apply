@@ -169,8 +169,9 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_HTTP_REFERER=https://apply-wizz.me
 
 # Railway deployment
-RAILWAY_ENV=true                      # Disables headful mode, caps memory
-ENABLE_PIPELINE_STOP=false            # Allow admin ⏹ Stop + CLI SIGINT (also auto-on when NODE_ENV=development)
+RAILWAY_ENV=true                      # Disables headful mode, caps memory; also enables cooperative pipeline stop
+ENABLE_PIPELINE_STOP=false            # Allow admin ⏹ Stop + CLI SIGINT (also auto-on when NODE_ENV=development or RAILWAY_ENV)
+RESOLVER_WORKER_POOL_SIZE=3           # Parallel candidate×job resolution workers during ingest (max 5)
 PIPELINE_VERBOSE=false                # Per-URL scan + per-field resolve logs; default is one summary line per phase/candidate
 ```
 
@@ -198,7 +199,7 @@ There is **no** Supabase Storage webhook and **no** poller — a CSV appearing i
 | Endpoint | Behaviour |
 |---|---|
 | `POST /api/admin/trigger-ingest-from-storage` | Admin-only (`isUserAdmin`, 403 otherwise). `409` if a run is already in flight. Otherwise returns `202 {started, startedAt}` and runs `ingestCsvFromStorage()` in the background — the full pipeline takes minutes, so it must not be awaited in the request. |
-| `POST /api/admin/stop-ingest` | Admin-only cooperative stop for the in-flight ingest pipeline. **Disabled in production** unless `ENABLE_PIPELINE_STOP=true` (always allowed when `NODE_ENV=development`). Returns `409` if nothing is running. |
+| `POST /api/admin/stop-ingest` | Admin-only cooperative stop for the in-flight ingest pipeline. Enabled when `NODE_ENV=development`, `RAILWAY_ENV=true`, or `ENABLE_PIPELINE_STOP=true`. Returns `409` if nothing is running. |
 | `GET /api/admin/ingest-status` | Admin-only. Returns `{running, startedAt, finishedAt, processedCount, processedFile, message, error}` for the most recent run. |
 
 CSV `applywizz_id`s are the approval to fetch missing ApplyWizz profiles. **`candidate_applications` is not upserted at segregator/scan time** — only after resolution (see `answerResolver.ts`). Exception: over-cap jobs upsert as `SKIPPED` at resolve time. Empty resolution (no non-empty field values) skips upsert; expired/missing templates skip upsert. `upsertApplication` preserves existing non-empty `resolved_fields` when a write would send all-empty values. FK still requires a `profiles` row before any upsert succeeds.
@@ -207,7 +208,7 @@ On ingest, logs include `Credential identity: urlProjectRef=... | jwt.role=... |
 
 The server resolves credentials via `resolveSupabaseCredentials()` / `listSupabaseKeyCandidates()` in `src/db/client.ts`: a JWT with `role=service_role` wins; otherwise **`SUPABASE_SERVICE_ROLE_KEY` is used even when it is `sb_secret_`**. Keys are normalized (trim, unwrap quotes, strip `Bearer`, strip JWT whitespace). Ingest **probes each key with a fresh client** and logs `Probe SUPABASE_… jwt.role=… entries=N names=…`. An empty object list is a failed run. Admin probe: `GET /api/admin/supabase-storage-health` returns `keyProbes[]` (no secrets). `sb_secret_` / anon keys still cannot list private `csv_uploads` — use the legacy `eyJ…` service_role JWT.
 
-The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboard/public/admin.html`, `/admin`). It calls POST `/api/admin/trigger-ingest-from-storage`, then polls `GET /api/admin/ingest-status` (includes `stopEnabled`). When stop is enabled, **⏹ Stop** calls `POST /api/admin/stop-ingest`. CLI equivalent: `npm run ingest:storage` (one-shot; Ctrl+C requests stop when `NODE_ENV=development` or `ENABLE_PIPELINE_STOP=true`). Run state lives in server memory (`src/server/runtimeState.ts`), so a restart mid-run loses the status (the pipeline itself dies with the process too). Abort checks: `src/orchestrator/pipelineAbort.ts` (between pipeline phases, Playwright URLs, profile sync workers, resolution pairs).
+The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboard/public/admin.html`, `/admin`). It calls POST `/api/admin/trigger-ingest-from-storage`, then polls `GET /api/admin/ingest-status` on every refresh and every 3s while `running` (includes `stopEnabled`). **⏹ Stop** is shown whenever a run is in flight. CLI equivalent: `npm run ingest:storage` (one-shot; Ctrl+C requests stop when stop is enabled). Ingest resolution uses batched Tier 5 (~15 fields per LLM call) with `RESOLVER_WORKER_POOL_SIZE` parallel jobs. Run state lives in server memory (`src/server/runtimeState.ts`), so a restart mid-run loses the status (the pipeline itself dies with the process too). Abort checks: `src/orchestrator/pipelineAbort.ts` (between pipeline phases, Playwright URLs, profile sync workers, resolution pairs).
 
 ## External Services & Endpoints
 | Service | URL | Purpose |

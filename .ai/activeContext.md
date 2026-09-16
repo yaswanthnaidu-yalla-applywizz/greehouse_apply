@@ -1,8 +1,26 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-16_
+_Last updated: 2026-09-17_
 
 ## Current Focus
+
+### 0a. Planned — Admin System ingest status bar (not started)
+- **Problem:** `/admin` **System** tab only shows one line (`Ingest: running | idle | failed`); header **▶ Start** polls `GET /api/admin/ingest-status` but progress is easy to miss during long Playwright runs.
+- **Plan:** Dedicated **ingest status bar** on **System** (and optionally sticky near header when `ingestRun.running`):
+  - States: idle · running · success · failed · stopped (`running`, `startedAt`, `finishedAt`, `processedFile`, `message`, `error` from existing API).
+  - While running: elapsed time, last poll timestamp, optional phase hint if we later expose it from server (for now: file name + startedAt only).
+  - Reuse existing poll loop in `admin.html` (already polls every few seconds when `ingestRun.running`).
+  - Match admin neo-brutalist card style; no new backend required unless we add phase field to `IngestRunState` later.
+- **Out of scope for v1 bar:** per-URL scan percent (Railway logs only until optional progress API).
+
+### 0c. Parallel resolve + batched Tier 5 + ingest stop (shipped locally — deploy next)
+- **`resolveJobApplication`:** Tier 1–2 per field, then Tier 5 in chunks of 15 via `resolveTier5Batch` + `finalizeRawAnswer` (options fail-closed, qa_bank writeback).
+- **`resolveAllApplications`:** `RESOLVER_WORKER_POOL_SIZE` (default 3) parallel workers; abort between jobs.
+- **Stop:** `isPipelineStopEnabled()` true on Railway; admin header polls ingest-status on all tabs; **Stop** visible while `running`.
+
+### 0b. Pipeline compact progress logs (local — deploy with next push)
+- **Playwright:** `[Playwright Scanner] progress N/M …` every 100 URLs or 120s in compact mode (plus existing `scan complete`).
+- **Pipeline:** `[Pipeline] phase A/B/C/D …` one-liners in compact mode; **Storage CSV Ingestion** `pipeline start` / existing `pipeline complete`.
 
 ### 0. Admin / manager dashboard metrics (local — ship after upcoming fixes)
 - **`GET /api/admin/managers`** — `adminManagerStats.ts` (operators / clients / apps / 48h active), not date-scoped client rollup.
@@ -21,7 +39,7 @@ _Last updated: 2026-09-16_
 - **UI:** **`/manager` → Ops mode** (manager confirm; dev picks manager) → `/` with session flags; operator banner + **Back to manager mode**; `roleAccess.js` sends headers on authed fetches.
 - **`requireOperatorDashboardAccess`:** operator, dev, or manager + view-as header on operator API routes.
 - Response header **`X-View-As-Active: true`** when branch active.
-- **Fix (local):** per-candidate routes use shared **`resolveDashboardCandidateAccess`** (same date query as list); detail hydrates from team WH + profiles; **`applicationAssignedCaAllowedForRequest`** for ops CA filter on jobs.
+- **Candidate jobs scope (shipped `5b70d04`):** **`resolveDashboardCandidateAccess`** on list + per-candidate routes (date query aligned); profile/WH detail hydration; **`applicationAssignedCaAllowedForRequest`**; scoped sidebar **`job_count`**; **`dateQuery`** on detail + single-job fetch; operator list WH fallback unified.
 
 ### 2b. Admin operators by manager (shipped)
 - **`GET /api/admin/operators?manager=`** filters via **`users.manager_email`** (`listOperatorEmailsForManager`), not date-scoped client dashboard rows. Response includes **`managerEmail`** per operator when mapped.
