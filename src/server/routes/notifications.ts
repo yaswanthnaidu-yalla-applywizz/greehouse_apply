@@ -50,7 +50,10 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
         return;
       }
       if (viewAsManagerEmail) {
-        const scope = await resolveManagerViewAsOperatorScope(viewAsManagerEmail);
+        const scope = await resolveManagerViewAsOperatorScope(viewAsManagerEmail, {
+          startIso: parsedRange.startIso,
+          endIso: parsedRange.endIso,
+        });
         allowedCandidateIds = Array.from(scope.allowedIds);
       } else {
         const merged = await mergeWorkHistoryForIstDates({

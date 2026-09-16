@@ -326,6 +326,48 @@ export async function hasSupabaseProfile(applywizzId: string): Promise<boolean> 
   }
 }
 
+export interface ProfileListingFields {
+  applywizzId: string;
+  clientName: string;
+  email: string;
+  location: string;
+}
+
+/** Batch load directory listing fields for applywizz IDs (Supabase only). */
+export async function fetchProfileListingFieldsByApplywizzIds(
+  applywizzIds: string[]
+): Promise<Map<string, ProfileListingFields>> {
+  const out = new Map<string, ProfileListingFields>();
+  const ids = [...new Set(applywizzIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0 || !isSupabaseConfigured()) return out;
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('profiles')
+      .select('applywizz_id, client_name, email, company_email, location')
+      .in('applywizz_id', ids);
+    if (error) {
+      log.warn(`[Profiles] listing batch failed: ${error.message}`);
+      return out;
+    }
+    for (const row of data || []) {
+      const r = row as ProfileRow;
+      const applywizzId = String(r.applywizz_id || '').trim();
+      if (!applywizzId) continue;
+      const key = applywizzId.toUpperCase();
+      out.set(key, {
+        applywizzId,
+        clientName: String(r.client_name || applywizzId).trim() || applywizzId,
+        email: String(r.email || r.company_email || '').trim(),
+        location: String(r.location || '').trim(),
+      });
+    }
+  } catch (err: any) {
+    log.warn(`[Profiles] listing batch error: ${err?.message || err}`);
+  }
+  return out;
+}
+
 /**
  * Fetches a candidate profile by ApplyWizz ID from Supabase or local cache.
  */
