@@ -48,7 +48,8 @@ type ResolutionFieldsCarrier = {
 /** True when the pipeline has persisted a resolution snapshot (non-empty resolved_fields). */
 export function applicationRowHasPersistedResolution(row: ResolutionFieldsCarrier): boolean {
   const fields = row.resolved_fields ?? row.resolvedFields;
-  return Array.isArray(fields) && fields.length > 0;
+  if (Array.isArray(fields) && fields.length > 0) return true;
+  return typeof row.fieldsCount === 'number' && row.fieldsCount > 0;
 }
 
 /** Drops segregator placeholders and other rows the resolver has not populated yet. */
@@ -65,6 +66,10 @@ export function filterOperatorApplicationJobs<T extends ResolutionFieldsCarrier 
   jobs: T[]
 ): T[] {
   return Array.isArray(jobs) ? jobs : [];
+}
+
+export function isSkippedApplicationJob(row: { status?: string | null }): boolean {
+  return (row.status || '').trim().toUpperCase() === 'SKIPPED';
 }
 
 type ResolvedFieldLike = {
@@ -100,7 +105,7 @@ export function operatorFormBlockedDetailMessage(app?: {
 export function isUnresolvedApplicationJob(
   row: ResolutionFieldsCarrier & { status?: string | null }
 ): boolean {
-  if ((row.status || '').toUpperCase() === 'SKIPPED') return false;
+  if (isSkippedApplicationJob(row)) return false;
   if (!applicationRowHasPersistedResolution(row)) return true;
   const fields = (row.resolved_fields ?? row.resolvedFields) as ResolvedFieldLike[] | undefined;
   if (!Array.isArray(fields) || fields.length === 0) return true;

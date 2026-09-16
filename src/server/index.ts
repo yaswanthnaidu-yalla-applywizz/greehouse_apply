@@ -202,15 +202,17 @@ function isDashboardJobScoreEligible(
   if (isAdmin && isDashboardDemoFixtureJob(applywizzId, job)) {
     return true;
   }
-  if (isPinnedDemoApplywizzId(applywizzId) && isDashboardDemoFixtureJob(applywizzId, job)) {
-    return true;
-  }
   return isDashboardJobScoreInRange(job);
 }
 
 function isPinnedDemoApplywizzId(applywizzId: string): boolean {
   const id = applywizzId.trim().toUpperCase();
   return id === DEMO_APPLYWIZZ_ID.toUpperCase() || id === AKSHITHA_APPLYWIZZ_ID.toUpperCase();
+}
+
+/** In-memory demo fixtures (AWL-YASWANTH / AWL-31428) are for dev/admin preview only. */
+function mayServeInMemoryDemoFixtures(unrestricted: boolean): boolean {
+  return unrestricted;
 }
 
 function dashboardJobUrlKey(job: { rawUrl?: string; canonicalUrl?: string }): string {
@@ -803,9 +805,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     res.setHeader('X-Dashboard-Date-Range', parsedRange.label);
 
     // 1. Process candidateSegments
-    const matchedSegments = artifactCache.candidateSegments.filter(
-      (seg) => !allowedIds || allowedIds.has(seg.applywizzId.toUpperCase())
-    );
+    const matchedSegments = artifactCache.candidateSegments.filter((seg) => {
+      if (allowedIds && !allowedIds.has(seg.applywizzId.toUpperCase())) return false;
+      if (!mayServeInMemoryDemoFixtures(unrestricted) && isPinnedDemoApplywizzId(seg.applywizzId)) {
+        return false;
+      }
+      return true;
+    });
 
     let candidateSummaries: CandidateSummary[] = matchedSegments.map((seg) => {
       const candidateApps = artifactCache.resolvedApplications.filter(
@@ -820,10 +826,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           return false;
         }
         if (
-          seg.applywizzId === DEMO_APPLYWIZZ_ID ||
-          seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
-          job.canonicalUrl === DEMO_JOB_URL ||
-          job.rawUrl === DEMO_JOB_URL
+          unrestricted &&
+          (seg.applywizzId === DEMO_APPLYWIZZ_ID ||
+            seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
+            job.canonicalUrl === DEMO_JOB_URL ||
+            job.rawUrl === DEMO_JOB_URL)
         ) {
           return true;
         }
@@ -1031,13 +1038,18 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    const seg =
-      candidatesMap.get(applywizzId) ||
-      (applywizzId === DEMO_APPLYWIZZ_ID
-        ? demoSegment
-        : applywizzId === AKSHITHA_APPLYWIZZ_ID
-        ? loadSecondaryDemoArtifacts().segment ?? undefined
-        : undefined);
+    let seg = candidatesMap.get(applywizzId);
+    if (!seg && mayServeInMemoryDemoFixtures(unrestricted)) {
+      seg =
+        applywizzId === DEMO_APPLYWIZZ_ID
+          ? demoSegment
+          : applywizzId === AKSHITHA_APPLYWIZZ_ID
+            ? loadSecondaryDemoArtifacts().segment ?? undefined
+            : undefined;
+    }
+    if (!mayServeInMemoryDemoFixtures(unrestricted) && isPinnedDemoApplywizzId(applywizzId)) {
+      seg = undefined;
+    }
 
     if (!seg) {
       // Check if it's a synthesized candidate from work-history
@@ -1137,9 +1149,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       })
       .filter(
         (job) =>
-          seg.applywizzId === DEMO_APPLYWIZZ_ID ||
-          seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
-          job.canonicalUrl === DEMO_JOB_URL ||
+          (unrestricted &&
+            (seg.applywizzId === DEMO_APPLYWIZZ_ID ||
+              seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
+              job.canonicalUrl === DEMO_JOB_URL)) ||
           job.fieldsCount < config.MAX_JOB_QUESTIONS
       );
 
@@ -1271,14 +1284,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         }
         if (!applicationRowHasPersistedResolution(application)) {
           skippedUnresolved++;
-          continue;
         }
+        const jobStatus = String(application.status || 'PENDING').trim().toUpperCase();
         jobs.push({
           rawUrl: application.job_url,
           canonicalUrl: application.job_url,
           companyName: application.company_name || 'Greenhouse Company',
           jobTitle: application.job_title || 'Job Opening',
-          status: application.status || 'PENDING',
+          status: jobStatus,
+          error_message: application.error_message ?? null,
           fieldsCount: Array.isArray(application.resolved_fields) ? application.resolved_fields.length : 0,
           hasManualEdits: Boolean(application.has_manual_edits),
         });
@@ -1287,20 +1301,26 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const afterCaFilter = jobs.length;
     const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);
-    if (pinnedDemo && unrestricted) {
-      jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
-      jobs = mergeDashboardJobsByUrl(jobs, segmentToJobRows(resolvePinnedDemoSegment(applywizzId)));
-    } else if (jobs.length === 0) {
-      jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
-      if (jobs.length === 0) {
+    if (mayServeInMemoryDemoFixtures(unrestricted)) {
+      if (pinnedDemo) {
+        jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
         jobs = mergeDashboardJobsByUrl(jobs, segmentToJobRows(resolvePinnedDemoSegment(applywizzId)));
+      } else if (jobs.length === 0) {
+        jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
+        if (jobs.length === 0) {
+          jobs = mergeDashboardJobsByUrl(jobs, segmentToJobRows(resolvePinnedDemoSegment(applywizzId)));
+        }
       }
-    }
 
-    if (pinnedDemo) {
-      jobs = jobs.filter((job) =>
-        isDashboardJobScoreEligible(applywizzId, job as { score?: string | number; canonicalUrl?: string; rawUrl?: string }, unrestricted)
-      );
+      if (pinnedDemo) {
+        jobs = jobs.filter((job) =>
+          isDashboardJobScoreEligible(
+            applywizzId,
+            job as { score?: string | number; canonicalUrl?: string; rawUrl?: string },
+            unrestricted
+          )
+        );
+      }
     }
 
     log.info(
@@ -1495,11 +1515,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       );
     }
 
-    if (!appItem && (applywizzId === DEMO_APPLYWIZZ_ID || decodedUrl === DEMO_JOB_URL || rawJobUrl === DEMO_JOB_URL)) {
+    if (
+      mayServeInMemoryDemoFixtures(unrestricted) &&
+      !appItem &&
+      (applywizzId === DEMO_APPLYWIZZ_ID || decodedUrl === DEMO_JOB_URL || rawJobUrl === DEMO_JOB_URL)
+    ) {
       appItem = demoApplication;
     }
 
-    if (!appItem && applywizzId === AKSHITHA_APPLYWIZZ_ID) {
+    if (mayServeInMemoryDemoFixtures(unrestricted) && !appItem && applywizzId === AKSHITHA_APPLYWIZZ_ID) {
       appItem = loadSecondaryDemoArtifacts().applications.find(
         (a) =>
           a.jobUrl === decodedUrl ||
@@ -1507,6 +1531,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           decodedUrl.includes(a.jobUrl) ||
           a.jobUrl.includes(decodedUrl)
       );
+    }
+
+    if (
+      appItem &&
+      !mayServeInMemoryDemoFixtures(unrestricted) &&
+      isDashboardDemoFixtureJob(applywizzId, { canonicalUrl: appItem.jobUrl, rawUrl: appItem.jobUrl })
+    ) {
+      appItem = undefined;
     }
 
     let lookupUrl = decodedUrl;

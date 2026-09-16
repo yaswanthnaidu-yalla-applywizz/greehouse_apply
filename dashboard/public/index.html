@@ -1391,7 +1391,15 @@
                       {job.fieldsCount ? `${job.fieldsCount} Qs` : 'Scanned'}
                     </span>
                     <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                      {isUnresolvedApplicationJob(job) && (
+                      {isSkippedApplicationStatus(job.status) && (
+                        <span
+                          className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded"
+                          title="This job was intentionally skipped — open the card for the reason"
+                        >
+                          ⏭ Skipped
+                        </span>
+                      )}
+                      {!isSkippedApplicationStatus(job.status) && isUnresolvedApplicationJob(job) && (
                         <span
                           className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded"
                           title="Resolver has not finished or required fields are still unresolved"
@@ -1399,27 +1407,22 @@
                           ⚠️ Unresolved
                         </span>
                       )}
-                      {job.status === 'SKIPPED' && (
-                        <span className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                          ⏭ Skipped
-                        </span>
-                      )}
-                      {job.status === 'APPLIED' && (
+                      {!isSkippedApplicationStatus(job.status) && job.status === 'APPLIED' && (
                         <span className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
                           ✅ Applied
                         </span>
                       )}
-                      {job.status === 'APPLYING' && (
+                      {!isSkippedApplicationStatus(job.status) && job.status === 'APPLYING' && (
                         <span className="text-[10px] font-mono text-white font-bold bg-[#E88474] border border-[#1A1A2E] px-1.5 py-0.2 rounded animate-pulse">
                           ⏳ Submitting
                         </span>
                       )}
-                      {job.status === 'DRY_RUN_COMPLETE' && (
+                      {!isSkippedApplicationStatus(job.status) && job.status === 'DRY_RUN_COMPLETE' && (
                         <span className="text-[10px] font-mono text-[#1E3A5F] font-bold bg-[#B8D4E8] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
                           🚀 Dry-Run
                         </span>
                       )}
-                      {job.status === 'READY_FOR_REVIEW' && (
+                      {!isSkippedApplicationStatus(job.status) && job.status === 'READY_FOR_REVIEW' && (
                         <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
                           🟡 Ready
                         </span>
