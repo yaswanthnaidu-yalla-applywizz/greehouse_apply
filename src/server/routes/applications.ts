@@ -26,6 +26,12 @@ import { generateFingerprint } from '../../resolver/fingerprint.js';
 import { normalizeOperatorErrorMessage } from '../../operator/operatorErrorMessages.js';
 import { wsManager } from '../ws.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
+import {
+  applicationAssignedCaAllowed,
+  isManagerViewAsOperator,
+  resolveManagerViewAsOperatorScope,
+} from '../managerTeamScope.js';
 import { isUserAdmin } from './auth.js';
 import { fetchAllowedCandidates } from '../../services/workHistoryClient.js';
 import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
@@ -500,27 +506,38 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
 
   try {
     let allowedIds: Set<string> | null = null;
+    let teamOperatorEmails: string[] | null = null;
+    const authReq = req as AuthenticatedRequest;
+    const managerViewAsOperator = isManagerViewAsOperator(authReq);
+
     if (!isAdmin) {
       if (!userEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      const merged = await mergeWorkHistoryForIstDates({
-        mode: 'ca',
-        caEmail: userEmail,
-        dates: istDatesForWorkHistory(parsedRange),
-      });
-      let candidateIds = merged.candidateIds;
-      if (candidateIds.length === 0 && parsedRange.preset === 'default') {
-        const allowedResult = await fetchAllowedCandidates(userEmail);
-        if (allowedResult.candidateIds.length > 0) {
-          candidateIds = allowedResult.candidateIds;
-        }
-      }
-      allowedIds = new Set(candidateIds.map((id) => id.toUpperCase()));
 
-      if (applywizzId && !allowedIds.has(applywizzId.toUpperCase())) {
+      if (managerViewAsOperator) {
+        const scope = await resolveManagerViewAsOperatorScope(userEmail);
+        allowedIds = scope.allowedIds;
+        teamOperatorEmails = scope.teamOperatorEmails;
+      } else {
+        const merged = await mergeWorkHistoryForIstDates({
+          mode: 'ca',
+          caEmail: userEmail,
+          dates: istDatesForWorkHistory(parsedRange),
+        });
+        let candidateIds = merged.candidateIds;
+        if (candidateIds.length === 0 && parsedRange.preset === 'default') {
+          const allowedResult = await fetchAllowedCandidates(userEmail);
+          if (allowedResult.candidateIds.length > 0) {
+            candidateIds = allowedResult.candidateIds;
+          }
+        }
+        allowedIds = new Set(candidateIds.map((id) => id.toUpperCase()));
+      }
+
+      if (applywizzId && allowedIds && !allowedIds.has(applywizzId.toUpperCase())) {
         log.warn(
           `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA in work-history span)`
         );
@@ -552,8 +569,18 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
       }
       applications = (data || []).filter((app: any) => {
         if (!applicationRowHasPersistedResolution(app)) return false;
-        if (!isAdmin && userEmail && app.assigned_ca_email) {
-          return app.assigned_ca_email.trim().toLowerCase() === userEmail.trim().toLowerCase();
+        if (!isAdmin && userEmail) {
+          if (managerViewAsOperator && teamOperatorEmails) {
+            return applicationAssignedCaAllowed(
+              app.assigned_ca_email,
+              userEmail,
+              'manager',
+              teamOperatorEmails
+            );
+          }
+          if (app.assigned_ca_email) {
+            return app.assigned_ca_email.trim().toLowerCase() === userEmail.trim().toLowerCase();
+          }
         }
         return true;
       });

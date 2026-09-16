@@ -34,7 +34,11 @@ import { adminDashboardRouter } from './routes/adminDashboard.js';
 import { devDashboardRouter } from './routes/devDashboard.js';
 import { wsManager } from './ws.js';
 import { requireAuth, type AuthenticatedRequest } from './middleware/auth.js';
-import { requireRole, requireRoleIfAuthenticated } from './routes/requireRole.js';
+import {
+  requireOperatorDashboardAccess,
+  requireRole,
+  requireRoleIfAuthenticated,
+} from './routes/requireRole.js';
 import { getIngestRun, registerQueueDaemon, setIngestRun } from './runtimeState.js';
 import {
   isPipelineStopEnabled,
@@ -472,7 +476,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   // Favicon / logo / other public assets. index:false so '/' stays on the guarded HTML routes.
   app.use(express.static(publicDir, { index: false }));
 
-  const operatorApiGuard = [requireAuth, requireRole('operator', 'dev')] as const;
+  const operatorApiGuard = [requireAuth, requireOperatorDashboardAccess] as const;
   const candidateListApiGuard = [requireAuth, requireRole('operator', 'manager', 'admin', 'dev')] as const;
   const usersApiGuard = [requireAuth, requireRole('manager', 'admin', 'dev')] as const;
   const adminApiGuard = [requireAuth, requireRole('admin', 'dev')] as const;

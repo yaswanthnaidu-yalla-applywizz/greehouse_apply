@@ -31,6 +31,19 @@ export function isManagerViewAsOperator(req: AuthenticatedRequest): boolean {
   return isViewAsOperatorHeaderValue(req.headers[VIEW_AS_OPERATOR_HEADER]);
 }
 
+export async function resolveManagerViewAsOperatorScope(managerEmail: string): Promise<{
+  allowedIds: Set<string>;
+  teamOperatorEmails: string[];
+}> {
+  const manager = managerEmail.trim().toLowerCase();
+  const teamOperatorEmails = await listOperatorEmailsForManager(manager);
+  const profileIds = await applywizzIdsForManagerTeamProfiles(manager);
+  return {
+    teamOperatorEmails,
+    allowedIds: new Set(profileIds.map((id) => id.trim().toUpperCase())),
+  };
+}
+
 export async function applywizzIdsForManagerTeamProfiles(managerEmail: string): Promise<string[]> {
   const operatorEmails = await listOperatorEmailsForManager(managerEmail);
   if (operatorEmails.length === 0 || !isSupabaseConfigured()) return [];

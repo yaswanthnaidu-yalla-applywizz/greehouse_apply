@@ -9,6 +9,7 @@ import {
   isManagerViewAsOperator,
   isViewAsOperatorHeaderValue,
 } from '../src/server/managerTeamScope.js';
+import { requireOperatorDashboardAccess } from '../src/server/routes/requireRole.js';
 import type { AuthenticatedRequest } from '../src/server/middleware/auth.js';
 
 describe('dashboardRoleResolution', () => {
@@ -75,5 +76,22 @@ describe('managerViewAsOperator', () => {
       user: { app_metadata: { role: 'manager' } },
     } as unknown as AuthenticatedRequest;
     assert.equal(isManagerViewAsOperator(noHeader), false);
+  });
+});
+
+describe('requireOperatorDashboardAccess', () => {
+  it('allows manager with X-View-As operator when guard is active', () => {
+    let called = false;
+    const req = {
+      headers: { 'x-view-as': 'operator', authorization: 'Bearer x' },
+      user: { app_metadata: { role: 'manager' } },
+    } as unknown as AuthenticatedRequest;
+    const res = {
+      status: () => ({ json: () => undefined }),
+    } as any;
+    requireOperatorDashboardAccess(req, res, () => {
+      called = true;
+    });
+    assert.equal(called, true);
   });
 });

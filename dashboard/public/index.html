@@ -80,8 +80,7 @@
     const API_BASE_URL = window.location.origin;
 
     function getAuthHeaders() {
-      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
-      return token ? { Authorization: `Bearer ${token}` } : {};
+      return ApplyWizzRoles.getAuthHeaders();
     }
 
     // -------------------------------------------------------------
@@ -3074,11 +3073,15 @@
       useEffect(() => {
         if (!localStorage.getItem('applywizz_auth_token')) return;
         const role = ApplyWizzRoles.sessionRole();
-        if (role === 'manager' || role === 'admin') {
+        if (role === 'manager' && !ApplyWizzRoles.isManagerOperatorView()) {
           ApplyWizzRoles.redirectToRoleHome(role);
           return;
         }
-        ApplyWizzRoles.enforcePageAccess(['operator', 'dev']);
+        if (role === 'admin') {
+          ApplyWizzRoles.redirectToRoleHome(role);
+          return;
+        }
+        ApplyWizzRoles.enforcePageAccess(['operator', 'dev', 'manager']);
       }, []);
 
       const getTodayIST = () => {
@@ -3167,10 +3170,7 @@
         } catch {}
       };
 
-      const getAuthHeaders = () => {
-        const token = localStorage.getItem('applywizz_auth_token');
-        return token ? { Authorization: `Bearer ${token}` } : {};
-      };
+      const getAuthHeaders = () => ApplyWizzRoles.getAuthHeaders();
 
       const sessionRole = () => ApplyWizzRoles.sessionRole();
 
@@ -3798,8 +3798,25 @@
         );
       }
 
+      const managerOperatorView = ApplyWizzRoles.isManagerOperatorView();
+
       return (
         <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1A1A2E] font-sans overflow-hidden select-none">
+          {managerOperatorView && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#E2F0FB] border-b-2 border-[#1A1A2E] text-xs font-bold shrink-0">
+              <span>Operator view — your team&apos;s clients only</span>
+              <button
+                type="button"
+                className="underline text-[#1E3A5F]"
+                onClick={() => {
+                  ApplyWizzRoles.setManagerOperatorView(false);
+                  window.location.replace('/manager');
+                }}
+              >
+                Exit to manager dashboard
+              </button>
+            </div>
+          )}
           <header className="h-16 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] flex items-center justify-between px-6 flex-shrink-0">
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-2.5">
