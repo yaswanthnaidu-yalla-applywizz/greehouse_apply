@@ -77,6 +77,21 @@ const WORK_HISTORY_ADMIN_FETCH_TIMEOUT_MS = 15000;
 const WORK_HISTORY_MAX_ATTEMPTS = 3;
 const WORK_HISTORY_RETRY_BACKOFF_MS = 2000;
 
+const CA_EMAIL_DATE_CACHE_TTL_MS = 60_000;
+
+type CaEmailDateCacheEntry = {
+  expiresAt: number;
+  records: WorkHistoryCandidateRecord[] | null;
+};
+
+/** Recent CA+date fetches (sign-in often triggers parallel identical requests). */
+const caEmailDateCache = new Map<string, CaEmailDateCacheEntry>();
+const caEmailDateInflight = new Map<string, Promise<WorkHistoryCandidateRecord[] | null>>();
+
+function caEmailDateCacheKey(caEmail: string, dateStr: string): string {
+  return `${caEmail.trim().toLowerCase()}|${dateStr}`;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -143,20 +158,10 @@ function parseWorkHistoryRecords(data: any): WorkHistoryCandidateRecord[] | null
   return Array.from(uniqueMap.values());
 }
 
-/**
- * Queries work-history API for a specific date (IST) and signed-in CA email.
- * Returns null if network error, HTTP error, or timeout occurs.
- */
-async function fetchRecordsForDate(
-  caEmail: string,
+async function fetchRecordsForDateFromApi(
+  normalizedEmail: string,
   dateStr: string
 ): Promise<WorkHistoryCandidateRecord[] | null> {
-  const normalizedEmail = (caEmail || '').trim().toLowerCase();
-  if (!normalizedEmail) {
-    log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
-    throw new Error('[WorkHistory] ❌ CA email missing — cannot proceed');
-  }
-
   const fullUrl = buildCaWorkHistoryUrl(normalizedEmail, dateStr);
   log.info(`[WorkHistory] Fetching ${fullUrl}`);
   const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
@@ -187,6 +192,41 @@ async function fetchRecordsForDate(
     log.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
     return null;
   }
+}
+
+/**
+ * Queries work-history API for a specific date (IST) and signed-in CA email.
+ * Returns null if network error, HTTP error, or timeout occurs.
+ * Dedupes identical ca_email+date requests for 60s (in-memory).
+ */
+async function fetchRecordsForDate(
+  caEmail: string,
+  dateStr: string
+): Promise<WorkHistoryCandidateRecord[] | null> {
+  const normalizedEmail = (caEmail || '').trim().toLowerCase();
+  if (!normalizedEmail) {
+    log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
+    throw new Error('[WorkHistory] ❌ CA email missing — cannot proceed');
+  }
+
+  const key = caEmailDateCacheKey(normalizedEmail, dateStr);
+  const now = Date.now();
+  const cached = caEmailDateCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    log.info(`[WorkHistory] Cache hit for ${normalizedEmail} ${dateStr}`);
+    return cached.records;
+  }
+
+  const inflight = caEmailDateInflight.get(key);
+  if (inflight) return inflight;
+
+  const promise = fetchRecordsForDateFromApi(normalizedEmail, dateStr).then((records) => {
+    caEmailDateCache.set(key, { expiresAt: Date.now() + CA_EMAIL_DATE_CACHE_TTL_MS, records });
+    caEmailDateInflight.delete(key);
+    return records;
+  });
+  caEmailDateInflight.set(key, promise);
+  return promise;
 }
 
 /**

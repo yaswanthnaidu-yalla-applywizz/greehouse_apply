@@ -6,6 +6,7 @@ import { getDbClient, isSupabaseConfigured } from './client.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Users');
+const authLog = createLogger('Auth');
 
 let missingTableWarned = false;
 
@@ -64,9 +65,11 @@ export async function upsertDashboardUserOnSignIn(input: {
 }): Promise<UpsertDashboardUserResult> {
   const normalized = input.email.trim().toLowerCase();
   if (!normalized) {
+    authLog.info('[Auth] users upsert result: data=null error=email missing');
     return { data: null, error: { message: 'email missing' } };
   }
   if (!isSupabaseConfigured()) {
+    authLog.info(`[Auth] users upsert result: data=null error=Supabase not configured`);
     return { data: null, error: { message: 'Supabase not configured' } };
   }
 
@@ -79,12 +82,19 @@ export async function upsertDashboardUserOnSignIn(input: {
     updated_at: new Date().toISOString(),
   };
 
+  authLog.info(`[Auth] Attempting users upsert for ${normalized}`);
+
   const supabase = getDbClient();
   const { data, error } = await supabase
     .from('users')
     .upsert(row, { onConflict: 'email' })
     .select('email, name, role, manager_email')
     .maybeSingle();
+
+  const resolved = (data as DashboardUserRow | null) ?? (error ? null : { ...row, name: row.name });
+  authLog.info(
+    `[Auth] users upsert result: data=${JSON.stringify(resolved)} error=${error?.message ?? 'null'}`
+  );
 
   if (error) {
     if (isMissingUsersTable(error)) {
@@ -100,7 +110,6 @@ export async function upsertDashboardUserOnSignIn(input: {
     };
   }
 
-  const resolved = (data as DashboardUserRow | null) ?? { ...row, name: row.name };
   return { data: resolved, error: null };
 }
 
