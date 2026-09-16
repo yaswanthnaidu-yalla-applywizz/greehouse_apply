@@ -143,7 +143,11 @@ export class V1Pipeline {
         limit: options.limit,
         concurrency: 25,
       });
-      if (!compact) log.info(`[Pipeline Phase A] ✅ Extracted ${uniqueUrls.length} unique canonical Greenhouse URLs.\n`);
+      if (compact) {
+        log.info(`[Pipeline] phase A done unique_urls=${uniqueUrls.length}`);
+      } else {
+        log.info(`[Pipeline Phase A] ✅ Extracted ${uniqueUrls.length} unique canonical Greenhouse URLs.\n`);
+      }
     } catch (err: any) {
       haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed', err);
     }
@@ -166,12 +170,15 @@ export class V1Pipeline {
     }
 
     if (scannedTemplates.length === 0) {
-      if (!compact) {
+      const scanWorkers = options.concurrency ?? config.WORKER_POOL_SIZE;
+      if (compact) {
+        log.info(`[Pipeline] phase B scan start urls=${uniqueUrls.length} workers=${scanWorkers}`);
+      } else {
         log.info(`[Pipeline Phase B] 🌐 Scanning ${uniqueUrls.length} unique URLs with Playwright pool...`);
       }
       try {
         const scanner = new PlaywrightScanner({
-          workerPoolSize: options.concurrency ?? config.WORKER_POOL_SIZE,
+          workerPoolSize: scanWorkers,
           timeoutMs: config.PLAYWRIGHT_TIMEOUT,
           minJitterMs: config.SCANNER_JITTER_MIN_MS,
           maxJitterMs: config.SCANNER_JITTER_MAX_MS,
@@ -179,7 +186,9 @@ export class V1Pipeline {
 
         scannedTemplates = await scanner.scanUniqueUrls(uniqueUrls);
         await exportScannedJobs(scannedTemplates, resolvedOutputDir);
-        if (!compact) {
+        if (compact) {
+          log.info(`[Pipeline] phase B done templates=${scannedTemplates.length}`);
+        } else {
           log.info(`[Pipeline Phase B] ✅ Successfully scanned ${scannedTemplates.length} job form schemas.\n`);
         }
       } catch (err: any) {
@@ -191,7 +200,11 @@ export class V1Pipeline {
     // -------------------------------------------------------------
     // Phase C: Candidate Segregation & Profile Sync (Branch 2)
     // -------------------------------------------------------------
-    if (!compact) log.info('[Pipeline Phase C] 👥 Segregating candidates & syncing ApplyWizz profiles...');
+    if (compact) {
+      log.info('[Pipeline] phase C segregate start');
+    } else {
+      log.info('[Pipeline Phase C] 👥 Segregating candidates & syncing ApplyWizz profiles...');
+    }
     try {
       const candidateMap = await segregateCandidatesByApplyWizzId(resolvedCsvPath, {
         limit: options.limit,
@@ -204,7 +217,9 @@ export class V1Pipeline {
 
       await exportCandidateSegments(candidateMap, resolvedOutputDir);
       candidateSegments = Array.from(candidateMap.values());
-      if (!compact) {
+      if (compact) {
+        log.info(`[Pipeline] phase C done candidates=${candidateSegments.length}`);
+      } else {
         log.info(`[Pipeline Phase C] ✅ Synced ${candidateSegments.length} candidate profiles and master resumes.\n`);
       }
     } catch (err: any) {
@@ -217,7 +232,14 @@ export class V1Pipeline {
     // -------------------------------------------------------------
     // Phase D: Multi-Tier Answer Resolution Engine
     // -------------------------------------------------------------
-    if (!compact) log.info('[Pipeline Phase D] 🧠 Resolving form answers (supabase vs ai)...');
+    const resolveJobCount = candidateSegments.reduce((sum, c) => sum + c.jobs.length, 0);
+    if (compact) {
+      log.info(
+        `[Pipeline] phase D resolve start candidates=${candidateSegments.length} job_assignments=${resolveJobCount}`
+      );
+    } else {
+      log.info('[Pipeline Phase D] 🧠 Resolving form answers (supabase vs ai)...');
+    }
     try {
       resolvedApplications = await this.resolver.resolveAllApplications(
         candidateSegments,
@@ -225,7 +247,9 @@ export class V1Pipeline {
       );
 
       await exportResolvedApplications(resolvedApplications, resolvedOutputDir);
-      if (!compact) {
+      if (compact) {
+        log.info(`[Pipeline] phase D done applications=${resolvedApplications.length}`);
+      } else {
         log.info(`[Pipeline Phase D] ✅ Resolved ${resolvedApplications.length} candidate job applications.\n`);
       }
     } catch (err: any) {

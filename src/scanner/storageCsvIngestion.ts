@@ -187,6 +187,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     resetPipelineAbort();
     // Run V1Pipeline with single worker concurrency for Railway stability
     const pipeline = new V1Pipeline();
+    log.info(`[Storage CSV Ingestion] pipeline start file="${targetFile.name}" workers=${config.WORKER_POOL_SIZE || 1}`);
     try {
       pipelineResult = await pipeline.runFullPipeline(tempFilePath, config.OUTPUT_DIR, {
         concurrency: config.WORKER_POOL_SIZE || 1,

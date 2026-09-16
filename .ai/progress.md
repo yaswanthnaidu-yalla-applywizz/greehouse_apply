@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-16_
+_Last updated: 2026-09-17_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -79,6 +79,7 @@ _Last updated: 2026-09-16_
 - [x] **Tier 5 fail-closed + SMS skip** — LLM option mismatch / low confidence → `unresolved`; SMS/marketing opt-in always No at fill (`31b830e`)
 - [x] **Role from `users.role` on sign-in** — map override → DB role → operator; JWT + signup gate for existing `users` row (2026-09-16)
 - [x] **Manager Ops mode (view-as operator)** — `X-View-As: operator` + dev `X-View-As-Manager-Email`; `/manager` **Ops mode** button (manager confirm, dev manager picker); operator banner **Back to manager mode**; `requireOperatorDashboardAccess` (2026-09-16)
+- [x] **Operator/Ops dashboard job queue scope** — `resolveDashboardCandidateAccess`; `dateQuery` on detail and `GET .../jobs/*`; CA + `created_at` scoped list aggregates; dev-only Supabase count overlay (`5b70d04`, 2026-09-17)
 - [x] **Admin operators by manager** — `GET /api/admin/operators?manager=` uses `users.manager_email`; `managerEmail` on operator rows (2026-09-16)
 - [x] **Submission eligibility gate** — ingest all CSV scores; resolve all templates; gate at submit (score 20–60, field_count &lt; 35); Dev dashboard toggle; migration 019 (2026-09-16)
 

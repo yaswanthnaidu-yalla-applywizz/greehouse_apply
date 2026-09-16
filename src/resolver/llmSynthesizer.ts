@@ -49,6 +49,8 @@ export interface BatchQuestion {
   label: string;
   type: string;
   value?: string;
+  /** When set, batch prompt instructs the model to pick one option verbatim. */
+  options?: string[];
 }
 
 /**
@@ -480,12 +482,33 @@ export class LLMSynthesizer {
    * Accepts an exact option or a free-text JSON answer. Non-matching options and
    * confidence below LLM_MIN_CONFIDENCE become unresolved — never guessed.
    */
+  /**
+   * Validates raw LLM text the same way as single-field synthesis (options fail-closed, min confidence).
+   */
+  public finalizeRawAnswer(
+    raw: string,
+    field: ScannedField,
+    profile: ApplyWizzCandidateProfile,
+    jobContext: JobContext,
+    opts?: { defaultConfidenceIfMissing?: number }
+  ): ResolvedField {
+    return this.finalizeLlmAnswer(
+      raw,
+      field,
+      profile,
+      jobContext,
+      getEffectiveFieldOptions(field),
+      opts
+    );
+  }
+
   private finalizeLlmAnswer(
     raw: string,
     field: ScannedField,
     profile: ApplyWizzCandidateProfile,
     jobContext: JobContext,
-    choiceOptions: string[] | undefined
+    choiceOptions: string[] | undefined,
+    opts?: { defaultConfidenceIfMissing?: number }
   ): ResolvedField {
     const parsed = parseLlmResponse(raw);
     let answer = parsed.answer;
@@ -512,6 +535,9 @@ export class LLMSynthesizer {
 
     if (!answer) {
       return unresolvedField(field);
+    }
+    if (confidence == null && opts?.defaultConfidenceIfMissing != null) {
+      confidence = opts.defaultConfidenceIfMissing;
     }
     if (confidence == null || confidence < LLM_MIN_CONFIDENCE) {
       log.warn(
@@ -543,7 +569,15 @@ Job description:
 ${jobDescription.slice(0, 12000)}
 
 Questions:
-${questions.map((question, index) => `${index}. [${question.type}] ${question.label}${question.value ? ` (existing value: ${question.value})` : ''}`).join('\n')}`;
+${questions
+      .map((question, index) => {
+        const opts =
+          question.options && question.options.length > 0
+            ? ` Options: ${question.options.join(' | ')}`
+            : '';
+        return `${index}. [${question.type}] ${question.label}${opts}${question.value ? ` (existing value: ${question.value})` : ''}`;
+      })
+      .join('\n')}`;
     const systemMessage =
       'You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order.';
 
