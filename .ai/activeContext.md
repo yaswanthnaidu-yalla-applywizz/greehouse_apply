@@ -13,7 +13,7 @@ _Last updated: 2026-09-17_
   - Match admin neo-brutalist card style; no new backend required unless we add phase field to `IngestRunState` later.
 - **Out of scope for v1 bar:** per-URL scan percent (Railway logs only until optional progress API).
 
-### 0c. Parallel resolve + batched Tier 5 + ingest stop (shipped locally — deploy next)
+### 0c. Parallel resolve + batched Tier 5 + ingest stop (shipped `56d5270`)
 - **`resolveJobApplication`:** Tier 1–2 per field, then Tier 5 in chunks of 15 via `resolveTier5Batch` + `finalizeRawAnswer` (options fail-closed, qa_bank writeback).
 - **`resolveAllApplications`:** `RESOLVER_WORKER_POOL_SIZE` (default 3) parallel workers; abort between jobs.
 - **Stop:** `isPipelineStopEnabled()` true on Railway; admin header polls ingest-status on all tabs; **Stop** visible while `running`.
