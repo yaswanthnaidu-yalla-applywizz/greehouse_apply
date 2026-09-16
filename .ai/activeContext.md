@@ -21,6 +21,7 @@ _Last updated: 2026-09-16_
 - **UI:** **`/manager` → Ops mode** (manager confirm; dev picks manager) → `/` with session flags; operator banner + **Back to manager mode**; `roleAccess.js` sends headers on authed fetches.
 - **`requireOperatorDashboardAccess`:** operator, dev, or manager + view-as header on operator API routes.
 - Response header **`X-View-As-Active: true`** when branch active.
+- **Fix (local):** per-candidate routes use shared **`resolveDashboardCandidateAccess`** (same date query as list); detail hydrates from team WH + profiles; **`applicationAssignedCaAllowedForRequest`** for ops CA filter on jobs.
 
 ### 2b. Admin operators by manager (shipped)
 - **`GET /api/admin/operators?manager=`** filters via **`users.manager_email`** (`listOperatorEmailsForManager`), not date-scoped client dashboard rows. Response includes **`managerEmail`** per operator when mapped.

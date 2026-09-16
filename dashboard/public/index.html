@@ -2789,9 +2789,17 @@
       return true;
     }
 
+    /** Dev/admin only: live Supabase overlay. Scoped roles use GET /api/candidates job_count (date + CA aligned). */
+    function shouldUseApplicationCountOverlay() {
+      if (ApplyWizzRoles.isOpsMode()) return false;
+      const role = ApplyWizzRoles.sessionRole();
+      return role === 'dev' || role === 'admin';
+    }
+
     /** Overlay card counts from candidate_applications (exclude SKIPPED). Falls back to API totalJobs on error/empty-list blindness. */
     async function overlayLiveApplicationCounts(candidates, authHeaders, dateFilterMode, customFrom, customTo) {
       if (!Array.isArray(candidates) || candidates.length === 0) return candidates;
+      if (!shouldUseApplicationCountOverlay()) return candidates;
       const client = await getSupabaseBrowserClient(authHeaders);
       if (!client) return candidates;
 
@@ -3466,9 +3474,10 @@
         const requestedId = normalizeApplywizzId(applywizzId);
         console.log(`[Dashboard] Selected ${requestedId} → fetching jobs assigned to this candidate only`);
         try {
-          const res = await fetch(`/api/candidates/${encodeURIComponent(applywizzId)}`, {
-            headers: getAuthHeaders(),
-          });
+          const res = await fetch(
+            `/api/candidates/${encodeURIComponent(applywizzId)}${dateQuery}`,
+            { headers: getAuthHeaders() }
+          );
           if (res.ok) {
             const detail = await res.json();
             if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
@@ -3577,9 +3586,10 @@
         setIsLoadingApplication(true);
         try {
           const encodedUrl = encodeURIComponent(jobUrl);
-          const res = await fetch(`/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}`, {
-            headers: getAuthHeaders(),
-          });
+          const res = await fetch(
+            `/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}${dateQuery}`,
+            { headers: getAuthHeaders() }
+          );
           if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
 
           if (res.ok) {
@@ -3604,7 +3614,7 @@
             setIsLoadingApplication(false);
           }
         }
-      }, []);
+      }, [dateQuery]);
 
       useEffect(() => {
         if (!selectedCandidateId || !selectedJobUrl) {
