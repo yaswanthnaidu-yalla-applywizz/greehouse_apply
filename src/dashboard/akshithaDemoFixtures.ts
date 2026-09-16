@@ -75,32 +75,8 @@ export const akshithaSegment: CandidateSegment = {
       scoredJobId: 'doit-product-analyst',
       status: 'READY',
     },
-    {
-      rawUrl: 'https://grnh.se/917vpvmw2us',
-      canonicalUrl: 'https://grnh.se/917vpvmw2us',
-      date: new Date().toISOString().slice(0, 10),
-      score: 94,
-      scoredJobId: 'hippo-data-analyst',
-      status: 'READY',
-    },
-    {
-      rawUrl: 'https://grnh.se/yn8za4pt1us',
-      canonicalUrl: 'https://grnh.se/yn8za4pt1us',
-      date: new Date().toISOString().slice(0, 10),
-      score: 92,
-      scoredJobId: 'mntn-sr-data-analyst',
-      status: 'READY',
-    },
-    {
-      rawUrl: 'https://grnh.se/wsjgyi6i3us',
-      canonicalUrl: 'https://grnh.se/wsjgyi6i3us',
-      date: new Date().toISOString().slice(0, 10),
-      score: 90,
-      scoredJobId: 'prometheus-sec-analyst',
-      status: 'READY',
-    },
   ],
-  totalJobs: 4,
+  totalJobs: 1,
   syncedAt: new Date().toISOString(),
 };
 
@@ -123,60 +99,6 @@ const doitResolvedFields: ResolvedField[] = [
   { fieldId: 'voluntary_disclosure_of_gender', name: 'question_32541707003', type: 'select', label: 'Voluntary Disclosure of Gender', value: 'Female', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
 ];
 
-const hippoResolvedFields: ResolvedField[] = [
-  { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name', value: 'AKSHITHA', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name', value: 'G', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'first_name', name: 'preferred_name', type: 'text', label: 'Preferred First Name', value: 'Akshitha', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'email', name: 'email', type: 'text', label: 'Email', value: 'akshitha.reddy@applywizard.ai', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'phone', name: 'phone', type: 'text', label: 'Phone', value: '940-222-8193', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'location', name: 'candidate_location', type: 'location_autocomplete', label: 'Candidate Location', value: 'Dallas, Texas, United States', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'resume', name: 'resume', type: 'file', label: 'Resume/CV', value: AKSHITHA_RESUME_STORAGE_PATH, source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'cover_letter', name: 'cover_letter', type: 'file', label: 'Cover Letter', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'linkedin_url', name: 'question_38114559002', type: 'text', label: 'LinkedIn Profile', value: 'https://www.linkedin.com/in/akshitha-reddy', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'what_is_your_current_address', name: 'question_38114560002', type: 'text', label: 'What is your current address?', value: 'Dallas, Texas, United States', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'will_you_now_or_in_the_future_require_sponsorship_for_employment', name: 'question_38114561002', type: 'select', label: 'Will you now or in the future require sponsorship for employment visa status (e.g., H-1B visa status)?', value: 'Yes', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'did_you_apply_for_this_role_with_a_referral_from_a_hippo_or_spin', name: 'question_38114562002', type: 'text', label: 'Did you apply for this role with a referral from a Hippo or Spinnaker Insurance Company employee? If yes, please include the employee name and your relationship to this employee.', value: 'No', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'location', name: 'question_38114563002', type: 'select', label: 'This role requires a hybrid work arrangement based in the location of the job posting. Are you able to work in a hybrid capacity from this location, either currently or by relocating if necessary?', value: 'Yes', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'phone', name: 'question_38114564002', type: 'select', label: 'SMS Consent: Do you agree to receive mobile messages from us in relation to this job application?', value: 'Yes', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'how_did_you_hear_about_us', name: 'question_38114565002', type: 'select', label: 'How did you hear about us?', value: 'LinkedIn', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'if_other_please_specify_here', name: 'question_38114566002', type: 'text', label: 'If other, please specify here.', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States of America', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'by_checking_this_box_i_agree_to_allow_hippo_insurance_to_store_a', name: 'gdpr_processing_consent_given', type: 'checkbox', label: 'By checking this box, I agree to allow Hippo Insurance to store and process my data for the purpose of considering my eligibility regarding my current application for employment.', value: 'true', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-];
-
-const mntnResolvedFields: ResolvedField[] = [
-  { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name', value: 'AKSHITHA', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name', value: 'G', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'first_name', name: 'preferred_name', type: 'text', label: 'Preferred First Name', value: 'Akshitha', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'email', name: 'email', type: 'text', label: 'Email', value: 'akshitha.reddy@applywizard.ai', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'phone', name: 'phone', type: 'text', label: 'Phone', value: '940-222-8193', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'resume', name: 'resume', type: 'file', label: 'Resume/CV', value: AKSHITHA_RESUME_STORAGE_PATH, source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'cover_letter', name: 'cover_letter', type: 'file', label: 'Cover Letter', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'do_you_currently_or_will_you_in_the_future_require_employer_base', name: 'question_68932665', type: 'select', label: 'Do you currently, or will you in the future, require employer-based visa sponsorship (such as an H-1B, TN, or other employer-based visa)?', value: 'Yes', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'linkedin_url', name: 'question_68932666', type: 'text', label: 'LinkedIn Profile', value: 'https://www.linkedin.com/in/akshitha-reddy', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'website_url', name: 'question_68932667', type: 'text', label: 'Website', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'gender', name: 'gender', type: 'select', label: 'Gender', value: 'Female', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'race', name: 'race', type: 'select', label: 'Race', value: 'Asian', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'veteran_status', name: 'veteran_status', type: 'select', label: 'Veteran Status', value: 'I am not a protected veteran', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'disability_status', name: 'disability_status', type: 'select', label: 'Disability Status', value: 'No, I do not have a disability and have not had one in the past', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States of America', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'hispanic_ethnicity', name: 'hispanic_ethnicity', type: 'select', label: 'Are you Hispanic/Latino?', value: 'No', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-];
-
-const prometheusResolvedFields: ResolvedField[] = [
-  { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name', value: 'AKSHITHA', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name', value: 'G', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'first_name', name: 'preferred_name', type: 'text', label: 'Preferred First Name', value: 'Akshitha', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'email', name: 'email', type: 'text', label: 'Email', value: 'akshitha.reddy@applywizard.ai', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'phone', name: 'phone', type: 'text', label: 'Phone', value: '940-222-8193', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'resume', name: 'resume', type: 'file', label: 'Resume/CV', value: AKSHITHA_RESUME_STORAGE_PATH, source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'cover_letter', name: 'cover_letter', type: 'file', label: 'Cover Letter', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'linkedin_url', name: 'question_32545340003', type: 'text', label: 'LinkedIn Profile', value: 'https://www.linkedin.com/in/akshitha-reddy', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'website_url', name: 'question_32545341003', type: 'text', label: 'Website', value: '', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'will_you_now_or_in_the_future_require_sponsorship_to_work_in_the', name: 'question_32545342003', type: 'select', label: 'Will you now or in the future require sponsorship to work in the U.S.?', value: 'Yes', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-  { fieldId: 'country', name: 'country', type: 'select', label: 'Country', value: 'United States of America', source: 'supabase', resolvedByTier: 1, confidence: 1.0 },
-];
-
 export const akshithaApplications: CandidateJobApplication[] = [
   {
     applywizzId: AKSHITHA_APPLYWIZZ_ID,
@@ -186,33 +108,6 @@ export const akshithaApplications: CandidateJobApplication[] = [
     jobTitle: 'Product Analyst',
     status: 'READY_FOR_REVIEW',
     resolvedFields: doitResolvedFields,
-  },
-  {
-    applywizzId: AKSHITHA_APPLYWIZZ_ID,
-    candidateName: 'AKSHITHA G',
-    jobUrl: 'https://grnh.se/917vpvmw2us',
-    companyName: 'Hippo Insurance',
-    jobTitle: 'Data Analyst',
-    status: 'READY_FOR_REVIEW',
-    resolvedFields: hippoResolvedFields,
-  },
-  {
-    applywizzId: AKSHITHA_APPLYWIZZ_ID,
-    candidateName: 'AKSHITHA G',
-    jobUrl: 'https://grnh.se/yn8za4pt1us',
-    companyName: 'MNTN',
-    jobTitle: 'Senior Data Analyst, Finance',
-    status: 'READY_FOR_REVIEW',
-    resolvedFields: mntnResolvedFields,
-  },
-  {
-    applywizzId: AKSHITHA_APPLYWIZZ_ID,
-    candidateName: 'AKSHITHA G',
-    jobUrl: 'https://grnh.se/wsjgyi6i3us',
-    companyName: 'Prometheus Real Estate Group',
-    jobTitle: 'Security Operations Analyst II',
-    status: 'READY_FOR_REVIEW',
-    resolvedFields: prometheusResolvedFields,
   },
 ];
 

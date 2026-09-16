@@ -5,6 +5,7 @@ import {
   isOperatorFormPanelBlocked,
   operatorFormBlockedDetailMessage,
   isUnresolvedApplicationJob,
+  isSkippedApplicationJob,
 } from '../src/dashboard/candidateQueueFilter.js';
 
 describe('candidateQueueFilter', () => {
@@ -32,6 +33,12 @@ describe('candidateQueueFilter', () => {
     );
   });
 
+  it('isSkippedApplicationJob is case-insensitive', () => {
+    assert.equal(isSkippedApplicationJob({ status: 'SKIPPED' }), true);
+    assert.equal(isSkippedApplicationJob({ status: 'skipped' }), true);
+    assert.equal(isSkippedApplicationJob({ status: 'PENDING' }), false);
+  });
+
   it('isUnresolvedApplicationJob detects missing resolution and unresolved fields', () => {
     assert.equal(isUnresolvedApplicationJob({ status: 'SKIPPED' }), false);
     assert.equal(isUnresolvedApplicationJob({ status: 'PENDING', resolved_fields: [] }), true);
@@ -47,6 +54,10 @@ describe('candidateQueueFilter', () => {
         status: 'READY_FOR_REVIEW',
         resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }],
       }),
+      false
+    );
+    assert.equal(
+      isUnresolvedApplicationJob({ status: 'READY_FOR_REVIEW', fieldsCount: 12 }),
       false
     );
   });
