@@ -76,6 +76,8 @@
       const [debug, setDebug] = useState(null);
       const [error, setError] = useState('');
       const [loading, setLoading] = useState(false);
+      const [submissionGate, setSubmissionGate] = useState(null);
+      const [gateSaving, setGateSaving] = useState(false);
 
       const loadJson = async (url) => {
         const res = await fetch(url, { headers: ApplyWizzRoles.getAuthHeaders() });
@@ -89,7 +91,11 @@
         setLoading(true);
         setError('');
         try {
-          if (tab === 'system') setHealth(await loadJson('/api/dev/health'));
+          if (tab === 'system') {
+            const healthPayload = await loadJson('/api/dev/health');
+            setHealth(healthPayload);
+            setSubmissionGate(healthPayload.submissionGate || null);
+          }
           if (tab === 'runs') {
             const params = new URLSearchParams({ date, limit: '100' });
             if (runStatus) params.set('status', runStatus);
@@ -113,6 +119,26 @@
       }, [tab, date, token, runStatus]);
 
       useEffect(() => { refresh(); }, [refresh]);
+
+      const setSubmissionGateEnabled = async (enabled) => {
+        setGateSaving(true);
+        setError('');
+        try {
+          const res = await fetch('/api/dev/submission-gate', {
+            method: 'PATCH',
+            headers: { ...ApplyWizzRoles.getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+          });
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload.error || 'Failed to update submission gate');
+          setSubmissionGate({ enabled: payload.enabled, criteria: payload.criteria });
+          if (health) setHealth({ ...health, submissionGate: { enabled: payload.enabled, criteria: payload.criteria } });
+        } catch (e) {
+          setError(e.message || 'Gate update failed');
+        } finally {
+          setGateSaving(false);
+        }
+      };
 
       const openDebugger = async (id) => {
         const target = (id || debugId).trim();
@@ -189,6 +215,26 @@
                   <p>Workers running: {String(health.workers.running)} · in flight {health.workers.inFlightCount} · idle {health.workers.idleCount}</p>
                   <p>Ingest: {health.ingest?.running ? 'running' : health.ingest?.error || health.ingest?.message || 'idle'}</p>
                 </div>
+                {submissionGate && (
+                  <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black uppercase">Submission eligibility gate</p>
+                        <p className="text-xs text-[#64748B] mt-1 max-w-xl">
+                          When ON, only jobs with CSV score {submissionGate.criteria?.minScore}–{submissionGate.criteria?.maxScore} and fewer than {submissionGate.criteria?.maxFieldCountExclusive} questions can be queued or live-submitted (including operator Submit). Resets to env default on process restart.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={gateSaving}
+                        onClick={() => setSubmissionGateEnabled(!submissionGate.enabled)}
+                        className={`px-4 py-2 text-xs font-black border-2 border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E] ${submissionGate.enabled ? 'bg-[#9AC89A]' : 'bg-[#FECACA]'}`}
+                      >
+                        {gateSaving ? 'Saving…' : submissionGate.enabled ? 'Gate ON — click to turn OFF' : 'Gate OFF — click to turn ON'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

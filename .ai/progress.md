@@ -77,6 +77,9 @@ _Last updated: 2026-09-16_
 - [x] **Question cap 35 + `SKIPPED`** — `MAX_JOB_QUESTIONS` default 35; over-cap jobs upsert `SKIPPED` (migration 014); operator queue **shows** SKIPPED with badge (2026-09-16)
 - [x] **Form hydration from `fields_schema`** — empty `resolved_fields` filled from scanned templates (`applicationFieldHydration.ts`)
 - [x] **Tier 5 fail-closed + SMS skip** — LLM option mismatch / low confidence → `unresolved`; SMS/marketing opt-in always No at fill (`31b830e`)
+- [x] **Role from `users.role` on sign-in** — map override → DB role → operator; JWT + signup gate for existing `users` row (2026-09-16)
+- [x] **Manager `X-View-As: operator`** — team-scoped `GET /api/candidates` + `/:id/jobs` via `profiles.ca_email` (2026-09-16)
+- [x] **Submission eligibility gate** — ingest all CSV scores; resolve all templates; gate at submit (score 20–60, field_count &lt; 35); Dev dashboard toggle; migration 019 (2026-09-16)
 
 - [x] **Central logger** — `src/utils/logger.ts`; all `src/` `console.log`/`warn`/`error` → `createLogger`; `[ISO] [LEVEL] [MODULE] message`
 - [x] **AW app logo** — `dashboard/public/logo.webp` as favicon + header/auth/manager mark; `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all
@@ -98,8 +101,7 @@ _Last updated: 2026-09-16_
 
 | Item | Status | Notes |
 |---|---|---|
-| **Role assignment authorities** | Not started | On sign-in/sign-up: prefer `users.role`; hardcoded email map overrides; CA API only when no `users` row; JWT `app_metadata.role` from resolved role |
-| Resolution engine — semantic/fuzzy improvement | Investigating | Tier 2+3 miss rate; approach not yet decided |
+| **Admin managers + operator workload (API + HTML)** | Implemented locally, uncommitted | `adminManagerStats.ts`, workload count in `applications.ts`, admin/manager route wiring; `admin.html` / `manager.html` display-only PARALLEL fields (2026-09-16) |
 
 ---
 
@@ -112,6 +114,7 @@ _Last updated: 2026-09-16_
 | Supabase Storage bucket access policies | Deferred with core-table RLS |
 | Residential proxy pool | Anti-bot detection hardening |
 | Lift question cap beyond 35 | `MAX_JOB_QUESTIONS` default is 35; further lift needs explicit instruction |
+| Resolution engine — Tier 2/3 quality | Optional future | Semantic search / better fuzzy or resume matching; 5-tier prod baseline unchanged |
 
 ---
 

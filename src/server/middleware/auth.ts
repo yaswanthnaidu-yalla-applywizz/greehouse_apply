@@ -7,7 +7,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
-import { resolveRoleFromEmail } from '../routes/auth.js';
+import { resolveEffectiveAppRole } from '../routes/auth.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: any;
@@ -30,7 +30,14 @@ export async function requireAuth(
   ) {
     if (req.headers['x-user-email']) {
       const email = String(req.headers['x-user-email']);
-      req.user = { email, role: resolveRoleFromEmail(email) };
+      const testRole = req.headers['x-user-role'];
+      req.user = {
+        email,
+        role: resolveEffectiveAppRole(
+          email,
+          typeof testRole === 'string' ? testRole : undefined
+        ),
+      };
     }
     next();
     return;
@@ -57,9 +64,11 @@ export async function requireAuth(
       return;
     }
 
+    const appMeta = data.user.app_metadata as Record<string, unknown> | undefined;
+    const jwtRole = appMeta?.role ?? (data.user as { role?: unknown }).role;
     req.user = {
       ...data.user,
-      role: resolveRoleFromEmail(data.user.email),
+      role: resolveEffectiveAppRole(data.user.email, jwtRole),
     };
     next();
   } catch (err: any) {

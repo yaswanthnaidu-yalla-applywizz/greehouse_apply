@@ -19,6 +19,12 @@ import {
 } from './storage.js';
 import { createLogger } from '../utils/logger.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
+import {
+  assertEligibleForSubmission,
+  SubmissionEligibilityBlockedError,
+} from '../submission/submissionEligibilityGate.js';
+
+export { SubmissionEligibilityBlockedError };
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import {
   normalizeOperatorErrorMessage,
@@ -83,6 +89,8 @@ export interface ApplicationRow {
   submitted_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  csv_job_score?: number | null;
+  field_count?: number | null;
 }
 
 /**
@@ -474,6 +482,39 @@ export type UpdateStatusExtra =
       job_url?: string | null;
     };
 
+const OPERATOR_WORKLOAD_STATUSES: ApplicationStatus[] = ['READY_FOR_REVIEW', 'APPROVED'];
+
+/**
+ * Current review queue depth per operator (`profiles.ca_email`), not date-scoped.
+ */
+export async function countOperatorWorkloadByProfileCaEmail(
+  operatorEmails: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const emails = [...new Set(operatorEmails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  if (emails.length === 0 || !isSupabaseConfigured()) return counts;
+
+  const emailSet = new Set(emails);
+  const { data, error } = await getDbClient()
+    .from('candidate_applications')
+    .select('id, profiles!inner(ca_email)')
+    .in('status', OPERATOR_WORKLOAD_STATUSES);
+
+  if (error) {
+    log.warn(`[DB] countOperatorWorkloadByProfileCaEmail failed: ${error.message}`);
+    return counts;
+  }
+
+  for (const row of data || []) {
+    const caEmail = ((row as { profiles?: { ca_email?: string | null } }).profiles?.ca_email || '')
+      .trim()
+      .toLowerCase();
+    if (!caEmail || !emailSet.has(caEmail)) continue;
+    counts.set(caEmail, (counts.get(caEmail) || 0) + 1);
+  }
+  return counts;
+}
+
 /**
  * Updates application lifecycle status.
  */
@@ -571,19 +612,17 @@ export async function updateStatus(
   const appLabel = `${cleanApplywizz} ${id}`;
   if (statusChanged) {
     log.info(`[DB] updateStatus ${appLabel}: ${previousStatus || 'UNKNOWN'} → ${status} (status changed, broadcast sent).`);
-    const eventApplicationId = isUuid ? id : existing?.id || mem?.id;
-    if (eventApplicationId) {
-      const { insertApplicationEvent } = await import('./events.js');
-      void insertApplicationEvent({
-        applicationId: eventApplicationId,
-        applywizzId: mem?.applywizz_id || existing?.applywizz_id || (isUuid ? undefined : cleanApplywizz),
-        fromStatus: previousStatus || null,
-        toStatus: status,
-        detail: extra && typeof extra === 'object' && extra.error_message
-          ? { error_message: extra.error_message }
-          : {},
-      });
-    }
+    const { insertApplicationEvent } = await import('./events.js');
+    void insertApplicationEvent({
+      applicationId: isUuid ? id : existing?.id || mem?.id || '',
+      applywizzId: mem?.applywizz_id || existing?.applywizz_id || (isUuid ? undefined : cleanApplywizz),
+      jobUrl: targetJobUrl || null,
+      fromStatus: previousStatus || null,
+      toStatus: status,
+      detail: extra && typeof extra === 'object' && extra.error_message
+        ? { error_message: extra.error_message }
+        : {},
+    });
   } else {
     log.info(`[DB] updateStatus: status unchanged, no broadcast. (${appLabel}: ${status})`);
   }
@@ -1430,6 +1469,8 @@ export async function enqueueApplication(
   if (!app) {
     throw new Error(`Application '${applicationIdOrApplywizzId}' not found to queue.`);
   }
+
+  assertEligibleForSubmission(app);
 
   const previousStatus = app.status || 'READY_FOR_REVIEW';
 

@@ -87,6 +87,9 @@ const envSchema = z.object({
   /** Jobs with field_count >= this value are skipped (default 35 → allow 0–34 fields) */
   MAX_JOB_QUESTIONS: z.coerce.number().int().positive().default(35),
 
+  /** Boot default for submission eligibility gate (runtime toggle on Dev dashboard overrides until restart) */
+  SUBMISSION_ELIGIBILITY_GATE_ENABLED: z.coerce.boolean().default(true),
+
   /** Supabase Project URL */
   SUPABASE_URL: z.string().optional(),
 

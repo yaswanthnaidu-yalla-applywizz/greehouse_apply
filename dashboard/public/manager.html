@@ -378,7 +378,7 @@
                         </td>
                         <td className="p-3 uppercase font-bold">{op.status}</td>
                         <td className="p-3 font-mono">{op.applications}</td>
-                        <td className="p-3 font-mono">{op.workload}</td>
+                        <td className="p-3 font-mono">{op.workload ?? 0}</td>
                         <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
                       </tr>
                     ))}
@@ -392,10 +392,11 @@
               <div className="bg-white border-2 border-[#1A1A2E] rounded">
                 {activityWarning && <p className="p-3 text-xs font-bold bg-[#FEF3C7] border-b-2 border-[#1A1A2E]">{activityWarning}</p>}
                 <ul className="divide-y divide-[#1A1A2E]/20 text-xs">
-                  {activity.map((event) => (
-                    <li key={event.id} className="p-3">
-                      <p className="font-black">{event.from_status || '—'} → {event.to_status}</p>
-                      <p className="font-mono text-[#64748B]">{event.applywizz_id} · {event.application_id} · {new Date(event.created_at).toLocaleString()}</p>
+                  {activity.map((event, index) => (
+                    <li key={`${event.timestamp}-${event.applywizz_id}-${event.to_status}-${index}`} className="p-3">
+                      <p className="font-mono text-[#1A1A2E]">
+                        [{new Date(event.timestamp || event.created_at).toLocaleString()}] {event.candidate_name || event.applywizz_id || '—'} applied to {event.job_title || 'Job'} at {event.company_name || '—'} → {event.to_status || '—'}
+                      </p>
                     </li>
                   ))}
                 </ul>

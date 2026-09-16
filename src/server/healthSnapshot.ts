@@ -7,7 +7,8 @@ import { isSupabaseConfigured, getDbClient } from '../db/client.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { config } from '../config/env.js';
 import { isAzureEmailConfigured } from '../services/azureEmail.js';
-import { getIngestRun, getQueueDaemon } from './runtimeState.js';
+import { getIngestRun, getQueueDaemon, getSubmissionEligibilityGateEnabled } from './runtimeState.js';
+import { submissionGateCriteria } from '../submission/submissionEligibilityGate.js';
 
 export type ProbeStatus = 'ok' | 'error' | 'not_configured' | 'degraded';
 
@@ -71,6 +72,7 @@ export async function collectHealthSnapshot(): Promise<{
     enabled: boolean;
   };
   ingest: ReturnType<typeof getIngestRun>;
+  submissionGate: { enabled: boolean; criteria: ReturnType<typeof submissionGateCriteria> };
 }> {
   const probes: ServiceProbe[] = [];
 
@@ -216,6 +218,10 @@ export async function collectHealthSnapshot(): Promise<{
     queue: { queued, applying, failed, applied, otpRequired, emailProofPending, stuck },
     workers,
     ingest: getIngestRun(),
+    submissionGate: {
+      enabled: getSubmissionEligibilityGateEnabled(),
+      criteria: submissionGateCriteria(),
+    },
   };
 }
 

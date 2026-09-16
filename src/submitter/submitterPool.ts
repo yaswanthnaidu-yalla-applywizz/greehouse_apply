@@ -15,6 +15,10 @@ import {
 import { wsManager } from '../server/ws.js';
 import { runLiveSubmit, type LiveSubmitResult } from './liveSubmit.js';
 import { createLogger } from '../utils/logger.js';
+import {
+  isEligibleForSubmission,
+  SubmissionEligibilityBlockedError,
+} from '../submission/submissionEligibilityGate.js';
 
 const log = createLogger('Submitter Pool');
 
@@ -128,6 +132,17 @@ export class SubmitterPool {
       const { application } = work;
       const applicationId = application.id || application.applywizz_id;
       try {
+        const eligibility = isEligibleForSubmission(application);
+        if (!eligibility.eligible) {
+          const message = eligibility.reason || 'Submission gate blocked this application.';
+          await updateStatus(applicationId, 'READY_FOR_REVIEW', {
+            error_message: message,
+            job_url: application.job_url,
+          });
+          work.reject(new SubmissionEligibilityBlockedError(message));
+          continue;
+        }
+
         await updateStatus(applicationId, 'APPLYING', {
           job_url: application.job_url,
         });

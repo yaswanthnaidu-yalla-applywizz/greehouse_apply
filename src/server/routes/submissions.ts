@@ -179,6 +179,13 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
       return;
     } catch (err: any) {
+      if (err?.name === 'SubmissionEligibilityBlockedError') {
+        res.status(403).json({
+          success: false,
+          error: err.message || 'Submission gate blocked this application.',
+        });
+        return;
+      }
       log.error(`[Submissions Router] ❌ Enqueue error for ${appId}:`, err);
       res.status(500).json({
         success: false,
@@ -252,6 +259,13 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
     }
   } catch (err: any) {
+    if (err?.name === 'SubmissionEligibilityBlockedError') {
+      res.status(403).json({
+        success: false,
+        error: err.message || 'Submission gate blocked this application.',
+      });
+      return;
+    }
     log.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
     await updateStatus(appId, 'FAILED', {
       error_message: err.message || 'Unexpected submit route error',

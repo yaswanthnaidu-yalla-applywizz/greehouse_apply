@@ -40,6 +40,7 @@ import { getProfile, getCompanyEmail } from '../db/profiles.js';
 import { zohoReader } from '../services/zohoReader.js';
 import { config } from '../config/env.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { assertEligibleForSubmission } from '../submission/submissionEligibilityGate.js';
 
 const log = createLogger('Live Submit');
 
@@ -1270,6 +1271,8 @@ export async function runLiveSubmit(
   } else {
     application = applicationOrId;
   }
+
+  assertEligibleForSubmission(application);
 
   // Ensure a persistent DB record exists so proof screenshots can be attached
   if (!application.id) {

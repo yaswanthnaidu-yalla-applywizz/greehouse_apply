@@ -137,7 +137,8 @@ SCANNER_JITTER_MAX_MS=6000
 INPUT_CSV_PATH=./greenhouse_only_applywizz_prod(in).csv
 OUTPUT_DIR=./output
 RESUMES_DIR=./resumes
-MAX_JOB_QUESTIONS=35                  # Skip jobs with field_count >= this value (allows 0–34 fields)
+MAX_JOB_QUESTIONS=35                  # Submission gate: live submit requires field_count < this value (0–34)
+SUBMISSION_ELIGIBILITY_GATE_ENABLED=true  # Boot default; Dev dashboard `/dev` System tab toggles runtime until restart
 
 # Supabase Storage bucket names
 SUPABASE_STORAGE_BUCKET_RESUMES=resumes
@@ -236,6 +237,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (applied 2026-09-15). **016** = `profiles.country` + `country_code` (apply in SQL Editor; missing columns block new profile creates) |
 | Audit / application events | `src/db/events.ts` — fail-closed if 015 tables missing |
 | Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = true`) |
+| Admin managers list stats | `src/server/adminManagerStats.ts` — `GET /api/admin/managers` uses `users.manager_email` + `profiles.ca_email` (not date-scoped rollup) |
 | HTTP response header sanitization | `src/server/httpHeaders.ts` — visible ASCII only (`X-Dashboard-Date-Range`) |
 | Resolved-field value helpers | `src/utils/resolvedFields.ts` |
 | Admin / Dev health probes | `src/server/healthSnapshot.ts` — ApplyWizz GET without id: HTTP 400 = reachable |
