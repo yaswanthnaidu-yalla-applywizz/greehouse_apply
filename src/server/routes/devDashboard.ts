@@ -17,6 +17,11 @@ import { displayNameMapForEmails } from '../authDirectory.js';
 import { emailsForRole } from './auth.js';
 import { fetchLinkedCaIds } from '../clientDashboard.js';
 import { createLogger } from '../../utils/logger.js';
+import {
+  getSubmissionEligibilityGateEnabled,
+  setSubmissionEligibilityGateEnabled,
+} from '../runtimeState.js';
+import { submissionGateCriteria } from '../../submission/submissionEligibilityGate.js';
 
 const log = createLogger('Dev Dashboard');
 
@@ -27,6 +32,29 @@ function parseLimit(value: unknown, fallback = 100): number {
   if (!Number.isInteger(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, 500);
 }
+
+devDashboardRouter.get('/submission-gate', (_req: Request, res: Response): void => {
+  res.json({
+    enabled: getSubmissionEligibilityGateEnabled(),
+    criteria: submissionGateCriteria(),
+    source: 'runtime',
+  });
+});
+
+devDashboardRouter.patch('/submission-gate', (req: Request, res: Response): void => {
+  const enabled = req.body?.enabled;
+  if (typeof enabled !== 'boolean') {
+    res.status(400).json({ error: 'Body must include boolean "enabled".' });
+    return;
+  }
+  setSubmissionEligibilityGateEnabled(enabled);
+  log.info(`[Dev] Submission eligibility gate → ${enabled ? 'ON' : 'OFF'}`);
+  res.json({
+    enabled: getSubmissionEligibilityGateEnabled(),
+    criteria: submissionGateCriteria(),
+    source: 'runtime',
+  });
+});
 
 devDashboardRouter.get('/health', async (_req: Request, res: Response): Promise<void> => {
   try {

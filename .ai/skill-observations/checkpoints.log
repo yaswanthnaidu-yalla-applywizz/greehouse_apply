@@ -59,3 +59,6 @@
 2026-09-16 checkpoint: default 2-day created_at filters on dashboard APIs + operator/manager UI date labels
 2026-09-16 10:49 session: operator manager_email mapping on sign-in (auth + migration 017)
 2026-09-16 session: operator Guide tab in dashboard/public/index.html
+2026-09-16 session-start scan: files=14 parsed=14 suspect=0 (AGENTS session start)
+2026-09-16 session: role from users.role + manager X-View-As operator on candidate APIs
+2026-09-16 session: submission eligibility gate + dev toggle + ingest unfilter

@@ -1,0 +1,79 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import {
+  isEmailAuthorizedForSignupSync,
+  resolveEffectiveAppRole,
+  resolveSignInRoleFromSources,
+} from '../src/server/routes/auth.js';
+import {
+  isManagerViewAsOperator,
+  isViewAsOperatorHeaderValue,
+} from '../src/server/managerTeamScope.js';
+import type { AuthenticatedRequest } from '../src/server/middleware/auth.js';
+
+describe('dashboardRoleResolution', () => {
+  it('resolveSignInRoleFromSources prefers email map over users.role', () => {
+    assert.equal(
+      resolveSignInRoleFromSources('balaji@applywizz.ai', 'operator'),
+      'manager'
+    );
+  });
+
+  it('resolveSignInRoleFromSources uses users.role when not in map', () => {
+    assert.equal(resolveSignInRoleFromSources('ca@applywizz.ai', 'manager'), 'manager');
+    assert.equal(resolveSignInRoleFromSources('ca@applywizz.ai', 'invalid'), 'operator');
+  });
+
+  it('resolveEffectiveAppRole prefers map over JWT', () => {
+    assert.equal(resolveEffectiveAppRole('balaji@applywizz.ai', 'operator'), 'manager');
+  });
+
+  it('resolveEffectiveAppRole uses JWT when not in map', () => {
+    assert.equal(resolveEffectiveAppRole('ca@applywizz.ai', 'admin'), 'admin');
+    assert.equal(resolveEffectiveAppRole('ca@applywizz.ai', undefined), 'operator');
+  });
+
+  it('isEmailAuthorizedForSignupSync allows existing dashboard user without CA list', () => {
+    assert.equal(
+      isEmailAuthorizedForSignupSync('newca@applywizz.ai', [], true),
+      true
+    );
+    assert.equal(
+      isEmailAuthorizedForSignupSync('newca@applywizz.ai', [], false),
+      false
+    );
+    assert.equal(
+      isEmailAuthorizedForSignupSync('newca@applywizz.ai', ['newca@applywizz.ai'], false),
+      true
+    );
+  });
+});
+
+describe('managerViewAsOperator', () => {
+  it('isViewAsOperatorHeaderValue accepts operator case-insensitively', () => {
+    assert.equal(isViewAsOperatorHeaderValue('operator'), true);
+    assert.equal(isViewAsOperatorHeaderValue('Operator'), true);
+    assert.equal(isViewAsOperatorHeaderValue('admin'), false);
+    assert.equal(isViewAsOperatorHeaderValue(undefined), false);
+  });
+
+  it('isManagerViewAsOperator requires manager JWT role and header', () => {
+    const base = {
+      headers: { 'x-view-as': 'operator' },
+      user: { app_metadata: { role: 'manager' } },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(isManagerViewAsOperator(base), true);
+
+    const operatorJwt = {
+      headers: { 'x-view-as': 'operator' },
+      user: { app_metadata: { role: 'operator' } },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(isManagerViewAsOperator(operatorJwt), false);
+
+    const noHeader = {
+      headers: {},
+      user: { app_metadata: { role: 'manager' } },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(isManagerViewAsOperator(noHeader), false);
+  });
+});

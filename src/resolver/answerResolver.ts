@@ -20,7 +20,6 @@ import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { resolveTier5 } from './tier5LLM.js';
 import { upsertApplication } from '../db/applications.js';
-import { isOverQuestionCap, upsertSkippedOverQuestionCap } from '../db/skippedApplications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
 import type {
   ApplicationStatus,
@@ -34,6 +33,11 @@ import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnecti
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
+import { parseCsvJobScore } from '../submission/submissionEligibilityGate.js';
+
+function parseScoreFromJob(score: string | number | undefined): number | null {
+  return parseCsvJobScore(score);
+}
 
 const log = createLogger('Answer Resolver');
 
@@ -303,7 +307,6 @@ export class AnswerResolver {
     for (const seg of segments) {
       let successful = 0;
       let unsuccessful = 0;
-      let skippedCap = 0;
       let noTemplate = 0;
       let failed = 0;
 
@@ -333,31 +336,6 @@ export class AnswerResolver {
         }
 
         const questionCount = template.fields?.length || 0;
-        if (isOverQuestionCap(questionCount)) {
-          try {
-            await upsertSkippedOverQuestionCap(seg.applywizzId, persistJobUrl, template, questionCount);
-          } catch (dbErr: any) {
-            if (isMissingTableError(dbErr)) {
-              haltWithDevAlert(
-                'Migration',
-                'required migration not applied (e.g. missing table error)',
-                dbErr
-              );
-            }
-            if (isSupabaseConnectionError(dbErr)) {
-              haltWithDevAlert(
-                'Supabase',
-                'Supabase connection failure — bad credentials, unreachable, or empty key probe',
-                dbErr
-              );
-            }
-            log.warn(
-              `[Answer Resolver] ⚠️ Could not upsert SKIPPED candidate_applications for ${seg.applywizzId} ${persistJobUrl}: ${dbErr.message}`
-            );
-          }
-          skippedCap++;
-          continue;
-        }
 
         let app: CandidateJobApplication;
         try {
@@ -408,6 +386,8 @@ export class AnswerResolver {
               company_name: app.companyName,
               job_title: app.jobTitle,
               resolved_fields: app.resolvedFields,
+              csv_job_score: parseScoreFromJob(job.score),
+              field_count: questionCount,
             });
           } catch (dbErr: any) {
             if (isMissingTableError(dbErr)) {
@@ -444,7 +424,7 @@ export class AnswerResolver {
 
       if (compact && seg.jobs.length > 0) {
         log.info(
-          `[Answer Resolver] ${seg.applywizzId} resolved successful=${successful} unsuccessful=${unsuccessful} skipped_cap=${skippedCap} no_template=${noTemplate} failed=${failed}`
+          `[Answer Resolver] ${seg.applywizzId} resolved successful=${successful} unsuccessful=${unsuccessful} no_template=${noTemplate} failed=${failed}`
         );
       }
     }

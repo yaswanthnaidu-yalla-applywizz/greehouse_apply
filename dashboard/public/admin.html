@@ -336,10 +336,10 @@
                           <button type="button" className="font-black underline" onClick={() => openManager(manager.email)}>{manager.name}</button>
                           <p className="font-mono text-[#64748B]">{manager.email}</p>
                         </td>
-                        <td className="p-3 font-mono">{manager.assignedOperators}</td>
-                        <td className="p-3 font-mono">{manager.assignedClients}</td>
-                        <td className="p-3 font-mono">{manager.applications}</td>
-                        <td className="p-3 uppercase font-bold">{manager.status}</td>
+                        <td className="p-3 font-mono">{manager.assignedOperators ?? 0}</td>
+                        <td className="p-3 font-mono">{manager.assignedClients ?? 0}</td>
+                        <td className="p-3 font-mono">{manager.applications ?? 0}</td>
+                        <td className="p-3 uppercase font-bold">{manager.status || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -382,8 +382,8 @@
                         <tr key={op.email} className="border-b border-[#1A1A2E]/20">
                           <td className="p-3 font-black">{op.name}<p className="font-mono font-normal text-[#64748B]">{op.email}</p></td>
                           <td className="p-3 uppercase font-bold">{op.status}</td>
-                          <td className="p-3 font-mono">{op.workload}</td>
-                          <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
+                          <td className="p-3 font-mono">{op.workload ?? 0}</td>
+                          <td className="p-3 font-mono">{(op.lastSignInAt || op.last_sign_in_at) ? new Date(op.lastSignInAt || op.last_sign_in_at).toLocaleString() : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -407,7 +407,7 @@
                           <td className="p-3 font-black">{row.client}</td>
                           <td className="p-3"><a className="underline break-all" href={row.jobUrl} target="_blank" rel="noopener noreferrer">{row.jobTitle || row.jobUrl}</a></td>
                           <td className="p-3">{row.companyName || '—'}</td>
-                          <td className="p-3 font-mono">{row.operator || '—'}</td>
+                          <td className="p-3 font-mono">{(row.operator || row.assigned_ca_email || '').trim() || '—'}</td>
                           <td className="p-3 font-bold">{row.status}</td>
                           <td className="p-3 font-mono">{row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}</td>
                         </tr>

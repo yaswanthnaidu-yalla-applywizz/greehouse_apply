@@ -13,6 +13,45 @@ import { isUserAdmin, resolveRoleFromEmail } from './routes/auth.js';
 import { resolveRoleFromRequest, type AppRole } from './routes/requireRole.js';
 import type { WorkHistoryCandidateRecord } from '../services/workHistoryClient.js';
 import { mergeWorkHistoryForCaEmails } from './workHistorySpan.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('ManagerTeamScope');
+
+export const VIEW_AS_OPERATOR_HEADER = 'x-view-as';
+
+/** True when header value is `operator` (case-insensitive). */
+export function isViewAsOperatorHeaderValue(raw: string | string[] | undefined): boolean {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return typeof v === 'string' && v.trim().toLowerCase() === 'operator';
+}
+
+/** Manager session with X-View-As: operator — operator-style candidate APIs scoped to their team. */
+export function isManagerViewAsOperator(req: AuthenticatedRequest): boolean {
+  if (resolveRoleFromRequest(req) !== 'manager') return false;
+  return isViewAsOperatorHeaderValue(req.headers[VIEW_AS_OPERATOR_HEADER]);
+}
+
+export async function applywizzIdsForManagerTeamProfiles(managerEmail: string): Promise<string[]> {
+  const operatorEmails = await listOperatorEmailsForManager(managerEmail);
+  if (operatorEmails.length === 0 || !isSupabaseConfigured()) return [];
+
+  const { data, error } = await getDbClient()
+    .from('profiles')
+    .select('applywizz_id')
+    .in('ca_email', operatorEmails);
+
+  if (error) {
+    log.warn(`[ManagerTeamScope] profiles team query failed: ${error.message}`);
+    return [];
+  }
+
+  const ids = new Set<string>();
+  for (const row of data || []) {
+    const id = String((row as { applywizz_id?: string }).applywizz_id || '').trim().toUpperCase();
+    if (id) ids.add(id);
+  }
+  return Array.from(ids);
+}
 
 export function resolveRequestAppRole(req: AuthenticatedRequest, email?: string | null): AppRole | null {
   return resolveRoleFromRequest(req) ?? resolveRoleFromEmail(email) ?? null;

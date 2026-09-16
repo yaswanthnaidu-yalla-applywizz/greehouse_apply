@@ -73,10 +73,17 @@ import { sanitizeHttpHeaderValue } from './httpHeaders.js';
 import { mergeWorkHistoryForIstDates } from './workHistorySpan.js';
 import {
   applicationAssignedCaAllowed,
+  applywizzIdsForManagerTeamProfiles,
   hasUnrestrictedDashboardAccess,
+  isManagerViewAsOperator,
   resolveRequestAppRole,
   resolveTeamCandidateIdsForManager,
 } from './managerTeamScope.js';
+import { listOperatorEmailsForManager } from '../db/users.js';
+import {
+  computeEligibleForSubmissionDisplay,
+  parseCsvJobScore,
+} from '../submission/submissionEligibilityGate.js';
 import { usersRouter } from './routes/users.js';
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
@@ -191,19 +198,6 @@ export interface ArtifactCache {
   lastLoadedAt: string | null;
 }
 
-/** Parse CSV/job score for dashboard eligibility (20–60). */
-function parseDashboardJobScore(score: string | number | undefined): number {
-  if (score === undefined || score === null) return 0;
-  if (typeof score === 'number') return Number.isFinite(score) ? score : 0;
-  const parsed = parseFloat(String(score).trim());
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function isDashboardJobScoreInRange(job: { score?: string | number }): boolean {
-  const score = parseDashboardJobScore(job.score);
-  return score >= 20 && score <= 60;
-}
-
 function isDashboardDemoFixtureJob(
   applywizzId: string,
   job: { canonicalUrl?: string; rawUrl?: string }
@@ -214,17 +208,6 @@ function isDashboardDemoFixtureJob(
     job.canonicalUrl === DEMO_JOB_URL ||
     job.rawUrl === DEMO_JOB_URL
   );
-}
-
-function isDashboardJobScoreEligible(
-  applywizzId: string,
-  job: { score?: string | number; canonicalUrl?: string; rawUrl?: string },
-  isAdmin: boolean
-): boolean {
-  if (isAdmin && isDashboardDemoFixtureJob(applywizzId, job)) {
-    return true;
-  }
-  return isDashboardJobScoreInRange(job);
 }
 
 function isPinnedDemoApplywizzId(applywizzId: string): boolean {
@@ -790,6 +773,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
     let workHistoryUnreachable = false;
 
+    const managerViewAsOperator = isManagerViewAsOperator(req);
+
     if (unrestricted) {
       const merged = await mergeWorkHistoryForIstDates({
         mode: 'admin',
@@ -803,6 +788,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
       workHistoryUnreachable = merged.unreachable;
       workHistoryRecords = merged.records;
+    } else if (managerViewAsOperator && userEmail) {
+      res.setHeader('X-View-As-Active', 'true');
+      const profileIds = await applywizzIdsForManagerTeamProfiles(userEmail);
+      allowedIds = new Set(profileIds.map((id) => id.toUpperCase()));
     } else if (isManager && userEmail) {
       const team = await resolveTeamCandidateIdsForManager(userEmail, whDates, createdAtRange);
       workHistoryUnreachable = team.unreachable;
@@ -842,32 +831,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       const readyCount = candidateApps.filter((a) => a.status === 'READY_FOR_REVIEW').length;
       const expiredCount = candidateApps.filter((a) => a.status === 'EXPIRED').length;
 
-      // Filter to only jobs eligible under current question threshold (< MAX_JOB_QUESTIONS)
-      const eligibleJobs = seg.jobs.filter((job) => {
-        if (!isDashboardJobScoreEligible(seg.applywizzId, job, unrestricted)) {
-          return false;
-        }
-        if (
-          unrestricted &&
-          (seg.applywizzId === DEMO_APPLYWIZZ_ID ||
-            seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
-            job.canonicalUrl === DEMO_JOB_URL ||
-            job.rawUrl === DEMO_JOB_URL)
-        ) {
-          return true;
-        }
-        const canonical = job.canonicalUrl || job.rawUrl;
-        const template =
-          templatesMap.get(canonical) ||
-          templatesMap.get(job.rawUrl) ||
-          Array.from(templatesMap.values()).find(
-            (t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl)
-          );
-        if (template && template.fields && template.fields.length >= config.MAX_JOB_QUESTIONS) {
-          return false;
-        }
-        return true;
-      });
+      const eligibleJobs = seg.jobs;
 
       const resumePath = path.join(config.RESUMES_DIR, `${seg.applywizzId}_resume.pdf`);
       const resumeAvailable = fs.existsSync(resumePath);
@@ -1144,7 +1108,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       (a) => a.applywizzId === applywizzId
     );
 
-    // Enrich jobs with resolved application status and metadata, filtering to < MAX_JOB_QUESTIONS
     const eligibleJobsWithStatus = seg.jobs
       .map((job) => {
         const canonical = job.canonicalUrl || job.rawUrl;
@@ -1180,24 +1143,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           status: appItem?.status || (template?.isExpired ? 'EXPIRED' : 'PENDING'),
           fieldsCount,
           hasManualEdits,
+          eligibleForSubmission: computeEligibleForSubmissionDisplay({
+            csv_job_score: parseCsvJobScore(job.score),
+            field_count: fieldsCount,
+          }),
         };
-      })
-      .filter(
-        (job) =>
-          (unrestricted &&
-            (seg.applywizzId === DEMO_APPLYWIZZ_ID ||
-              seg.applywizzId === AKSHITHA_APPLYWIZZ_ID ||
-              job.canonicalUrl === DEMO_JOB_URL)) ||
-          job.fieldsCount < config.MAX_JOB_QUESTIONS
-      );
+      });
 
-    const totalBeforeScoreFilter = eligibleJobsWithStatus.length;
-    const dashboardJobs = eligibleJobsWithStatus.filter((job) =>
-      isDashboardJobScoreEligible(seg.applywizzId, job, unrestricted)
-    );
-    log.info(
-      `[Dashboard] Filtered jobs: showed ${dashboardJobs.length}/${totalBeforeScoreFilter} (score 20–60 only).`
-    );
+    const dashboardJobs = eligibleJobsWithStatus;
 
     res.json({
       applywizzId: seg.applywizzId,
@@ -1227,6 +1180,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
     const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
     let teamOperatorEmails: string[] | null = null;
+    const managerViewAsOperator = isManagerViewAsOperator(req);
 
     if (!unrestricted) {
       if (!userEmail) {
@@ -1236,7 +1190,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
 
       let candidateIds: string[] = [];
-      if (role === 'manager') {
+      if (managerViewAsOperator) {
+        res.setHeader('X-View-As-Active', 'true');
+        teamOperatorEmails = await listOperatorEmailsForManager(userEmail);
+        candidateIds = await applywizzIdsForManagerTeamProfiles(userEmail);
+      } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(
           userEmail,
           istDatesForWorkHistory(parsedRange),
@@ -1323,6 +1281,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           skippedUnresolved++;
         }
         const jobStatus = String(application.status || 'PENDING').trim().toUpperCase();
+        const fieldsCount = Array.isArray(application.resolved_fields)
+          ? application.resolved_fields.length
+          : 0;
         jobs.push({
           rawUrl: application.job_url,
           canonicalUrl: application.job_url,
@@ -1330,9 +1291,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           jobTitle: application.job_title || 'Job Opening',
           status: jobStatus,
           error_message: application.error_message ?? null,
-          fieldsCount: Array.isArray(application.resolved_fields) ? application.resolved_fields.length : 0,
+          fieldsCount,
           resolved_fields: Array.isArray(application.resolved_fields) ? application.resolved_fields : [],
           hasManualEdits: Boolean(application.has_manual_edits),
+          eligibleForSubmission: computeEligibleForSubmissionDisplay({
+            csv_job_score: application.csv_job_score,
+            field_count: application.field_count ?? fieldsCount,
+          }),
         });
       }
     }
@@ -1349,15 +1314,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         }
       }
 
-      if (pinnedDemo) {
-        jobs = jobs.filter((job) =>
-          isDashboardJobScoreEligible(
-            applywizzId,
-            job as { score?: string | number; canonicalUrl?: string; rawUrl?: string },
-            unrestricted
-          )
-        );
-      }
     }
 
     log.info(

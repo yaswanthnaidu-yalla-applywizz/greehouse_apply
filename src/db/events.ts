@@ -29,13 +29,46 @@ export interface AuditEventInput {
   metadata?: Record<string, unknown>;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface ApplicationEventInput {
   applicationId: string;
   applywizzId?: string | null;
+  jobUrl?: string | null;
   fromStatus?: string | null;
   toStatus: string;
   actorEmail?: string | null;
   detail?: Record<string, unknown>;
+}
+
+async function resolveApplicationIdForEvent(event: ApplicationEventInput): Promise<string | null> {
+  const trimmedId = event.applicationId?.trim();
+  if (trimmedId && UUID_RE.test(trimmedId)) {
+    return trimmedId;
+  }
+  if (!isSupabaseConfigured()) return null;
+
+  const applywizzId = event.applywizzId?.trim();
+  const jobUrl = event.jobUrl?.trim();
+  if (!applywizzId || !jobUrl) return null;
+
+  try {
+    const { data, error } = await getDbClient()
+      .from('candidate_applications')
+      .select('id')
+      .eq('applywizz_id', applywizzId)
+      .eq('job_url', jobUrl)
+      .maybeSingle();
+    if (error) {
+      log.warn(`[Events] resolve application_id failed: ${error.message}`);
+      return null;
+    }
+    const id = data?.id ? String(data.id).trim() : '';
+    return id && UUID_RE.test(id) ? id : null;
+  } catch (err: any) {
+    log.warn(`[Events] resolve application_id exception: ${err?.message}`);
+    return null;
+  }
 }
 
 export interface AuditEventRow {
@@ -84,12 +117,20 @@ export async function insertAuditEvent(event: AuditEventInput): Promise<void> {
 }
 
 export async function insertApplicationEvent(event: ApplicationEventInput): Promise<void> {
-  if (!isSupabaseConfigured()) return;
-  const applicationId = event.applicationId?.trim();
-  if (!applicationId) return;
+  if (!isSupabaseConfigured()) {
+    log.warn('[Events] application_events insert skipped: Supabase not configured.');
+    return;
+  }
+  const resolvedId = await resolveApplicationIdForEvent(event);
+  if (!resolvedId) {
+    log.warn(
+      `[Events] application_events insert skipped: could not resolve application_id (applywizz_id=${event.applywizzId || '—'}, job_url=${event.jobUrl || '—'}).`
+    );
+    return;
+  }
   try {
     const { error } = await getDbClient().from('application_events').insert({
-      application_id: applicationId,
+      application_id: resolvedId,
       applywizz_id: event.applywizzId || null,
       from_status: event.fromStatus || null,
       to_status: event.toStatus,
@@ -102,7 +143,9 @@ export async function insertApplicationEvent(event: ApplicationEventInput): Prom
         return;
       }
       log.warn(`[Events] application_events insert failed: ${error.message}`);
+      return;
     }
+    log.info(`[Events] ✅ Status change written: ${resolvedId} → ${event.toStatus}`);
   } catch (err: any) {
     log.warn(`[Events] application_events insert exception: ${err?.message}`);
   }

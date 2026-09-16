@@ -10,13 +10,14 @@ import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
   applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
+  countOperatorWorkloadByProfileCaEmail,
   listApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
-import { insertAuditEvent, listApplicationEvents } from '../../db/events.js';
+import { insertAuditEvent, listApplicationEvents, type ApplicationEventRow } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { canAccessManagerDashboard, resolveRole } from './auth.js';
 import { loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
@@ -83,6 +84,139 @@ function parseLimit(value: unknown, fallback = 100): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, 500);
+}
+
+interface ManagerActivityEvent {
+  timestamp: string;
+  candidate_name: string;
+  job_title: string;
+  company_name: string;
+  from_status: string | null;
+  to_status: string;
+  applywizz_id: string;
+}
+
+function profileDisplayName(row: {
+  client_name?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+}): string {
+  const clientName = (row.client_name || '').trim();
+  if (clientName) return clientName;
+  const combined = `${row.first_name || ''} ${row.last_name || ''}`.trim();
+  return combined;
+}
+
+async function enrichApplicationEventsForActivity(
+  rawEvents: ApplicationEventRow[]
+): Promise<ManagerActivityEvent[]> {
+  if (rawEvents.length === 0) return [];
+
+  const appIds = [...new Set(rawEvents.map((e) => e.application_id).filter(Boolean))];
+  const applywizzIdsFromEvents = [
+    ...new Set(rawEvents.map((e) => (e.applywizz_id || '').trim()).filter(Boolean)),
+  ];
+
+  type AppJoinRow = {
+    id: string;
+    job_url: string | null;
+    applywizz_id: string;
+    job_title: string | null;
+    company_name: string | null;
+  };
+  const appById = new Map<string, AppJoinRow>();
+  const profileByAwl = new Map<
+    string,
+    { client_name: string | null; first_name: string | null; last_name: string | null }
+  >();
+  const templateByJobUrl = new Map<
+    string,
+    { job_title: string | null; company_name: string | null }
+  >();
+
+  if (isSupabaseConfigured()) {
+    if (appIds.length > 0) {
+      const { data: apps, error: appsError } = await getDbClient()
+        .from('candidate_applications')
+        .select('id, job_url, applywizz_id, job_title, company_name')
+        .in('id', appIds);
+      if (appsError) {
+        log.warn(`[Manager Router] activity application join failed: ${appsError.message}`);
+      } else {
+        for (const row of apps || []) {
+          appById.set(String(row.id), row as AppJoinRow);
+        }
+      }
+    }
+
+    const applywizzIds = [
+      ...new Set([
+        ...applywizzIdsFromEvents,
+        ...Array.from(appById.values()).map((a) => (a.applywizz_id || '').trim()).filter(Boolean),
+      ]),
+    ];
+    if (applywizzIds.length > 0) {
+      const { data: profiles, error: profilesError } = await getDbClient()
+        .from('profiles')
+        .select('applywizz_id, client_name, first_name, last_name')
+        .in('applywizz_id', applywizzIds);
+      if (profilesError) {
+        log.warn(`[Manager Router] activity profile join failed: ${profilesError.message}`);
+      } else {
+        for (const row of profiles || []) {
+          const key = String(row.applywizz_id || '').trim();
+          if (key) profileByAwl.set(key, row);
+        }
+      }
+    }
+
+    const jobUrls = [
+      ...new Set(
+        Array.from(appById.values())
+          .map((a) => (a.job_url || '').trim())
+          .filter(Boolean)
+      ),
+    ];
+    if (jobUrls.length > 0) {
+      const { data: templates, error: templatesError } = await getDbClient()
+        .from('scanned_job_templates')
+        .select('job_url, job_title, company_name')
+        .in('job_url', jobUrls);
+      if (templatesError) {
+        log.warn(`[Manager Router] activity template join failed: ${templatesError.message}`);
+      } else {
+        for (const row of templates || []) {
+          const key = String(row.job_url || '').trim();
+          if (key) templateByJobUrl.set(key, row);
+        }
+      }
+    }
+  }
+
+  return rawEvents.map((event) => {
+    const app = appById.get(event.application_id);
+    const applywizz_id = (event.applywizz_id || app?.applywizz_id || '').trim() || '—';
+    const profile = applywizz_id !== '—' ? profileByAwl.get(applywizz_id) : undefined;
+    const candidate_name =
+      (profile && profileDisplayName(profile)) || applywizz_id || '—';
+
+    const jobUrl = (app?.job_url || '').trim();
+    const template = jobUrl ? templateByJobUrl.get(jobUrl) : undefined;
+    const job_title =
+      (template?.job_title || app?.job_title || '').trim() || 'Job';
+    const company_name =
+      (template?.company_name || app?.company_name || '').trim() || '—';
+
+    return {
+      timestamp: event.created_at,
+      candidate_name,
+      job_title,
+      company_name,
+      from_status: event.from_status,
+      to_status: event.to_status,
+      applywizz_id,
+    };
+  });
 }
 
 async function scopedApplywizzIds(req: Request): Promise<{
@@ -234,6 +368,10 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       }
     }
 
+    const workloadByEmail = await countOperatorWorkloadByProfileCaEmail(
+      Array.from(operators.keys())
+    );
+
     const items = Array.from(operators.values()).map((operator) => {
       const user = byEmail.get(operator.email);
       const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
@@ -246,7 +384,7 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         pending: operator.pending,
         failed: operator.failed,
         lastSignInAt: user?.lastSignInAt || null,
-        workload: operator.pending,
+        workload: workloadByEmail.get(operator.email) || 0,
       };
     });
 
@@ -280,7 +418,11 @@ managerRouter.get('/activity', async (req: Request, res: Response): Promise<void
       applywizzIds: scoped.ids || undefined,
       limit,
     });
-    res.json(listed);
+    const events = await enrichApplicationEventsForActivity(listed.events);
+    res.json({
+      events,
+      warning: listed.warning || scoped.warning,
+    });
   } catch (error) {
     log.error('[Manager Router] Failed to load activity:', error);
     res.status(500).json({ error: 'Unable to load team activity.' });

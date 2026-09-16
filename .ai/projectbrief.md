@@ -24,6 +24,7 @@ Manually applying to hundreds of Greenhouse ATS postings per candidate is operat
 - Multi-tenant Supabase RLS on core tables (app-level role dashboards shipped; 015 event tables use service_role-only RLS)
 - Residential proxy pool
 - Further lifting the question cap (raise `MAX_JOB_QUESTIONS` when ready)
+- Resolution engine upgrades beyond the shipped 5-tier waterfall (e.g. semantic / improved Tier 2–3 matching)
 
 ## Input / Output
 | Input | Output |

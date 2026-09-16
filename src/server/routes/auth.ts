@@ -21,6 +21,8 @@ import { createLogger } from '../../utils/logger.js';
 import { insertAuditEvent } from '../../db/events.js';
 import { syncDashboardUserAfterSignIn } from '../../services/operatorManagerMapping.js';
 import type { WorkHistoryResult } from '../../services/workHistoryClient.js';
+import { getDashboardUserByEmail } from '../../db/users.js';
+import { normalizeAppRole } from './requireRole.js';
 
 const log = createLogger('Auth');
 
@@ -54,7 +56,7 @@ export function emailFromUserOrEmail(userOrEmail?: any): string {
   );
 }
 
-/** Single source of truth for dashboard roles — email map only, no DB. */
+/** Hardcoded privileged email map (break-glass override). */
 export function resolveRoleFromEmail(email?: string | null): AppRole {
   const normalized = normalizeAuthEmail(email);
   if (!normalized) return 'operator';
@@ -65,9 +67,38 @@ export function resolveRole(userOrEmail?: any): AppRole {
   return resolveRoleFromEmail(emailFromUserOrEmail(userOrEmail));
 }
 
-export function attachResolvedRole<T extends Record<string, any>>(user: T, email?: string | null): T & { role: AppRole } {
-  const role = resolveRoleFromEmail(email || emailFromUserOrEmail(user));
+export function attachResolvedRole<T extends Record<string, any>>(
+  user: T,
+  email?: string | null,
+  roleOverride?: AppRole
+): T & { role: AppRole } {
+  const role =
+    roleOverride ??
+    resolveEffectiveAppRole(email || emailFromUserOrEmail(user), (user as { role?: unknown }).role);
   return { ...user, role };
+}
+
+/** Request-time role: email map override, then JWT claim, else operator. */
+export function resolveEffectiveAppRole(email?: string | null, jwtRole?: unknown): AppRole {
+  const normalized = normalizeAuthEmail(email);
+  if (normalized && ROLE_BY_EMAIL[normalized]) {
+    return ROLE_BY_EMAIL[normalized];
+  }
+  const fromJwt = normalizeAppRole(jwtRole);
+  if (fromJwt) return fromJwt;
+  return 'operator';
+}
+
+/** Sign-in role precedence (map → users.role → operator). Pure helper for tests. */
+export function resolveSignInRoleFromSources(
+  normalizedEmail: string,
+  dbRoleRaw: string | null | undefined
+): AppRole {
+  const mapped = ROLE_BY_EMAIL[normalizedEmail];
+  if (mapped) return mapped;
+  const dbRole = normalizeAppRole(dbRoleRaw);
+  if (dbRole) return dbRole;
+  return 'operator';
 }
 
 export function homePathForRole(role: AppRole): string {
@@ -154,10 +185,17 @@ export function shouldFetchOperatorWorkHistoryOnSignIn(role: AppRole): boolean {
   return role === 'operator';
 }
 
-/** Resolve role from normalized email (single entry for sign-in handlers). */
-export function resolveSignInRole(email: string): { normalizedEmail: string; role: AppRole } {
+/** Resolve role at sign-in (map → users.role → operator). */
+export async function resolveSignInRoleForEmail(
+  email: string
+): Promise<{ normalizedEmail: string; role: AppRole }> {
   const normalizedEmail = normalizeAuthEmail(email);
-  const role = resolveRoleFromEmail(normalizedEmail);
+  const mapped = ROLE_BY_EMAIL[normalizedEmail];
+  if (mapped) {
+    return { normalizedEmail, role: mapped };
+  }
+  const row = await getDashboardUserByEmail(normalizedEmail);
+  const role = resolveSignInRoleFromSources(normalizedEmail, row?.role);
   return { normalizedEmail, role };
 }
 
@@ -250,6 +288,30 @@ export function isEmailAuthorized(email: string, authorizedList: string[]): bool
   return authorizedList.includes(normalized);
 }
 
+/** Signup authorization when CA list may be skipped for existing dashboard users. */
+export function isEmailAuthorizedForSignupSync(
+  normalizedEmail: string,
+  authorizedList: string[],
+  hasDashboardUserRow: boolean
+): boolean {
+  if (resolveRoleFromEmail(normalizedEmail) !== 'operator') {
+    return true;
+  }
+  if (hasDashboardUserRow) {
+    return true;
+  }
+  return isEmailAuthorized(normalizedEmail, authorizedList);
+}
+
+export async function isEmailAuthorizedForSignup(
+  email: string,
+  authorizedList: string[]
+): Promise<boolean> {
+  const normalized = normalizeAuthEmail(email);
+  const row = await getDashboardUserByEmail(normalized);
+  return isEmailAuthorizedForSignupSync(normalized, authorizedList, Boolean(row));
+}
+
 /**
  * Helper to fetch and extract authorized emails from the management API.
  */
@@ -312,7 +374,7 @@ authRouter.post('/verify-email', async (req: Request, res: Response): Promise<vo
       log.warn(`[Auth] ⚠️ CA Emails API query failed: ${apiErr.message}`);
     }
 
-    const isAuthorized = isEmailAuthorized(normalizedEmail, authorizedEmails);
+    const isAuthorized = await isEmailAuthorizedForSignup(normalizedEmail, authorizedEmails);
 
     if (!isAuthorized) {
       res.status(403).json({ error: 'Email not authorized to sign up.' });
@@ -381,7 +443,7 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
       log.warn(`[Auth] ⚠️ CA Emails API query failed: ${apiErr.message}`);
     }
 
-    if (!isEmailAuthorized(normalizedEmail, authorizedEmails)) {
+    if (!(await isEmailAuthorizedForSignup(normalizedEmail, authorizedEmails))) {
       res.status(403).json({ error: 'Email not authorized to sign up.' });
       return;
     }
@@ -729,7 +791,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const { normalizedEmail: signInEmail, role } = resolveSignInRole(normalizedEmail);
+    const { normalizedEmail: signInEmail, role } = await resolveSignInRoleForEmail(normalizedEmail);
     logAuthRoleResolved(signInEmail, role);
     const isAdmin = role === 'dev' || role === 'admin';
     const { allowedCandidateIds, workHistoryUnreachable } = await finalizeSuccessfulSignIn({
@@ -739,7 +801,11 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       authUser: verifyData.user || user,
     });
 
-    const sessionUser = attachResolvedRole(verifyData.user || { id: user.id, email: user.email }, signInEmail);
+    const sessionUser = attachResolvedRole(
+      verifyData.user || { id: user.id, email: user.email },
+      signInEmail,
+      role
+    );
 
     res.json({
       success: true,
@@ -870,7 +936,9 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const { normalizedEmail: userEmail, role } = resolveSignInRole(verifyData.user?.email || '');
+    const { normalizedEmail: userEmail, role } = await resolveSignInRoleForEmail(
+      verifyData.user?.email || ''
+    );
     logAuthRoleResolved(userEmail, role);
     const isAdmin = role === 'dev' || role === 'admin';
     let allowedCandidateIds: string[] = [];
@@ -1043,7 +1111,9 @@ authRouter.get('/me', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const role = resolveRoleFromEmail(data.user.email);
+    const appMeta = data.user.app_metadata as Record<string, unknown> | undefined;
+    const jwtRole = appMeta?.role ?? (data.user as { role?: unknown }).role;
+    const role = resolveEffectiveAppRole(data.user.email, jwtRole);
     res.json({
       valid: true,
       user: {

@@ -320,16 +320,6 @@ export async function segregateCandidatesByApplyWizzId(
 
         const { applywizzId, clientName, rawUrl, date, score, scoredJobId, status } = parsed;
 
-        if (score < 20 || score > 60) {
-          droppedScoreRows++;
-          if (!compact && droppedScoreRows === 1) {
-            log.info(
-              `[Segregator] Dropping jobs outside dashboard score range 20–60 (summary after ingest).`
-            );
-          }
-          return;
-        }
-
         if (candidateId && applywizzId.toUpperCase() !== candidateId.toUpperCase()) {
           return;
         }

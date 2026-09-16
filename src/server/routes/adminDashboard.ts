@@ -5,15 +5,16 @@
 import { Router, type Request, type Response } from 'express';
 import {
   countApplicationsByStatus,
+  countOperatorWorkloadByProfileCaEmail,
   getISTDateRangeUtc,
-  listApplications,
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { listAuditEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { emailsForRole } from './auth.js';
-import { fetchLinkedCaIds, loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
+import { buildManagerTeamStats } from '../adminManagerStats.js';
+import { loadClientDashboard } from '../clientDashboard.js';
 import { isActiveWithin, listAuthDirectory } from '../authDirectory.js';
 import { collectHealthSnapshot, trafficLights } from '../healthSnapshot.js';
 import { createLogger } from '../../utils/logger.js';
@@ -90,29 +91,25 @@ adminDashboardRouter.get('/managers', async (req: Request, res: Response): Promi
     const byEmail = new Map(directory.map((user) => [user.email, user]));
     const emails = Array.from(new Set([...emailsForRole('manager'), ...directory.filter((u) => u.role === 'manager').map((u) => u.email)]));
 
-    const managers = await Promise.all(
-      emails.map(async (email) => {
-        const dashboard = await loadClientDashboard({ managerEmail: email, date });
-        const linked = MANAGER_TEAM_SCOPE_ENABLED ? await fetchLinkedCaIds(email) : { ids: [] as string[] };
-        const user = byEmail.get(email);
-        const operatorEmails = new Set(
-          dashboard.rows.map((row) => row.assignedToEmail).filter(Boolean)
-        );
-        return {
-          email,
-          name: user?.displayName || email.split('@')[0],
-          assignedOperators: operatorEmails.size,
-          assignedClients: MANAGER_TEAM_SCOPE_ENABLED ? linked.ids.length : dashboard.clients.length,
-          applications: dashboard.totals.applications,
-          completed: dashboard.totals.applied,
-          pending: dashboard.totals.pending,
-          failed: dashboard.totals.failed,
-          lastSignInAt: user?.lastSignInAt || null,
-          status: isActiveWithin(user?.lastSignInAt) ? 'active' : 'inactive',
-          warning: dashboard.warning || linked.warning,
-        };
-      })
-    );
+    const statsByManager = await buildManagerTeamStats(emails);
+    const managers = emails.map((email) => {
+      const user = byEmail.get(email);
+      const stats = statsByManager.get(email) || {
+        operators: 0,
+        clients: 0,
+        applications: 0,
+        status: 'inactive' as const,
+      };
+      return {
+        email,
+        name: user?.displayName || email.split('@')[0],
+        assignedOperators: stats.operators,
+        assignedClients: stats.clients,
+        applications: stats.applications,
+        lastSignInAt: user?.lastSignInAt || null,
+        status: stats.status,
+      };
+    });
 
     res.json({ date, managers });
   } catch (error) {
@@ -172,25 +169,22 @@ adminDashboardRouter.get('/operators', async (req: Request, res: Response): Prom
       operators = operators.filter((user) => allowedEmails!.has(user.email));
     }
 
-    const inFlight = (await listApplications()).filter(
-      (row) => row.status === 'QUEUED' || row.status === 'APPLYING'
+    const workloadByEmail = await countOperatorWorkloadByProfileCaEmail(
+      operators.map((user) => user.email)
     );
-    const workload = new Map<string, number>();
-    for (const row of inFlight) {
-      const email = (row.assigned_ca_email || '').trim().toLowerCase();
-      if (!email) continue;
-      workload.set(email, (workload.get(email) || 0) + 1);
-    }
 
     res.json({
       date,
       operators: operators.map((user) => ({
         email: user.email,
         name: user.displayName,
-        status: isActiveWithin(user.lastSignInAt) || (workload.get(user.email) || 0) > 0 ? 'active' : 'inactive',
+        status:
+          isActiveWithin(user.lastSignInAt) || (workloadByEmail.get(user.email) || 0) > 0
+            ? 'active'
+            : 'inactive',
         lastSignInAt: user.lastSignInAt,
         createdAt: user.createdAt,
-        workload: workload.get(user.email) || 0,
+        workload: workloadByEmail.get(user.email) || 0,
       })),
     });
   } catch (error) {
@@ -222,7 +216,7 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
 
     let query = getDbClient()
       .from('candidate_applications')
-      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles!inner(client_name)', { count: 'exact' })
+      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles!inner(client_name, ca_email)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
     if (status) query = query.eq('status', status);
@@ -241,7 +235,7 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
       companyName: row.company_name,
       jobTitle: row.job_title,
       status: row.status,
-      operator: row.assigned_ca_email || '',
+      operator: row.profiles?.ca_email || '',
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       submittedAt: row.submitted_at,
