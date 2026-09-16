@@ -62,6 +62,7 @@ import {
   serializeApplicationDto,
   hydrateAndPersistApplicationFields,
   fetchCandidateApplicationAggregatesByApplywizzIds,
+  distinctApplywizzIdsForCreatedAtRange,
   type ApplicationRow,
   type CandidateQueueStatus,
 } from '../db/applications.js';
@@ -881,14 +882,29 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    if (allowedIds && !unrestricted) {
+    {
       const existingIds = new Set(candidateSummaries.map((c) => c.applywizzId.toUpperCase()));
-      const missingIds = [...allowedIds].filter((id) => !existingIds.has(id));
+      let supplementalIds: string[] = [];
+      if (unrestricted && isSupabaseConfigured()) {
+        supplementalIds = await distinctApplywizzIdsForCreatedAtRange({
+          startIso: parsedRange.startIso,
+          endIso: parsedRange.endIso,
+        });
+      } else if (allowedIds && !unrestricted) {
+        supplementalIds = [...allowedIds].filter((id) => !existingIds.has(id));
+      }
+      const missingIds = supplementalIds.filter((id) => !existingIds.has(id.trim().toUpperCase()));
       if (missingIds.length > 0) {
+        if (unrestricted) {
+          log.info(
+            `[API] GET /api/candidates dev/admin DB supplement: +${missingIds.length} candidates (${parsedRange.label})`
+          );
+        }
         const profileFields = await fetchProfileListingFieldsByApplywizzIds(missingIds);
         for (const idUpper of missingIds) {
-          if (existingIds.has(idUpper)) continue;
-          const fields = profileFields.get(idUpper);
+          const key = idUpper.trim().toUpperCase();
+          if (existingIds.has(key)) continue;
+          const fields = profileFields.get(key);
           const applywizzId = fields?.applywizzId || idUpper;
           const resumePath = path.join(config.RESUMES_DIR, `${applywizzId}_resume.pdf`);
           candidateSummaries.push({
@@ -904,19 +920,18 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
             status: 'PENDING',
             resumeAvailable: fs.existsSync(resumePath),
           });
-          existingIds.add(idUpper);
+          existingIds.add(key);
         }
       }
     }
 
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !unrestricted) {
       const connectedIds = await fetchZohoConnectedApplywizzIdSet(
         candidateSummaries.map((c) => c.applywizzId)
       );
       candidateSummaries = candidateSummaries.filter((c) =>
         connectedIds.has(c.applywizzId.trim().toUpperCase())
       );
-
     }
 
     const aggregateScope = restrictedAccess
@@ -999,6 +1014,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       res.json(candidateSummaries);
       return;
     }
+
+    log.info(
+      `[API] GET /api/candidates role=${role ?? 'unknown'} unrestricted=${unrestricted} viewAs=${viewAsManagerEmail || '-'} allowedIds=${allowedIds?.size ?? 'all'} listed=${candidateSummaries.length} whRecords=${workHistoryRecords.length}`
+    );
 
     if (!unrestricted && candidateSummaries.length === 0) {
       if (userEmail) {

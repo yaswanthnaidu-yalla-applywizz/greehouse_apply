@@ -9,6 +9,7 @@ import { Response, NextFunction } from 'express';
 import { isSupabaseConfigured } from '../../db/client.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { isManagerViewAsOperator } from '../managerTeamScope.js';
+import { emailFromUserOrEmail, resolveEffectiveAppRole } from './auth.js';
 
 export type AppRole = 'admin' | 'manager' | 'operator' | 'dev';
 
@@ -66,20 +67,41 @@ function roleFromJwtPayload(payload: Record<string, unknown>): AppRole | null {
 
 /**
  * Resolves the signed-in user's app role from JWT (Authorization header) and/or `req.user`.
+ * Uses the same email-map precedence as sign-in (`resolveEffectiveAppRole`).
  */
 export function resolveRoleFromRequest(req: AuthenticatedRequest): AppRole | null {
   const user = req.user as Record<string, unknown> | undefined;
-  const fromUser = roleFromRecord(user);
-  if (fromUser) return fromUser;
+  const email = emailFromUserOrEmail(user);
+  let jwtRole: unknown = user ? (user as { role?: unknown }).role : undefined;
+  if (jwtRole == null && user) {
+    jwtRole = roleFromRecord(user);
+  }
 
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers?.authorization;
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.slice('Bearer '.length).trim();
     const payload = decodeAccessTokenPayload(token);
     if (payload) {
-      const fromJwt = roleFromJwtPayload(payload);
-      if (fromJwt) return fromJwt;
+      if (!email) {
+        const payloadEmail =
+          typeof payload.email === 'string'
+            ? payload.email
+            : typeof (payload as { user_metadata?: { email?: string } }).user_metadata?.email ===
+                'string'
+              ? (payload as { user_metadata: { email: string } }).user_metadata.email
+              : '';
+        if (payloadEmail) {
+          return resolveEffectiveAppRole(payloadEmail, roleFromJwtPayload(payload) ?? jwtRole);
+        }
+      }
+      if (jwtRole == null) {
+        jwtRole = roleFromJwtPayload(payload);
+      }
     }
+  }
+
+  if (email) {
+    return resolveEffectiveAppRole(email, jwtRole);
   }
 
   const testRole = req.headers['x-user-role'];
@@ -87,7 +109,8 @@ export function resolveRoleFromRequest(req: AuthenticatedRequest): AppRole | nul
     return normalizeAppRole(testRole);
   }
 
-  return null;
+  const fallback = normalizeAppRole(jwtRole);
+  return fallback;
 }
 
 /**

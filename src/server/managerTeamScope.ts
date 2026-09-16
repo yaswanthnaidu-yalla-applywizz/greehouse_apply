@@ -170,15 +170,21 @@ export async function resolveTeamCandidateIdsForManager(
   }
 
   const wh = await mergeWorkHistoryForCaEmails(operatorEmails, dates);
+  const profileIds = await applywizzIdsForManagerTeamProfiles(manager);
   const dbIds = await distinctApplywizzIdsForOperatorEmails(operatorEmails, createdAtRange);
   const merged = new Set<string>();
-  for (const id of [...wh.candidateIds, ...dbIds]) {
+  for (const id of [...wh.candidateIds, ...profileIds, ...dbIds]) {
     merged.add(id.trim().toUpperCase());
   }
 
+  const candidateIds = Array.from(merged);
+  log.info(
+    `[ManagerTeamScope] team candidates manager=${manager} operators=${operatorEmails.length} whIds=${wh.candidateIds.length} profileIds=${profileIds.length} dbIds=${dbIds.length} merged=${candidateIds.length}`
+  );
+
   return {
     operatorEmails,
-    candidateIds: Array.from(merged),
+    candidateIds,
     records: wh.records,
     unreachable: wh.unreachable,
     warning: wh.unreachable ? 'Work history API was unreachable for one or more operators.' : undefined,
