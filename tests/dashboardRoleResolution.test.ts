@@ -8,6 +8,7 @@ import {
 import {
   isManagerViewAsOperator,
   isViewAsOperatorHeaderValue,
+  resolveViewAsOperatorManagerEmail,
 } from '../src/server/managerTeamScope.js';
 import { requireOperatorDashboardAccess } from '../src/server/routes/requireRole.js';
 import type { AuthenticatedRequest } from '../src/server/middleware/auth.js';
@@ -56,6 +57,43 @@ describe('managerViewAsOperator', () => {
     assert.equal(isViewAsOperatorHeaderValue('Operator'), true);
     assert.equal(isViewAsOperatorHeaderValue('admin'), false);
     assert.equal(isViewAsOperatorHeaderValue(undefined), false);
+  });
+
+  it('resolveViewAsOperatorManagerEmail: manager uses JWT email and ignores forged header', () => {
+    const req = {
+      headers: {
+        'x-view-as': 'operator',
+        'x-view-as-manager-email': 'other@applywizz.ai',
+      },
+      user: { app_metadata: { role: 'manager' }, email: 'balaji@applywizz.ai' },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(resolveViewAsOperatorManagerEmail(req), 'balaji@applywizz.ai');
+  });
+
+  it('resolveViewAsOperatorManagerEmail: dev requires manager email header', () => {
+    const devWithManager = {
+      headers: {
+        'x-view-as': 'operator',
+        'x-view-as-manager-email': 'balaji@applywizz.ai',
+      },
+      user: { app_metadata: { role: 'dev' }, email: 'yaswanthnaiduyalla@applywizz.ai' },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(resolveViewAsOperatorManagerEmail(devWithManager), 'balaji@applywizz.ai');
+
+    const devNoHeader = {
+      headers: { 'x-view-as': 'operator' },
+      user: { app_metadata: { role: 'dev' }, email: 'yaswanthnaiduyalla@applywizz.ai' },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(resolveViewAsOperatorManagerEmail(devNoHeader), null);
+
+    const devOperatorTarget = {
+      headers: {
+        'x-view-as': 'operator',
+        'x-view-as-manager-email': 'ca@applywizz.ai',
+      },
+      user: { app_metadata: { role: 'dev' }, email: 'yaswanthnaiduyalla@applywizz.ai' },
+    } as unknown as AuthenticatedRequest;
+    assert.equal(resolveViewAsOperatorManagerEmail(devOperatorTarget), null);
   });
 
   it('isManagerViewAsOperator requires manager JWT role and header', () => {

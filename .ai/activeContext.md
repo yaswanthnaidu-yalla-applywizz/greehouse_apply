@@ -15,9 +15,10 @@ _Last updated: 2026-09-16_
 - Requests: `resolveEffectiveAppRole` — map override → JWT claim (no per-request DB read).
 - Signup: existing `users` row bypasses CA emails API gate (`isEmailAuthorizedForSignup`).
 
-### 2. Manager view-as operator (shipped)
+### 2. Manager view-as operator / Ops mode (shipped)
 - Manager JWT + header **`X-View-As: operator`** on candidate list/jobs, **`/api/applications`**, **`/api/notifications`**: team-scoped via `profiles.ca_email` for operators where `users.manager_email` = manager.
-- **UI:** Manager dashboard **Open operator view** → `/` with session flag; banner + Exit; `roleAccess.js` sends header on all authed fetches.
+- **Dev ops mode:** same scope when dev sends **`X-View-As-Manager-Email`** (manager picker on `/manager`); unrestricted dev access unchanged without ops flags.
+- **UI:** **`/manager` → Ops mode** (manager confirm; dev picks manager) → `/` with session flags; operator banner + **Back to manager mode**; `roleAccess.js` sends headers on authed fetches.
 - **`requireOperatorDashboardAccess`:** operator, dev, or manager + view-as header on operator API routes.
 - Response header **`X-View-As-Active: true`** when branch active.
 

@@ -189,7 +189,13 @@
       const [activityWarning, setActivityWarning] = useState('');
       const [reports, setReports] = useState({ buckets: [], perOperator: [] });
       const [reportRange, setReportRange] = useState('daily');
+      const [opsPickerOpen, setOpsPickerOpen] = useState(false);
+      const [opsManagers, setOpsManagers] = useState([]);
+      const [opsManagerPick, setOpsManagerPick] = useState('');
+      const [opsPickerLoading, setOpsPickerLoading] = useState(false);
+      const [opsPickerError, setOpsPickerError] = useState('');
       const token = localStorage.getItem('applywizz_auth_token');
+      const sessionRole = ApplyWizzRoles.sessionRole();
       const userEmail = (() => {
         try {
           const raw = localStorage.getItem('applywizz_auth_user');
@@ -268,6 +274,51 @@
       useEffect(() => { if (tab === 'activity') loadActivity(); }, [tab, loadActivity]);
       useEffect(() => { if (tab === 'reports') loadReports(); }, [tab, loadReports]);
 
+      useEffect(() => {
+        if (!opsPickerOpen || sessionRole !== 'dev') return;
+        let cancelled = false;
+        (async () => {
+          setOpsPickerLoading(true);
+          setOpsPickerError('');
+          try {
+            const date = ApplyWizzRoles.getTodayIST();
+            const res = await fetch(`/api/admin/managers?date=${encodeURIComponent(date)}`, {
+              headers: ApplyWizzRoles.getAuthHeaders(),
+            });
+            const payload = await res.json();
+            if (!res.ok) throw new Error(payload.error || 'Unable to load managers.');
+            if (cancelled) return;
+            const list = payload.managers || [];
+            setOpsManagers(list);
+            setOpsManagerPick(list[0]?.email || '');
+          } catch (e) {
+            if (!cancelled) setOpsPickerError(e.message || 'Load failed');
+          } finally {
+            if (!cancelled) setOpsPickerLoading(false);
+          }
+        })();
+        return () => { cancelled = true; };
+      }, [opsPickerOpen, sessionRole]);
+
+      const enterOpsMode = () => {
+        if (sessionRole === 'manager') {
+          if (!window.confirm(
+            'Enter Ops mode? You will see your team\'s clients on the operator dashboard. Use "Back to manager mode" on that page to return here.'
+          )) return;
+          ApplyWizzRoles.setOpsMode({ enabled: true, managerEmail: ApplyWizzRoles.sessionUserEmail() });
+          window.location.href = '/';
+          return;
+        }
+        if (sessionRole === 'dev') setOpsPickerOpen(true);
+      };
+
+      const confirmDevOpsMode = () => {
+        const email = String(opsManagerPick || '').trim().toLowerCase();
+        if (!email) return;
+        ApplyWizzRoles.setOpsMode({ enabled: true, managerEmail: email });
+        window.location.href = '/';
+      };
+
       if (!token || access.reason === 'anon') {
         return (
           <main className="min-h-screen flex items-center justify-center p-6">
@@ -291,6 +342,41 @@
       return (
         <main className="min-h-screen p-4 md:p-8 font-sans">
           <EmailProofModal proof={emailProof} onClose={() => setEmailProof(null)} />
+          {opsPickerOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+              <div className="bg-white border-2 border-[#1A1A2E] rounded-lg p-5 max-w-md w-full shadow-[4px_4px_0_#1A1A2E]">
+                <h2 className="text-lg font-black mb-2">Ops mode — choose manager</h2>
+                <p className="text-xs text-[#64748B] mb-3">Operator dashboard will be scoped to that manager&apos;s team.</p>
+                {opsPickerLoading && <p className="text-xs font-mono mb-2">Loading managers…</p>}
+                {opsPickerError && <p className="text-xs font-bold text-[#991B1B] mb-2">{opsPickerError}</p>}
+                {!opsPickerLoading && !opsPickerError && (
+                  <label className="block text-xs font-bold uppercase mb-3">
+                    Manager
+                    <select
+                      value={opsManagerPick}
+                      onChange={(e) => setOpsManagerPick(e.target.value)}
+                      className="block mt-1 w-full border-2 border-[#1A1A2E] rounded px-2 py-2 text-sm bg-white"
+                    >
+                      {opsManagers.map((m) => (
+                        <option key={m.email} value={m.email}>{m.name ? `${m.name} (${m.email})` : m.email}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <button type="button" className="px-3 py-2 text-xs font-bold border-2 border-[#1A1A2E] rounded" onClick={() => setOpsPickerOpen(false)}>Cancel</button>
+                  <button
+                    type="button"
+                    disabled={opsPickerLoading || !!opsPickerError || !opsManagerPick}
+                    className="px-3 py-2 text-xs font-bold bg-[#1E3A5F] text-white border-2 border-[#1A1A2E] rounded disabled:opacity-50"
+                    onClick={confirmDevOpsMode}
+                  >
+                    Enter Ops mode
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="max-w-7xl mx-auto">
             <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6">
               <div className="flex items-center gap-3">
@@ -325,16 +411,13 @@
                     )}
                   </div>
                 </div>
-                {ApplyWizzRoles.sessionRole() === 'manager' && (
+                {(sessionRole === 'manager' || sessionRole === 'dev') && (
                   <button
                     type="button"
-                    onClick={() => {
-                      ApplyWizzRoles.setManagerOperatorView(true);
-                      window.location.href = '/';
-                    }}
+                    onClick={enterOpsMode}
                     className="bg-[#1E3A5F] text-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded shadow-[2px_2px_0_#1A1A2E]"
                   >
-                    Open operator view
+                    Ops mode
                   </button>
                 )}
                 <button type="button" onClick={load} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
@@ -486,7 +569,7 @@
                     <li>Completed rows may show web or email proof links — use these for QA, not for re-submitting.</li>
                     <li>Skipped jobs (35+ questions, Zoho not connected, expired postings, etc.) appear with plain-language reasons — same rules as the operator dashboard.</li>
                     <li>Operator-to-manager assignment happens on operator sign-in; this UI does not reassign teams.</li>
-                    <li><span className="font-bold">Open operator view</span> (header) opens the operator dashboard at <span className="font-mono">/</span> scoped to your team&apos;s clients (<span className="font-mono">profiles.ca_email</span> for your operators). Submit and review there; use Exit on that page to return here.</li>
+                    <li><span className="font-bold">Ops mode</span> (header) opens the operator dashboard at <span className="font-mono">/</span> scoped to your team&apos;s clients (<span className="font-mono">profiles.ca_email</span> for your operators). Submit and review there; use <span className="font-bold">Back to manager mode</span> on that page to return here.</li>
                   </ul>
                 </section>
 

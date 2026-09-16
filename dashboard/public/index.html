@@ -3073,7 +3073,7 @@
       useEffect(() => {
         if (!localStorage.getItem('applywizz_auth_token')) return;
         const role = ApplyWizzRoles.sessionRole();
-        if (role === 'manager' && !ApplyWizzRoles.isManagerOperatorView()) {
+        if (role === 'manager' && !ApplyWizzRoles.isOpsMode()) {
           ApplyWizzRoles.redirectToRoleHome(role);
           return;
         }
@@ -3798,22 +3798,28 @@
         );
       }
 
-      const managerOperatorView = ApplyWizzRoles.isManagerOperatorView();
+      const opsMode = ApplyWizzRoles.isOpsMode();
+      const opsModeRole = sessionRole();
+      const opsManagerEmail = ApplyWizzRoles.getOpsModeManagerEmail();
 
       return (
         <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1A1A2E] font-sans overflow-hidden select-none">
-          {managerOperatorView && (
+          {opsMode && (
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#E2F0FB] border-b-2 border-[#1A1A2E] text-xs font-bold shrink-0">
-              <span>Operator view — your team&apos;s clients only</span>
+              <span>
+                {opsModeRole === 'dev' && opsManagerEmail
+                  ? `Ops mode — scoped as ${opsManagerEmail}`
+                  : 'Ops mode — your team\u2019s clients only'}
+              </span>
               <button
                 type="button"
                 className="underline text-[#1E3A5F]"
                 onClick={() => {
-                  ApplyWizzRoles.setManagerOperatorView(false);
+                  ApplyWizzRoles.setOpsMode({ enabled: false });
                   window.location.replace('/manager');
                 }}
               >
-                Exit to manager dashboard
+                Back to manager mode
               </button>
             </div>
           )}
