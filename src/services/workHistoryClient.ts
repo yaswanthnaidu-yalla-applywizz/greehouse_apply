@@ -263,6 +263,67 @@ export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<Wor
  * Fetches yesterday's assigned candidates for a CA.
  * If yesterday had 0 records (weekend/holiday), looks back up to 7 days for the latest active day.
  */
+export function extractCareerAssociateManagerIdFromWorkHistoryPayload(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const root = data as Record<string, unknown>;
+
+  const direct =
+    root.careerassociatemanagerid ??
+    root.careerassociatemanager_id ??
+    root.careerAssociateManagerId;
+  if (typeof direct === 'string' && direct.trim()) {
+    return direct.trim().toLowerCase();
+  }
+
+  const records = root.records;
+  if (!Array.isArray(records)) return null;
+
+  for (const rec of records) {
+    if (!rec || typeof rec !== 'object') continue;
+    const row = rec as Record<string, unknown>;
+    const id =
+      row.careerassociatemanagerid ??
+      row.careerassociatemanager_id ??
+      row.careerAssociateManagerId;
+    if (typeof id === 'string' && id.trim()) {
+      return id.trim().toLowerCase();
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Work-history lookup for a single candidate (used to read careerassociatemanagerid).
+ */
+export async function fetchCareerAssociateManagerIdForCandidate(
+  applywizzId: string,
+  dateStr: string
+): Promise<string | null> {
+  const id = (applywizzId || '').trim().toUpperCase();
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+
+  const base = getWorkHistoryBaseUrl();
+  const fullUrl = `${base}?from=${dateStr}&to=${dateStr}&applywizz_id=${encodeURIComponent(id)}`;
+  const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
+  if (!outcome.ok) return null;
+
+  const res = outcome.response;
+  if (!res.ok) {
+    log.warn(`[WorkHistory] Failed ${fullUrl}: HTTP ${res.status}`);
+    return null;
+  }
+
+  try {
+    const data: unknown = await res.json();
+    return extractCareerAssociateManagerIdFromWorkHistoryPayload(data);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
+    return null;
+  }
+}
+
 export async function fetchAllowedCandidates(caEmail: string): Promise<WorkHistoryResult> {
   let unreachableCount = 0;
 

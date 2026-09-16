@@ -13,8 +13,8 @@ import {
   dismissAllNotifications,
 } from '../../db/applications.js';
 import { isUserAdmin } from './auth.js';
-import { getCachedWorkHistory, setCachedWorkHistory } from '../workHistoryCache.js';
-import { fetchWorkHistoryForDate, getYesterdayIST } from '../../services/workHistoryClient.js';
+import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
+import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -29,9 +29,11 @@ export const notificationsRouter = Router();
 notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
-    const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-      ? req.query.date
-      : undefined;
+    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
+    }
 
     const userEmail = getAuthenticatedCaEmail(req);
     const isAdmin = isUserAdmin((req as any).user || userEmail);
@@ -43,24 +45,16 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      const targetDate = dateParam || getYesterdayIST();
-      let cached = getCachedWorkHistory(userEmail, targetDate);
-      if (!cached) {
-        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
-      }
-      allowedCandidateIds = cached.candidateIds;
+      const merged = await mergeWorkHistoryForIstDates({
+        mode: 'ca',
+        caEmail: userEmail,
+        dates: istDatesForWorkHistory(parsedRange),
+      });
+      allowedCandidateIds = merged.candidateIds;
     }
 
     const notifications = await getRecentNotifications(limit, {
-      date: dateParam,
+      createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
       allowedCandidateIds,
     });
     res.json(notifications);

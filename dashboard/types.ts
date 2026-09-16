@@ -61,6 +61,13 @@ export interface CandidateDetail {
 /**
  * Aggregated dashboard pipeline metrics returned by `GET /api/stats`.
  */
+export interface DashboardDateRangeMeta {
+  preset: string;
+  from: string | null;
+  to: string | null;
+  label: string;
+}
+
 export interface DashboardStats {
   totalCandidates: number;
   totalApplications: number;
@@ -73,6 +80,7 @@ export interface DashboardStats {
   supabasePercentage: number;
   aiPercentage: number;
   pipelineStatus: 'READY' | 'IDLE' | 'PROCESSING';
+  dateRange?: DashboardDateRangeMeta;
 }
 
 export type { ApplicationStatus, EmailProofStatus };

@@ -141,7 +141,7 @@
         );
       }
 
-      const tabs = ['system', 'runs', 'errors', 'queue', 'integrations', 'debugger'];
+      const tabs = ['system', 'runs', 'errors', 'queue', 'integrations', 'debugger', 'guide'];
       const app = debug?.application;
 
       return (
@@ -300,6 +300,53 @@
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {tab === 'guide' && (
+              <div className="max-w-3xl space-y-6">
+                <div>
+                  <h2 className="text-2xl font-black text-[#1A1A2E]">Developer Guide</h2>
+                  <p className="text-xs text-[#64748B] font-mono mt-0.5">Internals, debugging, and cross-role dashboard access.</p>
+                </div>
+
+                <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-2">Access</h3>
+                  <p className="text-sm text-[#1A1A2E] leading-relaxed">
+                    Use the header switcher to open <span className="font-bold">Dev</span>, <span className="font-bold">Admin</span>, <span className="font-bold">Manager</span>, or <span className="font-bold">Operator</span> UIs. Dev role bypasses manager/operator API scoping when using those dashboards.
+                  </p>
+                </section>
+
+                <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tabs</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li><span className="font-bold">System</span> — health probes, queue and worker summary, ingest line.</li>
+                    <li><span className="font-bold">Runs</span> — applications for the header date; optional status filter; click ID to open Debugger.</li>
+                    <li><span className="font-bold">Errors</span> — grouped failures for the date; click app IDs to debug.</li>
+                    <li><span className="font-bold">Queue</span> — live queued/applying/stuck counts and running/pending ID lists.</li>
+                    <li><span className="font-bold">Integrations</span> — per-integration probe detail and last errors.</li>
+                    <li><span className="font-bold">Debugger</span> — paste an application UUID for status, proofs, raw error, and timeline.</li>
+                  </ul>
+                </section>
+
+                <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tips</h3>
+                  <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                    <li>Prefer Debugger over operator-facing messages when triaging production issues.</li>
+                    <li>Date affects Runs and Errors; Queue and Integrations are live snapshots.</li>
+                    <li>CSV ingest Start/Stop lives on the Admin dashboard, not here.</li>
+                    <li>Reproduce submit/dry-run flows on the Operator dashboard at <span className="font-mono">/</span>.</li>
+                  </ul>
+                </section>
+
+                <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E] text-center">
+                  <h3 className="text-sm font-black uppercase tracking-wide mb-2">Need help?</h3>
+                  <p className="text-sm text-[#64748B] leading-relaxed">
+                    Contact{' '}
+                    <a href="mailto:yaswanthnaiduyalla@applywizz.ai" className="font-bold text-[#1A1A2E] underline hover:text-[#E88474]">yaswanthnaiduyalla@applywizz.ai</a>{' '}
+                    on Microsoft Teams.
+                  </p>
+                </section>
               </div>
             )}
           </div>

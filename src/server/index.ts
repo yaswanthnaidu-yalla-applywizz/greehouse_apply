@@ -46,8 +46,6 @@ import { getCachedWorkHistory, setCachedWorkHistory } from './workHistoryCache.j
 import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
 import {
   fetchAllowedCandidates,
-  fetchWorkHistoryForDate,
-  fetchAdminWorkHistoryForDate,
   ADMIN_WORK_HISTORY_CACHE_KEY,
   getYesterdayIST,
   type WorkHistoryCandidateRecord,
@@ -55,7 +53,9 @@ import {
 import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHydrate.js';
 import {
   cacheApplicationLocally,
+  applyCreatedAtRangeFilter,
   getSubmissionOutcomeCounts,
+  getDashboardApplicationMetrics,
   getApplication,
   upsertApplication,
   serializeApplicationDto,
@@ -63,6 +63,19 @@ import {
   countNonSkippedApplicationsByApplywizzIds,
   type ApplicationRow,
 } from '../db/applications.js';
+import {
+  istDatesForWorkHistory,
+  parseDashboardCreatedAtRange,
+  serializeDateRange,
+} from './dashboardDateRange.js';
+import { mergeWorkHistoryForIstDates } from './workHistorySpan.js';
+import {
+  applicationAssignedCaAllowed,
+  hasUnrestrictedDashboardAccess,
+  resolveRequestAppRole,
+  resolveTeamCandidateIdsForManager,
+} from './managerTeamScope.js';
+import { usersRouter } from './routes/users.js';
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
 import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient } from '../db/client.js';
@@ -138,6 +151,12 @@ export interface DashboardStats {
   supabasePercentage: number;
   aiPercentage: number;
   pipelineStatus: 'READY' | 'IDLE' | 'PROCESSING';
+  dateRange?: {
+    preset: string;
+    from: string | null;
+    to: string | null;
+    label: string;
+  };
 }
 
 /**
@@ -447,6 +466,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   app.use(express.static(publicDir, { index: false }));
 
   const operatorApiGuard = [requireAuth, requireRole('operator', 'dev')] as const;
+  const candidateListApiGuard = [requireAuth, requireRole('operator', 'manager', 'admin', 'dev')] as const;
+  const usersApiGuard = [requireAuth, requireRole('manager', 'admin', 'dev')] as const;
   const adminApiGuard = [requireAuth, requireRole('admin', 'dev')] as const;
   const managerApiGuard = [requireAuth, requireRole('manager', 'dev')] as const;
   const devApiGuard = [requireAuth, requireRole('dev')] as const;
@@ -468,7 +489,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   app.use('/api/manager', ...managerApiGuard, managerRouter);
 
   // Operator candidate queue + admin namespace
-  app.use('/api/candidates', ...operatorApiGuard);
+  app.use('/api/candidates', ...candidateListApiGuard);
+  app.use('/api/users', ...usersApiGuard, usersRouter);
   app.use('/api/admin', ...adminApiGuard);
   app.use('/api/dev', ...devApiGuard, devDashboardRouter);
 
@@ -494,66 +516,68 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * GET /api/stats
    * Returns aggregated dashboard metrics.
    */
-  app.get('/api/stats', ...operatorApiGuard, async (req: Request, res: Response) => {
-    let totalFields = 0;
-    let supabaseCount = 0;
-    let aiCount = 0;
-
-    for (const appItem of artifactCache.resolvedApplications) {
-      for (const f of appItem.resolvedFields) {
-        totalFields++;
-        if (f.source === 'supabase') supabaseCount++;
-        if (f.source === 'ai') aiCount++;
-      }
+  app.get('/api/stats', ...candidateListApiGuard, async (req: Request, res: Response) => {
+    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
     }
 
-    const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-      ? req.query.date
-      : undefined;
-
-    const userEmail = getAuthenticatedCaEmail(req);
-    const isAdmin = isUserAdmin((req as any).user || userEmail);
+    const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
+    const userEmail = getAuthenticatedCaEmail(req as AuthenticatedRequest);
+    const role = resolveRequestAppRole(req as AuthenticatedRequest, userEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
 
     let allowedCandidateIds: string[] | undefined = undefined;
-    if (!isAdmin) {
-      const targetDate = dateParam || getYesterdayIST();
+    if (!unrestricted) {
       if (!userEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      let cached = getCachedWorkHistory(userEmail, targetDate);
-      if (!cached) {
-        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
+      if (role === 'manager') {
+        const team = await resolveTeamCandidateIdsForManager(
+          userEmail,
+          istDatesForWorkHistory(parsedRange),
+          createdAtRange
+        );
+        allowedCandidateIds = team.candidateIds;
+      } else {
+        const merged = await mergeWorkHistoryForIstDates({
+          mode: 'ca',
+          caEmail: userEmail,
+          dates: istDatesForWorkHistory(parsedRange),
+        });
+        allowedCandidateIds = merged.candidateIds;
       }
-      allowedCandidateIds = cached.candidateIds;
     }
 
     const outcomes = await getSubmissionOutcomeCounts({
-      date: dateParam,
+      createdAtRange,
+      allowedCandidateIds,
+    });
+    const metrics = await getDashboardApplicationMetrics({
+      createdAtRange,
       allowedCandidateIds,
     });
 
     const stats: DashboardStats = {
-      totalCandidates: artifactCache.candidateSegments.length,
-      totalApplications: artifactCache.resolvedApplications.length,
+      totalCandidates: metrics.totalCandidates,
+      totalApplications: metrics.totalApplications,
       successfulApplications: outcomes.successfulApplications,
       failedApplications: outcomes.failedApplications,
-      uniqueScannedJobs: artifactCache.scannedJobs.length,
-      totalFieldsPopulated: totalFields,
-      supabaseTaggedCount: supabaseCount,
-      aiTaggedCount: aiCount,
-      supabasePercentage: totalFields ? Number(((supabaseCount / totalFields) * 100).toFixed(1)) : 0,
-      aiPercentage: totalFields ? Number(((aiCount / totalFields) * 100).toFixed(1)) : 0,
-      pipelineStatus: artifactCache.resolvedApplications.length > 0 ? 'READY' : 'IDLE',
+      uniqueScannedJobs: metrics.uniqueScannedJobs,
+      totalFieldsPopulated: metrics.totalFieldsPopulated,
+      supabaseTaggedCount: metrics.supabaseTaggedCount,
+      aiTaggedCount: metrics.aiTaggedCount,
+      supabasePercentage: metrics.totalFieldsPopulated
+        ? Number(((metrics.supabaseTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
+        : 0,
+      aiPercentage: metrics.totalFieldsPopulated
+        ? Number(((metrics.aiTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
+        : 0,
+      pipelineStatus: metrics.totalApplications > 0 ? 'READY' : 'IDLE',
+      dateRange: serializeDateRange(parsedRange),
     };
 
     res.json(stats);
@@ -726,59 +750,49 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    */
   app.get('/api/candidates', async (req: AuthenticatedRequest, res: Response) => {
     const userEmail = getAuthenticatedCaEmail(req);
-    const isAdmin = isUserAdmin(req.user || userEmail);
+    const role = resolveRequestAppRole(req, userEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
+    const isManager = role === 'manager';
 
-    const dateParam = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-      ? req.query.date
-      : getYesterdayIST();
+    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
+    }
+    const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
+    const whDates = istDatesForWorkHistory(parsedRange);
 
     let allowedIds: Set<string> | null = null;
     let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
     let workHistoryUnreachable = false;
 
-    if (isAdmin) {
-      let cached = getCachedWorkHistory(ADMIN_WORK_HISTORY_CACHE_KEY, dateParam);
-      if (!cached) {
-        const whResult = await fetchAdminWorkHistoryForDate(dateParam);
-        try {
-          await hydrateAdminProfilesFromWorkHistory(dateParam);
-        } catch (hydrateErr: any) {
-          log.warn('[Server] Admin profile hydration on candidates list failed:', hydrateErr?.message);
-        }
-        setCachedWorkHistory(
-          ADMIN_WORK_HISTORY_CACHE_KEY,
-          whResult.records,
-          whResult.candidateIds,
-          whResult.unreachable,
-          whResult.resolvedDate,
-          dateParam
-        );
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
+    if (unrestricted) {
+      const merged = await mergeWorkHistoryForIstDates({
+        mode: 'admin',
+        caEmail: ADMIN_WORK_HISTORY_CACHE_KEY,
+        dates: whDates,
+      });
+      try {
+        await hydrateAdminProfilesFromWorkHistory(whDates[0]);
+      } catch (hydrateErr: any) {
+        log.warn('[Server] Admin profile hydration on candidates list failed:', hydrateErr?.message);
       }
-      workHistoryUnreachable = cached.unreachable;
-      workHistoryRecords = cached.records;
+      workHistoryUnreachable = merged.unreachable;
+      workHistoryRecords = merged.records;
+    } else if (isManager && userEmail) {
+      const team = await resolveTeamCandidateIdsForManager(userEmail, whDates, createdAtRange);
+      workHistoryUnreachable = team.unreachable;
+      workHistoryRecords = team.records;
+      allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
     } else if (userEmail) {
-      let cached = getCachedWorkHistory(userEmail, dateParam);
-      if (!cached) {
-        const whResult = await fetchWorkHistoryForDate(userEmail, dateParam);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, dateParam);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
-      }
-      workHistoryUnreachable = cached.unreachable;
-      workHistoryRecords = cached.records;
-      allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+      const merged = await mergeWorkHistoryForIstDates({
+        mode: 'ca',
+        caEmail: userEmail,
+        dates: whDates,
+      });
+      workHistoryUnreachable = merged.unreachable;
+      workHistoryRecords = merged.records;
+      allowedIds = new Set(merged.candidateIds.map((id) => id.toUpperCase()));
     } else {
       log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
       res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
@@ -786,7 +800,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     res.setHeader('X-Work-History-Unreachable', String(workHistoryUnreachable));
-    res.setHeader('X-Work-History-Date', dateParam);
+    res.setHeader('X-Dashboard-Date-Range', parsedRange.label);
 
     // 1. Process candidateSegments
     const matchedSegments = artifactCache.candidateSegments.filter(
@@ -802,7 +816,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
       // Filter to only jobs eligible under current question threshold (< MAX_JOB_QUESTIONS)
       const eligibleJobs = seg.jobs.filter((job) => {
-        if (!isDashboardJobScoreEligible(seg.applywizzId, job, isAdmin)) {
+        if (!isDashboardJobScoreEligible(seg.applywizzId, job, unrestricted)) {
           return false;
         }
         if (
@@ -882,7 +896,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       );
 
       const queueCounts = await countNonSkippedApplicationsByApplywizzIds(
-        candidateSummaries.map((c) => c.applywizzId)
+        candidateSummaries.map((c) => c.applywizzId),
+        createdAtRange
       );
       candidateSummaries = candidateSummaries.map((summary) => {
         const dbTotal = queueCounts.get(summary.applywizzId.trim().toUpperCase());
@@ -893,7 +908,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       });
     }
 
-    if (isAdmin) {
+    if (unrestricted) {
       // Remove any prior or default-mapped instances of demo candidates to guarantee clean top placement
       const nonDemoSummaries = candidateSummaries.filter(
         (c) => c.applywizzId !== DEMO_APPLYWIZZ_ID && c.applywizzId !== AKSHITHA_APPLYWIZZ_ID
@@ -938,27 +953,27 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    if (!isAdmin && candidateSummaries.length === 0) {
+    if (!unrestricted && candidateSummaries.length === 0) {
       if (userEmail) {
         logActiveCandidatesThrottled(userEmail, 0);
       }
       res.json({
         candidates: [],
-        message: `No candidates were assigned to you on ${dateParam}.`,
+        message: `No candidates were assigned to you for ${parsedRange.label}.`,
         workHistoryUnreachable,
-        selectedDate: dateParam,
+        dateRange: serializeDateRange(parsedRange),
       });
       return;
     }
 
-    if (!isAdmin && userEmail) {
+    if (!unrestricted && userEmail) {
       logActiveCandidatesThrottled(userEmail, candidateSummaries.length);
     }
 
     res.json({
       candidates: candidateSummaries,
       workHistoryUnreachable,
-      selectedDate: dateParam,
+      dateRange: serializeDateRange(parsedRange),
     });
   });
 
@@ -971,29 +986,36 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
     const userEmail = getAuthenticatedCaEmail(req);
-    const isAdmin = isUserAdmin(req.user || userEmail);
+    const role = resolveRequestAppRole(req, userEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
     let caWorkHistoryEmail: string | undefined;
 
-    if (!isAdmin) {
+    if (!unrestricted) {
       if (!userEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
       caWorkHistoryEmail = userEmail;
-      let cached = getCachedWorkHistory(caWorkHistoryEmail);
-      if (!cached) {
-        const whResult = await fetchAllowedCandidates(caWorkHistoryEmail);
-        setCachedWorkHistory(caWorkHistoryEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
+      let allowedIds: Set<string>;
+      if (role === 'manager') {
+        const team = await resolveTeamCandidateIdsForManager(userEmail, [getYesterdayIST()]);
+        allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
+      } else {
+        let cached = getCachedWorkHistory(caWorkHistoryEmail);
+        if (!cached) {
+          const whResult = await fetchAllowedCandidates(caWorkHistoryEmail);
+          setCachedWorkHistory(caWorkHistoryEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+          cached = {
+            records: whResult.records,
+            candidateIds: whResult.candidateIds,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+            unreachable: whResult.unreachable,
+            resolvedDate: whResult.resolvedDate,
+          };
+        }
+        allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
       }
-      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
       if (!allowedIds.has(applywizzId.toUpperCase())) {
         res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
         return;
@@ -1001,7 +1023,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     const zohoGate = await assertApplywizzZohoConnected(applywizzId, {
-      isAdmin,
+      isAdmin: unrestricted,
       allowAdminDemo: true,
     });
     if (!zohoGate.allowed) {
@@ -1123,7 +1145,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const totalBeforeScoreFilter = eligibleJobsWithStatus.length;
     const dashboardJobs = eligibleJobsWithStatus.filter((job) =>
-      isDashboardJobScoreEligible(seg.applywizzId, job, isAdmin)
+      isDashboardJobScoreEligible(seg.applywizzId, job, unrestricted)
     );
     log.info(
       `[Dashboard] Filtered jobs: showed ${dashboardJobs.length}/${totalBeforeScoreFilter} (score 20–60 only).`
@@ -1148,50 +1170,51 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
     const userEmail = getAuthenticatedCaEmail(req);
-    const isAdmin = isUserAdmin(req.user || userEmail);
-    const targetDate =
-      typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-        ? req.query.date
-        : getYesterdayIST();
+    const role = resolveRequestAppRole(req, userEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
+    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
+    }
+    const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
+    let teamOperatorEmails: string[] | null = null;
 
-    if (!isAdmin) {
+    if (!unrestricted) {
       if (!userEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
 
-      let cached = getCachedWorkHistory(userEmail, targetDate) || getCachedWorkHistory(userEmail);
-      if (!cached) {
-        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
-      }
-
-      if (cached.candidateIds.length === 0 && !req.query.date) {
-        const allowedResult = await fetchAllowedCandidates(userEmail);
-        if (allowedResult.candidateIds.length > 0) {
-          setCachedWorkHistory(userEmail, allowedResult.records, allowedResult.candidateIds, allowedResult.unreachable, allowedResult.resolvedDate);
-          cached = {
-            records: allowedResult.records,
-            candidateIds: allowedResult.candidateIds,
-            expiresAt: Date.now() + 5 * 60 * 1000,
-            unreachable: allowedResult.unreachable,
-            resolvedDate: allowedResult.resolvedDate,
-          };
+      let candidateIds: string[] = [];
+      if (role === 'manager') {
+        const team = await resolveTeamCandidateIdsForManager(
+          userEmail,
+          istDatesForWorkHistory(parsedRange),
+          createdAtRange
+        );
+        candidateIds = team.candidateIds;
+        teamOperatorEmails = team.operatorEmails;
+      } else {
+        const merged = await mergeWorkHistoryForIstDates({
+          mode: 'ca',
+          caEmail: userEmail,
+          dates: istDatesForWorkHistory(parsedRange),
+        });
+        candidateIds = merged.candidateIds;
+        if (candidateIds.length === 0 && parsedRange.preset === 'default') {
+          const allowedResult = await fetchAllowedCandidates(userEmail);
+          if (allowedResult.candidateIds.length > 0) {
+            candidateIds = allowedResult.candidateIds;
+          }
         }
       }
 
-      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+      const allowedIds = new Set(candidateIds.map((id) => id.toUpperCase()));
       if (!allowedIds.has(applywizzId.toUpperCase())) {
         log.warn(
-          `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail}) → filtered to 0 jobs (candidate not assigned to CA on ${targetDate})`
+          `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail}) → filtered to 0 jobs (candidate not assigned to CA in work-history span)`
         );
         res.status(403).json({
           error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
@@ -1203,7 +1226,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     const zohoGate = await assertApplywizzZohoConnected(applywizzId, {
-      isAdmin,
+      isAdmin: unrestricted,
       allowAdminDemo: true,
     });
     if (!zohoGate.allowed) {
@@ -1222,10 +1245,12 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     let skippedUnresolved = 0;
 
     if (isSupabaseConfigured()) {
-      const { data, error } = await getDbClient()
+      let appQuery = getDbClient()
         .from('candidate_applications')
         .select('*')
         .eq('applywizz_id', applywizzId);
+      appQuery = applyCreatedAtRangeFilter(appQuery, createdAtRange);
+      const { data, error } = await appQuery;
       if (error) {
         log.error(`[API] Failed to fetch jobs for ${applywizzId}:`, error.message);
         res.status(500).json({ error: error.message });
@@ -1233,8 +1258,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
       dbRowCount = (data || []).length;
       for (const application of data || []) {
-        if (!isAdmin && userEmail && application.assigned_ca_email &&
-            application.assigned_ca_email.trim().toLowerCase() !== userEmail.trim().toLowerCase()) {
+        if (
+          !applicationAssignedCaAllowed(
+            application.assigned_ca_email,
+            userEmail || '',
+            role,
+            teamOperatorEmails
+          )
+        ) {
           skippedCaAssignment++;
           continue;
         }
@@ -1256,7 +1287,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const afterCaFilter = jobs.length;
     const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);
-    if (pinnedDemo && isAdmin) {
+    if (pinnedDemo && unrestricted) {
       jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
       jobs = mergeDashboardJobsByUrl(jobs, segmentToJobRows(resolvePinnedDemoSegment(applywizzId)));
     } else if (jobs.length === 0) {
@@ -1268,7 +1299,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (pinnedDemo) {
       jobs = jobs.filter((job) =>
-        isDashboardJobScoreEligible(applywizzId, job as { score?: string | number; canonicalUrl?: string; rawUrl?: string }, isAdmin)
+        isDashboardJobScoreEligible(applywizzId, job as { score?: string | number; canonicalUrl?: string; rawUrl?: string }, unrestricted)
       );
     }
 
@@ -1289,27 +1320,34 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
     const userEmail = getAuthenticatedCaEmail(req);
-    const isAdmin = isUserAdmin(req.user || userEmail);
+    const role = resolveRequestAppRole(req, userEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
 
-    if (!isAdmin) {
+    if (!unrestricted) {
       if (!userEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      let cached = getCachedWorkHistory(userEmail) || getCachedWorkHistory(userEmail, getYesterdayIST());
-      if (!cached) {
-        const whResult = await fetchAllowedCandidates(userEmail);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
+      let allowedIds: Set<string>;
+      if (role === 'manager') {
+        const team = await resolveTeamCandidateIdsForManager(userEmail, [getYesterdayIST()]);
+        allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
+      } else {
+        let cached = getCachedWorkHistory(userEmail) || getCachedWorkHistory(userEmail, getYesterdayIST());
+        if (!cached) {
+          const whResult = await fetchAllowedCandidates(userEmail);
+          setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+          cached = {
+            records: whResult.records,
+            candidateIds: whResult.candidateIds,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+            unreachable: whResult.unreachable,
+            resolvedDate: whResult.resolvedDate,
+          };
+        }
+        allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
       }
-      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
       if (!allowedIds.has(applywizzId.toUpperCase())) {
         res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
         return;
@@ -1355,27 +1393,34 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ? req.params.applywizzId[0]
       : String(req.params.applywizzId || '');
     const userEmail = getAuthenticatedCaEmail(req);
-    const isAdmin = isUserAdmin(req.user || userEmail);
+    const role = resolveRequestAppRole(req, userEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
 
-    if (!isAdmin) {
+    if (!unrestricted) {
       if (!userEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      let cached = getCachedWorkHistory(userEmail);
-      if (!cached) {
-        const whResult = await fetchAllowedCandidates(userEmail);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
+      let allowedIds: Set<string>;
+      if (role === 'manager') {
+        const team = await resolveTeamCandidateIdsForManager(userEmail, [getYesterdayIST()]);
+        allowedIds = new Set(team.candidateIds.map((id) => id.toUpperCase()));
+      } else {
+        let cached = getCachedWorkHistory(userEmail);
+        if (!cached) {
+          const whResult = await fetchAllowedCandidates(userEmail);
+          setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate);
+          cached = {
+            records: whResult.records,
+            candidateIds: whResult.candidateIds,
+            expiresAt: Date.now() + 5 * 60 * 1000,
+            unreachable: whResult.unreachable,
+            resolvedDate: whResult.resolvedDate,
+          };
+        }
+        allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
       }
-      const allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
       if (!allowedIds.has(applywizzId.toUpperCase())) {
         res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
         return;
@@ -1383,7 +1428,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     const zohoJobGate = await assertApplywizzZohoConnected(applywizzId, {
-      isAdmin,
+      isAdmin: unrestricted,
       allowAdminDemo: true,
     });
     if (!zohoJobGate.allowed) {

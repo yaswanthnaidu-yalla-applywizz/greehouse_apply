@@ -143,7 +143,10 @@ async function runProofLifecycleTestSuite() {
     await updateStatus(recordId, 'FAILED', 'Form submission timed out');
     updated = await getApplication(recordId);
     assert(updated?.status === 'FAILED', 'Application transitioned to FAILED status');
-    assert(updated?.error_message === 'Form submission timed out', 'error_message persisted on FAILED');
+    assert(
+      updated?.error_message?.includes('took too long') || updated?.error_message?.includes('try submitting'),
+      'error_message persisted on FAILED as operator-friendly copy'
+    );
     assert(updated?.proof_failed_url === mockFailedProofUrl, 'proof_failed_url persisted on FAILED');
 
     // Test transition to OTP_REQUIRED

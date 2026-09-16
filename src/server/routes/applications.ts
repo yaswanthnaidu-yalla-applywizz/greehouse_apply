@@ -8,6 +8,7 @@
 
 import { Router, Request, Response } from 'express';
 import {
+  applyCreatedAtRangeFilter,
   getApplication,
   updateResolvedFields,
   getRecentNotifications,
@@ -22,15 +23,13 @@ import {
 import { upsertAnswer } from '../../db/qaBank.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { generateFingerprint } from '../../resolver/fingerprint.js';
+import { normalizeOperatorErrorMessage } from '../../operator/operatorErrorMessages.js';
 import { wsManager } from '../ws.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import { isUserAdmin } from './auth.js';
-import { getCachedWorkHistory, setCachedWorkHistory } from '../workHistoryCache.js';
-import {
-  fetchAllowedCandidates,
-  fetchWorkHistoryForDate,
-  getYesterdayIST,
-} from '../../services/workHistoryClient.js';
+import { fetchAllowedCandidates } from '../../services/workHistoryClient.js';
+import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
+import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
 import { applicationRowHasPersistedResolution } from '../../dashboard/candidateQueueFilter.js';
@@ -331,7 +330,10 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
 
     // Emit WebSocket event on worker failure for instant UI notification
     if (status === 'FAILED' && statusChanged) {
-      const failReason = resolvedErrorMessage || application?.error_message || 'Submission execution failed.';
+      const failReason = normalizeOperatorErrorMessage(
+        resolvedErrorMessage || application?.error_message,
+        'FAILED'
+      );
       wsManager.emitApplicationFailed({
         appId: targetAppId,
         reason: failReason,
@@ -490,10 +492,11 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
   const rawCandidate = req.query.applywizzId || req.query.applywizz_id || req.query.candidateId;
   const applywizzId = (typeof rawCandidate === 'string' ? rawCandidate : '').trim();
 
-  const targetDate =
-    typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-      ? req.query.date
-      : getYesterdayIST();
+  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  if ('error' in parsedRange) {
+    res.status(400).json({ error: parsedRange.error });
+    return;
+  }
 
   try {
     let allowedIds: Set<string> | null = null;
@@ -503,36 +506,23 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      let cached = getCachedWorkHistory(userEmail, targetDate) || getCachedWorkHistory(userEmail);
-      if (!cached) {
-        const whResult = await fetchWorkHistoryForDate(userEmail, targetDate);
-        setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, whResult.unreachable, whResult.resolvedDate, targetDate);
-        cached = {
-          records: whResult.records,
-          candidateIds: whResult.candidateIds,
-          expiresAt: Date.now() + 5 * 60 * 1000,
-          unreachable: whResult.unreachable,
-          resolvedDate: whResult.resolvedDate,
-        };
-      }
-      if (cached.candidateIds.length === 0 && !req.query.date) {
+      const merged = await mergeWorkHistoryForIstDates({
+        mode: 'ca',
+        caEmail: userEmail,
+        dates: istDatesForWorkHistory(parsedRange),
+      });
+      let candidateIds = merged.candidateIds;
+      if (candidateIds.length === 0 && parsedRange.preset === 'default') {
         const allowedResult = await fetchAllowedCandidates(userEmail);
         if (allowedResult.candidateIds.length > 0) {
-          setCachedWorkHistory(userEmail, allowedResult.records, allowedResult.candidateIds, allowedResult.unreachable, allowedResult.resolvedDate);
-          cached = {
-            records: allowedResult.records,
-            candidateIds: allowedResult.candidateIds,
-            expiresAt: Date.now() + 5 * 60 * 1000,
-            unreachable: allowedResult.unreachable,
-            resolvedDate: allowedResult.resolvedDate,
-          };
+          candidateIds = allowedResult.candidateIds;
         }
       }
-      allowedIds = new Set(cached.candidateIds.map((id) => id.toUpperCase()));
+      allowedIds = new Set(candidateIds.map((id) => id.toUpperCase()));
 
       if (applywizzId && !allowedIds.has(applywizzId.toUpperCase())) {
         log.warn(
-          `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA on ${targetDate})`
+          `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA in work-history span)`
         );
         res.status(403).json({
           error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
@@ -551,6 +541,10 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
       } else if (allowedIds) {
         query = query.in('applywizz_id', Array.from(allowedIds));
       }
+      query = applyCreatedAtRangeFilter(query, {
+        startIso: parsedRange.startIso,
+        endIso: parsedRange.endIso,
+      });
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) {
         res.status(500).json({ error: error.message });

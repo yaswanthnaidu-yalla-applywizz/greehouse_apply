@@ -1134,7 +1134,7 @@
     // -------------------------------------------------------------
     // Candidate Directory (Left Sidebar) Component
     // -------------------------------------------------------------
-    function CandidateList({ candidates, selectedId, onSelectCandidate, isLoading, emptyMessage, selectedDate }) {
+    function CandidateList({ candidates, selectedId, onSelectCandidate, isLoading, emptyMessage, dateRangeLabel }) {
       const [searchTerm, setSearchTerm] = useState('');
 
       const filteredCandidates = useMemo(() => {
@@ -1163,9 +1163,9 @@
               </span>
             </div>
 
-            {selectedDate && (
+            {dateRangeLabel && (
               <div className="mb-2 px-2 py-0.5 bg-[#E2F0FB] border border-[#1A1A2E] rounded text-[10px] font-mono font-bold text-[#1E3A5F] flex items-center justify-between shadow-[1px_1px_0px_#1A1A2E]">
-                <span>📅 Assigned: {selectedDate} (IST)</span>
+                <span>📅 {dateRangeLabel}</span>
               </div>
             )}
 
@@ -1386,30 +1386,45 @@
                     {cardTitle}
                   </div>
 
-                  <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#1A1A2E]/20">
-                    <span className="font-mono text-[#64748B]">
+                  <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#1A1A2E]/20 gap-1">
+                    <span className="font-mono text-[#64748B] shrink-0">
                       {job.fieldsCount ? `${job.fieldsCount} Qs` : 'Scanned'}
                     </span>
-                    {job.status === 'APPLIED' && (
-                      <span className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                        ✅ Applied
-                      </span>
-                    )}
-                    {job.status === 'APPLYING' && (
-                      <span className="text-[10px] font-mono text-white font-bold bg-[#E88474] border border-[#1A1A2E] px-1.5 py-0.2 rounded animate-pulse">
-                        ⏳ Submitting
-                      </span>
-                    )}
-                    {job.status === 'DRY_RUN_COMPLETE' && (
-                      <span className="text-[10px] font-mono text-[#1E3A5F] font-bold bg-[#B8D4E8] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                        🚀 Dry-Run
-                      </span>
-                    )}
-                    {job.status === 'READY_FOR_REVIEW' && (
-                      <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                        🟡 Ready
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                      {isUnresolvedApplicationJob(job) && (
+                        <span
+                          className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded"
+                          title="Resolver has not finished or required fields are still unresolved"
+                        >
+                          ⚠️ Unresolved
+                        </span>
+                      )}
+                      {job.status === 'SKIPPED' && (
+                        <span className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                          ⏭ Skipped
+                        </span>
+                      )}
+                      {job.status === 'APPLIED' && (
+                        <span className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                          ✅ Applied
+                        </span>
+                      )}
+                      {job.status === 'APPLYING' && (
+                        <span className="text-[10px] font-mono text-white font-bold bg-[#E88474] border border-[#1A1A2E] px-1.5 py-0.2 rounded animate-pulse">
+                          ⏳ Submitting
+                        </span>
+                      )}
+                      {job.status === 'DRY_RUN_COMPLETE' && (
+                        <span className="text-[10px] font-mono text-[#1E3A5F] font-bold bg-[#B8D4E8] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                          🚀 Dry-Run
+                        </span>
+                      )}
+                      {job.status === 'READY_FOR_REVIEW' && (
+                        <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                          🟡 Ready
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </button>
               );
@@ -1606,6 +1621,10 @@
             </p>
           </div>
         );
+      }
+
+      if (isOperatorFormPanelBlocked(currentStatus)) {
+        return <OperatorFormBlockedPanel application={application} />;
       }
 
       const handleTriggerDryRun = async () => {
@@ -2650,15 +2669,119 @@
     }
 
     function filterOperatorApplicationJobs(jobs) {
-      return excludeUnresolvedApplicationJobs(excludeSkippedApplicationJobs(jobs));
+      return Array.isArray(jobs) ? jobs : [];
+    }
+
+    function isUnresolvedApplicationJob(row) {
+      if (isSkippedApplicationStatus(row.status)) return false;
+      if (!applicationRowHasPersistedResolution(row)) return true;
+      const fields = row.resolved_fields ?? row.resolvedFields;
+      if (!Array.isArray(fields) || fields.length === 0) return true;
+      return fields.some(
+        (f) => f && (f.source === 'unresolved' || f.resolvedByTier === null || f.resolvedByTier === undefined)
+      );
+    }
+
+    const OPERATOR_SUBMITTABLE_APPLICATION_STATUSES = new Set([
+      'READY_FOR_REVIEW',
+      'APPROVED',
+      'QUEUED',
+      'APPLYING',
+      'APPLIED',
+    ]);
+
+    function isOperatorFormPanelBlocked(status) {
+      const normalized = (status || 'READY_FOR_REVIEW').trim().toUpperCase();
+      return !OPERATOR_SUBMITTABLE_APPLICATION_STATUSES.has(normalized);
+    }
+
+    function operatorFormBlockedDetailMessage(app) {
+      const status = (app?.status || '').toUpperCase();
+      const raw = (app?.error_message || app?.errorMessage || app?.error || '').trim();
+      if (status === 'SKIPPED' || /\d+\s*fields?\s*\(?>=\s*\d+/i.test(raw) || /max_job_questions/i.test(raw)) {
+        return 'This job has too many questions. We can only handle up to 35 questions per job.';
+      }
+      if (/not zoho|zoho mail connected/i.test(raw)) {
+        return "Your email isn't connected to our mail system yet. Ask an admin to connect it.";
+      }
+      if (/profile was not written|applywizz profile/i.test(raw)) {
+        return "We couldn't retrieve your candidate profile. Please contact support.";
+      }
+      if (/playwright failed to scan/i.test(raw)) {
+        return "We couldn't read this job form. Please try again later.";
+      }
+      if (/fetch failed|econnrefused|network error|timed out|timeout/i.test(raw)) {
+        return 'Network error. Please try submitting this job again.';
+      }
+      if (/^(This job|Your email|We couldn't|Please|Network error)/i.test(raw)) return raw;
+      if (raw) return raw;
+      return 'Please contact support for assistance with this application.';
+    }
+
+    function OperatorFormBlockedPanel({ application }) {
+      const detail = operatorFormBlockedDetailMessage(application);
+      return (
+        <div className="flex-1 p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full">
+          <p className="text-base md:text-lg font-bold text-[#1A1A2E] mb-3 leading-snug">
+            ⚠️ This application couldn't be submitted
+          </p>
+          <p className="text-sm font-mono text-[#64748B] leading-relaxed whitespace-pre-wrap">{detail}</p>
+        </div>
+      );
     }
 
     function isSkippedApplicationStatus(status) {
       return (status || '').toUpperCase() === 'SKIPPED';
     }
 
+    function getYesterdayIST() {
+      const now = new Date();
+      const istOffset = 5.5 * 60 * 60 * 1000;
+      const istDate = new Date(now.getTime() + istOffset);
+      istDate.setUTCDate(istDate.getUTCDate() - 1);
+      const yyyy = istDate.getUTCFullYear();
+      const mm = String(istDate.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(istDate.getUTCDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function buildDashboardDateQuery(dateFilterMode, customFrom, customTo) {
+      if (dateFilterMode === 'custom' && customFrom && customTo) {
+        return `?from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`;
+      }
+      return '';
+    }
+
+    function dashboardDateRangeLabel(dateFilterMode, customFrom, customTo) {
+      if (dateFilterMode === 'custom' && customFrom && customTo) {
+        return customFrom === customTo ? customFrom : `${customFrom} – ${customTo}`;
+      }
+      return 'Today & Yesterday';
+    }
+
+    function createdAtRangeForOverlay(dateFilterMode, customFrom, customTo) {
+      if (dateFilterMode === 'custom' && customFrom && customTo) {
+        return {
+          startIso: new Date(`${customFrom}T00:00:00+05:30`).toISOString(),
+          endIso: new Date(`${customTo}T23:59:59.999+05:30`).toISOString(),
+        };
+      }
+      return {
+        startIso: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        endIso: null,
+      };
+    }
+
+    function rowCreatedAtInClientRange(createdAt, range) {
+      if (!createdAt) return false;
+      const time = new Date(createdAt).getTime();
+      if (time < new Date(range.startIso).getTime()) return false;
+      if (range.endIso && time > new Date(range.endIso).getTime()) return false;
+      return true;
+    }
+
     /** Overlay card counts from candidate_applications (exclude SKIPPED). Falls back to API totalJobs on error/empty-list blindness. */
-    async function overlayLiveApplicationCounts(candidates, authHeaders) {
+    async function overlayLiveApplicationCounts(candidates, authHeaders, dateFilterMode, customFrom, customTo) {
       if (!Array.isArray(candidates) || candidates.length === 0) return candidates;
       const client = await getSupabaseBrowserClient(authHeaders);
       if (!client) return candidates;
@@ -2666,10 +2789,16 @@
       const ids = candidates.map((c) => c.applywizzId).filter(Boolean);
       if (ids.length === 0) return candidates;
 
-      const { data, error } = await client
+      const createdRange = createdAtRangeForOverlay(dateFilterMode, customFrom, customTo);
+      let overlayQuery = client
         .from('candidate_applications')
-        .select('applywizz_id, status, resolved_fields')
-        .in('applywizz_id', ids);
+        .select('applywizz_id, status, resolved_fields, created_at')
+        .in('applywizz_id', ids)
+        .gte('created_at', createdRange.startIso);
+      if (createdRange.endIso) {
+        overlayQuery = overlayQuery.lte('created_at', createdRange.endIso);
+      }
+      const { data, error } = await overlayQuery;
 
       if (error) {
         console.warn('[Dashboard] candidate_applications count overlay failed:', error.message);
@@ -2688,6 +2817,7 @@
       const counts = new Map();
       for (const id of ids) counts.set(normalizeApplywizzId(id), 0);
       for (const row of data) {
+        if (!rowCreatedAtInClientRange(row.created_at, createdRange)) continue;
         if (isSkippedApplicationStatus(row.status)) continue;
         if (!applicationRowHasPersistedResolution(row)) continue;
         const key = normalizeApplywizzId(row.applywizz_id);
@@ -2946,7 +3076,17 @@
         return `${yyyy}-${mm}-${dd}`;
       };
 
-      const [selectedDate, setSelectedDate] = useState(getTodayIST);
+      const [dateFilterMode, setDateFilterMode] = useState('default');
+      const [customFrom, setCustomFrom] = useState(getYesterdayIST);
+      const [customTo, setCustomTo] = useState(getTodayIST);
+      const dateRangeLabel = useMemo(
+        () => dashboardDateRangeLabel(dateFilterMode, customFrom, customTo),
+        [dateFilterMode, customFrom, customTo]
+      );
+      const dateQuery = useMemo(
+        () => buildDashboardDateQuery(dateFilterMode, customFrom, customTo),
+        [dateFilterMode, customFrom, customTo]
+      );
       const [activeTab, setActiveTab] = useState('dashboard');
       const [candidates, setCandidates] = useState([]);
       const [stats, setStats] = useState(null);
@@ -3038,20 +3178,19 @@
               ...getAuthHeaders(),
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ date: selectedDate }),
+            body: JSON.stringify({ date: getTodayIST() }),
           });
         } catch (err) {
           console.warn('Admin hydration request failed:', err);
         } finally {
           setIsAuthHydrating(false);
         }
-      }, [currentUser, selectedDate]);
+      }, [currentUser]);
 
       const fetchNotifications = useCallback(async () => {
         try {
           const headers = getAuthHeaders();
-          const query = selectedDate ? `?date=${encodeURIComponent(selectedDate)}` : '';
-          const res = await fetch(`/api/notifications${query}`, { headers });
+          const res = await fetch(`/api/notifications${dateQuery}`, { headers });
           if (res.ok) {
             const serverNotifs = await res.json();
             if (Array.isArray(serverNotifs)) {
@@ -3061,7 +3200,7 @@
         } catch (err) {
           console.warn('Failed to fetch notifications:', err);
         }
-      }, [selectedDate]);
+      }, [dateQuery]);
 
       const clearNotification = async (id) => {
         // Optimistically remove from state
@@ -3098,10 +3237,9 @@
         if (!isPolling) setIsLoadingCandidates(true);
         try {
           const headers = getAuthHeaders();
-          const dateParam = selectedDate ? `?date=${encodeURIComponent(selectedDate)}` : '';
           const [candidatesRes, statsRes] = await Promise.all([
-            fetch(`/api/candidates${dateParam}`, { headers }),
-            fetch(`/api/stats${dateParam}`, { headers }),
+            fetch(`/api/candidates${dateQuery}`, { headers }),
+            fetch(`/api/stats${dateQuery}`, { headers }),
           ]);
 
           if (candidatesRes.ok) {
@@ -3114,7 +3252,10 @@
 
             const candidatesWithLiveCounts = await overlayLiveApplicationCounts(
               candidateData,
-              headers
+              headers,
+              dateFilterMode,
+              customFrom,
+              customTo
             );
             setCandidates(candidatesWithLiveCounts);
             if (unreachable) setWorkHistoryUnreachable(true);
@@ -3135,7 +3276,7 @@
         } finally {
           if (!isPolling) setIsLoadingCandidates(false);
         }
-      }, [selectedDate]);
+      }, [dateQuery, dateFilterMode, customFrom, customTo]);
 
       const handleRefresh = async () => {
         if (isRefreshing) return;
@@ -3317,9 +3458,10 @@
             const detail = await res.json();
             if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
 
-            const jobsRes = await fetch(`/api/candidates/${encodeURIComponent(applywizzId)}/jobs`, {
-              headers: getAuthHeaders(),
-            });
+            const jobsRes = await fetch(
+              `/api/candidates/${encodeURIComponent(applywizzId)}/jobs${dateQuery}`,
+              { headers: getAuthHeaders() }
+            );
 
             if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
 
@@ -3370,7 +3512,7 @@
         } catch (err) {
           console.error(`Failed to fetch candidate ${applywizzId}:`, err);
         }
-      }, []);
+      }, [dateQuery]);
 
       useEffect(() => {
         if (!selectedCandidateId) {
@@ -3684,6 +3826,17 @@
                 >
                   Stats
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('guide')}
+                  className={`px-3 py-1 text-xs font-bold rounded transition-all ${
+                    activeTab === 'guide'
+                      ? 'bg-[#E88474] text-white'
+                      : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
+                  }`}
+                >
+                  Guide
+                </button>
                 {sessionRole() === 'dev' && (
                   <>
                     <a href="/dev" className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB] border-l border-[#1A1A2E]/20 ml-1 pl-2">Dev</a>
@@ -3695,20 +3848,43 @@
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Date Scope Filter (IST) */}
-              <div className="flex items-center gap-1.5 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
-                <span className="text-xs font-mono font-bold text-[#64748B]">📅 IST:</span>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setSelectedDate(e.target.value);
-                    }
-                  }}
-                  title="Filter dashboard by assignments on this IST date"
-                  className="text-xs font-mono font-bold text-[#1A1A2E] bg-transparent border-none outline-none cursor-pointer"
-                />
+              {/* Application created_at scope */}
+              <div className="flex flex-wrap items-center gap-1.5 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
+                <span className="text-xs font-mono font-bold text-[#1A1A2E]">📅 {dateRangeLabel}</span>
+                {dateFilterMode !== 'custom' ? (
+                  <button
+                    type="button"
+                    onClick={() => setDateFilterMode('custom')}
+                    className="text-[10px] font-bold underline text-[#64748B]"
+                  >
+                    Custom
+                  </button>
+                ) : (
+                  <>
+                    <input
+                      type="date"
+                      value={customFrom}
+                      onChange={(e) => e.target.value && setCustomFrom(e.target.value)}
+                      className="text-[10px] font-mono border border-[#1A1A2E] rounded px-1"
+                      title="Range start (IST)"
+                    />
+                    <span className="text-[10px] font-bold">–</span>
+                    <input
+                      type="date"
+                      value={customTo}
+                      onChange={(e) => e.target.value && setCustomTo(e.target.value)}
+                      className="text-[10px] font-mono border border-[#1A1A2E] rounded px-1"
+                      title="Range end (IST)"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setDateFilterMode('default')}
+                      className="text-[10px] font-bold underline text-[#64748B]"
+                    >
+                      Reset
+                    </button>
+                  </>
+                )}
               </div>
 
               {stats && (
@@ -4095,6 +4271,103 @@
               )}
             </div>
 
+          <div className={`flex-1 overflow-y-auto p-8 max-w-3xl mx-auto w-full custom-scrollbar ${activeTab === 'guide' ? '' : 'hidden'}`}>
+            <div className="mb-8">
+              <h2 className="text-2xl font-black text-[#1A1A2E]">Operator Guide</h2>
+              <p className="text-xs text-[#64748B] font-mono mt-0.5">
+                How to review applications and submit jobs on Greenhouse.
+              </p>
+            </div>
+
+            <section className="mb-6 bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <h3 className="text-sm font-black text-[#1A1A2E] uppercase tracking-wide mb-3">Quick start</h3>
+              <ol className="list-decimal list-inside space-y-2 text-sm text-[#1A1A2E] leading-relaxed">
+                <li>
+                  <span className="font-bold">Pick a candidate</span> from the list on the left. If the list is empty, check the date filter (top bar) or see the notes below.
+                </li>
+                <li>
+                  <span className="font-bold">Select a job</span> in the queue for that candidate. Status badges show where each application is in the pipeline.
+                </li>
+                <li>
+                  <span className="font-bold">Review the form</span> — answers are pre-filled from the candidate profile and our resolution engine. Edit any field if something looks wrong.
+                </li>
+                <li>
+                  <span className="font-bold">Submit the application</span> using <span className="font-black text-[#E88474]">Approve &amp; Submit</span> when you are ready to send it to the employer. That is the real submission.
+                </li>
+              </ol>
+            </section>
+
+            <section className="mb-6 bg-[#FEE2E2] border-2 border-[#991B1B] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <h3 className="text-sm font-black text-[#991B1B] uppercase tracking-wide mb-2">Dry Run is not Approve &amp; Submit</h3>
+              <p className="text-sm text-[#1A1A2E] leading-relaxed mb-2">
+                <span className="font-bold">Dry Run</span> only fills the form in a test browser session. It does <span className="font-bold">not</span> submit the application to Greenhouse and does <span className="font-bold">not</span> count as a completed apply.
+              </p>
+              <p className="text-sm text-[#1A1A2E] leading-relaxed">
+                Use Dry Run only when you intentionally want to preview the form. For every normal workflow, always click <span className="font-black text-[#991B1B]">Approve &amp; Submit</span>.
+              </p>
+            </section>
+
+            <section className="mb-6 bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <h3 className="text-sm font-black text-[#5C4A0A] uppercase tracking-wide mb-3">Understanding the job queue</h3>
+              <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed">
+                <li>
+                  <span className="font-bold">Ready for review / Approved / Queued / Applying / Applied</span> — you can open the form and submit (or track an in-progress apply).
+                </li>
+                <li>
+                  <span className="font-bold">Skipped</span> — we intentionally did not process this job (see notes below). Open the card to read the reason; the form cannot be submitted.
+                </li>
+                <li>
+                  <span className="font-bold text-[#991B1B]">⚠️ Unresolved</span> — usually means the job was skipped, the posting was not found, or answers are still processing. We do <span className="font-bold">not</span> leave eligible Greenhouse jobs unresolved: if a job meets our rules and can be scanned, we resolve it. An Unresolved tag is not a sign that the system &quot;gave up&quot; on a normal job.
+                </li>
+              </ul>
+            </section>
+
+            <section className="mb-6 bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <h3 className="text-sm font-black text-[#1E3A5F] uppercase tracking-wide mb-3">Date filter &amp; refresh</h3>
+              <p className="text-sm text-[#1A1A2E] leading-relaxed mb-2">
+                By default you see applications from <span className="font-bold">Today &amp; Yesterday</span> (IST). Use <span className="font-bold">Custom</span> in the top bar for a wider range, or <span className="font-bold">Reset</span> to go back to the default.
+              </p>
+              <p className="text-sm text-[#1A1A2E] leading-relaxed">
+                Click the <span className="font-bold">↻</span> refresh button after new jobs are assigned or if counts look stale.
+              </p>
+            </section>
+
+            <section className="mb-6 bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+              <h3 className="text-sm font-black text-[#1A1A2E] uppercase tracking-wide mb-3">Important notes</h3>
+              <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+                <li>
+                  Jobs with <span className="font-bold">more than 35 application questions</span> are skipped on purpose. We cannot auto-fill forms above that limit.
+                </li>
+                <li>
+                  Candidates whose <span className="font-bold">ApplyWizz email is not connected to Zoho Mail</span> are skipped for automated apply. If a client is missing from your queue, this is often why — it is expected, not a bug.
+                </li>
+                <li>
+                  Some jobs are skipped because the <span className="font-bold">posting expired</span>, the page could not be loaded, or the employer uses flows we cannot complete (CAPTCHA, OTP, etc.). The card message explains each case.
+                </li>
+                <li>
+                  <span className="font-bold">Stats</span> (nav tab) shows pipeline counts for the same date range as the dashboard.
+                </li>
+                <li>
+                  <span className="font-bold">Notifications</span> (bell icon) surface items that may need your attention.
+                </li>
+              </ul>
+            </section>
+
+            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E] text-center">
+              <h3 className="text-sm font-black text-[#1A1A2E] uppercase tracking-wide mb-2">Need help?</h3>
+              <p className="text-sm text-[#64748B] leading-relaxed">
+                Contact{' '}
+                <a
+                  href="mailto:yaswanthnaiduyalla@applywizz.ai"
+                  className="font-bold text-[#1A1A2E] underline hover:text-[#E88474]"
+                >
+                  yaswanthnaiduyalla@applywizz.ai
+                </a>{' '}
+                on Microsoft Teams.
+              </p>
+            </section>
+          </div>
+
           <div className={`flex flex-1 overflow-hidden ${activeTab === 'dashboard' ? '' : 'hidden'}`}>
             <CandidateList
                 candidates={candidates}
@@ -4102,7 +4375,7 @@
                 onSelectCandidate={(id) => setSelectedCandidateId(id)}
                 isLoading={isLoadingCandidates || isAuthHydrating}
                 emptyMessage={noCandidatesMessage}
-                selectedDate={selectedDate}
+                dateRangeLabel={dateRangeLabel}
               />
 
               <main className="flex-1 flex flex-col bg-[#FFF5EB] overflow-hidden">

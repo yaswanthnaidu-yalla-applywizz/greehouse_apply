@@ -3,6 +3,7 @@
  */
 
 import config from '../config/env.js';
+import { OperatorErrors } from '../operator/operatorErrorMessages.js';
 import { upsertApplication } from './applications.js';
 import type { ScannedJobTemplate } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
@@ -22,7 +23,6 @@ export async function upsertSkippedOverQuestionCap(
   template: Pick<ScannedJobTemplate, 'companyName' | 'jobTitle'>,
   questionCount: number
 ): Promise<void> {
-  const maxAllowed = config.MAX_JOB_QUESTIONS - 1;
   await upsertApplication({
     applywizz_id: applywizzId,
     job_url: persistJobUrl,
@@ -30,7 +30,7 @@ export async function upsertSkippedOverQuestionCap(
     job_title: template.jobTitle || null,
     status: 'SKIPPED',
     resolved_fields: [],
-    error_message: `Skipped: ${questionCount} form fields (dashboard cap allows ${maxAllowed} or fewer; MAX_JOB_QUESTIONS=${config.MAX_JOB_QUESTIONS})`,
+    error_message: OperatorErrors.TOO_MANY_QUESTIONS,
   });
   log.info(
     `[Answer Resolver] ⏭️ SKIPPED ${applywizzId} ${persistJobUrl} — ${questionCount} fields (>= ${config.MAX_JOB_QUESTIONS})`

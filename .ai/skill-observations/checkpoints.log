@@ -55,3 +55,7 @@
 2026-09-15 session-start scan: files=13 parsed=13 suspect=0 (new-profile create failures)
 2026-09-15 session-end: logged 0014 (TS row fields need SQL columns); migration 016 + upsertProfile country retry; open 0003+0005+0011+0012+0013+0014
 2026-09-15 session-end: commit+push; 0014 actioned; excluded greenhouse_logs + logs json from commit
+2026-09-16 session-start scan: files=14 parsed=14 suspect=0 (AGENTS session start)
+2026-09-16 checkpoint: default 2-day created_at filters on dashboard APIs + operator/manager UI date labels
+2026-09-16 10:49 session: operator manager_email mapping on sign-in (auth + migration 017)
+2026-09-16 session: operator Guide tab in dashboard/public/index.html

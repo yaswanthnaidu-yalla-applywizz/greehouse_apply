@@ -19,6 +19,8 @@ import { hydrateAdminProfilesFromWorkHistory } from '../../services/adminProfile
 import { setCachedWorkHistory } from '../workHistoryCache.js';
 import { createLogger } from '../../utils/logger.js';
 import { insertAuditEvent } from '../../db/events.js';
+import { syncDashboardUserAfterSignIn } from '../../services/operatorManagerMapping.js';
+import type { WorkHistoryResult } from '../../services/workHistoryClient.js';
 
 const log = createLogger('Auth');
 
@@ -671,11 +673,12 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
     // Fetch work-history for CA filtering (skip for admins)
     let allowedCandidateIds: string[] = [];
     let workHistoryUnreachable = false;
+    let whResult: WorkHistoryResult | undefined;
     const role = resolveRoleFromEmail(normalizedEmail);
     const isAdmin = role === 'dev' || role === 'admin';
 
     if (!isAdmin && normalizedEmail) {
-      const whResult = await fetchAllowedCandidates(normalizedEmail);
+      whResult = await fetchAllowedCandidates(normalizedEmail);
       allowedCandidateIds = whResult.candidateIds;
       workHistoryUnreachable = whResult.unreachable;
       setCachedWorkHistory(normalizedEmail, whResult.records, whResult.candidateIds, workHistoryUnreachable, whResult.resolvedDate);
@@ -686,6 +689,13 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
         log.warn('[Auth] Admin profile hydration on login failed:', hydrateErr?.message);
       }
     }
+
+    await syncDashboardUserAfterSignIn({
+      email: normalizedEmail,
+      role,
+      authUser: verifyData.user || user,
+      whResult,
+    });
 
     await persistRoleClaim(user.id, role);
     logAuthLogin(normalizedEmail, role);
@@ -831,11 +841,12 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
     const userEmail = (verifyData.user?.email || '').trim().toLowerCase();
     let allowedCandidateIds: string[] = [];
     let workHistoryUnreachable = false;
+    let whResult: WorkHistoryResult | undefined;
     const role = resolveRoleFromEmail(userEmail);
     const isAdmin = role === 'dev' || role === 'admin';
 
     if (userEmail && !isAdmin) {
-      const whResult = await fetchAllowedCandidates(userEmail);
+      whResult = await fetchAllowedCandidates(userEmail);
       allowedCandidateIds = whResult.candidateIds;
       workHistoryUnreachable = whResult.unreachable;
       setCachedWorkHistory(userEmail, whResult.records, whResult.candidateIds, workHistoryUnreachable, whResult.resolvedDate);
@@ -848,6 +859,13 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
     }
 
     if (userEmail) {
+      await syncDashboardUserAfterSignIn({
+        email: userEmail,
+        role,
+        authUser: verifyData.user,
+        whResult,
+      });
+
       await persistRoleClaim(verifyData.user?.id, role);
       logAuthLogin(userEmail, role);
       void insertAuditEvent({

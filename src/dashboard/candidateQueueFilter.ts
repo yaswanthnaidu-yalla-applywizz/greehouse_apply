@@ -2,6 +2,8 @@
  * Ensures the operator job queue only contains applications for one applywizz_id.
  */
 
+import { normalizeOperatorErrorMessage } from '../operator/operatorErrorMessages.js';
+
 export function normalizeApplywizzId(id: string | null | undefined): string {
   return (id || '').trim().toUpperCase();
 }
@@ -32,7 +34,7 @@ export function filterJobsForCandidate<T extends JobWithOptionalOwner>(
   });
 }
 
-/** SKIPPED applications must not appear in the operator application queue. */
+/** Legacy helper — prefer showing all queue rows and badge SKIPPED/unresolved in the UI. */
 export function excludeSkippedApplicationJobs<T extends { status?: string | null }>(jobs: T[]): T[] {
   return jobs.filter((job) => (job.status || '').toUpperCase() !== 'SKIPPED');
 }
@@ -58,11 +60,53 @@ export function excludeUnresolvedApplicationJobs<T extends ResolutionFieldsCarri
   );
 }
 
-/** Operator queue: assigned candidate, not SKIPPED, resolver has run. */
+/** Operator application queue — all assigned rows (including SKIPPED and pre-resolve placeholders). */
 export function filterOperatorApplicationJobs<T extends ResolutionFieldsCarrier & { status?: string | null }>(
   jobs: T[]
 ): T[] {
-  return excludeUnresolvedApplicationJobs(excludeSkippedApplicationJobs(jobs));
+  return Array.isArray(jobs) ? jobs : [];
+}
+
+type ResolvedFieldLike = {
+  source?: string | null;
+  resolvedByTier?: number | null;
+};
+
+/** True when the app has no resolution snapshot or still has tier-missing / unresolved fields. */
+/** Statuses that show the full operator form + submit controls. */
+export const OPERATOR_SUBMITTABLE_APPLICATION_STATUSES = new Set([
+  'READY_FOR_REVIEW',
+  'APPROVED',
+  'QUEUED',
+  'APPLYING',
+  'APPLIED',
+]);
+
+export function isOperatorFormPanelBlocked(status?: string | null): boolean {
+  const normalized = (status || 'READY_FOR_REVIEW').trim().toUpperCase();
+  return !OPERATOR_SUBMITTABLE_APPLICATION_STATUSES.has(normalized);
+}
+
+export function operatorFormBlockedDetailMessage(app?: {
+  error_message?: string | null;
+  errorMessage?: string | null;
+  error?: string | null;
+  status?: string | null;
+} | null): string {
+  const msg = app?.error_message || app?.errorMessage || app?.error || null;
+  return normalizeOperatorErrorMessage(msg, app?.status);
+}
+
+export function isUnresolvedApplicationJob(
+  row: ResolutionFieldsCarrier & { status?: string | null }
+): boolean {
+  if ((row.status || '').toUpperCase() === 'SKIPPED') return false;
+  if (!applicationRowHasPersistedResolution(row)) return true;
+  const fields = (row.resolved_fields ?? row.resolvedFields) as ResolvedFieldLike[] | undefined;
+  if (!Array.isArray(fields) || fields.length === 0) return true;
+  return fields.some(
+    (f) => f && (f.source === 'unresolved' || f.resolvedByTier === null || f.resolvedByTier === undefined)
+  );
 }
 
 export function candidateDetailMatchesSelection(
