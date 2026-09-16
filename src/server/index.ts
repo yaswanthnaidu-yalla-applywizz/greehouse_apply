@@ -96,6 +96,7 @@ import {
   DEMO_JOB_URL,
   AKSHITHA_APPLYWIZZ_ID,
   loadSecondaryDemoArtifacts,
+  inMemoryDemoJobRowsForDashboard,
 } from '../dashboard/demoFixtures.js';
 import { zohoReader } from '../services/zohoReader.js';
 import type {
@@ -1262,7 +1263,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         .from('candidate_applications')
         .select('*')
         .eq('applywizz_id', applywizzId);
-      appQuery = applyCreatedAtRangeFilter(appQuery, createdAtRange);
+      if (!unrestricted) {
+        appQuery = applyCreatedAtRangeFilter(appQuery, createdAtRange);
+      }
       const { data, error } = await appQuery;
       if (error) {
         log.error(`[API] Failed to fetch jobs for ${applywizzId}:`, error.message);
@@ -1294,6 +1297,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           status: jobStatus,
           error_message: application.error_message ?? null,
           fieldsCount: Array.isArray(application.resolved_fields) ? application.resolved_fields.length : 0,
+          resolved_fields: Array.isArray(application.resolved_fields) ? application.resolved_fields : [],
           hasManualEdits: Boolean(application.has_manual_edits),
         });
       }
@@ -1303,8 +1307,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);
     if (mayServeInMemoryDemoFixtures(unrestricted)) {
       if (pinnedDemo) {
-        jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
-        jobs = mergeDashboardJobsByUrl(jobs, segmentToJobRows(resolvePinnedDemoSegment(applywizzId)));
+        jobs = mergeDashboardJobsByUrl(jobs, inMemoryDemoJobRowsForDashboard(applywizzId));
       } else if (jobs.length === 0) {
         jobs = mergeDashboardJobsByUrl(jobs, resolvedApplicationsToJobRows(applywizzId));
         if (jobs.length === 0) {

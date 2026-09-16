@@ -42,6 +42,7 @@ describe('candidateQueueFilter', () => {
   it('isUnresolvedApplicationJob detects missing resolution and unresolved fields', () => {
     assert.equal(isUnresolvedApplicationJob({ status: 'SKIPPED' }), false);
     assert.equal(isUnresolvedApplicationJob({ status: 'PENDING', resolved_fields: [] }), true);
+    assert.equal(isUnresolvedApplicationJob({ status: 'PENDING', fieldsCount: 8 }), false);
     assert.equal(
       isUnresolvedApplicationJob({
         status: 'READY_FOR_REVIEW',

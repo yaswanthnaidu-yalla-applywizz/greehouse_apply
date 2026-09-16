@@ -17,6 +17,8 @@ import type {
 
 export const AKSHITHA_APPLYWIZZ_ID = 'AWL-31428';
 export const AKSHITHA_RESUME_STORAGE_PATH = 'resumes/AWL-31428_resume.pdf';
+/** Sole in-memory admin demo job for AWL-31428 (DoiT Product Analyst). */
+export const AKSHITHA_ADMIN_DEMO_JOB_URL = 'https://grnh.se/zqe6mzwz3us';
 
 export const akshithaSegment: CandidateSegment = {
   applywizzId: AKSHITHA_APPLYWIZZ_ID,
