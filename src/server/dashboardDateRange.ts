@@ -76,7 +76,7 @@ export function parseDashboardCreatedAtRange(
       preset: 'custom',
       fromDate: from,
       toDate: to,
-      label: `${from} – ${to}`,
+      label: `${from} - ${to}`,
     };
   }
 

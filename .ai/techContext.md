@@ -175,10 +175,21 @@ PIPELINE_VERBOSE=false                # Per-URL scan + per-field resolve logs; d
 
 ## Deployment
 - **Platform:** Railway (single Docker service)
+- **Prod URL:** https://gh.applywizz.ai (project `alert-spontaneity`, service `greehouse_apply`, region `sfo`)
 - **Dockerfile:** root `Dockerfile`
-- **Config:** `railway.json`
+- **Config:** `railway.json` (healthcheck `GET /api/health`, start `node dist/server/index.js`)
 - **Prod entry:** `node dist/server/index.js` only (`railway.json` → `deploy.startCommand`). There is **no** separate worker or ingest service — the submission daemon runs in-process inside the server when `ENABLE_QUEUE_WORKER=true`, otherwise nothing dequeues `QUEUED`. `npm run daemon:prod` exists for running it standalone but is not what Railway starts.
 - **Key Railway constraint:** `RAILWAY_ENV=true` must be set — disables headful Playwright, caps memory
+
+### AI ops — Railway & Supabase (MCP)
+Authenticated **Railway** and **Supabase MCP** servers are enabled in Cursor. Agents should prefer MCP over shell CLI:
+
+| Task | Use |
+|---|---|
+| Service status, deployment logs, redeploy | Railway MCP |
+| SQL, row counts, migration sanity, RLS checks | Supabase MCP |
+
+Discover tool schemas with `GetDynamicTools` (namespace or pattern), then invoke with `CallDynamicTool`. Fall back to `railway` / `supabase` CLI only if MCP is not exposed in that agent session.
 
 ## CSV Ingestion Trigger (operator-driven)
 There is **no** Supabase Storage webhook and **no** poller — a CSV appearing in the `csv_uploads` bucket does nothing on its own. The pipeline starts only when an operator triggers it:
@@ -189,7 +200,7 @@ There is **no** Supabase Storage webhook and **no** poller — a CSV appearing i
 | `POST /api/admin/stop-ingest` | Admin-only cooperative stop for the in-flight ingest pipeline. **Disabled in production** unless `ENABLE_PIPELINE_STOP=true` (always allowed when `NODE_ENV=development`). Returns `409` if nothing is running. |
 | `GET /api/admin/ingest-status` | Admin-only. Returns `{running, startedAt, finishedAt, processedCount, processedFile, message, error}` for the most recent run. |
 
-CSV `applywizz_id`s are the approval to fetch missing ApplyWizz profiles. Application rows are written only after a Supabase `profiles` row exists (`hasSupabaseProfile`); otherwise the `candidate_applications_applywizz_id_fkey` is skipped with a warn.
+CSV `applywizz_id`s are the approval to fetch missing ApplyWizz profiles. **`candidate_applications` is not upserted at segregator/scan time** — only after resolution (see `answerResolver.ts`). Exception: over-cap jobs upsert as `SKIPPED` at resolve time. Empty resolution (no non-empty field values) skips upsert; expired/missing templates skip upsert. `upsertApplication` preserves existing non-empty `resolved_fields` when a write would send all-empty values. FK still requires a `profiles` row before any upsert succeeds.
 
 On ingest, logs include `Credential identity: urlProjectRef=... | jwt.role=... | jwt.ref=... | urlRefMatch=...` (see `src/db/supabaseKeyDiagnostics.ts`) — never the raw key.
 
@@ -219,12 +230,14 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Supabase client | `src/db/client.ts` |
 | Supabase key diagnostics (ingest logs) | `src/db/supabaseKeyDiagnostics.ts` |
 | Empty-form hydration | `src/db/applicationFieldHydration.ts` |
-| Over-cap SKIPPED upserts | `src/db/skippedApplications.ts` |
+| Over-cap SKIPPED upserts (resolve-time only) | `src/db/skippedApplications.ts` — removed pre-resolve `ensureCandidateApplicationRows.ts` |
 | Operator queue filters | `src/dashboard/candidateQueueFilter.ts` |
 | DB DDL | `src/db/schema.sql` |
 | Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (applied 2026-09-15). **016** = `profiles.country` + `country_code` (apply in SQL Editor; missing columns block new profile creates) |
 | Audit / application events | `src/db/events.ts` — fail-closed if 015 tables missing |
-| Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = false`) |
+| Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = true`) |
+| HTTP response header sanitization | `src/server/httpHeaders.ts` — visible ASCII only (`X-Dashboard-Date-Range`) |
+| Resolved-field value helpers | `src/utils/resolvedFields.ts` |
 | Admin / Dev health probes | `src/server/healthSnapshot.ts` — ApplyWizz GET without id: HTTP 400 = reachable |
 | Form filler (largest file, 59KB) | `src/submitter/formFiller.ts` |
 | Live submit engine (69KB) | `src/submitter/liveSubmit.ts` |

@@ -136,7 +136,7 @@
                       <td className="p-3"><CountButton value={row.completed} active={expanded === completedKey} onClick={() => onToggle(completedKey)} /></td>
                       <td className="p-3"><CountButton value={row.pending} active={expanded === pendingKey} onClick={() => onToggle(pendingKey)} /></td>
                       <td className="p-3"><CountButton value={row.failed} active={expanded === failedKey} onClick={() => onToggle(failedKey)} /></td>
-                      <td className="p-3 text-[#64748B]">{row.assignedTo || '—'}</td>
+                      <td className="p-3 text-[#64748B]">{row.assigned_ca || '—'}</td>
                     </tr>
                     {openKey && (
                       <tr className="border-b border-[#1A1A2E]/20">

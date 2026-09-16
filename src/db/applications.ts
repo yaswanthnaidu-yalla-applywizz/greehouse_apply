@@ -18,6 +18,7 @@ import {
   isApplicationUuid,
 } from './storage.js';
 import { createLogger } from '../utils/logger.js';
+import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import {
   normalizeOperatorErrorMessage,
@@ -163,7 +164,7 @@ export async function upsertApplication(
   if (
     payload.status !== 'SKIPPED' &&
     Array.isArray(payload.resolved_fields) &&
-    payload.resolved_fields.length === 0 &&
+    !hasAnyNonEmptyResolvedField(payload.resolved_fields) &&
     payload.applywizz_id &&
     payload.job_url &&
     isSupabaseConfigured()
@@ -176,8 +177,9 @@ export async function upsertApplication(
         .eq('applywizz_id', payload.applywizz_id)
         .eq('job_url', payload.job_url)
         .maybeSingle();
-      if (Array.isArray(existing?.resolved_fields) && existing.resolved_fields.length > 0) {
-        payload.resolved_fields = existing.resolved_fields;
+      const existingFields = existing?.resolved_fields;
+      if (hasAnyNonEmptyResolvedField(existingFields)) {
+        payload.resolved_fields = existingFields;
       }
     } catch {
       /* fall through — empty payload is acceptable for brand-new rows */
@@ -1219,6 +1221,116 @@ export async function listApplications(filter?: {
   });
 
   return results;
+}
+
+export type CandidateQueueStatus =
+  | 'NO_APPLICATIONS'
+  | 'READY'
+  | 'IN_PROGRESS'
+  | 'DONE';
+
+const QUEUE_STATUS_IN_PROGRESS: ReadonlySet<ApplicationStatus> = new Set([
+  'APPROVED',
+  'QUEUED',
+  'APPLYING',
+]);
+
+const QUEUE_STATUS_DONE: ReadonlySet<ApplicationStatus> = new Set([
+  'APPLIED',
+  'FAILED',
+  'EXPIRED',
+  'OTP_REQUIRED',
+  'CAPTCHA_TIMEOUT',
+  'CAPTCHA_REQUIRED',
+  'EMAIL_PROOF_PENDING',
+  'EMAIL_UNVERIFIED',
+  'SKIPPED',
+]);
+
+/**
+ * Derives dashboard queue_status for one candidate from all candidate_applications statuses.
+ * Priority when mixed: IN_PROGRESS > READY > DONE > NO_APPLICATIONS.
+ */
+export function deriveCandidateQueueStatus(
+  statuses: ApplicationStatus[]
+): CandidateQueueStatus {
+  if (statuses.length === 0) {
+    return 'NO_APPLICATIONS';
+  }
+  if (statuses.some((s) => QUEUE_STATUS_IN_PROGRESS.has(s))) {
+    return 'IN_PROGRESS';
+  }
+  if (statuses.some((s) => s === 'READY_FOR_REVIEW')) {
+    return 'READY';
+  }
+  if (statuses.every((s) => QUEUE_STATUS_DONE.has(s))) {
+    return 'DONE';
+  }
+  return 'READY';
+}
+
+export interface CandidateApplicationAggregate {
+  job_count: number;
+  queue_status: CandidateQueueStatus;
+}
+
+/**
+ * job_count = COUNT(*) of candidate_applications rows per applywizz_id (all statuses).
+ */
+export async function fetchCandidateApplicationAggregatesByApplywizzIds(
+  applywizzIds: string[]
+): Promise<Map<string, CandidateApplicationAggregate>> {
+  const aggregates = new Map<string, CandidateApplicationAggregate>();
+  const ids = [...new Set(applywizzIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) {
+    return aggregates;
+  }
+
+  const statusesByKey = new Map<string, ApplicationStatus[]>();
+  let loadedFromSupabase = false;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('candidate_applications')
+        .select('applywizz_id, status')
+        .in('applywizz_id', ids);
+      if (!error && data) {
+        loadedFromSupabase = true;
+        for (const row of data) {
+          const key = String(row.applywizz_id || '').trim().toUpperCase();
+          if (!key) continue;
+          const list = statusesByKey.get(key) || [];
+          list.push(row.status as ApplicationStatus);
+          statusesByKey.set(key, list);
+        }
+      }
+    } catch {
+      // fall through to memory
+    }
+  }
+
+  if (!loadedFromSupabase) {
+    for (const app of memoryApplications.values()) {
+      const key = app.applywizz_id.trim().toUpperCase();
+      if (!ids.some((id) => id.toUpperCase() === key)) continue;
+      const list = statusesByKey.get(key) || [];
+      list.push(app.status);
+      statusesByKey.set(key, list);
+    }
+  }
+
+  for (const id of ids) {
+    const key = id.toUpperCase();
+    const statuses = statusesByKey.get(key) || [];
+    aggregates.set(key, {
+      job_count: statuses.length,
+      queue_status: deriveCandidateQueueStatus(statuses),
+    });
+  }
+
+  return aggregates;
 }
 
 /**

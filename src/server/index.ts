@@ -60,14 +60,16 @@ import {
   upsertApplication,
   serializeApplicationDto,
   hydrateAndPersistApplicationFields,
-  countNonSkippedApplicationsByApplywizzIds,
+  fetchCandidateApplicationAggregatesByApplywizzIds,
   type ApplicationRow,
+  type CandidateQueueStatus,
 } from '../db/applications.js';
 import {
   istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
   serializeDateRange,
 } from './dashboardDateRange.js';
+import { sanitizeHttpHeaderValue } from './httpHeaders.js';
 import { mergeWorkHistoryForIstDates } from './workHistorySpan.js';
 import {
   applicationAssignedCaAllowed,
@@ -130,11 +132,30 @@ export interface CandidateSummary {
   email: string;
   location: string;
   totalJobs: number;
+  job_count: number;
+  queue_status: CandidateQueueStatus;
   readyCount: number;
   expiredCount: number;
   status: 'READY' | 'PENDING' | 'EXPIRED';
   syncedAt?: string;
   resumeAvailable: boolean;
+}
+
+function applyApplicationAggregatesToSummaries(
+  summaries: CandidateSummary[],
+  aggregates: Map<string, { job_count: number; queue_status: CandidateQueueStatus }>
+): CandidateSummary[] {
+  return summaries.map((summary) => {
+    const agg = aggregates.get(summary.applywizzId.trim().toUpperCase());
+    const job_count = agg?.job_count ?? 0;
+    const queue_status = agg?.queue_status ?? 'NO_APPLICATIONS';
+    return {
+      ...summary,
+      job_count,
+      queue_status,
+      totalJobs: job_count,
+    };
+  });
 }
 
 /**
@@ -803,7 +824,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     }
 
     res.setHeader('X-Work-History-Unreachable', String(workHistoryUnreachable));
-    res.setHeader('X-Dashboard-Date-Range', parsedRange.label);
+    res.setHeader('X-Dashboard-Date-Range', sanitizeHttpHeaderValue(parsedRange.label));
 
     // 1. Process candidateSegments
     const matchedSegments = artifactCache.candidateSegments.filter((seg) => {
@@ -863,7 +884,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         clientName: seg.clientName,
         email: seg.profile?.email || '',
         location: seg.profile?.location || '',
-        totalJobs: eligibleJobs.length,
+        totalJobs: 0,
+        job_count: 0,
+        queue_status: 'NO_APPLICATIONS' as CandidateQueueStatus,
         readyCount,
         expiredCount,
         status,
@@ -885,6 +908,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
             email: rec.clientEmail,
             location: '',
             totalJobs: 0,
+            job_count: 0,
+            queue_status: 'NO_APPLICATIONS',
             readyCount: 0,
             expiredCount: 0,
             status: 'PENDING',
@@ -903,18 +928,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         connectedIds.has(c.applywizzId.trim().toUpperCase())
       );
 
-      const queueCounts = await countNonSkippedApplicationsByApplywizzIds(
-        candidateSummaries.map((c) => c.applywizzId),
-        createdAtRange
-      );
-      candidateSummaries = candidateSummaries.map((summary) => {
-        const dbTotal = queueCounts.get(summary.applywizzId.trim().toUpperCase());
-        if (dbTotal === undefined) {
-          return summary;
-        }
-        return { ...summary, totalJobs: dbTotal };
-      });
     }
+
+    const applicationAggregates = await fetchCandidateApplicationAggregatesByApplywizzIds(
+      candidateSummaries.map((c) => c.applywizzId)
+    );
+    candidateSummaries = applyApplicationAggregatesToSummaries(
+      candidateSummaries,
+      applicationAggregates
+    );
 
     if (unrestricted) {
       // Remove any prior or default-mapped instances of demo candidates to guarantee clean top placement
@@ -927,7 +949,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         clientName: demoSegment.clientName,
         email: demoSegment.profile?.email || 'portgasdiscord@gmail.com',
         location: demoSegment.profile?.location || 'Hyderabad, Telangana, India',
-        totalJobs: demoSegment.jobs.length,
+        totalJobs: 0,
+        job_count: 0,
+        queue_status: 'NO_APPLICATIONS',
         readyCount: demoSegment.jobs.length,
         expiredCount: 0,
         status: 'READY',
@@ -943,7 +967,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           clientName: generatedSegment.clientName,
           email: generatedSegment.profile?.email || '',
           location: generatedSegment.profile?.location || '',
-          totalJobs: generatedSegment.jobs.length,
+          totalJobs: 0,
+          job_count: 0,
+          queue_status: 'NO_APPLICATIONS',
           readyCount: generatedSegment.jobs.length,
           expiredCount: 0,
           status: 'READY',
@@ -953,6 +979,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
 
       candidateSummaries = [...adminPinnedSummaries, ...nonDemoSummaries];
+      const pinnedAggregates = await fetchCandidateApplicationAggregatesByApplywizzIds(
+        adminPinnedSummaries.map((c) => c.applywizzId)
+      );
+      const enrichedPinned = applyApplicationAggregatesToSummaries(
+        adminPinnedSummaries,
+        pinnedAggregates
+      );
+      candidateSummaries = [...enrichedPinned, ...nonDemoSummaries];
     }
 
     // For unauthenticated / testing environments without headers, return flat array for backward-compatibility

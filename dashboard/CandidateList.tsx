@@ -137,22 +137,24 @@ export const CandidateList: React.FC<CandidateListProps> = ({
                     </span>
                   </div>
 
-                  {/* Status Indicator Pill */}
-                  {c.status === 'READY' && (
+                  {/* Status Indicator Pill (queue_status from candidate_applications) */}
+                  {(c.queue_status === 'READY' || (!c.queue_status && c.status === 'READY')) && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#1E4620] bg-[#9AC89A] px-2 py-0.5 rounded border border-[#1A1A2E]">
                       <span className="w-1.5 h-1.5 rounded-full bg-[#1E4620] animate-pulse"></span>
                       Ready
                     </span>
                   )}
-                  {c.status === 'PENDING' && (
+                  {(c.queue_status === 'IN_PROGRESS' ||
+                    c.queue_status === 'NO_APPLICATIONS' ||
+                    (!c.queue_status && c.status === 'PENDING')) && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#5C4A0A] bg-[#F4D66B] px-2 py-0.5 rounded border border-[#1A1A2E]">
                       <span className="w-1.5 h-1.5 rounded-full bg-[#5C4A0A]"></span>
-                      Pending
+                      {c.queue_status === 'IN_PROGRESS' ? 'In progress' : 'Pending'}
                     </span>
                   )}
-                  {c.status === 'EXPIRED' && (
+                  {(c.queue_status === 'DONE' || (!c.queue_status && c.status === 'EXPIRED')) && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#475569] bg-[#E2E8F0] px-2 py-0.5 rounded border border-[#1A1A2E]">
-                      Expired
+                      Done
                     </span>
                   )}
                 </div>
@@ -169,7 +171,8 @@ export const CandidateList: React.FC<CandidateListProps> = ({
                   </span>
 
                   <span className="bg-[#FAF4EB] border border-[#1A1A2E] text-[#1A1A2E] px-2 py-0.5 rounded text-[10px] font-bold font-mono">
-                    {c.totalJobs} {c.totalJobs === 1 ? 'Job' : 'Jobs'}
+                    {c.job_count ?? c.totalJobs}{' '}
+                    {(c.job_count ?? c.totalJobs) === 1 ? 'Job' : 'Jobs'}
                   </span>
                 </div>
               </button>

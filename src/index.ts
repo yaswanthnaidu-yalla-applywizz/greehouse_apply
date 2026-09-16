@@ -24,11 +24,7 @@ import { migrate } from './db/migrate.js';
 import { readAndDeduplicateUrls } from './scanner/csvDeduplicator.js';
 import { PlaywrightScanner } from './scanner/playwrightScanner.js';
 import { exportScannedJobs } from './scanner/exportScannedJobs.js';
-import {
-  segregateCandidatesByApplyWizzId,
-  exportCandidateSegments,
-  ensureApplicationRowsFromCsv,
-} from './candidate/segregator.js';
+import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from './candidate/segregator.js';
 import { AnswerResolver, exportResolvedApplications, resolutionSourceKey } from './resolver/answerResolver.js';
 import { createServer, loadArtifacts } from './server/index.js';
 import { createLogger, haltWithDevAlert } from './utils/logger.js';
@@ -326,16 +322,6 @@ export async function main(): Promise<void> {
           log.info(`✅ Form scanning completed. ${allScanned.length} job template(s) available.`);
         }
 
-        // CLI runs sync before scan — re-upsert application rows so scanned_job_templates metadata is applied.
-        try {
-          await ensureApplicationRowsFromCsv(resolvedCsv, {
-            limit: options.limit,
-            maxJobsPerCandidate: options.maxJobs,
-            candidateId: options.candidateId,
-          });
-        } catch (err: any) {
-          log.warn(`⚠️ ensureApplicationRowsFromCsv after scan: ${err.message}`);
-        }
       }
     }
 

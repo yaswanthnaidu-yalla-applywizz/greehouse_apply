@@ -18,7 +18,6 @@ import { config } from '../config/env.js';
 import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
 import { profileRowToCandidateProfile } from '../db/profiles.js';
-import { ensureApplicationRowsForSegment } from '../db/ensureCandidateApplicationRows.js';
 import { ensureSupabaseProfile } from './ensureSupabaseProfile.js';
 import type { CandidateSegment } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
@@ -232,10 +231,6 @@ export interface SegregatorOptions {
    */
   onProgress?: (stats: { processedCandidates: number; totalCandidates: number; totalJobs: number }) => void;
 
-  /**
-   * When true with syncProfiles=false: upsert candidate_applications from CSV without requiring profile/Zoho sync.
-   */
-  applicationRowsFromCsvOnly?: boolean;
 }
 
 /**
@@ -263,7 +258,6 @@ export async function segregateCandidatesByApplyWizzId(
     client = new ApplyWizzClient(),
     candidateId,
     onProgress,
-    applicationRowsFromCsvOnly = false,
   } = options;
 
   if (!fs.existsSync(csvPath)) {
@@ -513,7 +507,7 @@ export async function segregateCandidatesByApplyWizzId(
 
   // Remove candidates that could not be loaded from Supabase/cache or were not Zoho-connected.
   let skippedNoProfile = 0;
-  if (syncProfiles && !applicationRowsFromCsvOnly) {
+  if (syncProfiles) {
     for (const [id, segment] of Array.from(segmentsMap.entries())) {
       if (!segment.profile) {
         segmentsMap.delete(id);
@@ -528,42 +522,7 @@ export async function segregateCandidatesByApplyWizzId(
     }
   }
 
-  let applicationJobsAttempted = 0;
-  let applicationRowsUpserted = 0;
-  let applicationSkippedOverCap = 0;
-  let applicationSkippedNoProfile = 0;
-  let applicationUpsertFailed = 0;
-  for (const segment of segmentsMap.values()) {
-    const rowResult = await ensureApplicationRowsForSegment(segment);
-    applicationJobsAttempted += rowResult.attempted;
-    applicationRowsUpserted += rowResult.upserted;
-    applicationSkippedOverCap += rowResult.skippedOverCap;
-    applicationSkippedNoProfile += rowResult.skippedNoProfile;
-    applicationUpsertFailed += rowResult.failed;
-  }
-  if (applicationJobsAttempted > 0) {
-    log.info(
-      `[Candidate Segregator] candidate_applications attempted=${applicationJobsAttempted} upserted=${applicationRowsUpserted} skipped_over_cap=${applicationSkippedOverCap} skipped_no_profile=${applicationSkippedNoProfile} failed=${applicationUpsertFailed}`
-    );
-  }
-
   return segmentsMap;
-}
-
-/**
- * Upserts candidate_applications for every CSV (applywizz_id, job_url) without profile sync.
- * Call after scan so scanned_job_templates metadata is available for enrichment.
- */
-export async function ensureApplicationRowsFromCsv(
-  csvPath: string,
-  options: Pick<SegregatorOptions, 'limit' | 'maxJobsPerCandidate' | 'candidateId'> = {}
-): Promise<Map<string, CandidateSegment>> {
-  return segregateCandidatesByApplyWizzId(csvPath, {
-    ...options,
-    syncProfiles: false,
-    downloadResumes: false,
-    applicationRowsFromCsvOnly: true,
-  });
 }
 
 /**

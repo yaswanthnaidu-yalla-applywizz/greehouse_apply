@@ -48,6 +48,8 @@ _Last updated: 2026-09-16_
 - [x] **Dashboard default date range** — stats/lists default to today + yesterday (IST); optional `?from=&to=`; UI label "Today & Yesterday" (2026-09-16)
 - [x] **Operator queue UX** — show SKIPPED / pre-resolve rows; unresolved + skipped badges; blocked form panel + operator-friendly `error_message` copy (2026-09-16)
 - [x] **Operator → manager mapping on login** — upsert `users`, set `manager_email` from work-history CA manager UUID map; migration **017** (2026-09-16)
+- [x] **Resolve-time-only `candidate_applications` upserts** — removed segregator / post-scan placeholder upserts; skip when no non-empty resolved values; SKIPPED over-cap at resolve; idempotent preserve of existing fields in `upsertApplication` (2026-09-16)
+- [x] **Railway crash-loop fix** — `ERR_INVALID_CHAR` on `X-Dashboard-Date-Range` (en-dash in custom date label); `httpHeaders.ts` + ASCII label in `dashboardDateRange.ts` (2026-09-16)
 - [x] **Manager list API scoping** — `GET /api/candidates`, `/jobs`, `/stats`, `GET /api/users` team-filtered for managers; dev/admin unrestricted (2026-09-16)
 - [x] Manager UI at **`/manager`** (managers + dev). Secondary tabs: Operators, Activity, Reports (volume only)
 - [x] Admin dashboard at **`/admin`** — org overview, managers, operators, applications, audit, system status, **▶ Start** ingest
@@ -114,7 +116,8 @@ _Last updated: 2026-09-16_
 ---
 
 ## Known Bugs / Gotchas
-- **✅ FIXED (code, not yet committed) — `candidate_applications` FK after CSV ingest:** `ensureApplicationRowsFromCsv` upserted every CSV pair even when Phase C never wrote `profiles` (new ID / Rule 1 blocked API). Postgres `candidate_applications_applywizz_id_fkey` failed (AWL-39218 Fanatics). Ingest/pipeline now fetches missing ApplyWizz profiles; application upserts skip unless `hasSupabaseProfile` is true
+- **✅ FIXED — `candidate_applications` FK after CSV ingest:** removed pre-resolve upserts (`ensureApplicationRowsFromCsv` / segregator). Ingest still syncs profiles first; application rows appear only after resolution (or SKIPPED over-cap)
+- **✅ FIXED — Railway process crash on `/api/candidates`:** non-ASCII en-dash in `X-Dashboard-Date-Range` → Node `ERR_INVALID_CHAR`; use ASCII `-` and `sanitizeHttpHeaderValue()`
 - **✅ FIXED — new `profiles` rows never insert (schema cache):** Railway 2026-09-15 logs — ApplyWizz fetch OK, PostgREST rejected `country`/`country_code` on `profiles`. Migration **016** adds columns; `upsertProfile` / profile patches strip any column missing from the schema cache and retry so creates are not blocked. **Apply 016 in Supabase SQL Editor** for country to persist
 - **✅ FIXED — CSV uploads to Storage never started the pipeline:** there was no webhook, no Realtime listener, no DB trigger and no poller; `ingestCsvFromStorage` was reachable only via the one-shot `npm run ingest:storage` CLI and an admin route the dashboard never called. Now admin-driven via the **▶ Start** button on `/admin`.
 - **✅ FIXED — Storage permission blindness reported as "no pending CSV files":** anon/publishable keys get `[]` with no error from `listBuckets()` and `from(bucket).list()`. Ingest probes every configured key (`0d02593`), logs `jwt.role` + names, fails if all lists are empty. Local `service_role` JWT sees `test(Sheet1).csv`. **Railway still reports entries=0** — process keys are not a Storage-capable `service_role` JWT

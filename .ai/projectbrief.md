@@ -5,7 +5,7 @@ Internal bulk job-application automation platform. Operators upload a CSV of can
 
 ## Target Users
 - **Operators** — primary users; review/approve/submit applications via dashboard
-- **Managers / COO** — client table at `/manager` (all clients until CA-manager mapping is known); date filter, expandable proofs
+- **Managers / COO** — client table at `/manager`; team scoped via `users.manager_email` → operator assignments; date filter, expandable proofs
 - **Admins** — org ops at `/admin` including CSV ingest Start
 - **Developers** — technical dashboard at `/dev`
 
@@ -28,6 +28,6 @@ Manually applying to hundreds of Greenhouse ATS postings per candidate is operat
 ## Input / Output
 | Input | Output |
 |---|---|
-| CSV: `applywizz_id, job_url` pairs | `candidate_applications` rows in Supabase |
+| CSV: `applywizz_id, job_url` pairs | `candidate_applications` rows after resolution (or SKIPPED over-cap) |
 | ApplyWizz API (candidate profile JSON + resume PDF) | Web proof screenshots in `proofs_web` Supabase bucket |
 | Greenhouse ATS pages (DOM via Playwright) | Status: `APPLIED` / `FAILED` / `CAPTCHA_REQUIRED` |

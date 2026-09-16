@@ -141,7 +141,13 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
       ca: requestedCa,
       teamScopeUnrestricted: hasUnrestrictedDashboardAccess(role),
     });
-    res.json(payload);
+    res.json({
+      ...payload,
+      rows: payload.rows.map((row) => ({
+        ...row,
+        assigned_ca: (row.assigned_ca || '').trim(),
+      })),
+    });
   } catch (error) {
     log.error('[Manager Router] Failed to load dashboard:', error);
     res.status(502).json({ error: 'Unable to load manager dashboard.' });

@@ -36,6 +36,7 @@ export interface ProfileRow {
   resume_facts?: Record<string, any> | null;
   raw_api_payload?: Record<string, any> | null;
   zoho_connected?: boolean;
+  ca_email?: string | null;
   last_api_fetch_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -232,6 +233,9 @@ export async function upsertProfile(
     extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
   const payload: ProfileRow = {
     ...profile,
+    ...(profile.ca_email !== undefined
+      ? { ca_email: profile.ca_email ? profile.ca_email.trim().toLowerCase() : null }
+      : {}),
     country: isYaswanth ? 'India' : (isAkshitha ? (profile.country ?? 'United States of America') : (profile.country ?? null)),
     country_code: isYaswanth ? '+91' : (isAkshitha ? (profile.country_code ?? '+1') : (profile.country_code ?? null)),
     location: isYaswanth ? (profile.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (profile.location || 'Dallas, Texas, United States') : (profile.location ?? null)),
