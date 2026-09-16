@@ -108,7 +108,9 @@ export function isUnresolvedApplicationJob(
   if (isSkippedApplicationJob(row)) return false;
   if (!applicationRowHasPersistedResolution(row)) return true;
   const fields = (row.resolved_fields ?? row.resolvedFields) as ResolvedFieldLike[] | undefined;
-  if (!Array.isArray(fields) || fields.length === 0) return true;
+  if (!Array.isArray(fields) || fields.length === 0) {
+    return false;
+  }
   return fields.some(
     (f) => f && (f.source === 'unresolved' || f.resolvedByTier === null || f.resolvedByTier === undefined)
   );

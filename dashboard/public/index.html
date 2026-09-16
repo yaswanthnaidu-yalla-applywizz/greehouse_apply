@@ -2679,7 +2679,7 @@
       if (isSkippedApplicationStatus(row.status)) return false;
       if (!applicationRowHasPersistedResolution(row)) return true;
       const fields = row.resolved_fields ?? row.resolvedFields;
-      if (!Array.isArray(fields) || fields.length === 0) return true;
+      if (!Array.isArray(fields) || fields.length === 0) return false;
       return fields.some(
         (f) => f && (f.source === 'unresolved' || f.resolvedByTier === null || f.resolvedByTier === undefined)
       );

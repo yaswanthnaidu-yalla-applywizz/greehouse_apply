@@ -11,6 +11,8 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 import type { ApplicationRow } from '../db/applications.js';
+import { akshithaInMemoryDemoJobRows } from './generatedDemoFixtures.js';
+import { AKSHITHA_APPLYWIZZ_ID } from './akshithaDemoFixtures.js';
 
 export const DEMO_APPLYWIZZ_ID = 'AWL-YASWANTH';
 export const DEMO_JOB_URL =
@@ -446,6 +448,30 @@ export function toApplicationRow(app: CandidateJobApplication): ApplicationRow {
     status: 'READY_FOR_REVIEW',
     resolved_fields: app.resolvedFields,
   };
+}
+
+export function inMemoryDemoJobRowsForDashboard(applywizzId: string): Array<Record<string, unknown>> {
+  const target = applywizzId.trim().toUpperCase();
+  if (target === DEMO_APPLYWIZZ_ID.toUpperCase()) {
+    return [
+      {
+        rawUrl: demoApplication.jobUrl,
+        canonicalUrl: demoApplication.jobUrl,
+        companyName: demoApplication.companyName,
+        jobTitle: demoApplication.jobTitle,
+        status: 'READY_FOR_REVIEW',
+        fieldsCount: demoApplication.resolvedFields.length,
+        resolved_fields: demoApplication.resolvedFields,
+        resolvedFields: demoApplication.resolvedFields,
+        hasManualEdits: false,
+        isInMemoryDemoFixture: true,
+      },
+    ];
+  }
+  if (target === AKSHITHA_APPLYWIZZ_ID.toUpperCase()) {
+    return akshithaInMemoryDemoJobRows();
+  }
+  return [];
 }
 
 export function mergeDemoFixtures<T extends { applywizzId?: string; jobUrl?: string }>(

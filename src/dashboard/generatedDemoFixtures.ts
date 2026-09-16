@@ -11,6 +11,7 @@ import {
   akshithaSegment,
   akshithaTemplates,
   AKSHITHA_APPLYWIZZ_ID,
+  AKSHITHA_ADMIN_DEMO_JOB_URL,
 } from './akshithaDemoFixtures.js';
 import type {
   CandidateJobApplication,
@@ -55,6 +56,61 @@ export function readGeneratedDemoFixtures(): GeneratedDemoFixtureFile | null {
   }
 }
 
+function normalizeAkshithaAdminDemoArtifacts(input: {
+  segment: CandidateSegment | null;
+  applications: CandidateJobApplication[];
+  templates: ScannedJobTemplate[];
+}): {
+  segment: CandidateSegment | null;
+  applications: CandidateJobApplication[];
+  templates: ScannedJobTemplate[];
+} {
+  const demoUrl = AKSHITHA_ADMIN_DEMO_JOB_URL.trim().toLowerCase();
+  const applications = input.applications.filter(
+    (a) => (a.jobUrl || '').trim().toLowerCase() === demoUrl
+  );
+  const templates = input.templates.filter((t) => (t.jobUrl || '').trim().toLowerCase() === demoUrl);
+  let segment = input.segment;
+  if (segment) {
+    const jobs = (segment.jobs || []).filter(
+      (j) => (j.canonicalUrl || j.rawUrl || '').trim().toLowerCase() === demoUrl
+    );
+    segment = {
+      ...segment,
+      jobs: jobs.length > 0 ? jobs : segment.jobs.slice(0, 1),
+      totalJobs: jobs.length > 0 ? jobs.length : 1,
+    };
+  }
+  if (applications.length === 0 && akshithaApplications.length > 0) {
+    return normalizeAkshithaAdminDemoArtifacts({
+      segment: akshithaSegment,
+      applications: akshithaApplications,
+      templates: akshithaTemplates,
+    });
+  }
+  return { segment, applications, templates };
+}
+
+function demoApplicationToDashboardJobRow(app: CandidateJobApplication): Record<string, unknown> {
+  return {
+    rawUrl: app.jobUrl,
+    canonicalUrl: app.jobUrl,
+    companyName: app.companyName || 'Greenhouse Company',
+    jobTitle: app.jobTitle || 'Job Opening',
+    status: String(app.status || 'READY_FOR_REVIEW').trim().toUpperCase(),
+    fieldsCount: app.resolvedFields?.length ?? 0,
+    resolved_fields: app.resolvedFields ?? [],
+    resolvedFields: app.resolvedFields ?? [],
+    hasManualEdits: false,
+    isInMemoryDemoFixture: true,
+  };
+}
+
+/** Job queue rows for AWL-31428 admin demo (DoiT only). */
+export function akshithaInMemoryDemoJobRows(): Array<Record<string, unknown>> {
+  return loadSecondaryDemoArtifacts().applications.map(demoApplicationToDashboardJobRow);
+}
+
 export function loadSecondaryDemoArtifacts(): {
   segment: CandidateSegment | null;
   applications: CandidateJobApplication[];
@@ -62,17 +118,17 @@ export function loadSecondaryDemoArtifacts(): {
 } {
   const fixture = readGeneratedDemoFixtures();
   if (fixture) {
-    return {
+    return normalizeAkshithaAdminDemoArtifacts({
       segment: fixture.segment,
       applications: fixture.applications,
       templates: fixture.templates,
-    };
+    });
   }
-  return {
+  return normalizeAkshithaAdminDemoArtifacts({
     segment: akshithaSegment,
     applications: akshithaApplications,
     templates: akshithaTemplates,
-  };
+  });
 }
 
 function templatesFromApplications(apps: CandidateJobApplication[]): ScannedJobTemplate[] {
