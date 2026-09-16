@@ -325,6 +325,18 @@
                     )}
                   </div>
                 </div>
+                {ApplyWizzRoles.sessionRole() === 'manager' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      ApplyWizzRoles.setManagerOperatorView(true);
+                      window.location.href = '/';
+                    }}
+                    className="bg-[#1E3A5F] text-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded shadow-[2px_2px_0_#1A1A2E]"
+                  >
+                    Open operator view
+                  </button>
+                )}
                 <button type="button" onClick={load} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
                 <HeaderSignOut />
               </div>
@@ -474,6 +486,7 @@
                     <li>Completed rows may show web or email proof links — use these for QA, not for re-submitting.</li>
                     <li>Skipped jobs (35+ questions, Zoho not connected, expired postings, etc.) appear with plain-language reasons — same rules as the operator dashboard.</li>
                     <li>Operator-to-manager assignment happens on operator sign-in; this UI does not reassign teams.</li>
+                    <li><span className="font-bold">Open operator view</span> (header) opens the operator dashboard at <span className="font-mono">/</span> scoped to your team&apos;s clients (<span className="font-mono">profiles.ca_email</span> for your operators). Submit and review there; use Exit on that page to return here.</li>
                   </ul>
                 </section>
 

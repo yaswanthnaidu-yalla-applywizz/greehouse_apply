@@ -8,6 +8,7 @@
 import { Response, NextFunction } from 'express';
 import { isSupabaseConfigured } from '../../db/client.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
+import { isManagerViewAsOperator } from '../managerTeamScope.js';
 
 export type AppRole = 'admin' | 'manager' | 'operator' | 'dev';
 
@@ -139,4 +140,38 @@ export function requireRoleIfAuthenticated(...allowedRoles: string[]) {
     }
     guard(req, res, next);
   };
+}
+
+/**
+ * Operator dashboard API: operator, dev, or manager with X-View-As: operator.
+ */
+export function requireOperatorDashboardAccess(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (authGuardBypassed(req)) {
+    next();
+    return;
+  }
+
+  const role = resolveRoleFromRequest(req);
+  if (role === 'dev' || role === 'operator') {
+    next();
+    return;
+  }
+
+  if (role === 'manager' && isManagerViewAsOperator(req)) {
+    next();
+    return;
+  }
+
+  if (!role) {
+    res.status(403).json({ error: 'Forbidden: role claim missing from session token.' });
+    return;
+  }
+
+  res.status(403).json({
+    error: 'Forbidden: operator dashboard access requires operator role or manager operator view.',
+  });
 }

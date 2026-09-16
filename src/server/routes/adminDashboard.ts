@@ -15,6 +15,7 @@ import { getISTDateString } from '../../services/workHistoryClient.js';
 import { emailsForRole } from './auth.js';
 import { buildManagerTeamStats } from '../adminManagerStats.js';
 import { loadClientDashboard } from '../clientDashboard.js';
+import { listAllDashboardUsers, listOperatorEmailsForManager } from '../../db/users.js';
 import { isActiveWithin, listAuthDirectory } from '../authDirectory.js';
 import { collectHealthSnapshot, trafficLights } from '../healthSnapshot.js';
 import { createLogger } from '../../utils/logger.js';
@@ -162,11 +163,17 @@ adminDashboardRouter.get('/operators', async (req: Request, res: Response): Prom
     if (status === 'active') operators = operators.filter((user) => isActiveWithin(user.lastSignInAt));
     if (status === 'inactive') operators = operators.filter((user) => !isActiveWithin(user.lastSignInAt));
 
-    let allowedEmails: Set<string> | null = null;
     if (managerEmail) {
-      const dashboard = await loadClientDashboard({ managerEmail, date });
-      allowedEmails = new Set(dashboard.rows.map((row) => row.assignedToEmail).filter(Boolean));
-      operators = operators.filter((user) => allowedEmails!.has(user.email));
+      const teamEmails = await listOperatorEmailsForManager(managerEmail);
+      const teamSet = new Set(teamEmails.map((e) => e.trim().toLowerCase()));
+      operators = operators.filter((user) => teamSet.has(user.email.trim().toLowerCase()));
+    }
+
+    const managerByOperatorEmail = new Map<string, string>();
+    for (const row of await listAllDashboardUsers()) {
+      const opEmail = (row.email || '').trim().toLowerCase();
+      const mgr = (row.manager_email || '').trim().toLowerCase();
+      if (opEmail && mgr) managerByOperatorEmail.set(opEmail, mgr);
     }
 
     const workloadByEmail = await countOperatorWorkloadByProfileCaEmail(
@@ -178,6 +185,7 @@ adminDashboardRouter.get('/operators', async (req: Request, res: Response): Prom
       operators: operators.map((user) => ({
         email: user.email,
         name: user.displayName,
+        managerEmail: managerByOperatorEmail.get(user.email.trim().toLowerCase()) || null,
         status:
           isActiveWithin(user.lastSignInAt) || (workloadByEmail.get(user.email) || 0) > 0
             ? 'active'

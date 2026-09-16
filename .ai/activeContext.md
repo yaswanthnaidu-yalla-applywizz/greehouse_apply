@@ -15,9 +15,14 @@ _Last updated: 2026-09-16_
 - Requests: `resolveEffectiveAppRole` — map override → JWT claim (no per-request DB read).
 - Signup: existing `users` row bypasses CA emails API gate (`isEmailAuthorizedForSignup`).
 
-### 2. Manager view-as operator (shipped — server only)
-- Manager JWT + header **`X-View-As: operator`** on **`GET /api/candidates`** and **`GET /api/candidates/:id/jobs`**: team-scoped via `profiles.ca_email` ∈ operators where `users.manager_email` = manager (no work-history merge).
-- Response header **`X-View-As-Active: true`** when branch active. Manager UI must send the header on fetches (follow-up if not wired).
+### 2. Manager view-as operator (shipped)
+- Manager JWT + header **`X-View-As: operator`** on candidate list/jobs, **`/api/applications`**, **`/api/notifications`**: team-scoped via `profiles.ca_email` for operators where `users.manager_email` = manager.
+- **UI:** Manager dashboard **Open operator view** → `/` with session flag; banner + Exit; `roleAccess.js` sends header on all authed fetches.
+- **`requireOperatorDashboardAccess`:** operator, dev, or manager + view-as header on operator API routes.
+- Response header **`X-View-As-Active: true`** when branch active.
+
+### 2b. Admin operators by manager (shipped)
+- **`GET /api/admin/operators?manager=`** filters via **`users.manager_email`** (`listOperatorEmailsForManager`), not date-scoped client dashboard rows. Response includes **`managerEmail`** per operator when mapped.
 
 ### 3. Manager CA / team filtering (shipped — verify in prod)
 - **`users.manager_email`** populated on operator login via work-history + CA manager UUID map (migration **017**).

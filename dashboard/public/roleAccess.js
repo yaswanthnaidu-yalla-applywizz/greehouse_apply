@@ -2,6 +2,7 @@
   var WEEK_MS = 7 * 24 * 60 * 60 * 1000;
   var REFRESH_SKEW_MS = 2 * 60 * 1000;
   var AUTH_SKIP = /\/api\/auth\/(login|refresh|send-signup-otp|verify-signup-otp|register|verify-email)(?:\?|$)/;
+  var MANAGER_VIEW_AS_OPERATOR_KEY = 'applywizz_manager_view_as_operator';
   var refreshInFlight = null;
   var nativeFetch = root.fetch.bind(root);
   var ROLE_BY_EMAIL = {
@@ -74,6 +75,9 @@
     localStorage.removeItem('applywizz_wh_unreachable');
     localStorage.removeItem('applywizz_is_admin');
     localStorage.removeItem('applywizz_role');
+    try {
+      sessionStorage.removeItem(MANAGER_VIEW_AS_OPERATOR_KEY);
+    } catch (e) { /* ignore */ }
   }
 
   function persistSession(data, renewExpiry) {
@@ -211,9 +215,33 @@
     return { ok: false, reason: 'redirect', role: role };
   }
 
+  function isManagerOperatorView() {
+    try {
+      if (sessionRole() !== 'manager') return false;
+      return sessionStorage.getItem(MANAGER_VIEW_AS_OPERATOR_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setManagerOperatorView(enabled) {
+    try {
+      if (enabled && sessionRole() === 'manager') {
+        sessionStorage.setItem(MANAGER_VIEW_AS_OPERATOR_KEY, '1');
+      } else {
+        sessionStorage.removeItem(MANAGER_VIEW_AS_OPERATOR_KEY);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   function getAuthHeaders() {
     var token = localStorage.getItem('applywizz_auth_token');
-    return token ? { Authorization: 'Bearer ' + token } : {};
+    if (!token) return {};
+    var headers = { Authorization: 'Bearer ' + token };
+    if (isManagerOperatorView()) {
+      headers['X-View-As'] = 'operator';
+    }
+    return headers;
   }
 
   function headerValue(headers, name) {
@@ -285,5 +313,7 @@
     enforcePageAccess: enforcePageAccess,
     getAuthHeaders: getAuthHeaders,
     getTodayIST: getTodayIST,
+    isManagerOperatorView: isManagerOperatorView,
+    setManagerOperatorView: setManagerOperatorView,
   };
 })(window);

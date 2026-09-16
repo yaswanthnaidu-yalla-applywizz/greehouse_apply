@@ -16,6 +16,8 @@ import { isUserAdmin } from './auth.js';
 import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
 import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
+import { isManagerViewAsOperator, resolveManagerViewAsOperatorScope } from '../managerTeamScope.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('Notifications');
@@ -45,12 +47,17 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
         res.status(401).json({ error: 'Unauthorized: CA email missing — cannot proceed' });
         return;
       }
-      const merged = await mergeWorkHistoryForIstDates({
-        mode: 'ca',
-        caEmail: userEmail,
-        dates: istDatesForWorkHistory(parsedRange),
-      });
-      allowedCandidateIds = merged.candidateIds;
+      if (isManagerViewAsOperator(req as AuthenticatedRequest)) {
+        const scope = await resolveManagerViewAsOperatorScope(userEmail);
+        allowedCandidateIds = Array.from(scope.allowedIds);
+      } else {
+        const merged = await mergeWorkHistoryForIstDates({
+          mode: 'ca',
+          caEmail: userEmail,
+          dates: istDatesForWorkHistory(parsedRange),
+        });
+        allowedCandidateIds = merged.candidateIds;
+      }
     }
 
     const notifications = await getRecentNotifications(limit, {
