@@ -77,9 +77,12 @@ export async function upsertAnswer(entry: QABankRow): Promise<void> {
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      await supabase
+      const { error } = await supabase
         .from('candidate_qa_bank')
         .upsert(payload, { onConflict: 'applywizz_id,question_fingerprint' });
+      if (error) {
+        throw new Error(error.message);
+      }
       return;
     } catch (err: any) {
       // Fall through to local fallback
