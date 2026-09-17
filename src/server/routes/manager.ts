@@ -11,6 +11,8 @@ import {
   applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
   countOperatorWorkloadByProfileCaEmail,
+  countSubmittedApplicationsSince,
+  countSubmittedApplicationsByOperatorSince,
   listApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
@@ -291,8 +293,13 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
       endIso: parsedRange.endIso,
       actorEmails: operatorEmails,
     });
+    const submittedToday = await countSubmittedApplicationsSince(
+      getISTDateRangeUtc(getISTDateString()).startIso,
+      operatorEmails
+    );
     res.json({
       ...payload,
+      submitted_today: submittedToday,
       submitClicks,
       rows: payload.rows.map((row) => ({
         ...row,
@@ -318,6 +325,10 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
     const managerEmail = managerEmailForRequest(req);
     const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
     const unrestricted = hasUnrestrictedDashboardAccess(role);
+    const submittedByOperator = await countSubmittedApplicationsByOperatorSince(
+      getISTDateRangeUtc(getISTDateString()).startIso,
+      unrestricted ? undefined : await listOperatorEmailsForManager(managerEmail)
+    );
     const dashboard = await loadClientDashboard({
       managerEmail,
       date,
@@ -400,6 +411,7 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         completed: operator.completed,
         pending: operator.pending,
         failed: operator.failed,
+        submitted_today: submittedByOperator.get(operator.email) || 0,
         lastSignInAt: user?.lastSignInAt || null,
         workload: workloadByEmail.get(operator.email) || 0,
       };

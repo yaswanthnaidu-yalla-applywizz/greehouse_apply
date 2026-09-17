@@ -10,7 +10,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="/roleAccess.js"></script>
+  <script src="/roleAccess.js" defer></script>
 </head>
 <body class="bg-[#FFF5EB] text-[#1A1A2E]">
   <div id="root"></div>
@@ -178,6 +178,7 @@
       const [rows, setRows] = useState([]);
       const [totals, setTotals] = useState({});
       const [submitClicks, setSubmitClicks] = useState(0);
+      const [submittedToday, setSubmittedToday] = useState(0);
       const [careerAssociates, setCareerAssociates] = useState([]);
       const [warning, setWarning] = useState('');
       const [loading, setLoading] = useState(false);
@@ -227,6 +228,7 @@
           setRows(payload.rows || []);
           setTotals(payload.totals || {});
           setSubmitClicks(payload.submitClicks ?? 0);
+          setSubmittedToday(payload.submitted_today ?? 0);
           setWarning(payload.warning || '');
           const cas = [];
           const seen = new Set();
@@ -275,6 +277,13 @@
       useEffect(() => { if (tab === 'operators') loadOperators(); }, [tab, loadOperators]);
       useEffect(() => { if (tab === 'activity') loadActivity(); }, [tab, loadActivity]);
       useEffect(() => { if (tab === 'reports') loadReports(); }, [tab, loadReports]);
+      useEffect(() => {
+        const interval = setInterval(() => {
+          load();
+          if (tab === 'operators') loadOperators();
+        }, 30000);
+        return () => clearInterval(interval);
+      }, [load, loadOperators, tab]);
 
       useEffect(() => {
         if (!opsPickerOpen || sessionRole !== 'dev') return;
@@ -438,7 +447,7 @@
             {tab === 'home' && (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-                  {[['Applications', totals.applications], ['Submit clicks (day)', submitClicks], ['Completed', totals.applied], ['Failed', totals.failed], ['Pending', totals.pending], ['Waiting email', totals.waiting_for_email]].map(([label, val]) => (
+                  {[['Applications', totals.applications], ['Submit clicks (day)', submitClicks], ['Submitted Today', submittedToday], ['Completed', totals.applied], ['Failed', totals.failed], ['Pending', totals.pending], ['Waiting email', totals.waiting_for_email]].map(([label, val]) => (
                     <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
                       <p className="text-xs font-bold uppercase">{label}</p>
                       <p className="text-2xl font-black mt-1">{val ?? 0}</p>
@@ -464,7 +473,7 @@
                 </div>
                 <table className="w-full min-w-[640px] text-left text-xs">
                   <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-                    <tr>{['Operator', 'Status', 'Apps', 'Workload', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+                    <tr>{['Operator', 'Status', 'Apps', 'Submitted', 'Workload', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
                   </thead>
                   <tbody>
                     {operators.map((op) => (
@@ -475,6 +484,7 @@
                         </td>
                         <td className="p-3 uppercase font-bold">{op.status}</td>
                         <td className="p-3 font-mono">{op.applications}</td>
+                        <td className="p-3 font-mono">{op.submitted_today ?? 0}</td>
                         <td className="p-3 font-mono">{op.workload ?? 0}</td>
                         <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
                       </tr>
@@ -548,7 +558,7 @@
                 <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
                   <h3 className="text-sm font-black uppercase tracking-wide mb-3">Home</h3>
                   <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
-                    <li>Summary cards: Applications, Completed, Failed, Pending, Waiting email — scoped to your date range.</li>
+                    <li>Summary cards: Applications, Submitted Today, Completed, Failed, Pending, Waiting email — scoped to your date range.</li>
                     <li>Client table: click underlined <span className="font-bold">Completed</span>, <span className="font-bold">Pending</span>, or <span className="font-bold">Failed</span> counts to expand job links, proofs, or failure reasons.</li>
                     <li><span className="font-bold">Filter by Career Associate</span> narrows the table to one operator.</li>
                     <li>Default date range is <span className="font-bold">Today &amp; Yesterday</span>; use Custom / Reset and Refresh in the header.</li>
