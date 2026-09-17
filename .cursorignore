@@ -17,11 +17,6 @@ greenhouse_logs*.md
 logs.*.json
 *.log
 
-# Task-observer meta-skill (large bundle; AGENTS.md points here on demand)
-.ai/skills/task-observer/
-
-# Skill observation backlog (session noise; not product code)
-.ai/skill-observations/
 
 # Planning / handover scratch (also in .gitignore)
 docs/

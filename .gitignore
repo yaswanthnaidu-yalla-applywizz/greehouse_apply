@@ -15,7 +15,7 @@ codebase_analysis.md
 handover.md
 context.md
 *.plan.md
-rules.md
+
 
 # Planning, capacity scratch & deployment notes (not product docs)
 CAPACITY_*.md
@@ -30,6 +30,9 @@ project docs/
 greenhouse_only_applywizz_prod(in).csv
 # Raw debug captures: real candidate inboxes, live OTP codes, application history
 .ai/skill-observations/evidence/
+
+# Local Supabase CLI linkage (project refs)
+supabase/.temp/
 
 # Build output
 dist/
