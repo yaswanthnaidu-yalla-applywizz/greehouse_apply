@@ -10,7 +10,7 @@
   <!-- React & Babel CDN -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.8/babel.min.js"></script>
   <script src="/roleAccess.js"></script>
 
   <style>
@@ -52,7 +52,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect } = window.React;
 
     function formatQrCodeSrc(qr) {
       if (!qr) return '';
@@ -644,16 +644,36 @@
         return;
       }
       window.__applywizzOnOperatorLoaded = onReady;
-      if (document.querySelector('script[data-applywizz-operator-app]')) return;
-      const s = document.createElement('script');
-      s.type = 'text/babel';
-      s.src = '/operator-app.jsx';
-      s.dataset.applywizzOperatorApp = '1';
-      s.dataset.presets = 'react';
-      document.body.appendChild(s);
-      if (window.Babel && typeof Babel.transformScriptTags === 'function') {
-        Babel.transformScriptTags();
-      }
+      if (window.__applywizzOperatorAppLoading) return;
+      window.__applywizzOperatorAppLoading = true;
+      // Compile the extracted JSX with the classic runtime. Do NOT use
+      // Babel.transformScriptTags() here - it re-runs the inline
+      // <script type="text/babel"> block above and throws
+      // "Identifier 'useState' has already been declared".
+      fetch('/operator-app.jsx')
+        .then((res) => {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.text();
+        })
+        .then((code) => {
+          const transformed = window.Babel.transform(code, {
+            presets: [['react', { runtime: 'classic' }], 'env'],
+            sourceMaps: false,
+          }).code;
+          const s = document.createElement('script');
+          s.dataset.applywizzOperatorApp = '1';
+          // Run in a function scope so this file's top-level declarations
+          // cannot collide with the globals declared by the inline block above
+          // ("Identifier 'useState' has already been declared"). window.*
+          // assignments inside still reach the page - operator-app.jsx exposes
+          // itself via window.__applywizzOperatorApp.
+          s.text = ';(function () {\n' + transformed + '\n}).call(window);';
+          document.body.appendChild(s);
+        })
+        .catch((err) => {
+          window.__applywizzOperatorAppLoading = false;
+          console.error('[Dashboard] Failed to load operator app:', err);
+        });
     }
 
     function OperatorShell() {
@@ -692,7 +712,7 @@
       return <DashboardApp />;
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
+    const root = window.ReactDOM.createRoot(document.getElementById('root'));
     root.render(<OperatorShell />);
 
 </script>
