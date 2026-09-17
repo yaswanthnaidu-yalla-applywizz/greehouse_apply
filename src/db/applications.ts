@@ -52,6 +52,15 @@ export type ApplicationStatus =
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
 
+export const SUBMITTED_TODAY_STATUSES: readonly ApplicationStatus[] = [
+  'QUEUED',
+  'APPLYING',
+  'APPLIED',
+  'EMAIL_PROOF_PENDING',
+  'EMAIL_UNVERIFIED',
+  'DRY_RUN_COMPLETE',
+];
+
 export interface EmailProofJson {
   from: string;
   to?: string;
@@ -104,6 +113,64 @@ export function getISTDateRangeUtc(dateStr: string): { startIso: string; endIso:
     startIso: startDate.toISOString(),
     endIso: endDate.toISOString(),
   };
+}
+
+export async function countSubmittedApplicationsSince(
+  startIso: string,
+  assignedCaEmails?: string[]
+): Promise<number> {
+  if (!isSupabaseConfigured()) return 0;
+  const emails = assignedCaEmails?.map((email) => email.trim().toLowerCase()).filter(Boolean);
+  if (emails && emails.length === 0) return 0;
+
+  try {
+    let query = getDbClient()
+      .from('candidate_applications')
+      .select('id', { count: 'exact', head: true })
+      .in('status', [...SUBMITTED_TODAY_STATUSES])
+      .gte('updated_at', startIso);
+    if (emails) query = query.in('assigned_ca_email', emails);
+    const { count, error } = await query;
+    if (error) {
+      log.warn(`[DB] submitted-today count failed: ${error.message}`);
+      return 0;
+    }
+    return count ?? 0;
+  } catch (err: any) {
+    log.warn(`[DB] submitted-today count exception: ${err?.message}`);
+    return 0;
+  }
+}
+
+export async function countSubmittedApplicationsByOperatorSince(
+  startIso: string,
+  assignedCaEmails?: string[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (!isSupabaseConfigured()) return result;
+  const emails = assignedCaEmails?.map((email) => email.trim().toLowerCase()).filter(Boolean);
+  if (emails && emails.length === 0) return result;
+
+  try {
+    let query = getDbClient()
+      .from('candidate_applications')
+      .select('assigned_ca_email')
+      .in('status', [...SUBMITTED_TODAY_STATUSES])
+      .gte('updated_at', startIso);
+    if (emails) query = query.in('assigned_ca_email', emails);
+    const { data, error } = await query;
+    if (error) {
+      log.warn(`[DB] submitted-today operator counts failed: ${error.message}`);
+      return result;
+    }
+    for (const row of data || []) {
+      const email = String(row.assigned_ca_email || '').trim().toLowerCase();
+      if (email) result.set(email, (result.get(email) || 0) + 1);
+    }
+  } catch (err: any) {
+    log.warn(`[DB] submitted-today operator counts exception: ${err?.message}`);
+  }
+  return result;
 }
 
 export interface CreatedAtRangeFilter {

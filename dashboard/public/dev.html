@@ -9,7 +9,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="/roleAccess.js"></script>
+  <script src="/roleAccess.js" defer></script>
 </head>
 <body class="bg-[#FFF5EB] text-[#1A1A2E]">
   <div id="root"></div>
@@ -119,6 +119,10 @@
       }, [tab, date, token, runStatus]);
 
       useEffect(() => { refresh(); }, [refresh]);
+      useEffect(() => {
+        const interval = setInterval(refresh, 30000);
+        return () => clearInterval(interval);
+      }, [refresh]);
 
       const setSubmissionGateEnabled = async (enabled) => {
         setGateSaving(true);
@@ -204,6 +208,11 @@
                   <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
                     <p className="text-xs font-bold uppercase">Submit clicks (day)</p>
                     <p className="text-2xl font-black mt-1">{health.submitClicks ?? 0}</p>
+                    <p className="text-[10px] font-mono text-[#64748B] mt-1">{health.submitClicksDate || date}</p>
+                  </div>
+                  <div className="bg-[#F4D66B] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
+                    <p className="text-xs font-bold uppercase">Submitted Today</p>
+                    <p className="text-2xl font-black mt-1">{health.submitted_today ?? 0}</p>
                     <p className="text-[10px] font-mono text-[#64748B] mt-1">{health.submitClicksDate || date}</p>
                   </div>
                 </div>
