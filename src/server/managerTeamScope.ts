@@ -178,9 +178,11 @@ export async function resolveTeamCandidateIdsForManager(
   }
 
   const candidateIds = Array.from(merged);
-  log.info(
-    `[ManagerTeamScope] team candidates manager=${manager} operators=${operatorEmails.length} whIds=${wh.candidateIds.length} profileIds=${profileIds.length} dbIds=${dbIds.length} merged=${candidateIds.length}`
-  );
+  if (candidateIds.length === 0) {
+    log.warn(
+      `[ManagerTeamScope] team candidates manager=${manager} operators=${operatorEmails.length} whIds=${wh.candidateIds.length} profileIds=${profileIds.length} dbIds=${dbIds.length} merged=0`
+    );
+  }
 
   return {
     operatorEmails,
