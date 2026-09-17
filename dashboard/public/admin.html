@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/webp" href="/logo.webp">
   <title>Apply Wizz — Admin</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="/roleAccess.js"></script>
+  <script src="/roleAccess.js" defer></script>
 </head>
 <body class="bg-[#FFF5EB] text-[#1A1A2E]">
   <div id="root"></div>
@@ -200,6 +200,10 @@
       }, [tab, date, token, opSearch, opStatus, opManager, appSearch, appStatus]);
 
       useEffect(() => { refresh(); }, [refresh]);
+      useEffect(() => {
+        const interval = setInterval(refresh, 30000);
+        return () => clearInterval(interval);
+      }, [refresh]);
 
       const openManager = async (email) => {
         setSelectedManager(email);
@@ -304,6 +308,7 @@
                     ['Active operators', overview.activeOperators],
                     ['Inactive operators', overview.inactiveOperators],
                     ['Submit clicks (day)', overview.submitClicks],
+                    ['Submitted Today', overview.submitted_today],
                     ['Processed', overview.applicationsProcessed],
                     ['Running', overview.applicationsRunning],
                     ['Queued', overview.applicationsQueued],

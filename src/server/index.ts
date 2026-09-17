@@ -55,8 +55,10 @@ import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHyd
 import {
   cacheApplicationLocally,
   applyCreatedAtRangeFilter,
+  getISTDateRangeUtc,
   getSubmissionOutcomeCounts,
   getDashboardApplicationMetrics,
+  countSubmittedApplicationsSince,
   getApplication,
   upsertApplication,
   serializeApplicationDto,
@@ -66,6 +68,7 @@ import {
   type ApplicationRow,
   type CandidateQueueStatus,
 } from '../db/applications.js';
+import { getISTDateString } from '../services/workHistoryClient.js';
 import {
   istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
@@ -176,6 +179,7 @@ export interface DashboardStats {
   totalApplications: number;
   successfulApplications: number;
   failedApplications: number;
+  submitted_today: number;
   uniqueScannedJobs: number;
   totalFieldsPopulated: number;
   supabaseTaggedCount: number;
@@ -547,12 +551,14 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
     const authReq = req as AuthenticatedRequest;
+    const todayRange = getISTDateRangeUtc(getISTDateString());
     const userEmail = getAuthenticatedCaEmail(authReq);
     const role = resolveRequestAppRole(authReq, userEmail);
     const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(authReq);
     const unrestricted = hasUnrestrictedDashboardAccess(role) && !viewAsManagerEmail;
 
     let allowedCandidateIds: string[] | undefined = undefined;
+    let submittedOperatorEmails: string[] | undefined;
     if (!unrestricted) {
       if (!userEmail && !viewAsManagerEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
@@ -566,6 +572,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           createdAtRange
         );
         allowedCandidateIds = team.candidateIds;
+        submittedOperatorEmails = team.operatorEmails;
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(
           userEmail!,
@@ -573,6 +580,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           createdAtRange
         );
         allowedCandidateIds = team.candidateIds;
+        submittedOperatorEmails = team.operatorEmails;
       } else {
         const merged = await mergeWorkHistoryForIstDates({
           mode: 'ca',
@@ -580,13 +588,17 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           dates: istDatesForWorkHistory(parsedRange),
         });
         allowedCandidateIds = merged.candidateIds;
+        submittedOperatorEmails = userEmail ? [userEmail] : [];
       }
     }
 
-    const outcomes = await getSubmissionOutcomeCounts({
+    const [outcomes, submittedToday] = await Promise.all([
+      getSubmissionOutcomeCounts({
       createdAtRange,
       allowedCandidateIds,
-    });
+      }),
+      countSubmittedApplicationsSince(todayRange.startIso, unrestricted ? undefined : submittedOperatorEmails),
+    ]);
     const metrics = await getDashboardApplicationMetrics({
       createdAtRange,
       allowedCandidateIds,
@@ -608,6 +620,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         ? Number(((metrics.aiTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
         : 0,
       pipelineStatus: metrics.totalApplications > 0 ? 'READY' : 'IDLE',
+      submitted_today: submittedToday,
       dateRange: serializeDateRange(parsedRange),
     };
 
