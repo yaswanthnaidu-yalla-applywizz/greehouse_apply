@@ -423,7 +423,19 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   loadArtifacts(outputDir, { log: true });
   const app = express();
 
-  app.use(cors());
+  app.use(
+    cors({
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: [
+        'Authorization',
+        'Content-Type',
+        'X-View-As',
+        'X-View-As-Manager-Email',
+        'X-Dashboard-Date-Range',
+        'X-Work-History-Unreachable',
+      ],
+    })
+  );
   app.use(express.json());
 
   // Static directory for master resume PDFs
