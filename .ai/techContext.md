@@ -55,7 +55,8 @@ npm run db:backfill-company-email
 npm run db:clear             # Clear candidate_qa_bank answers
 
 # Build & Prod
-npm run build                # tsc compile → dist/
+npm run build                # tsc compile → dist/ + dashboard Tailwind CSS
+npm run build:dashboard-css  # dashboard/public/dashboard.css from HTML/JSX class names
 npm run start:prod           # node dist/server/index.js
 npm run daemon:prod          # node dist/submitter/queueWorker.js
 
@@ -249,7 +250,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Answer resolver orchestrator | `src/resolver/answerResolver.ts` |
 | LLM synthesizer | `src/resolver/llmSynthesizer.ts` |
 | Express server | `src/server/index.ts` |
-| **Operator UI (the one actually served)** | `dashboard/public/index.html` — inline Babel/JSX, served at `GET /` |
+| **Operator UI (the one actually served)** | `dashboard/public/index.html` (auth + shell) + lazy `operator-app.jsx`; static `dashboard.css`; served at `GET /` |
 | Manager UI | `dashboard/public/manager.html` → `GET /manager` |
 | Admin UI | `dashboard/public/admin.html` → `GET /admin` |
 | Dev UI | `dashboard/public/dev.html` → `GET /dev` |
