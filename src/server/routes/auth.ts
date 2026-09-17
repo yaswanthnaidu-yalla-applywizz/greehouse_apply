@@ -22,6 +22,7 @@ import { insertAuditEvent } from '../../db/events.js';
 import { syncDashboardUserAfterSignIn } from '../../services/operatorManagerMapping.js';
 import type { WorkHistoryResult } from '../../services/workHistoryClient.js';
 import { getDashboardUserByEmail } from '../../db/users.js';
+import { findAuthUserByEmail } from '../authUserLookup.js';
 import { normalizeAppRole } from './requireRole.js';
 
 const log = createLogger('Auth');
@@ -381,18 +382,13 @@ authRouter.post('/verify-email', async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // 2. Check if already exists in Supabase Auth
     const supabase = getDbClient();
-    const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
-    if (listError) {
-      log.error('[Auth] Failed to check existing auth users:', listError.message);
+    const { user: existingUser, error: lookupError } = await findAuthUserByEmail(normalizedEmail);
+    if (lookupError) {
+      log.error('[Auth] Failed to check existing auth users:', lookupError.message);
       res.status(500).json({ error: 'Failed to verify existing accounts.' });
       return;
     }
-
-    const existingUser = usersData?.users?.find(
-      (u) => normalizeAuthEmail(u.email) === normalizedEmail
-    );
 
     if (existingUser) {
       const factorsRes = await (supabase.auth.admin as any)._listFactors({ userId: existingUser.id });
@@ -448,18 +444,13 @@ authRouter.post('/send-signup-otp', async (req: Request, res: Response): Promise
       return;
     }
 
-    // 2. Check if account already exists
     const supabase = getDbClient();
-    const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
-    if (listError) {
-      log.error('[Auth] Failed to check existing accounts:', listError.message);
+    const { user: existingUser, error: lookupError } = await findAuthUserByEmail(normalizedEmail);
+    if (lookupError) {
+      log.error('[Auth] Failed to check existing accounts:', lookupError.message);
       res.status(500).json({ error: 'Failed to verify existing accounts.' });
       return;
     }
-
-    const existingUser = usersData?.users?.find(
-      (u) => normalizeAuthEmail(u.email) === normalizedEmail
-    );
 
     if (existingUser) {
       const factorsRes = await (supabase.auth.admin as any)._listFactors({ userId: existingUser.id });
@@ -535,10 +526,13 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
       return;
     }
 
-    // 2. Ensure user exists in Supabase Auth (create without password)
     const supabase = getDbClient();
-    const { data: usersData } = await supabase.auth.admin.listUsers();
-    let user = usersData?.users?.find((u) => normalizeAuthEmail(u.email) === normalizedEmail);
+    const { user: foundUser, error: lookupError } = await findAuthUserByEmail(normalizedEmail);
+    if (lookupError) {
+      res.status(500).json({ error: 'Failed to query user records.' });
+      return;
+    }
+    let user = foundUser;
 
     if (!user) {
       const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
@@ -676,16 +670,11 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 
     const supabase = getDbClient();
 
-    // 1. Locate user in Supabase Auth
-    const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
-    if (listError) {
+    const { user, error: lookupError } = await findAuthUserByEmail(normalizedEmail);
+    if (lookupError) {
       res.status(500).json({ error: 'Failed to query user records.' });
       return;
     }
-
-    const user = usersData?.users?.find(
-      (u) => normalizeAuthEmail(u.email) === normalizedEmail
-    );
 
     if (!user) {
       res.status(404).json({ error: 'Account not found. Please sign up.' });
