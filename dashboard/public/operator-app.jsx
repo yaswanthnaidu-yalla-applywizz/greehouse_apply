@@ -1196,6 +1196,8 @@
 
     // -------------------------------------------------------------
     // Horizontal Job Queue Tabs Component
+    // Per-job status is stored on App's Map (keyed by application id / job URL).
+    // Expand/collapse must not re-initialize that Map.
     // -------------------------------------------------------------
     const CARD_IN_FLIGHT_STATUSES = new Set([
       'QUEUED',
@@ -1205,12 +1207,63 @@
       'EMAIL_PROOF_PENDING',
     ]);
     const CARD_SUBMITTED_STATUSES = new Set(['APPLIED', 'DRY_RUN_COMPLETE', 'EMAIL_UNVERIFIED']);
+    const CARD_RESET_OK_STATUSES = new Set(['READY_FOR_REVIEW', 'APPROVED', 'PENDING']);
+
+    function jobCardStatusKeys(jobOrApp) {
+      if (!jobOrApp) return [];
+      const keys = [];
+      const id = jobOrApp.id || jobOrApp.applicationId;
+      if (id) keys.push(`id:${id}`);
+      const aw = String(jobOrApp.applywizzId || jobOrApp.applywizz_id || '').trim().toUpperCase();
+      const url =
+        jobOrApp.canonicalUrl ||
+        jobOrApp.rawUrl ||
+        jobOrApp.jobUrl ||
+        jobOrApp.job_url ||
+        '';
+      if (aw && url) keys.push(`job:${aw}::${url}`);
+      if (url) keys.push(`url:${url}`);
+      return keys;
+    }
+
+    function lookupJobCardStatus(statusMap, job) {
+      if (statusMap) {
+        for (const key of jobCardStatusKeys(job)) {
+          if (statusMap.has(key)) return statusMap.get(key);
+        }
+      }
+      return job.status || 'READY_FOR_REVIEW';
+    }
+
+    function shouldKeepStoredJobStatus(stored, incoming) {
+      if (!stored) return false;
+      if (!incoming || stored === incoming) return true;
+      if (CARD_RESET_OK_STATUSES.has(stored)) return false;
+      if (CARD_RESET_OK_STATUSES.has(incoming)) return true;
+      return false;
+    }
+
+    function writeJobCardStatus(statusMap, jobOrApp, status) {
+      if (!statusMap || !status) return false;
+      const keys = jobCardStatusKeys(jobOrApp);
+      if (keys.length === 0) return false;
+      let changed = false;
+      for (const key of keys) {
+        if (statusMap.get(key) !== status) {
+          statusMap.set(key, status);
+          changed = true;
+        }
+      }
+      return changed;
+    }
 
     function JobQueueView({
       candidate,
       selectedApplywizzId,
       selectedJobUrl,
       onSelectJob,
+      jobStatusById,
+      jobStatusEpoch,
     }) {
       const queueJobs = useMemo(() => {
         if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
@@ -1218,11 +1271,11 @@
         }
         const owned = filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
         return filterOperatorApplicationJobs(owned);
-      }, [candidate, selectedApplywizzId]);
+      }, [candidate, selectedApplywizzId, jobStatusEpoch]);
 
       const handleJobCardClick = (job) => {
         const jobKey = job.canonicalUrl || job.rawUrl;
-        const currentStatus = job.status || 'READY_FOR_REVIEW';
+        const currentStatus = lookupJobCardStatus(jobStatusById, job);
         const alreadyExpanded =
           selectedJobUrl === jobKey ||
           selectedJobUrl === job.rawUrl ||
@@ -1294,7 +1347,7 @@
             }).map((job, idx) => {
               const jobKey = job.canonicalUrl || job.rawUrl;
               const isSelected = selectedJobUrl === jobKey || selectedJobUrl === job.rawUrl || selectedJobUrl === job.canonicalUrl;
-              const cardStatus = job.status || 'READY_FOR_REVIEW';
+              const cardStatus = lookupJobCardStatus(jobStatusById, job);
               const cardCompany = jobCardCompanyLabel(job);
               const cardTitle = jobCardTitleLabel(job);
               const initial = cardCompany ? cardCompany[0].toUpperCase() : 'G';
@@ -2615,6 +2668,18 @@
       const [isNotifOpen, setIsNotifOpen] = useState(false);
       const notifRef = useRef(null);
       const selectedCandidateRef = useRef(null);
+      const jobStatusByIdRef = useRef(new Map());
+      const [jobStatusEpoch, setJobStatusEpoch] = useState(0);
+
+      const rememberJobCardStatus = (jobOrApp, incomingStatus, { force = false } = {}) => {
+        if (!jobOrApp || !incomingStatus) return;
+        const stored = lookupJobCardStatus(jobStatusByIdRef.current, jobOrApp);
+        if (!force && shouldKeepStoredJobStatus(stored, incomingStatus)) return;
+        if (writeJobCardStatus(jobStatusByIdRef.current, jobOrApp, incomingStatus)) {
+          setJobStatusEpoch((n) => n + 1);
+        }
+      };
+
       useEffect(() => {
         selectedCandidateRef.current = selectedCandidateId;
       }, [selectedCandidateId]);
@@ -2982,6 +3047,14 @@
               getAuthHeaders()
             );
             if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
+            for (const job of jobsWithTemplates) {
+              const incoming = job.status || 'READY_FOR_REVIEW';
+              rememberJobCardStatus(
+                { ...job, applywizzId: requestedId },
+                incoming,
+                { force: false }
+              );
+            }
             setCandidateDetail({
               ...detail,
               applywizzId: requestedId,
@@ -3067,6 +3140,7 @@
               return;
             }
             setApplication(appData);
+            rememberJobCardStatus(appData, appData.status || 'READY_FOR_REVIEW', { force: false });
           } else {
             setApplication(null);
           }
@@ -3107,6 +3181,19 @@
           const selectedId = selectedCandidateRef.current;
           const rowApplywizz = row.applywizz_id || '';
           if (selectedId && rowApplywizz && !isSameApplywizzId(rowApplywizz, selectedId)) return;
+
+          if (row.status) {
+            rememberJobCardStatus(
+              {
+                id: row.id,
+                applywizzId: row.applywizz_id,
+                jobUrl: row.job_url,
+                canonicalUrl: row.job_url,
+              },
+              row.status,
+              { force: !CARD_RESET_OK_STATUSES.has(String(row.status || '').toUpperCase()) }
+            );
+          }
 
           setApplication((prev) => mergeApplicationFromRealtimeRow(prev, row, selectedId));
           setCandidateDetail((prev) => {
@@ -3186,6 +3273,15 @@
 
       const handleStatusChange = async (newStatus, updatedPayload, options = {}) => {
         const persist = options.persist !== false;
+        const statusSource = {
+          id: updatedPayload?.id || updatedPayload?.applicationId || application?.id,
+          applywizzId: updatedPayload?.applywizzId || updatedPayload?.applywizz_id || application?.applywizzId || application?.applywizz_id,
+          jobUrl: updatedPayload?.jobUrl || updatedPayload?.job_url || application?.jobUrl || application?.job_url || selectedJobUrl,
+          canonicalUrl: updatedPayload?.jobUrl || updatedPayload?.job_url || application?.jobUrl || application?.job_url || selectedJobUrl,
+        };
+        if (newStatus) {
+          rememberJobCardStatus(statusSource, newStatus, { force: true });
+        }
         if (!application) return;
         // Poll-originated updates only refresh the display — echoing a polled status
         // back would requeue a submission a worker is still running.
@@ -3888,6 +3984,8 @@
                       candidate={candidateDetail}
                       selectedApplywizzId={selectedCandidateId}
                       selectedJobUrl={selectedJobUrl}
+                      jobStatusById={jobStatusByIdRef.current}
+                      jobStatusEpoch={jobStatusEpoch}
                       onSelectJob={(url) => {
                         setSelectedJobUrl(url);
                         if (!url) {
