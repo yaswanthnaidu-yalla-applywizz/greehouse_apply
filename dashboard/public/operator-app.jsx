@@ -600,6 +600,29 @@
       );
     }
 
+    function applicationResolvedFields(app) {
+      const camel = app?.resolvedFields;
+      const snake = app?.resolved_fields;
+      if (Array.isArray(camel) && camel.length > 0) return camel;
+      if (Array.isArray(snake) && snake.length > 0) return snake;
+      if (Array.isArray(snake)) return snake;
+      if (Array.isArray(camel)) return camel;
+      return [];
+    }
+
+    function resolvedFieldMatchesUpdate(f, updatedField) {
+      if (updatedField.fieldId && (f.fieldId === updatedField.fieldId || f.name === updatedField.fieldId)) {
+        return true;
+      }
+      if (updatedField.name && (f.fieldId === updatedField.name || f.name === updatedField.name)) {
+        return true;
+      }
+      if (updatedField.label && f.label === updatedField.label) {
+        return true;
+      }
+      return false;
+    }
+
     // -------------------------------------------------------------
     // Editable Form Field Component
     // -------------------------------------------------------------
@@ -641,10 +664,16 @@
       const executeSave = async () => {
         setIsSaving(true);
         setError(null);
+        const fieldKey = field.fieldId || field.name;
+        if (!fieldKey) {
+          setError('Cannot save: field has no identifier.');
+          setIsSaving(false);
+          return;
+        }
 
         try {
           const response = await fetch(
-            `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}`,
+            `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(fieldKey)}`,
             {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -661,7 +690,16 @@
           setIsConfirming(false);
           setIsEditing(false);
           if (onFieldUpdate) {
-            onFieldUpdate(updatedField);
+            onFieldUpdate({
+              ...field,
+              ...updatedField,
+              fieldId: updatedField.fieldId || field.fieldId || field.name,
+              name: updatedField.name || field.name || field.fieldId,
+              label: updatedField.label || field.label,
+              value,
+              source: 'manual',
+              isEdited: true,
+            });
           }
         } catch (err) {
           console.error('Failed to update field:', err);
@@ -1273,13 +1311,6 @@
         return filterOperatorApplicationJobs(owned);
       }, [candidate, selectedApplywizzId, jobStatusEpoch]);
 
-      const activeJobsCount = useMemo(() => {
-        return queueJobs.filter((job) => {
-          const st = (lookupJobCardStatus(jobStatusById, job) || '').toUpperCase();
-          return st === 'READY_FOR_REVIEW' || st === 'APPROVED';
-        }).length;
-      }, [queueJobs, jobStatusById, jobStatusEpoch]);
-
       const handleJobCardClick = (job) => {
         const jobKey = job.canonicalUrl || job.rawUrl;
         const currentStatus = lookupJobCardStatus(jobStatusById, job);
@@ -1326,7 +1357,7 @@
                 Assigned Applications Queue
               </span>
               <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#1A1A2E] text-[#1E3A5F] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
-                {activeJobsCount} Active
+                {queueJobs.length} Active
               </span>
               <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#1A1A2E] text-[#1E4620] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
                 ⚡ &lt; 35 Qs
@@ -2349,15 +2380,11 @@
 
     function withQueueJobCount(candidates, applywizzId, jobs) {
       if (!Array.isArray(candidates) || !applywizzId) return candidates;
-      const owned = filterJobsForCandidate(jobs || [], applywizzId);
-      const liveCount = (owned || []).filter((j) => {
-        const st = (j.status || 'READY_FOR_REVIEW').toUpperCase();
-        return st === 'READY_FOR_REVIEW' || st === 'APPROVED';
-      }).length;
+      const liveCount = filterOperatorApplicationJobs(
+        filterJobsForCandidate(jobs || [], applywizzId)
+      ).length;
       return candidates.map((c) =>
-        isSameApplywizzId(c.applywizzId, applywizzId)
-          ? { ...c, job_count: liveCount, totalJobs: liveCount }
-          : c
+        isSameApplywizzId(c.applywizzId, applywizzId) ? { ...c, totalJobs: liveCount } : c
       );
     }
 
@@ -3270,15 +3297,22 @@
       }, [currentUser, selectedCandidateId]);
 
       const handleFieldUpdate = (updatedField) => {
-        if (!application) return;
-        const fields = application.resolvedFields || application.resolved_fields || [];
-        const newResolvedFields = fields.map((f) =>
-          f.fieldId === updatedField.fieldId || f.name === updatedField.fieldId ? updatedField : f
-        );
-        setApplication({
-          ...application,
-          resolvedFields: newResolvedFields,
-          resolved_fields: newResolvedFields,
+        setApplication((prev) => {
+          if (!prev) return prev;
+          const fields = applicationResolvedFields(prev);
+          const merged = {
+            ...updatedField,
+            source: updatedField.source || 'manual',
+            isEdited: updatedField.isEdited !== false,
+          };
+          const newResolvedFields = fields.map((f) =>
+            resolvedFieldMatchesUpdate(f, merged) ? { ...f, ...merged } : f
+          );
+          return {
+            ...prev,
+            resolvedFields: newResolvedFields,
+            resolved_fields: newResolvedFields,
+          };
         });
       };
 
@@ -3502,10 +3536,6 @@
                   <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E3A5F] shadow-[1px_1px_0px_#1A1A2E]">
                     <span>Jobs:</span>
                     <span>{stats.totalApplications}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5C4A0A] shadow-[1px_1px_0px_#1A1A2E]">
-                    <span>Done today:</span>
-                    <span>{stats.submitted_today ?? 0}</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E4620] shadow-[1px_1px_0px_#1A1A2E]">
@@ -3810,17 +3840,6 @@
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
                       {stats.totalCandidates}
-                    </div>
-                    <div className="bg-[#F4D66B] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[#5C4A0A]">
-                        Jobs Done Today
-                      </span>
-                      <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                        {stats.submitted_today ?? 0}
-                      </div>
-                      <div className="text-[11px] font-mono text-[#5C4A0A] mt-1">
-                        Queued or submitted today
-                      </div>
                     </div>
                     <div className="text-[11px] font-mono text-[#5C4A0A] mt-1">
                       Ingested &amp; segregated
