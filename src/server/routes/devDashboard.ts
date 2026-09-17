@@ -8,6 +8,7 @@ import {
   getISTDateRangeUtc,
   hydrateApplicationProofUrls,
   listApplications,
+  countSubmittedApplicationsSince,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { listApplicationEvents } from '../../db/events.js';
@@ -66,12 +67,14 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
     const date =
       dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : getISTDateString();
     const { startIso, endIso } = getISTDateRangeUtc(date);
+    const todayStart = getISTDateRangeUtc(getISTDateString()).startIso;
     const submitClicks = await countAuditEventsByActionInRange({
       action: SUBMIT_CLICK_AUDIT_ACTION,
       startIso,
       endIso,
     });
-    res.json({ ...(await collectHealthSnapshot()), submitClicks, submitClicksDate: date });
+    const submittedToday = await countSubmittedApplicationsSince(todayStart);
+    res.json({ ...(await collectHealthSnapshot()), submitClicks, submitClicksDate: date, submitted_today: submittedToday });
   } catch (error) {
     log.error('[Dev] health failed:', error);
     res.status(500).json({ error: 'Unable to load health snapshot.' });

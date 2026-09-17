@@ -6,6 +6,7 @@ import { Router, type Request, type Response } from 'express';
 import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
+  countSubmittedApplicationsSince,
   getISTDateRangeUtc,
   type ApplicationStatus,
 } from '../../db/applications.js';
@@ -57,6 +58,7 @@ adminDashboardRouter.get('/overview', async (req: Request, res: Response): Promi
     const date =
       dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : getISTDateString();
     const { startIso, endIso } = getISTDateRangeUtc(date);
+    const todayStart = getISTDateRangeUtc(getISTDateString()).startIso;
 
     const directory = await listAuthDirectory();
     const managers = directory.filter((user) => user.role === 'manager');
@@ -71,13 +73,14 @@ adminDashboardRouter.get('/overview', async (req: Request, res: Response): Promi
       countApplicationsByStatus('APPLYING'),
       countApplicationsByStatus('FAILED'),
     ]);
-    const [audit, submitClicks] = await Promise.all([
+    const [audit, submitClicks, submittedToday] = await Promise.all([
       listAuditEvents({ limit: 15 }),
       countAuditEventsByActionInRange({
         action: SUBMIT_CLICK_AUDIT_ACTION,
         startIso,
         endIso,
       }),
+      countSubmittedApplicationsSince(todayStart),
     ]);
 
     res.json({
@@ -91,6 +94,7 @@ adminDashboardRouter.get('/overview', async (req: Request, res: Response): Promi
       applicationsFailed: failed,
       submitClicks,
       submitClicksDate: date,
+      submitted_today: submittedToday,
       recentActivity: audit.events,
       warning: audit.warning,
       generatedAt: new Date().toISOString(),
