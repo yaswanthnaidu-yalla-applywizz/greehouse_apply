@@ -600,6 +600,29 @@
       );
     }
 
+    function applicationResolvedFields(app) {
+      const camel = app?.resolvedFields;
+      const snake = app?.resolved_fields;
+      if (Array.isArray(camel) && camel.length > 0) return camel;
+      if (Array.isArray(snake) && snake.length > 0) return snake;
+      if (Array.isArray(snake)) return snake;
+      if (Array.isArray(camel)) return camel;
+      return [];
+    }
+
+    function resolvedFieldMatchesUpdate(f, updatedField) {
+      if (updatedField.fieldId && (f.fieldId === updatedField.fieldId || f.name === updatedField.fieldId)) {
+        return true;
+      }
+      if (updatedField.name && (f.fieldId === updatedField.name || f.name === updatedField.name)) {
+        return true;
+      }
+      if (updatedField.label && f.label === updatedField.label) {
+        return true;
+      }
+      return false;
+    }
+
     // -------------------------------------------------------------
     // Editable Form Field Component
     // -------------------------------------------------------------
@@ -641,10 +664,16 @@
       const executeSave = async () => {
         setIsSaving(true);
         setError(null);
+        const fieldKey = field.fieldId || field.name;
+        if (!fieldKey) {
+          setError('Cannot save: field has no identifier.');
+          setIsSaving(false);
+          return;
+        }
 
         try {
           const response = await fetch(
-            `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}`,
+            `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(fieldKey)}`,
             {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -661,7 +690,16 @@
           setIsConfirming(false);
           setIsEditing(false);
           if (onFieldUpdate) {
-            onFieldUpdate(updatedField);
+            onFieldUpdate({
+              ...field,
+              ...updatedField,
+              fieldId: updatedField.fieldId || field.fieldId || field.name,
+              name: updatedField.name || field.name || field.fieldId,
+              label: updatedField.label || field.label,
+              value,
+              source: 'manual',
+              isEdited: true,
+            });
           }
         } catch (err) {
           console.error('Failed to update field:', err);
@@ -3259,15 +3297,22 @@
       }, [currentUser, selectedCandidateId]);
 
       const handleFieldUpdate = (updatedField) => {
-        if (!application) return;
-        const fields = application.resolvedFields || application.resolved_fields || [];
-        const newResolvedFields = fields.map((f) =>
-          f.fieldId === updatedField.fieldId || f.name === updatedField.fieldId ? updatedField : f
-        );
-        setApplication({
-          ...application,
-          resolvedFields: newResolvedFields,
-          resolved_fields: newResolvedFields,
+        setApplication((prev) => {
+          if (!prev) return prev;
+          const fields = applicationResolvedFields(prev);
+          const merged = {
+            ...updatedField,
+            source: updatedField.source || 'manual',
+            isEdited: updatedField.isEdited !== false,
+          };
+          const newResolvedFields = fields.map((f) =>
+            resolvedFieldMatchesUpdate(f, merged) ? { ...f, ...merged } : f
+          );
+          return {
+            ...prev,
+            resolvedFields: newResolvedFields,
+            resolved_fields: newResolvedFields,
+          };
         });
       };
 
