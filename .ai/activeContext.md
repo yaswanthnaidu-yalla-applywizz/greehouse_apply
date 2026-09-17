@@ -2,7 +2,19 @@
 
 _Last updated: 2026-09-17_
 
+## Docs
+
+- **`OVERVIEW.md`** (repo root, 2026-09-17) — four-perspective analysis (architect / developer / product / critique) with Mermaid diagrams. Not a sprint tracker; use this file for current focus.
+
 ## Current Focus
+
+### 0e. Planned — Dashboard UI: bundled TSX (not started; info only)
+- **Today (production):** Express serves `dashboard/public/*.html` + lazy `operator-app.jsx`; Babel Standalone on CDN compiles JSX in the browser. Styles: `dashboard/public/dashboard.css` (`npm run build:dashboard-css`). **`dashboard/App.tsx` and `components/*.tsx` are not served** — `dashboard/tsconfig.json` is `noEmit`; root `tsc` only builds `src/` → `dist/`.
+- **Why two trees:** Historical inline-HTML approach vs typed mirror for `npm run typecheck:dashboard`. Operator fixes ship in **`index.html` / `operator-app.jsx`** until migration; `.tsx` can drift (see `.ai/progress.md` gotcha).
+- **Target (recommended):** Vite (or similar) **multi-entry** build → static JS in `dashboard/public/`; thin HTML shells per route; drop in-browser Babel.
+- **Migration order:** (1) operator — `App.tsx` entry, parity with `operator-app.jsx`; (2) manager — `ManagerDashboard.tsx` + `main-manager.tsx`; (3) **port** admin/dev from `admin.html` / `dev.html` (no `.tsx` exists yet); (4) delete duplicate Babel blocks + `operator-app.jsx`.
+- **Routes unchanged:** `GET /`, `/manager`, `/admin`, `/dev` stay role-guarded HTML; only assets become pre-built bundles. Shared `DevSwitcher` / auth → TS modules, not four copy-paste HTML files.
+- **Not a flip-switch:** needs CI/Railway `build:dashboard` step; cannot “use App.tsx only” without bundler + admin/dev port + QA on all four roles.
 
 ### 0a. Planned — Admin System ingest status bar (not started)
 - **Problem:** `/admin` **System** tab only shows one line (`Ingest: running | idle | failed`); header **▶ Start** polls `GET /api/admin/ingest-status` but progress is easy to miss during long Playwright runs.
@@ -21,6 +33,11 @@ _Last updated: 2026-09-17_
 ### 0b. Pipeline compact progress logs (local — deploy with next push)
 - **Playwright:** `[Playwright Scanner] progress N/M …` every 100 URLs or 120s in compact mode (plus existing `scan complete`).
 - **Pipeline:** `[Pipeline] phase A/B/C/D …` one-liners in compact mode; **Storage CSV Ingestion** `pipeline start` / existing `pipeline complete`.
+
+### 0d. Dashboard role + candidate hydration (shipped `3b42135`)
+- **`resolveRoleFromRequest`:** same precedence as sign-in (`resolveEffectiveAppRole`) so dev email map wins over JWT `app_metadata.operator`.
+- **`GET /api/candidates`:** unrestricted roles supplement list from `distinctApplywizzIdsForCreatedAtRange`; skip `zoho_connected_profiles` filter when unrestricted.
+- **Manager team scope:** union work-history + **`applywizzIdsForManagerTeamProfiles`** + DB operator emails.
 
 ### 0. Admin / manager dashboard metrics (local — ship after upcoming fixes)
 - **`GET /api/admin/managers`** — `adminManagerStats.ts` (operators / clients / apps / 48h active), not date-scoped client rollup.
