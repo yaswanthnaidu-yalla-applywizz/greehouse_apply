@@ -58,6 +58,42 @@ export interface FormFillSummary {
   results: FieldFillResult[];
 }
 
+function sanitizeResumeNamePart(value: string | null | undefined, fallback: string): string {
+  const sanitized = (value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
+  return sanitized || fallback;
+}
+
+function resumeJobShortcode(companyName: string, jobTitle: string): string {
+  const jobContext = `${companyName} ${jobTitle}`;
+  if (/software\s*engineer|developer|engineering/i.test(jobContext)) return 'SDE';
+  if (/data\s*analyst|data\s*science|analytics/i.test(jobContext)) return 'DA';
+  if (/product\s*manager/i.test(jobContext)) return 'PM';
+  if (/business\s*analyst/i.test(jobContext)) return 'BA';
+  if (/marketing/i.test(jobContext)) return 'MKT';
+  if (/finance|accounting/i.test(jobContext)) return 'FIN';
+  if (/designer|ux/i.test(jobContext)) return 'UX';
+  if (/devops|cloud|infrastructure/i.test(jobContext)) return 'OPS';
+  return 'GEN';
+}
+
+function buildResumeFilename(
+  profile: ProfileRow | null,
+  companyName: string,
+  jobTitle: string
+): string {
+  const clientNameParts = (profile?.client_name || '').trim().split(/\s+/).filter(Boolean);
+  const firstName = sanitizeResumeNamePart(profile?.first_name || clientNameParts[0], 'candidate');
+  const lastName = sanitizeResumeNamePart(
+    profile?.last_name || clientNameParts.slice(1).join(' ') || clientNameParts[0],
+    'resume'
+  );
+  return `resume_${firstName}_${lastName}_${resumeJobShortcode(companyName, jobTitle)}.pdf`;
+}
+
 /**
  * Generates a randomized delay between [minMs, maxMs].
  */
@@ -563,7 +599,8 @@ export async function fillSingleField(
   field: ResolvedField,
   applywizzId: string,
   tempFilesToClean: string[],
-  options: FormFillerOptions = {}
+  options: FormFillerOptions = {},
+  resumeFilename?: string
 ): Promise<FieldFillResult> {
   const timeoutMs = options.timeoutMs ?? 5000;
   let val = (field.value ?? '').trim();
@@ -573,6 +610,13 @@ export async function fillSingleField(
   const label = field.label || name;
   const isCountryCode = isCountryCodeField(fieldId, name, label);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
+  const isForcedCountryField =
+    /country/i.test(label) &&
+    ['text', 'select', 'radio', 'location_autocomplete'].includes(rawType);
+  if (isForcedCountryField) {
+    val = 'United States';
+    log.info(`Country field detected — forcing United States for field=${label}`);
+  }
 
   const fillResult: FieldFillResult = {
     fieldId,
@@ -638,6 +682,11 @@ export async function fillSingleField(
       } else {
         try {
           tempResumePath = await downloadResumeTempFile(applywizzId);
+          if (resumeFilename) {
+            const renamedResumePath = path.join(path.dirname(tempResumePath), resumeFilename);
+            fs.renameSync(tempResumePath, renamedResumePath);
+            tempResumePath = renamedResumePath;
+          }
           tempFilesToClean.push(tempResumePath);
         } catch (dlErr: any) {
           if (isDemoResumeApplywizzId(applywizzId)) {
@@ -1522,6 +1571,15 @@ export async function fillForm(
   const applywizzId: string = appObj.applywizz_id || appObj.applywizzId || '';
   const appId: string = appObj.id || applywizzId || 'unknown-app';
   const jobUrl: string = appObj.job_url || appObj.jobUrl || page.url();
+  const companyName = appObj.company_name || appObj.companyName || '';
+  const jobTitle = appObj.job_title || appObj.jobTitle || '';
+  let profile: ProfileRow | null = null;
+  try {
+    profile = await getProfile(applywizzId);
+  } catch (profileErr: any) {
+    log.warn(`[Form Filler] ⚠️ Could not load profile for resume filename: ${profileErr.message}`);
+  }
+  const resumeFilename = buildResumeFilename(profile, companyName, jobTitle);
 
   // Normalize resolved fields array
   const rawFields = appObj.resolved_fields || appObj.resolvedFields || [];
@@ -1547,7 +1605,14 @@ export async function fillForm(
       const field = isConsentSmsMarketingField(fields[i].label || '')
         ? applyConsentSmsMarketingNo(fields[i])
         : fields[i];
-      const fillRes = await fillSingleField(page, field, applywizzId, tempFilesToClean, options);
+      const fillRes = await fillSingleField(
+        page,
+        field,
+        applywizzId,
+        tempFilesToClean,
+        options,
+        resumeFilename
+      );
       results.push(fillRes);
 
       // Apply human-like randomized jitter before next field
@@ -1562,7 +1627,6 @@ export async function fillForm(
 
     // Lazy-loaded resolution context
     let resolver: AnswerResolver | null = null;
-    let profile: ProfileRow | null = null;
     let parsedResume: ResumeParsedRow | null = null;
     let qaEntries: QABankRow[] | undefined = undefined;
 
@@ -1602,8 +1666,8 @@ export async function fillForm(
             parsedResume,
             qaEntries,
             jobContext: {
-              companyName: appObj.company_name || appObj.companyName || '',
-              jobTitle: appObj.job_title || appObj.jobTitle || '',
+              companyName,
+              jobTitle,
             },
           });
         }
@@ -1613,7 +1677,14 @@ export async function fillForm(
         );
 
         // Fill the newly resolved field
-        const fillRes = await fillSingleField(page, resolved, applywizzId, tempFilesToClean, options);
+        const fillRes = await fillSingleField(
+          page,
+          resolved,
+          applywizzId,
+          tempFilesToClean,
+          options,
+          resumeFilename
+        );
         results.push(fillRes);
 
         // Keep application resolved_fields updated

@@ -24,7 +24,14 @@ import { verifySubmissionSignals, registerSubmissionSession } from '../../submit
 import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } from '../../submitter/proofCapture.js';
 import { emailProofPoller } from '../../submitter/emailProofPoller.js';
 import { fillForm } from '../../submitter/formFiller.js';
-import { getApplication, updateStatus, enqueueApplication, hydrateApplicationProofUrls } from '../../db/applications.js';
+import {
+  getApplication,
+  updateStatus,
+  enqueueApplication,
+  hydrateApplicationProofUrls,
+  requeueApplicationForRetry,
+} from '../../db/applications.js';
+import { getRetryReason } from '../../submitter/submissionRetry.js';
 import { isUserAdmin } from './auth.js';
 import {
   assertApplywizzZohoConnected,
@@ -263,6 +270,21 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
     } else {
       const failReason = result.errorMessage || 'Submission failed.';
+      const retryReason = getRetryReason(result);
+      if (retryReason) {
+        const retry = await requeueApplicationForRetry(appId, retryReason, req.body?.jobUrl);
+        if (retry.requeued) {
+          res.status(202).json({
+            success: false,
+            status: 'QUEUED',
+            applicationId: result.applicationId,
+            retryCount: retry.retryCount,
+            message: `Retrying submission (${retry.retryCount}/3).`,
+            summary: result.summary,
+          });
+          return;
+        }
+      }
       await updateStatus(appId, (result.status as any) || 'FAILED', {
         error_message: failReason,
         proof_failed_url: result.proofFailedUrl,
@@ -285,6 +307,20 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${err.message}`);
       respondEligibilityBlockedAsQueued(res, appId);
       return;
+    }
+    const retryReason = getRetryReason(err instanceof Error ? err : String(err));
+    if (retryReason) {
+      const retry = await requeueApplicationForRetry(appId, retryReason, req.body?.jobUrl);
+      if (retry.requeued) {
+        res.status(202).json({
+          success: false,
+          status: 'QUEUED',
+          applicationId: appId,
+          retryCount: retry.retryCount,
+          message: `Retrying submission (${retry.retryCount}/3).`,
+        });
+        return;
+      }
     }
     log.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
     await updateStatus(appId, 'FAILED', {

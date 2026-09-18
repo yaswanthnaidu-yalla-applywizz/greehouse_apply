@@ -11,7 +11,7 @@ import {
   updateResumeStoragePath,
   type ProfileRow,
 } from '../db/profiles.js';
-import { uploadResume } from '../db/storage.js';
+import { uploadResume, type ResumeNamingProfile } from '../db/storage.js';
 import type { ApplyWizzCandidateProfile } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
@@ -40,7 +40,7 @@ export interface EnsureSupabaseProfileDeps {
   getProfile: (id: string) => Promise<ProfileRow | null>;
   upsertProfile: (row: Partial<ProfileRow> & { applywizz_id: string; client_name: string }) => Promise<ProfileRow>;
   updateResumeStoragePath: (id: string, path: string) => Promise<void>;
-  uploadResume: (id: string, buffer: Buffer) => Promise<string>;
+  uploadResume: (id: string, buffer: Buffer, mimeType?: string, profile?: ResumeNamingProfile) => Promise<string>;
 }
 
 const defaultDeps: EnsureSupabaseProfileDeps = {
@@ -95,7 +95,11 @@ export async function ensureSupabaseProfile(
       try {
         if (fs.existsSync(localPath) && fs.statSync(localPath).size > 100) {
           const buffer = await fs.promises.readFile(localPath);
-          resumeStoragePath = await ports.uploadResume(id, buffer);
+          resumeStoragePath = await ports.uploadResume(id, buffer, 'application/pdf', {
+            firstName: profile.firstName,
+            lastName: profile.lastName,
+            workExperience: profile.workExperience,
+          });
         }
       } catch (uploadErr: any) {
         log.warn(

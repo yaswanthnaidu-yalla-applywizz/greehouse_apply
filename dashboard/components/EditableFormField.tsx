@@ -30,6 +30,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   const [isConfirming, setIsConfirming] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showHint, setShowHint] = useState(true);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -103,6 +104,26 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     setError(null);
     setIsConfirming(false);
     setIsEditing(false);
+  };
+
+  const getHintText = (): string => {
+    const type = (field.type || '').toLowerCase();
+    if (type === 'text' || type === 'textarea') {
+      return 'Enter a specific answer. Example: years of experience, a number, a short sentence.';
+    }
+    if (type === 'select' || type === 'radio') {
+      return 'Choose the option that best matches the candidate\'s profile.';
+    }
+    if (type === 'checkbox') {
+      return 'Check if applicable based on candidate\'s background.';
+    }
+    if (type === 'file') {
+      return 'Upload the required document.';
+    }
+    if (type === 'location_autocomplete') {
+      return 'Enter city, state, or country as applicable.';
+    }
+    return 'Provide a clear, specific answer for this field.';
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

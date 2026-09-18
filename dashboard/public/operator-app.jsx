@@ -1,43 +1,9 @@
     const { useState, useEffect, useCallback, useMemo, useRef } = React;
     const API_BASE_URL = window.location.origin;
+    const RETRYABLE_FAILURE_PATTERN = /otp|one.?time|security.?code|unresolved.?required/i;
 
     function getAuthHeaders() {
       return ApplyWizzRoles.getAuthHeaders();
-    }
-
-    // -------------------------------------------------------------
-    // Difficulty Badge Component
-    // -------------------------------------------------------------
-    function DifficultyBadge({ fieldsCount, level, className = '' }) {
-      let resolvedLevel = level;
-      if (!resolvedLevel) {
-        if (fieldsCount === undefined || fieldsCount === null) resolvedLevel = 'Easy';
-        else if (fieldsCount < 10) resolvedLevel = 'Easy';
-        else if (fieldsCount <= 18) resolvedLevel = 'Medium';
-        else resolvedLevel = 'Hard';
-      }
-
-      if (resolvedLevel === 'Easy') {
-        return (
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
-            Easy
-          </span>
-        );
-      }
-
-      if (resolvedLevel === 'Medium') {
-        return (
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
-            Medium
-          </span>
-        );
-      }
-
-      return (
-        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
-          Hard
-        </span>
-      );
     }
 
     // -------------------------------------------------------------
@@ -632,12 +598,14 @@
       const [isConfirming, setIsConfirming] = useState(false);
       const [isSaving, setIsSaving] = useState(false);
       const [error, setError] = useState(null);
+      const [showHint, setShowHint] = useState(field.source === 'unresolved');
       const inputRef = useRef(null);
       const confirmBtnRef = useRef(null);
 
       useEffect(() => {
         setValue(field.value || '');
-      }, [field.value]);
+        setShowHint(field.source === 'unresolved');
+      }, [field.value, field.source]);
 
       useEffect(() => {
         if (isEditing && !isConfirming && inputRef.current) {
@@ -731,6 +699,19 @@
 
       const isTextarea = field.type === 'textarea';
       const isUnresolved = field.source === 'unresolved';
+      const fieldType = String(field.field_type || field.type || '').toLowerCase();
+      const unresolvedHint =
+        fieldType === 'text' || fieldType === 'textarea'
+          ? 'Enter a specific answer. Example: years of experience, a number, a short sentence.'
+          : fieldType === 'select' || fieldType === 'radio'
+          ? "Choose the option that best matches the candidate's profile."
+          : fieldType === 'checkbox'
+          ? "Check if applicable based on candidate's background."
+          : fieldType === 'file'
+          ? 'Upload the required document.'
+          : fieldType === 'location_autocomplete'
+          ? 'Enter city, state, or country as applicable.'
+          : 'Provide a clear, specific answer for this field.';
 
       return (
         <div
@@ -745,6 +726,11 @@
               <label className="text-xs font-bold text-[#1A1A2E] flex items-center gap-1.5">
                 <span>{field.label}</span>
                 {(field.isRequired || field.required) && <span className="text-[#EF4444] font-bold">*</span>}
+                {field.jobCount > 1 && (
+                  <span className="text-[10px] font-mono text-[#64748B] bg-[#F1F5F9] border border-[#CBD5E1] px-1.5 py-0.5 rounded">
+                    Asked on {field.jobCount} jobs
+                  </span>
+                )}
                 <span className="text-[10px] font-mono text-[#64748B] font-normal">({field.type})</span>
               </label>
             </div>
@@ -775,7 +761,11 @@
                 <textarea
                   ref={inputRef}
                   value={value}
-                  onChange={(e) => setValue(e.target.value)}
+                  onFocus={() => setShowHint(false)}
+                  onChange={(e) => {
+                    setShowHint(false);
+                    setValue(e.target.value);
+                  }}
                   onKeyDown={handleKeyDown}
                   disabled={isSaving || isConfirming}
                   rows={3}
@@ -786,11 +776,18 @@
                   ref={inputRef}
                   type="text"
                   value={value}
-                  onChange={(e) => setValue(e.target.value)}
+                  onFocus={() => setShowHint(false)}
+                  onChange={(e) => {
+                    setShowHint(false);
+                    setValue(e.target.value);
+                  }}
                   onKeyDown={handleKeyDown}
                   disabled={isSaving || isConfirming}
                   className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
                 />
+              )}
+              {isUnresolved && showHint && (
+                <p className="mt-1.5 text-[10px] text-[#64748B]">{unresolvedHint}</p>
               )}
 
               {!isConfirming ? (
@@ -1392,6 +1389,9 @@
               const inProgress = CARD_IN_FLIGHT_STATUSES.has(cardStatus);
               const submitted = CARD_SUBMITTED_STATUSES.has(cardStatus);
               const failed = cardStatus === 'FAILED';
+              const retryableFailure =
+                failed &&
+                RETRYABLE_FAILURE_PATTERN.test(job.errorMessage || job.error_message || '');
               const expiredOrSkipped = cardStatus === 'EXPIRED' || cardStatus === 'SKIPPED';
               let cardChrome = isSelected
                 ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
@@ -1430,7 +1430,6 @@
                         {cardCompany}
                       </span>
                     </div>
-                    <DifficultyBadge fieldsCount={job.fieldsCount} />
                   </div>
 
                   <div className="text-xs text-[#1A1A2E] font-medium truncate mb-1">
@@ -1455,6 +1454,11 @@
                       {failed && (
                         <span className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
                           ❌ Failed
+                        </span>
+                      )}
+                      {retryableFailure && (
+                        <span className="text-[10px] font-mono text-[#9A3412] font-bold bg-[#FED7AA] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                          Retry
                         </span>
                       )}
                       {cardStatus === 'EXPIRED' && (
@@ -1534,6 +1538,8 @@
     function FormRenderer({ application, isLoading, candidateName, onFieldUpdate, onStatusChange }) {
       const [isSubmitting, setIsSubmitting] = useState(false);
       const [isDryRunning, setIsDryRunning] = useState(false);
+      const [isRetrying, setIsRetrying] = useState(false);
+      const [retryError, setRetryError] = useState('');
       const [viewerOpen, setViewerOpen] = useState(false);
       const [viewerImageUrl, setViewerImageUrl] = useState(null);
       const [viewerTitle, setViewerTitle] = useState('Application Proof');
@@ -1661,9 +1667,47 @@
         (f) => !isDemographic(f.label) || f.source === 'ai' || f.source === 'unresolved' || (f.isRequired || f.required)
       );
 
-      const displayFields = filterActionableOnly && actionableFields.length > 0
+      const baseFields = filterActionableOnly && actionableFields.length > 0
         ? actionableFields
         : visuallyRenderedFields;
+      const fieldsByFingerprint = new Map();
+      baseFields.forEach((field) => {
+        const fingerprint = field.question_fingerprint;
+        if (!fingerprint) {
+          field.jobCount = 1;
+          fieldsByFingerprint.set(Symbol(), field);
+          return;
+        }
+        const existing = fieldsByFingerprint.get(fingerprint);
+        if (existing) {
+          existing.jobCount = (existing.jobCount || 1) + 1;
+        } else {
+          field.jobCount = 1;
+          fieldsByFingerprint.set(fingerprint, field);
+        }
+      });
+      const displayFields = Array.from(fieldsByFingerprint.values()).sort((a, b) => {
+        const aReq = a.isRequired || a.required ? 0 : 1;
+        const bReq = b.isRequired || b.required ? 0 : 1;
+        return aReq - bReq;
+      });
+      const displayedFingerprints = new Set(
+        displayFields.map((field) => field.question_fingerprint).filter(Boolean)
+      );
+      const aiResolvedFields = [];
+      const seenAiFingerprints = new Set();
+      fields.forEach((field) => {
+        if (field.source !== 'ai' || displayFields.includes(field)) return;
+        const fingerprint = field.question_fingerprint;
+        if (fingerprint && (displayedFingerprints.has(fingerprint) || seenAiFingerprints.has(fingerprint))) return;
+        if (fingerprint) seenAiFingerprints.add(fingerprint);
+        aiResolvedFields.push(field);
+      });
+      const [aiResolvedOpen, setAiResolvedOpen] = useState(false);
+
+      useEffect(() => {
+        setAiResolvedOpen(false);
+      }, [appId, jobUrl]);
 
       const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
       const currentField = displayFields[boundedIndex];
@@ -1824,6 +1868,38 @@
         }
       };
 
+      const handleRetrySubmission = async () => {
+        if (isRetrying) return;
+        setIsRetrying(true);
+        setRetryError('');
+        try {
+          const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/retry`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ jobUrl }),
+          });
+          if (!res.ok) {
+            setRetryError(
+              res.status === 400
+                ? 'This failure type cannot be retried automatically'
+                : 'Retry request failed. Please try again.'
+            );
+            return;
+          }
+          if (onStatusChange) {
+            onStatusChange(
+              'QUEUED',
+              { status: 'QUEUED', error_message: null, errorMessage: null },
+              { persist: false }
+            );
+          }
+        } catch (err) {
+          setRetryError('Retry request failed. Please try again.');
+        } finally {
+          setIsRetrying(false);
+        }
+      };
+
       return (
         <div className="flex-1 overflow-y-auto px-5 py-3.5 md:px-7 md:py-4 max-w-5xl mx-auto w-full custom-scrollbar">
           <SubmitCelebration
@@ -1865,7 +1941,6 @@
                   <span className="text-[11px] font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] px-1.5 py-0.5 rounded border border-[#1A1A2E]">
                     {application.applywizzId || application.applywizz_id}
                   </span>
-                  <DifficultyBadge fieldsCount={fields.length} />
                   <ApplicationStatusBadge
                     status={badgeStatus}
                     applicationId={appId}
@@ -1895,12 +1970,31 @@
                 </a>
                 {currentStatus === 'FAILED' &&
                   (application.error_message || application.errorMessage) && (
-                    <p
-                      className="mt-2 text-[11px] font-mono text-[#991B1B] bg-[#FEE2E2] border border-[#1A1A2E] rounded-lg px-2.5 py-1.5 max-w-2xl"
-                      title="Failure reason from submission worker"
-                    >
-                      {application.error_message || application.errorMessage}
-                    </p>
+                    <div className="mt-2 max-w-2xl">
+                      <p
+                        className="text-[11px] font-mono text-[#991B1B] bg-[#FEE2E2] border border-[#1A1A2E] rounded-lg px-2.5 py-1.5"
+                        title="Failure reason from submission worker"
+                      >
+                        {application.error_message || application.errorMessage}
+                      </p>
+                      {RETRYABLE_FAILURE_PATTERN.test(
+                        application.error_message || application.errorMessage || ''
+                      ) && (
+                        <button
+                          type="button"
+                          onClick={handleRetrySubmission}
+                          disabled={isRetrying}
+                          className="mt-2 px-3 py-1.5 text-[11px] font-bold text-[#9A3412] bg-[#FED7AA] hover:bg-[#FDBA74] border border-[#1A1A2E] rounded shadow-[1px_1px_0px_#1A1A2E] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isRetrying ? 'Retrying...' : '↺ Retry Submission'}
+                        </button>
+                      )}
+                      {retryError && (
+                        <p className="mt-1.5 text-[11px] font-bold text-[#991B1B]">
+                          {retryError}
+                        </p>
+                      )}
+                    </div>
                   )}
               </div>
 
@@ -2142,7 +2236,7 @@
                     🎴 Switch to 1-by-1 Cards
                   </button>
                 </div>
-                {fields.map((field, index) => (
+                {displayFields.map((field, index) => (
                   <EditableFormField
                     key={`${field.fieldId}-${index}`}
                     field={field}
@@ -2151,6 +2245,31 @@
                     onFieldUpdate={onFieldUpdate}
                   />
                 ))}
+                {aiResolvedFields.length > 0 && (
+                  <div className="bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setAiResolvedOpen((prev) => !prev)}
+                      className="w-full flex items-center justify-between px-3.5 py-3 text-left text-xs font-mono font-bold text-[#5B21B6] bg-[#EDE9FE] hover:bg-[#DDD6FE] transition-colors"
+                    >
+                      <span>🤖 AI Resolved ({aiResolvedFields.length})</span>
+                      <span>{aiResolvedOpen ? '▾' : '▸'}</span>
+                    </button>
+                    {aiResolvedOpen && (
+                      <div className="space-y-3.5 p-3.5">
+                        {aiResolvedFields.map((field, index) => (
+                          <EditableFormField
+                            key={`ai-${field.fieldId}-${index}`}
+                            field={field}
+                            applicationId={appId}
+                            jobUrl={jobUrl}
+                            onFieldUpdate={onFieldUpdate}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2707,6 +2826,9 @@
       const notifRef = useRef(null);
       const selectedCandidateRef = useRef(null);
       const jobStatusByIdRef = useRef(new Map());
+      const completedCandidateIdsRef = useRef(new Set());
+      const previousActiveJobCountsRef = useRef(new Map());
+      const [completionToast, setCompletionToast] = useState(false);
       const [jobStatusEpoch, setJobStatusEpoch] = useState(0);
 
       const rememberJobCardStatus = (jobOrApp, incomingStatus, { force = false } = {}) => {
@@ -2721,6 +2843,44 @@
       useEffect(() => {
         selectedCandidateRef.current = selectedCandidateId;
       }, [selectedCandidateId]);
+
+      useEffect(() => {
+        if (
+          !selectedCandidateId ||
+          !candidateDetailMatchesSelection(candidateDetail, selectedCandidateId)
+        ) {
+          return;
+        }
+
+        const candidateKey = normalizeApplywizzId(selectedCandidateId);
+        const jobs = filterOperatorApplicationJobs(
+          filterJobsForCandidate(candidateDetail.jobs || [], selectedCandidateId)
+        );
+        const activeJobCount = jobs.filter((job) => {
+          const status = lookupJobCardStatus(jobStatusByIdRef.current, job);
+          return status === 'READY_FOR_REVIEW' || status === 'APPROVED';
+        }).length;
+        const previousActiveJobCount = previousActiveJobCountsRef.current.get(candidateKey);
+        previousActiveJobCountsRef.current.set(candidateKey, activeJobCount);
+
+        if (
+          previousActiveJobCount === undefined ||
+          previousActiveJobCount === 0 ||
+          activeJobCount !== 0 ||
+          completedCandidateIdsRef.current.has(candidateKey)
+        ) {
+          return;
+        }
+
+        completedCandidateIdsRef.current.add(candidateKey);
+        setCompletionToast(true);
+      }, [candidateDetail, selectedCandidateId, jobStatusEpoch]);
+
+      useEffect(() => {
+        if (!completionToast) return;
+        const timeout = setTimeout(() => setCompletionToast(false), 5000);
+        return () => clearTimeout(timeout);
+      }, [completionToast]);
 
       // Close notification popover on outside click
       useEffect(() => {
@@ -3334,15 +3494,17 @@
           ...prev,
           status: newStatus,
           error_message:
-            updatedPayload?.error_message ||
-            updatedPayload?.errorMessage ||
-            updatedPayload?.error ||
-            prev.error_message,
+            updatedPayload && Object.prototype.hasOwnProperty.call(updatedPayload, 'error_message')
+              ? updatedPayload.error_message
+              : updatedPayload && Object.prototype.hasOwnProperty.call(updatedPayload, 'errorMessage')
+              ? updatedPayload.errorMessage
+              : updatedPayload?.error || prev.error_message,
           errorMessage:
-            updatedPayload?.error_message ||
-            updatedPayload?.errorMessage ||
-            updatedPayload?.error ||
-            prev.errorMessage,
+            updatedPayload && Object.prototype.hasOwnProperty.call(updatedPayload, 'error_message')
+              ? updatedPayload.error_message
+              : updatedPayload && Object.prototype.hasOwnProperty.call(updatedPayload, 'errorMessage')
+              ? updatedPayload.errorMessage
+              : updatedPayload?.error || prev.errorMessage,
           proof_web_url: updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || prev.proof_web_url,
           proof_captured_at: updatedPayload?.proofCapturedAt || updatedPayload?.proof_captured_at || prev.proof_captured_at,
           proof_email_url: updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proof_email_url,
@@ -3405,6 +3567,16 @@
 
       return (
         <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1A1A2E] font-sans overflow-hidden select-none">
+          {completionToast && (
+            <button
+              type="button"
+              onClick={() => setCompletionToast(false)}
+              className="fixed bottom-6 right-6 z-[60] max-w-[calc(100vw-3rem)] bg-[#9AC89A] text-[#1E4620] border-2 border-[#1A1A2E] rounded-xl px-4 py-3 text-sm font-black shadow-[4px_4px_0px_#1A1A2E] animate-fadeIn cursor-pointer"
+              title="Dismiss"
+            >
+              🎉 All jobs completed for today! Great work.
+            </button>
+          )}
           {opsMode && (
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#E2F0FB] border-b-2 border-[#1A1A2E] text-xs font-bold shrink-0">
               <span>
