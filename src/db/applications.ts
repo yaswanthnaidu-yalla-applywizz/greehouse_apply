@@ -100,6 +100,7 @@ export interface ApplicationRow {
   updated_at?: string;
   csv_job_score?: number | null;
   field_count?: number | null;
+  retry_count?: number | null;
 }
 
 /**
@@ -986,6 +987,8 @@ export interface ApplicationDto {
   createdAt?: string;
   updated_at?: string;
   updatedAt?: string;
+  retry_count?: number | null;
+  retryCount?: number | null;
 }
 
 /**
@@ -1051,6 +1054,7 @@ export function serializeApplicationDto(
   const assignedCaEmail = merged.assigned_ca_email || merged.assignedCaEmail || null;
   const createdAt = merged.created_at || merged.createdAt;
   const updatedAt = merged.updated_at || merged.updatedAt;
+  const retryCount = Number(merged.retry_count ?? merged.retryCount ?? 0);
 
   return {
     id: merged.id,
@@ -1103,7 +1107,102 @@ export function serializeApplicationDto(
     createdAt,
     updated_at: updatedAt,
     updatedAt,
+    retry_count: Number.isFinite(retryCount) ? retryCount : 0,
+    retryCount: Number.isFinite(retryCount) ? retryCount : 0,
   };
+}
+
+export const MAX_SUBMISSION_RETRIES = 3;
+
+export async function retryFailedApplication(
+  application: ApplicationRow
+): Promise<boolean> {
+  const payload = {
+    status: 'QUEUED' as const,
+    retry_count: 0,
+    error_message: null,
+    submission_order: Date.now(),
+    updated_at: new Date().toISOString(),
+  };
+  let updated = false;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      let query = supabase.from('candidate_applications').update(payload);
+      if (application.id) {
+        query = query.eq('id', application.id);
+      } else {
+        query = query
+          .eq('applywizz_id', application.applywizz_id)
+          .eq('job_url', application.job_url);
+      }
+      const result = await query.eq('status', 'FAILED').select('id');
+      updated = !result.error && Array.isArray(result.data) && result.data.length > 0;
+      if (result.error) {
+        log.warn(`[DB] Operator retry failed for ${application.id || application.applywizz_id}: ${result.error.message}`);
+      }
+    } catch (err: any) {
+      log.warn(`[DB] Operator retry exception for ${application.id || application.applywizz_id}: ${err.message}`);
+    }
+  } else {
+    updated = true;
+  }
+
+  if (!updated) return false;
+  cacheApplicationLocally({ ...application, ...payload });
+  return true;
+}
+
+export async function requeueApplicationForRetry(
+  applicationId: string,
+  reason: string,
+  jobUrl?: string
+): Promise<{ requeued: boolean; retryCount: number }> {
+  const app = await getApplication(applicationId, jobUrl);
+  if (!app) return { requeued: false, retryCount: 0 };
+  const currentRetryCount = app.retry_count ?? 0;
+  if (currentRetryCount >= MAX_SUBMISSION_RETRIES) {
+    return { requeued: false, retryCount: currentRetryCount };
+  }
+
+  const nextRetryCount = currentRetryCount + 1;
+  const nextOrder = Date.now();
+  const payload = {
+    status: 'QUEUED' as const,
+    retry_count: nextRetryCount,
+    submission_order: nextOrder,
+    error_message: reason,
+    updated_at: new Date().toISOString(),
+  };
+  let updated = false;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      let query = supabase.from('candidate_applications').update(payload);
+      if (app.id) {
+        query = query.eq('id', app.id);
+      } else {
+        query = query.eq('applywizz_id', app.applywizz_id).eq('job_url', app.job_url);
+      }
+      const result = await query
+        .eq('status', 'FAILED')
+        .eq('retry_count', currentRetryCount)
+        .select('id');
+      updated = !result.error && Array.isArray(result.data) && result.data.length > 0;
+      if (result.error) log.warn(`[DB] Retry requeue failed for ${applicationId}: ${result.error.message}`);
+    } catch (err: any) {
+      log.warn(`[DB] Retry requeue exception for ${applicationId}: ${err.message}`);
+    }
+  } else {
+    updated = true;
+  }
+
+  if (!updated) return { requeued: false, retryCount: currentRetryCount };
+  cacheApplicationLocally({ ...app, ...payload });
+  log.info(`[Queue] Retry ${nextRetryCount}/${MAX_SUBMISSION_RETRIES} → QUEUED (${applicationId}): ${reason}`);
+  return { requeued: true, retryCount: nextRetryCount };
 }
 
 

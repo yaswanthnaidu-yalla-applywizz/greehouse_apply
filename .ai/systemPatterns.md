@@ -148,6 +148,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `proof_captured_at` | TIMESTAMPTZ | |
 | `dry_run_screenshot_url` | TEXT | |
 | `submitted_at` | TIMESTAMPTZ | |
+| `retry_count` | INTEGER | Automatic OTP-fetch / unresolved-required-field retries used; max 3 before `FAILED` |
 | `error_message` | TEXT | |
 | UNIQUE | | `(applywizz_id, job_url)` — idempotent upsert |
 
@@ -157,7 +158,7 @@ Tracks Zoho Mail accounts linked to candidates for email proof capture.
 ### Supabase Storage Buckets
 | Bucket | Path Pattern | Contents |
 |---|---|---|
-| `resumes` | `resumes/{awl_id}_resume.pdf` | Candidate resume PDFs |
+| `resumes` | `resumes/resume_{first_name}_{last_name}_{domain_shortcode}.pdf` | Candidate resume PDFs; shortcode is DA, SDE, PM, BA, MKT, FIN, UX, OPS, or GEN |
 | `proofs_web` | `proofs/{app_id}_web.png` | Confirmation screenshots |
 | `proofs_dry_run` | `dry-run/{app_id}_dryrun.png` | Dry-run screenshots |
 

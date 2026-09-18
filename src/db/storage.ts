@@ -12,6 +12,7 @@ export const PROOFS_BUCKET = config.SUPABASE_STORAGE_BUCKET_PROOFS || 'proofs_we
 export const PROOFS_FAILED_BUCKET = 'proofs_failed';
 export const PROOFS_MAIL_BUCKET = 'proofs_mail';
 export const CSV_UPLOADS_BUCKET = 'csv_uploads';
+export const RESUMES_BUCKET = 'resumes';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEMO_RESUME_BUCKET_PATH = 'resumes/AWL-YASHANTH_resume.pdf';
@@ -38,6 +39,47 @@ export function isDemoResumeApplywizzId(applywizzId: string): boolean {
   return id === 'AWL-YASWANTH' || id === 'AWL-YASHANTH';
 }
 
+export interface ResumeNamingProfile {
+  firstName?: string | null;
+  lastName?: string | null;
+  jobTitle?: string | null;
+  workExperience?: Array<{ title?: string | null }>;
+}
+
+function sanitizeResumeNamePart(value: string | null | undefined, fallback: string): string {
+  const sanitized = (value || '')
+    .normalize('NFKD')
+    .replace(/[^\x00-\x7F]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return sanitized || fallback;
+}
+
+export function resumeDomainShortcode(profile?: ResumeNamingProfile): string {
+  const title = (profile?.jobTitle || profile?.workExperience?.[0]?.title || '').toLowerCase();
+  if (/data\s*(analyst|science)|data scientist/.test(title)) return 'DA';
+  if (/software\s*engineer|developer|\bswe\b/.test(title)) return 'SDE';
+  if (/product\s*manager/.test(title)) return 'PM';
+  if (/business\s*analyst/.test(title)) return 'BA';
+  if (/marketing/.test(title)) return 'MKT';
+  if (/finance|accounting/.test(title)) return 'FIN';
+  if (/designer|\bux\b/.test(title)) return 'UX';
+  if (/devops|cloud/.test(title)) return 'OPS';
+  return 'GEN';
+}
+
+export function resumeStorageFilename(
+  applywizzId: string,
+  profile?: ResumeNamingProfile
+): string {
+  const firstName = sanitizeResumeNamePart(profile?.firstName, 'candidate');
+  const lastName = sanitizeResumeNamePart(profile?.lastName, sanitizeResumeNamePart(applywizzId, 'resume'));
+  return `resume_${firstName}_${lastName}_${resumeDomainShortcode(profile)}.pdf`;
+}
+
 /**
  * Ensures required storage buckets exist in Supabase.
  * Optimized: Only maintains 3 proof buckets + 1 private csv_uploads dropzone.
@@ -54,6 +96,7 @@ export async function ensureBucketsExist(): Promise<void> {
       { name: PROOFS_FAILED_BUCKET, public: false },
       { name: PROOFS_MAIL_BUCKET, public: false },
       { name: CSV_UPLOADS_BUCKET, public: false },
+      { name: RESUMES_BUCKET, public: false },
     ];
 
     const { data: existingBuckets, error: listError } = await supabase.storage.listBuckets();
@@ -87,15 +130,50 @@ export async function ensureBucketsExist(): Promise<void> {
 export async function uploadResume(
   applywizzId: string,
   fileBuffer: Buffer,
-  _mimeType: string = 'application/pdf'
+  mimeType: string = 'application/pdf',
+  profile?: ResumeNamingProfile
 ): Promise<string> {
-  const storagePath = `${applywizzId}_resume.pdf`;
+  const storagePath = `${RESUMES_BUCKET}/${resumeStorageFilename(applywizzId, profile)}`;
   const resumesDir = path.resolve(process.cwd(), config.RESUMES_DIR || 'resumes');
   if (!fs.existsSync(resumesDir)) {
     fs.mkdirSync(resumesDir, { recursive: true });
   }
-  const localFile = path.join(resumesDir, storagePath);
-  fs.writeFileSync(localFile, fileBuffer);
+  const localFile = path.join(resumesDir, path.basename(storagePath));
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data: existing, error: listError } = await supabase.storage
+        .from(RESUMES_BUCKET)
+        .list('', { limit: 1000, search: path.basename(storagePath) });
+      if (!listError && existing?.some((entry) => entry.name === path.basename(storagePath))) {
+        if (!fs.existsSync(localFile) || fs.statSync(localFile).size <= 100) {
+          await fs.promises.writeFile(localFile, fileBuffer);
+        }
+        return storagePath;
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from(RESUMES_BUCKET)
+        .upload(path.basename(storagePath), fileBuffer, {
+          contentType: mimeType,
+          upsert: false,
+        });
+      if (!uploadError || /already exists|duplicate/i.test(uploadError.message)) {
+        if (!fs.existsSync(localFile) || fs.statSync(localFile).size <= 100) {
+          await fs.promises.writeFile(localFile, fileBuffer);
+        }
+        return storagePath;
+      }
+      log.warn(`[Storage] Resume upload failed for ${storagePath}: ${uploadError.message}`);
+    } catch (err: any) {
+      log.warn(`[Storage] Resume upload check failed for ${storagePath}: ${err.message}`);
+    }
+  }
+
+  if (!fs.existsSync(localFile) || fs.statSync(localFile).size <= 100) {
+    await fs.promises.writeFile(localFile, fileBuffer);
+  }
   return localFile;
 }
 
