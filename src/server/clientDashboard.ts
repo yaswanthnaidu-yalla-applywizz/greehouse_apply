@@ -243,7 +243,7 @@ export async function loadClientDashboard(options: {
   for (const application of hydrated) {
     const email = assignedCaEmail(application);
     const profileCa = profileCaEmail(application);
-    const assignedName = nameMap.get(email) || (email ? email.split('@')[0] : '—');
+    const assignedName = nameMap.get(email) || email.split('@')[0];
     if (requestedCa.toLowerCase() !== 'all') {
       const needle = requestedCa.toLowerCase();
       if (email !== needle && assignedName.toLowerCase() !== needle) continue;

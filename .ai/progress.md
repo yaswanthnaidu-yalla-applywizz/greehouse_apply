@@ -1,6 +1,6 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-17_
+_Last updated: 2026-09-18_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
@@ -51,8 +51,9 @@ _Last updated: 2026-09-17_
 - [x] **Resolve-time-only `candidate_applications` upserts** — removed segregator / post-scan placeholder upserts; skip when no non-empty resolved values; SKIPPED over-cap at resolve; idempotent preserve of existing fields in `upsertApplication` (2026-09-16)
 - [x] **Railway crash-loop fix** — `ERR_INVALID_CHAR` on `X-Dashboard-Date-Range` (en-dash in custom date label); `httpHeaders.ts` + ASCII label in `dashboardDateRange.ts` (2026-09-16)
 - [x] **Manager list API scoping** — `GET /api/candidates`, `/jobs`, `/stats`, `GET /api/users` team-filtered for managers; dev/admin unrestricted (2026-09-16)
-- [x] Manager UI at **`/manager`** (managers + dev). Secondary tabs: Operators, Activity, Reports (volume only)
-- [x] Admin dashboard at **`/admin`** — org overview, managers, operators, applications, audit, system status, **▶ Start** ingest
+- [x] Manager UI at **`/manager`** (managers + dev). Secondary tabs: Operators, Activity, Reports (volume only); the 30s poll also refreshes Activity while that tab is open (2026-09-18)
+- [x] **Manager reports API per-operator metrics** — `GET /api/manager/reports` `perOperator[]` now also returns `apps` (all-time count, all statuses), `completed` (period, `countCompletedApplicationsSince`) and `approved` (period, 6-status pipeline set). The reports tab per-operator table now renders them as **Assigned / Completed / Approved** columns (2026-09-18)
+- [x] Admin dashboard at **`/admin`** — org overview, managers, operators, applications, audit, system status, **▶ Start** ingest; the Overview ingest status bar is the dashboard's single Start/Stop location and carries ids `ingestStatusBar` / `ingestStatusText` / `ingestStartBtn` / `ingestStopBtn` (2026-09-18)
 - [x] Dev dashboard at **`/dev`** — health, runs, errors, queue, integrations, application debugger
 - [x] Login redirects by role (`homePath`); strict API isolation (`requireRole`)
 - [x] Auth audit logging + `POST /api/auth/logout`
@@ -155,3 +156,4 @@ _Last updated: 2026-09-17_
 - The `< 35` field count filter runs at scan/resolve time (`MAX_JOB_QUESTIONS=35`); over-cap jobs persist as `SKIPPED` (migration 014). Changing the cap requires re-resolve for already-SKIPPED rows
 - **React-Select combobox:** Do not use keyboard Enter as a fallback after failed option click — it clears the type-ahead without committing (use option click or flyout toggle). Full-page option search uses `page.locator('body')` (Locator, not Page) for portaled menus.
 - **Local dry-run script** (`runUserApplication.ts`) is separate from dashboard `POST .../dry-run` (`dryRun.ts` + Supabase application row)
+- **Gotcha — same column labels, three different windows (2026-09-18):** `Assigned` is the operator **email string** on Home, a **period-scoped count** on the Operators summary card, and an **all-time count** in the new Reports column. `Completed` is **today-IST only** on Home's card and on Operators (`countCompletedApplicationsByOperatorSince(getISTDateRangeUtc(getISTDateString()).startIso)` ignores the date filter) but **period-scoped** in the new Reports column. Managers comparing tabs will read the differences as bugs.
