@@ -201,6 +201,37 @@ export async function countCompletedApplicationsByOperatorSince(
   return result;
 }
 
+export async function countAppliedApplicationsByOperatorSince(
+  startIso: string,
+  assignedCaEmails?: string[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (!isSupabaseConfigured()) return result;
+  const emails = assignedCaEmails?.map((email) => email.trim().toLowerCase()).filter(Boolean);
+  if (emails && emails.length === 0) return result;
+
+  try {
+    let query = getDbClient()
+      .from('candidate_applications')
+      .select('assigned_ca_email')
+      .eq('status', 'APPLIED')
+      .gte('updated_at', startIso);
+    if (emails) query = query.in('assigned_ca_email', emails);
+    const { data, error } = await query;
+    if (error) {
+      log.warn(`[DB] applied-today operator counts failed: ${error.message}`);
+      return result;
+    }
+    for (const row of data || []) {
+      const email = String(row.assigned_ca_email || '').trim().toLowerCase();
+      if (email) result.set(email, (result.get(email) || 0) + 1);
+    }
+  } catch (err: any) {
+    log.warn(`[DB] applied-today operator counts exception: ${err?.message}`);
+  }
+  return result;
+}
+
 export interface CreatedAtRangeFilter {
   startIso: string;
   endIso: string | null;

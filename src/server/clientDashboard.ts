@@ -50,6 +50,7 @@ export interface ManagerClientRow {
   applywizzId: string;
   applications: number;
   completed: number;
+  applied: number;
   pending: number;
   failed: number;
   waitingForEmail: number;
@@ -250,31 +251,44 @@ export async function loadClientDashboard(options: {
     }
 
     const name = clientName(application);
-    const row = grouped.get(name) || {
-      client: name,
-      applywizzId: application.applywizz_id,
-      applications: 0,
-      completed: 0,
-      pending: 0,
-      failed: 0,
-      waitingForEmail: 0,
-      assignedTo: assignedName,
-      assignedToEmail: email,
-      ca_email: email,
-      assigned_ca: profileCa,
-      completedApplications: [],
-      pendingApplications: [],
-      failedApplications: [],
-      expanded_details: { completed: [], failed: [], pending: [] },
-    };
+const row = grouped.get(name) || {
+       client: name,
+       applywizzId: application.applywizz_id,
+       applications: 0,
+       completed: 0,
+       applied: 0,
+       pending: 0,
+       failed: 0,
+       waitingForEmail: 0,
+       assignedTo: assignedName,
+       assignedToEmail: email,
+       ca_email: email,
+       assigned_ca: profileCa,
+       completedApplications: [],
+       pendingApplications: [],
+       failedApplications: [],
+       expanded_details: { completed: [], failed: [], pending: [] },
+     };
     row.applications += 1;
     row.assignedTo = assignedName || row.assignedTo;
     row.assignedToEmail = email || row.assignedToEmail;
     row.ca_email = email || row.ca_email;
     row.assigned_ca = profileCa || row.assigned_ca;
 
-    if (application.status === 'APPLIED') {
+    const isCompleted =
+      application.status === 'QUEUED' ||
+      application.status === 'APPLYING' ||
+      application.status === 'APPLIED' ||
+      application.status === 'EMAIL_PROOF_PENDING' ||
+      application.status === 'EMAIL_UNVERIFIED';
+
+    const isApplied = application.status === 'APPLIED';
+
+    if (isCompleted) {
       row.completed += 1;
+      if (isApplied) {
+        row.applied += 1;
+      }
       const detail = detailFor(application, true);
       row.completedApplications.push(detail);
       row.expanded_details.completed.push(detail);
@@ -294,16 +308,16 @@ export async function loadClientDashboard(options: {
   }
 
   const rows = Array.from(grouped.values());
-  const totals = rows.reduce(
-    (total, row) => ({
-      applications: total.applications + row.applications,
-      applied: total.applied + row.completed,
-      failed: total.failed + row.failed,
-      pending: total.pending + row.pending,
-      waiting_for_email: total.waiting_for_email + row.waitingForEmail,
-    }),
-    { applications: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 }
-  );
+const totals = rows.reduce(
+  (total, row) => ({
+    applications: total.applications + row.applications,
+    applied: total.applied + row.applied,
+    failed: total.failed + row.failed,
+    pending: total.pending + row.pending,
+    waiting_for_email: total.waiting_for_email + row.waitingForEmail,
+  }),
+  { applications: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 }
+);
 
   return {
     date,
