@@ -13,6 +13,7 @@ import {
   countOperatorWorkloadByProfileCaEmail,
   countCompletedApplicationsSince,
   countCompletedApplicationsByOperatorSince,
+  countAppliedApplicationsByOperatorSince,
   listApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
