@@ -56,6 +56,49 @@
       );
     }
 
+    function AppliedModal({ operator, onClose, onEmailProof }) {
+      if (!operator) return null;
+      const items = operator.items || [];
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1A2E]/80" onClick={onClose}>
+          <div className="relative w-full max-w-2xl bg-white border-2 border-[#1A1A2E] rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <header className="px-5 py-4 bg-[#EFF6FF] border-b-2 border-[#1A1A2E] flex justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">Applied jobs</p>
+                <h3 className="text-sm font-bold break-words">{operator.name}</h3>
+                <p className="text-xs font-mono mt-1">{items.length} applied application(s)</p>
+              </div>
+              <button type="button" onClick={onClose} className="font-black px-2">✕</button>
+            </header>
+            <div className="px-5 py-4 bg-[#FAF4EB] max-h-[50vh] overflow-y-auto">
+              <div className="space-y-2">
+                {!items.length ? (
+                  <p className="text-xs text-[#64748B]">No applied applications for this operator in the selected report period.</p>
+                ) : items.map((item, index) => (
+                  <div key={item.id || item.job_url || index} className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between text-xs">
+                    <span className="break-words">
+                      <a href={item.job_url} target="_blank" rel="noopener noreferrer" className="font-bold text-[#1E3A5F] underline break-all">{item.job_title || 'Job'}</a>
+                      <span className="text-[#64748B]"> at {item.company_name || '—'}</span>
+                    </span>
+                    <span className="flex flex-wrap gap-3 shrink-0">
+                      {item.proof_web_url ? <a href={item.proof_web_url} target="_blank" rel="noopener noreferrer" className="text-[#1E4620] underline font-bold">Web proof screenshot</a> : <span className="text-[#64748B]">Web proof unavailable</span>}
+                      {item.proof_email_url ? (
+                        <a href={item.proof_email_url} target="_blank" rel="noopener noreferrer" className="text-[#1E4620] underline font-bold">Email screenshot</a>
+                      ) : item.proof_email_json ? (
+                        <button type="button" className="text-[#1E4620] underline font-bold" onClick={() => onEmailProof(item.proof_email_json)}>View email proof</button>
+                      ) : (
+                        <span className="text-[#64748B]">Email proof unavailable</span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function EmailProofModal({ proof, onClose }) {
       if (!proof) return null;
       const received = proof.received_at ? new Date(proof.received_at).toLocaleString() : proof.received_at;
@@ -246,6 +289,8 @@
       const [error, setError] = useState('');
       const [expanded, setExpanded] = useState(null);
       const [emailProof, setEmailProof] = useState(null);
+      const [appliedByOperator, setAppliedByOperator] = useState({});
+      const [appliedOperator, setAppliedOperator] = useState(null);
       const [operators, setOperators] = useState([]);
       const [operatorTotals, setOperatorTotals] = useState({});
       const [activity, setActivity] = useState([]);
@@ -333,6 +378,38 @@
         const res = await fetch(`/api/manager/reports?range=${encodeURIComponent(reportRange)}`, { headers: ApplyWizzRoles.getAuthHeaders() });
         const payload = await res.json();
         if (res.ok) setReports(payload);
+        setAppliedOperator(null);
+        // /api/manager/reports has no applied counts or job list, so pull APPLIED rows
+        // (with hydrated proof URLs) from /api/manager/dashboard over the same window the
+        // reports endpoint uses (daily=14d, weekly=56d, monthly=180d, ending today IST).
+        const dayCount = reportRange === 'monthly' ? 180 : reportRange === 'weekly' ? 56 : 14;
+        const today = ApplyWizzRoles.getTodayIST();
+        const start = (() => {
+          const d = new Date(`${today}T00:00:00+05:30`);
+          d.setDate(d.getDate() - (dayCount - 1));
+          return d.toISOString().slice(0, 10);
+        })();
+        try {
+          const appliedRes = await fetch(`/api/manager/dashboard?from=${encodeURIComponent(start)}&to=${encodeURIComponent(today)}`, { headers: ApplyWizzRoles.getAuthHeaders() });
+          const appliedPayload = await appliedRes.json();
+          if (!appliedRes.ok) return;
+          const grouped = {};
+          for (const row of appliedPayload.rows || []) {
+            const email = String(row.assignedToEmail || row.assigned_ca || row.ca_email || '').trim().toLowerCase();
+            if (!email) continue;
+            for (const detail of row.completedApplications || []) {
+              if (detail.status !== 'APPLIED') continue;
+              (grouped[email] = grouped[email] || []).push(detail);
+            }
+          }
+          setAppliedByOperator(grouped);
+          setReports((prev) => ({
+            ...prev,
+            perOperator: (prev.perOperator || []).map((row) => ({ ...row, applied: (grouped[row.email] || []).length })),
+          }));
+        } catch {
+          // Applied column falls back to 0 if the dashboard fetch fails.
+        }
       }, [reportRange]);
 
       useEffect(() => { load(); }, [load]);
@@ -415,6 +492,7 @@
 
       return (
         <main className="min-h-screen p-4 md:p-8 font-sans">
+          <AppliedModal operator={appliedOperator} onClose={() => setAppliedOperator(null)} onEmailProof={setEmailProof} />
           <EmailProofModal proof={emailProof} onClose={() => setEmailProof(null)} />
           {opsPickerOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
@@ -548,7 +626,7 @@
                 </div>
                 <table className="w-full min-w-[640px] text-left text-xs">
 <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-  <tr>{['Operator', 'Status', 'Apps', 'Completed', 'Applied', 'Workload', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+  <tr>{['Operator', 'Status', 'Assigned', 'Completed', 'Applied', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
 </thead>
                   <tbody>
                     {operators.map((op) => (
@@ -561,7 +639,6 @@
   <td className="p-3 font-mono">{op.applications}</td>
   <td className="p-3 font-mono">{op.completed ?? 0}</td>
   <td className="p-3 font-mono">{op.applied ?? 0}</td>
-  <td className="p-3 font-mono">{op.workload ?? 0}</td>
   <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
 </tr>
                     ))}
@@ -606,10 +683,10 @@
                 </div>
                 <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Operator</th><th className="p-3 font-black uppercase">Applications</th><th className="p-3 font-black uppercase">Assigned</th><th className="p-3 font-black uppercase">Completed</th><th className="p-3 font-black uppercase">Approved</th></tr></thead>
+                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Operator</th><th className="p-3 font-black uppercase">Applications</th><th className="p-3 font-black uppercase">Assigned</th><th className="p-3 font-black uppercase">Completed</th><th className="p-3 font-black uppercase">Applied</th></tr></thead>
                     <tbody>
                       {(reports.perOperator || []).map((row) => (
-                        <tr key={row.email} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-black">{row.name}</td><td className="p-3 font-mono">{row.applications}</td><td className="p-3 font-mono">{row.apps}</td><td className="p-3 font-mono">{row.completed}</td><td className="p-3 font-mono">{row.approved}</td></tr>
+                        <tr key={row.email} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-black">{row.name}</td><td className="p-3 font-mono">{row.applications}</td><td className="p-3 font-mono">{row.apps}</td><td className="p-3 font-mono">{row.completed}</td><td className="p-3"><CountButton value={row.applied ?? 0} active={!!appliedOperator && appliedOperator.email === row.email} onClick={() => setAppliedOperator(appliedOperator && appliedOperator.email === row.email ? null : { email: row.email, name: row.name, items: appliedByOperator[row.email] || [] })} /></td></tr>
                       ))}
                     </tbody>
                   </table>
