@@ -228,6 +228,21 @@ export async function listApplicationEvents(options: {
 } = {}): Promise<{ events: ApplicationEventRow[]; warning?: string }> {
   if (!isSupabaseConfigured()) return { events: [] };
   const limit = Math.min(Math.max(options.limit ?? 200, 1), 500);
+  let probeError = null;
+  try {
+    await getDbClient()
+      .from('application_events')
+      .select('id')
+      .limit(1);
+  } catch (err) {
+    probeError = err;
+  }
+
+  if (probeError && isMissingTable(probeError, 'application_events')) {
+    warnMissingOnce('application_events', probeError);
+    return { events: [], warning: 'Migration 015 not applied (application_events).' };
+  }
+
   try {
     let query = getDbClient()
       .from('application_events')
@@ -240,10 +255,6 @@ export async function listApplicationEvents(options: {
     }
     const { data, error } = await query;
     if (error) {
-      if (isMissingTable(error, 'application_events')) {
-        warnMissingOnce('application_events', error);
-        return { events: [], warning: 'Migration 015 not applied (application_events).' };
-      }
       throw error;
     }
     return { events: (data || []) as ApplicationEventRow[] };

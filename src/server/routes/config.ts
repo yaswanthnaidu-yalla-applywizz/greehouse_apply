@@ -18,7 +18,8 @@ configRouter.get('/supabase-realtime', (_req: Request, res: Response): void => {
   const anonKey = resolveSupabaseAnonKey();
 
   if (!isSupabaseConfigured() || !url || !anonKey) {
-    res.json({ enabled: false });
+    log.warn('Supabase Realtime disabled — no valid anon key configured');
+    res.json({ enabled: false, url: '', anonKey: '' });
     return;
   }
 
