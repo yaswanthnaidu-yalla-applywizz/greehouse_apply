@@ -8,7 +8,9 @@ import {
   getISTDateRangeUtc,
   hydrateApplicationProofUrls,
   listApplications,
-  countSubmittedApplicationsSince,
+  countCompletedApplicationsSince,
+  countAppliedApplicationsSince,
+  countApplicationsByStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { listApplicationEvents } from '../../db/events.js';
@@ -67,14 +69,35 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
     const date =
       dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : getISTDateString();
     const { startIso, endIso } = getISTDateRangeUtc(date);
-    const todayStart = getISTDateRangeUtc(getISTDateString()).startIso;
+    const today = getISTDateString();
+    const todayStart = getISTDateRangeUtc(today).startIso;
+    const [year, month] = today.split('-').map(Number);
+    const monthStart = getISTDateRangeUtc(
+      `${year}-${String(month).padStart(2, '0')}-01`
+    ).startIso;
     const submitClicks = await countAuditEventsByActionInRange({
       action: SUBMIT_CLICK_AUDIT_ACTION,
       startIso,
       endIso,
     });
-    const submittedToday = await countSubmittedApplicationsSince(todayStart);
-    res.json({ ...(await collectHealthSnapshot()), submitClicks, submitClicksDate: date, submitted_today: submittedToday });
+    const [completedMonth, completedToday, applied, failed, queued] = await Promise.all([
+      countCompletedApplicationsSince(monthStart),
+      countCompletedApplicationsSince(todayStart),
+      countAppliedApplicationsSince(),
+      countApplicationsByStatus('FAILED'),
+      countApplicationsByStatus('QUEUED'),
+    ]);
+    res.json({
+      ...(await collectHealthSnapshot()),
+      submitClicks,
+      submitClicksDate: date,
+      submitted_today: completedToday,
+      completedMonth,
+      completedToday,
+      applied,
+      failed,
+      queued,
+    });
   } catch (error) {
     log.error('[Dev] health failed:', error);
     res.status(500).json({ error: 'Unable to load health snapshot.' });

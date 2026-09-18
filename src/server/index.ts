@@ -58,7 +58,8 @@ import {
   getISTDateRangeUtc,
   getSubmissionOutcomeCounts,
   getDashboardApplicationMetrics,
-  countSubmittedApplicationsSince,
+  countCompletedApplicationsSince,
+  countAppliedApplicationsSince,
   getApplication,
   upsertApplication,
   serializeApplicationDto,
@@ -177,16 +178,9 @@ function applyApplicationAggregatesToSummaries(
 export interface DashboardStats {
   totalCandidates: number;
   totalApplications: number;
-  successfulApplications: number;
-  failedApplications: number;
-  submitted_today: number;
-  uniqueScannedJobs: number;
-  totalFieldsPopulated: number;
-  supabaseTaggedCount: number;
-  aiTaggedCount: number;
-  supabasePercentage: number;
-  aiPercentage: number;
-  pipelineStatus: 'READY' | 'IDLE' | 'PROCESSING';
+  completed: number;
+  applied: number;
+  failed: number;
   dateRange?: {
     preset: string;
     from: string | null;
@@ -592,12 +586,12 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    const [outcomes, submittedToday] = await Promise.all([
+    const [outcomes, completed, applied] = await Promise.all([
       getSubmissionOutcomeCounts({
-      createdAtRange,
-      allowedCandidateIds,
+        allowedCandidateIds,
       }),
-      countSubmittedApplicationsSince(todayRange.startIso, unrestricted ? undefined : submittedOperatorEmails),
+      countCompletedApplicationsSince(todayRange.startIso, unrestricted ? undefined : submittedOperatorEmails),
+      countAppliedApplicationsSince(undefined, unrestricted ? undefined : submittedOperatorEmails),
     ]);
     const metrics = await getDashboardApplicationMetrics({
       createdAtRange,
@@ -607,20 +601,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const stats: DashboardStats = {
       totalCandidates: metrics.totalCandidates,
       totalApplications: metrics.totalApplications,
-      successfulApplications: outcomes.successfulApplications,
-      failedApplications: outcomes.failedApplications,
-      uniqueScannedJobs: metrics.uniqueScannedJobs,
-      totalFieldsPopulated: metrics.totalFieldsPopulated,
-      supabaseTaggedCount: metrics.supabaseTaggedCount,
-      aiTaggedCount: metrics.aiTaggedCount,
-      supabasePercentage: metrics.totalFieldsPopulated
-        ? Number(((metrics.supabaseTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
-        : 0,
-      aiPercentage: metrics.totalFieldsPopulated
-        ? Number(((metrics.aiTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
-        : 0,
-      pipelineStatus: metrics.totalApplications > 0 ? 'READY' : 'IDLE',
-      submitted_today: submittedToday,
+      completed,
+      applied,
+      failed: outcomes.failedApplications,
       dateRange: serializeDateRange(parsedRange),
     };
 

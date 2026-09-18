@@ -610,6 +610,22 @@ export async function fillSingleField(
   const label = field.label || name;
   const isCountryCode = isCountryCodeField(fieldId, name, label);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
+  const isWorkAuthRelocation =
+    /work.?auth|authorized.?to.?work|legally.?authorized|reloc|willing.?to.?relocat|open.?to.?(work|reloc)|able.?to.?work|eligible.?to.?work/i.test(
+      label
+    );
+  const isReferralSource =
+    /how did you hear|how did you find|how did you learn|source of application|referral source|where did you hear/i.test(
+      label
+    );
+  const referralOptionValues = ['LinkedIn', 'Social Media', 'Online'];
+  if (isWorkAuthRelocation) {
+    val = 'Yes';
+    log.info(`Work auth/relocation field detected — forcing Yes for label=${label}`);
+  } else if (isReferralSource) {
+    val = 'LinkedIn';
+    log.info(`Referral source field detected — forcing LinkedIn for label=${label}`);
+  }
   const isForcedCountryField =
     /country/i.test(label) &&
     ['text', 'select', 'radio', 'location_autocomplete'].includes(rawType);
@@ -617,6 +633,7 @@ export async function fillSingleField(
     val = 'United States';
     log.info(`Country field detected — forcing United States for field=${label}`);
   }
+  const optionValues = isReferralSource ? referralOptionValues : [val];
 
   const fillResult: FieldFillResult = {
     fieldId,
@@ -770,6 +787,7 @@ export async function fillSingleField(
       if (isCountryCode) {
         selectValue = targetCountryName;
       }
+      const selectOptionValues = isCountryCode ? [targetCountryName] : optionValues;
 
       // Check for sponsorship question rendered as radio buttons in the DOM
       if (isSponsorship) {
@@ -912,16 +930,24 @@ export async function fillSingleField(
           className.includes('select__input');
 
         if (interactive) {
-          const typeQuery = isCountryCode ? targetCountryName : selectValue;
+          const selectAttempts = isReferralSource ? referralOptionValues : [selectValue];
           const countryMatcher: OptionTextMatcher = (optText) =>
             new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
-          const selected = await fillSearchableSelectInput(
-            page,
-            found.locator,
-            found.selector,
-            typeQuery,
-            isCountryCode ? countryMatcher : isSponsorship || booleanValue ? fuzzyOptionTextMatch : exactOptionTextMatch
-          );
+          let selected = false;
+          for (const attempt of selectAttempts) {
+            selected = await fillSearchableSelectInput(
+              page,
+              found.locator,
+              found.selector,
+              isCountryCode ? targetCountryName : attempt,
+              isCountryCode
+                ? countryMatcher
+                : isSponsorship || booleanValue || isReferralSource
+                ? fuzzyOptionTextMatch
+                : exactOptionTextMatch
+            );
+            if (selected) break;
+          }
 
           if (selected) {
             fillResult.success = true;
@@ -991,27 +1017,35 @@ export async function fillSingleField(
           // Fallback standard options matching
           if (!selected) {
             // 1. Try exact label match
-            try {
-              await found.locator.selectOption({ label: selectValue }, { force: true, timeout: 2000 });
-              selected = true;
-            } catch {}
+            for (const attempt of selectOptionValues) {
+              try {
+                await found.locator.selectOption({ label: attempt }, { force: true, timeout: 2000 });
+                selected = true;
+                break;
+              } catch {}
+            }
 
             // 2. Try value match
             if (!selected) {
-              try {
-                await found.locator.selectOption({ value: selectValue }, { force: true, timeout: 2000 });
-                selected = true;
-              } catch {}
+              for (const attempt of selectOptionValues) {
+                try {
+                  await found.locator.selectOption({ value: attempt }, { force: true, timeout: 2000 });
+                  selected = true;
+                  break;
+                } catch {}
+              }
             }
 
             // 3. Try fuzzy/case-insensitive option match
             if (!selected) {
               try {
                 const optionsList = await found.locator.locator('option').allInnerTexts();
-                const lowerVal = selectValue.toLowerCase().trim();
                 const matchedOpt = optionsList.find((opt) => {
                   const o = opt.toLowerCase().trim();
-                  return o === lowerVal || o.startsWith(lowerVal) || o.includes(lowerVal) || lowerVal.includes(o);
+                  return selectOptionValues.some((attempt) => {
+                    const lowerVal = attempt.toLowerCase().trim();
+                    return o === lowerVal || o.startsWith(lowerVal) || o.includes(lowerVal) || lowerVal.includes(o);
+                  });
                 });
                 if (matchedOpt) {
                   await found.locator.selectOption({ label: matchedOpt.trim() }, { force: true, timeout: 2000 });
@@ -1066,7 +1100,17 @@ export async function fillSingleField(
           (field as any).metadata?.selector
         );
         if (searchable) {
-          const selected = await fillSearchableSelectInput(page, searchable.locator, searchable.selector, selectValue);
+          let selected = false;
+          for (const attempt of isReferralSource ? referralOptionValues : [selectValue]) {
+            selected = await fillSearchableSelectInput(
+              page,
+              searchable.locator,
+              searchable.selector,
+              attempt,
+              isReferralSource ? fuzzyOptionTextMatch : exactOptionTextMatch
+            );
+            if (selected) break;
+          }
           if (selected) {
             fillResult.success = true;
             return fillResult;
@@ -1079,7 +1123,17 @@ export async function fillSingleField(
 
         const count = await select2Trigger.count();
         if (count > 0) {
-          const selected = await fillSearchableSelectInput(page, select2Trigger, 'combobox-fallback', selectValue);
+          let selected = false;
+          for (const attempt of isReferralSource ? referralOptionValues : [selectValue]) {
+            selected = await fillSearchableSelectInput(
+              page,
+              select2Trigger,
+              'combobox-fallback',
+              attempt,
+              isReferralSource ? fuzzyOptionTextMatch : exactOptionTextMatch
+            );
+            if (selected) break;
+          }
           if (selected) {
             fillResult.success = true;
           } else {
@@ -1102,7 +1156,9 @@ export async function fillSingleField(
 
       const booleanValue = normalizeBooleanValue(val);
       if (count > 0) {
-        for (let r = 0; r < count; r++) {
+        const radioTargets = isReferralSource ? referralOptionValues : [val];
+        for (const target of radioTargets) {
+          for (let r = 0; r < count; r++) {
           const radio = radioGroup.nth(r);
           const radioId = await radio.getAttribute('id');
           const radioVal = await radio.getAttribute('value');
@@ -1122,7 +1178,7 @@ export async function fillSingleField(
           }
 
           const cleanLabel = labelText.trim().toLowerCase();
-          const cleanTarget = val.toLowerCase().trim();
+          const cleanTarget = target.toLowerCase().trim();
 
           const isSponsorshipMatch = isSponsorship && (/^yes\b/i.test(cleanLabel) || /^yes\b/i.test(cleanTarget) || ['true', '1'].includes(radioVal?.toLowerCase() || ''));
           if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget) || isSponsorshipMatch) {
@@ -1145,13 +1201,15 @@ export async function fillSingleField(
             checked = true;
             break;
           }
+          }
+          if (checked) break;
         }
       }
 
       if (!checked) {
         const labelLoc = isSponsorship
           ? page.locator('label').filter({ hasText: /^yes\b/i }).first()
-          : page.locator('label').filter({ hasText: val }).first();
+          : page.locator('label').filter({ hasText: isReferralSource ? /LinkedIn|Social Media|Online/i : val }).first();
         if ((await labelLoc.count()) > 0) {
           if (isSponsorship) {
             await labelLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});

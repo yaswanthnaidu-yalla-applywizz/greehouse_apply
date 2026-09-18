@@ -17,6 +17,7 @@ import {
   emailProofStoragePath,
   isApplicationUuid,
 } from './storage.js';
+import { insertApplicationEvent } from './events.js';
 import { createLogger } from '../utils/logger.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import {
@@ -52,13 +53,12 @@ export type ApplicationStatus =
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
 
-export const SUBMITTED_TODAY_STATUSES: readonly ApplicationStatus[] = [
+export const COMPLETED_STATUSES: readonly ApplicationStatus[] = [
   'QUEUED',
   'APPLYING',
   'APPLIED',
   'EMAIL_PROOF_PENDING',
   'EMAIL_UNVERIFIED',
-  'DRY_RUN_COMPLETE',
 ];
 
 export interface EmailProofJson {
@@ -116,7 +116,7 @@ export function getISTDateRangeUtc(dateStr: string): { startIso: string; endIso:
   };
 }
 
-export async function countSubmittedApplicationsSince(
+export async function countCompletedApplicationsSince(
   startIso: string,
   assignedCaEmails?: string[]
 ): Promise<number> {
@@ -128,7 +128,7 @@ export async function countSubmittedApplicationsSince(
     let query = getDbClient()
       .from('candidate_applications')
       .select('id', { count: 'exact', head: true })
-      .in('status', [...SUBMITTED_TODAY_STATUSES])
+      .in('status', [...COMPLETED_STATUSES])
       .gte('updated_at', startIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
@@ -143,7 +143,34 @@ export async function countSubmittedApplicationsSince(
   }
 }
 
-export async function countSubmittedApplicationsByOperatorSince(
+export async function countAppliedApplicationsSince(
+  since?: string,
+  assignedCaEmails?: string[]
+): Promise<number> {
+  if (!isSupabaseConfigured()) return 0;
+  const emails = assignedCaEmails?.map((email) => email.trim().toLowerCase()).filter(Boolean);
+  if (emails && emails.length === 0) return 0;
+
+  try {
+    let query = getDbClient()
+      .from('candidate_applications')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'APPLIED');
+    if (since) query = query.gte('updated_at', since);
+    if (emails) query = query.in('assigned_ca_email', emails);
+    const { count, error } = await query;
+    if (error) {
+      log.warn(`[DB] applied count failed: ${error.message}`);
+      return 0;
+    }
+    return count ?? 0;
+  } catch (err: any) {
+    log.warn(`[DB] applied count exception: ${err?.message}`);
+    return 0;
+  }
+}
+
+export async function countCompletedApplicationsByOperatorSince(
   startIso: string,
   assignedCaEmails?: string[]
 ): Promise<Map<string, number>> {
@@ -156,7 +183,7 @@ export async function countSubmittedApplicationsByOperatorSince(
     let query = getDbClient()
       .from('candidate_applications')
       .select('assigned_ca_email')
-      .in('status', [...SUBMITTED_TODAY_STATUSES])
+      .in('status', [...COMPLETED_STATUSES])
       .gte('updated_at', startIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { data, error } = await query;
@@ -1294,6 +1321,7 @@ export async function getDashboardApplicationMetrics(options?: {
   totalFieldsPopulated: number;
   supabaseTaggedCount: number;
   aiTaggedCount: number;
+  resumeTaggedCount: number;
 }> {
   const allowedSet =
     options?.allowedCandidateIds && options.allowedCandidateIds.length > 0
@@ -1305,6 +1333,7 @@ export async function getDashboardApplicationMetrics(options?: {
   let totalFieldsPopulated = 0;
   let supabaseTaggedCount = 0;
   let aiTaggedCount = 0;
+  let resumeTaggedCount = 0;
   const candidateIds = new Set<string>();
   const jobUrls = new Set<string>();
 
@@ -1320,6 +1349,7 @@ export async function getDashboardApplicationMetrics(options?: {
       totalFieldsPopulated += 1;
       if (f?.source === 'supabase') supabaseTaggedCount += 1;
       if (f?.source === 'ai') aiTaggedCount += 1;
+      if (f?.source === 'resume') resumeTaggedCount += 1;
     }
   };
 
@@ -1347,6 +1377,7 @@ export async function getDashboardApplicationMetrics(options?: {
           totalFieldsPopulated,
           supabaseTaggedCount,
           aiTaggedCount,
+          resumeTaggedCount,
         };
       }
     } catch {
@@ -1365,6 +1396,7 @@ export async function getDashboardApplicationMetrics(options?: {
     totalFieldsPopulated,
     supabaseTaggedCount,
     aiTaggedCount,
+    resumeTaggedCount,
   };
 }
 
@@ -1764,6 +1796,16 @@ export async function enqueueApplication(
       }
       if (queueRes?.error) {
         log.error(`[DB] enqueueApplication Supabase error:`, queueRes.error.message);
+      } else {
+        const { insertApplicationEvent } = await import('./events.js');
+        void insertApplicationEvent({
+          applicationId: app.id || '',
+          applywizzId: app.applywizz_id,
+          jobUrl: app.job_url,
+          fromStatus: previousStatus ?? null,
+          toStatus: 'QUEUED',
+          actorEmail: options.assignedCaEmail ?? null,
+        });
       }
     } catch (err: any) {
       log.warn(`[DB] Could not update application to QUEUED in Supabase: ${err.message}`);
@@ -1803,6 +1845,14 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
       if (!error && data && Array.isArray(data) && data.length > 0) {
         const selected = data[0] as ApplicationRow;
         cacheApplicationLocally(selected);
+        void insertApplicationEvent({
+          applicationId: selected.id || '',
+          applywizzId: selected.applywizz_id,
+          jobUrl: selected.job_url,
+          fromStatus: 'QUEUED',
+          toStatus: 'APPLYING',
+          actorEmail: selected.assigned_ca_email ?? null,
+        });
         const appRef = selected.id || selected.applywizz_id;
         log.info(`[API] Status → APPLYING (application ${appRef}, dequeued via RPC from QUEUED)`);
         return selected;
@@ -1838,6 +1888,14 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
             updated_at: new Date().toISOString(),
           };
           cacheApplicationLocally(applyingApp);
+          void insertApplicationEvent({
+            applicationId: applyingApp.id || '',
+            applywizzId: applyingApp.applywizz_id,
+            jobUrl: applyingApp.job_url,
+            fromStatus: 'QUEUED',
+            toStatus: 'APPLYING',
+            actorEmail: applyingApp.assigned_ca_email ?? null,
+          });
           const appRef = applyingApp.id || applyingApp.applywizz_id;
           log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from QUEUED)`);
           return applyingApp;

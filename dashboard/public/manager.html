@@ -155,6 +155,65 @@
       );
     }
 
+    function SearchableDropdown({ value, options, onChange, placeholder = 'Search...' }) {
+      const [query, setQuery] = useState('');
+      const [open, setOpen] = useState(false);
+
+      const selected = options.find((option) => option.value === value);
+      const selectedLabel = selected?.label || selected?.name || selected?.email || '';
+      const filteredOptions = options.filter((option) => {
+        const haystack = `${option.label || ''} ${option.name || ''} ${option.email || ''} ${option.value || ''}`.toLowerCase();
+        return haystack.includes(query.trim().toLowerCase());
+      });
+
+      useEffect(() => {
+        setQuery(selectedLabel);
+      }, [selectedLabel]);
+
+      return (
+        <div
+          className="relative mt-1 min-w-[12rem]"
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+        >
+          <input
+            type="text"
+            value={query}
+            placeholder={placeholder}
+            onFocus={() => {
+              setOpen(true);
+              setQuery('');
+            }}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+            }}
+            className="block w-full border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm bg-white"
+          />
+          {open && (
+            <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto bg-white border-2 border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E]">
+              {filteredOptions.length > 0 ? filteredOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    onChange(option.value);
+                    setQuery(option.label || option.name || option.email || '');
+                    setOpen(false);
+                  }}
+                  className="block w-full text-left px-2 py-1.5 text-sm hover:bg-[#FAF4EB]"
+                >
+                  {option.label || option.name || option.email}
+                </button>
+              )) : (
+                <p className="px-2 py-1.5 text-xs text-[#64748B]">No matches</p>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function ManagerApp() {
       const access = ApplyWizzRoles.enforcePageAccess(['manager']);
       const [tab, setTab] = useState('home');
@@ -177,6 +236,7 @@
       const [ca, setCa] = useState('all');
       const [rows, setRows] = useState([]);
       const [totals, setTotals] = useState({});
+      const [completed, setCompleted] = useState(0);
       const [submitClicks, setSubmitClicks] = useState(0);
       const [submittedToday, setSubmittedToday] = useState(0);
       const [careerAssociates, setCareerAssociates] = useState([]);
@@ -227,6 +287,7 @@
           if (!res.ok) throw new Error(payload.error || 'Unable to load manager dashboard.');
           setRows(payload.rows || []);
           setTotals(payload.totals || {});
+          setCompleted(payload.completed ?? 0);
           setSubmitClicks(payload.submitClicks ?? 0);
           setSubmittedToday(payload.submitted_today ?? 0);
           setWarning(payload.warning || '');
@@ -281,6 +342,7 @@
         const interval = setInterval(() => {
           load();
           if (tab === 'operators') loadOperators();
+          if (tab === 'activity') loadActivity();
         }, 30000);
         return () => clearInterval(interval);
       }, [load, loadOperators, tab]);
@@ -363,15 +425,17 @@
                 {!opsPickerLoading && !opsPickerError && (
                   <label className="block text-xs font-bold uppercase mb-3">
                     Manager
-                    <select
+                    <SearchableDropdown
                       value={opsManagerPick}
-                      onChange={(e) => setOpsManagerPick(e.target.value)}
-                      className="block mt-1 w-full border-2 border-[#1A1A2E] rounded px-2 py-2 text-sm bg-white"
-                    >
-                      {opsManagers.map((m) => (
-                        <option key={m.email} value={m.email}>{m.name ? `${m.name} (${m.email})` : m.email}</option>
-                      ))}
-                    </select>
+                      onChange={setOpsManagerPick}
+                      placeholder="Search manager..."
+                      options={opsManagers.map((m) => ({
+                        value: m.email,
+                        name: m.name,
+                        email: m.email,
+                        label: m.name ? `${m.name} (${m.email})` : m.email,
+                      }))}
+                    />
                   </label>
                 )}
                 <div className="flex gap-2 justify-end">
@@ -401,10 +465,20 @@
               <div className="flex flex-wrap gap-2 items-end">
                 <DevSwitcher current="/manager" />
                 <label className="text-xs font-bold uppercase">Filter by Career Associate
-                  <select value={ca} onChange={(e) => setCa(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm bg-white min-w-[12rem]">
-                    <option value="all">All</option>
-                    {careerAssociates.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>
+                  <SearchableDropdown
+                    value={ca}
+                    onChange={setCa}
+                    placeholder="Search operator..."
+                    options={[
+                      { value: 'all', label: 'All', name: 'All', email: '' },
+                      ...careerAssociates.map((item) => {
+                        const email = item.value || '';
+                        const localPart = email.split('@')[0] || email;
+                        const label = item.label && item.label !== '—' ? item.label : localPart;
+                        return { value: email, label, name: label, email };
+                      }),
+                    ]}
+                  />
                 </label>
                 <div className="text-xs font-bold uppercase">
                   Date range
@@ -447,7 +521,7 @@
             {tab === 'home' && (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-                  {[['Applications', totals.applications], ['Submit clicks (day)', submitClicks], ['Submitted Today', submittedToday], ['Completed', totals.applied], ['Failed', totals.failed], ['Pending', totals.pending], ['Waiting email', totals.waiting_for_email]].map(([label, val]) => (
+                  {[['Total Applications', totals.applications], ['Completed (team)', completed]].map(([label, val]) => (
                     <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
                       <p className="text-xs font-bold uppercase">{label}</p>
                       <p className="text-2xl font-black mt-1">{val ?? 0}</p>
@@ -467,13 +541,13 @@
             {tab === 'operators' && (
               <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
                 <div className="grid grid-cols-3 gap-3 p-4 border-b-2 border-[#1A1A2E]">
-                  {[['Assigned', operatorTotals.assigned], ['Active', operatorTotals.active], ['Inactive', operatorTotals.inactive]].map(([label, val]) => (
+                  {[['Assigned', operatorTotals.assigned], ['Completed', operatorTotals.completed]].map(([label, val]) => (
                     <div key={label}><p className="text-[10px] font-bold uppercase text-[#64748B]">{label}</p><p className="text-xl font-black">{val ?? 0}</p></div>
                   ))}
                 </div>
                 <table className="w-full min-w-[640px] text-left text-xs">
                   <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-                    <tr>{['Operator', 'Status', 'Apps', 'Submitted', 'Workload', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+                    <tr>{['Operator', 'Status', 'Apps', 'Completed', 'Workload', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
                   </thead>
                   <tbody>
                     {operators.map((op) => (
@@ -484,7 +558,7 @@
                         </td>
                         <td className="p-3 uppercase font-bold">{op.status}</td>
                         <td className="p-3 font-mono">{op.applications}</td>
-                        <td className="p-3 font-mono">{op.submitted_today ?? 0}</td>
+                        <td className="p-3 font-mono">{op.completed ?? 0}</td>
                         <td className="p-3 font-mono">{op.workload ?? 0}</td>
                         <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
                       </tr>
@@ -530,10 +604,10 @@
                 </div>
                 <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Operator</th><th className="p-3 font-black uppercase">Applications</th></tr></thead>
+                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Operator</th><th className="p-3 font-black uppercase">Applications</th><th className="p-3 font-black uppercase">Assigned</th><th className="p-3 font-black uppercase">Completed</th><th className="p-3 font-black uppercase">Approved</th></tr></thead>
                     <tbody>
                       {(reports.perOperator || []).map((row) => (
-                        <tr key={row.email} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-black">{row.name}</td><td className="p-3 font-mono">{row.applications}</td></tr>
+                        <tr key={row.email} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-black">{row.name}</td><td className="p-3 font-mono">{row.applications}</td><td className="p-3 font-mono">{row.apps}</td><td className="p-3 font-mono">{row.completed}</td><td className="p-3 font-mono">{row.approved}</td></tr>
                       ))}
                     </tbody>
                   </table>

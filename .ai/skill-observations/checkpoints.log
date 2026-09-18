@@ -18,6 +18,8 @@
 2026-09-15 session end: docs updated (activeContext, progress, systemPatterns, techContext); observations 0006 and 0008 actioned; uncommitted work since 37bab44 documented
 2026-09-15 session-start scan: files=8 parsed=8 (context-load session)
 2026-09-15 session-start scan: files=8 parsed=8
+2026-09-18 session-start scan: files=16 parsed=16 suspect=0 (fresh start-session; open=0003,0005,0011,0012,0013,0016 | branch patch/v2.6 @ 1a53b0c, 11 modified files uncommitted)
+
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-15 deliverable flush: observation 0006 resolution updated (prefer SERVICE_ROLE_KEY including sb_secret; empty dropzone list is failure); ingest listing no longer gates on listBuckets
 2026-09-15 session: fields_schema chain fix � no new observation
@@ -84,3 +86,12 @@
 2026-09-17 session-end: unresolved-field helper hints added; diff check passed; no new observations
 2026-09-17 no observations
 2026-09-17 no observations
+2026-09-18 session-start scan: observation frontmatter scanned, no suspect entries
+2026-09-18 session-end: enqueueApplication QUEUED event insert verified already present in patch tree (grep + git diff hunk + tsc pass); no duplicate added; 0003 extended with third instance
+2026-09-18 session-start scan: files=16 parsed=16
+2026-09-18 deliverable flush: added QUEUED->APPLYING application_events insert to getNextQueuedApplicationForRoundRobin (both dequeue branches, static import; tsc clean; CRLF delta 17 = exactly the added lines); logged 0017 (convention copied into different control-flow context); extended 0003 with 4th instance (positional call vs single-object signature); activeContext decision line updated
+2026-09-18 deliverable flush (2): manager.html setInterval now refreshes Activity tab when active - spec said activeTab which does not exist in the file, used tab (line 339 precedent); 1 line added, timing/deps untouched, git diff = 1 added line; extended 0003 (5th instance: nonexistent identifier); logged 0018 (verification coverage is per-surface); progress.md manager bullet updated
+2026-09-18 deliverable flush (3): manager.ts /reports perOperator now returns apps + completed + approved per spec predicates (literal); hoisted inline mapping to awaited const; +33 lines exactly as predicted, CRLF consistent, tsc clean for manager.ts; logged 0019 (field inherits sibling scope by implication - apps is all-time vs period-scoped neighbours); progress.md + activeContext open question
+2026-09-18 deliverable flush (4): manager.html reports per-operator table gained Assigned/Completed/Approved columns (spec said operator.apps; local binding is row) - 5 th / 5 td verified, td style byte-identical to existing applications cell, line count + EOL unchanged (single-line replacements), buckets table and ClientTable colSpan={6} untouched; extended 0003 with 6th instance (identifier borrowed from the adjacent layer); progress.md gotcha added for same-label-different-window across tabs + stale API-only note corrected; activeContext open question updated
+2026-09-18 findings flush (no code changed): admin.html ingest-bar request NOT implemented - literal change impossible on this surface (file is JSX-only: 0 style=" and 0 lowercase onclick; body = #root + one babel script), apiFetch does not exist anywhere (0/584 files; roleAccess.js wraps window.fetch), named insertion point already holds an equivalent status bar (lines ~307-333) with same copy + Start/Stop + 3s poller + 60s clear, and no other Start/Stop buttons exist to remove; 0003 extended with 7th instance (premise = the file technology); awaiting user decision on approach
+2026-09-18 deliverable (admin ingest bar, user chose Option A): added ids ingestStatusBar/ingestStatusText/ingestStartBtn/ingestStopBtn to the EXISTING React bar in admin.html - 4 within-line edits, lineCount 557 unchanged, CRLF unchanged, setInterval still 2 (no second poller), apiFetch still 0, no second bar; literal spec (raw HTML + inline style/onclick + apiFetch) not implementable on this JSX-only surface and its feature already existed; 0003 frontmatter context extended to instances 5-7; activeContext 0a corrected from stale Planned(not started) to actual shipped-on-Overview state; progress.md admin bullet updated
