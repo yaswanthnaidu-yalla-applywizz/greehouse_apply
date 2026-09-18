@@ -320,6 +320,10 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       getISTDateRangeUtc(getISTDateString()).startIso,
       unrestricted ? undefined : await listOperatorEmailsForManager(managerEmail)
     );
+    const appliedByOperator = await countAppliedApplicationsByOperatorSince(
+      getISTDateRangeUtc(getISTDateString()).startIso,
+      unrestricted ? undefined : await listOperatorEmailsForManager(managerEmail)
+    );
     const dashboard = await loadClientDashboard({
       managerEmail,
       date,
@@ -335,25 +339,27 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         .map((row) => (row.assigned_ca_email || '').trim().toLowerCase())
     );
 
-    const operators = new Map<
-      string,
-      { email: string; name: string; applications: number; completed: number; pending: number; failed: number }
-    >();
+const operators = new Map<
+       string,
+       { email: string; name: string; applications: number; completed: number; applied: number; pending: number; failed: number }
+     >();
     for (const row of dashboard.rows) {
       const email = row.assignedToEmail || '';
       if (!email) continue;
-      const current = operators.get(email) || {
-        email,
-        name: row.assignedTo,
-        applications: 0,
-        completed: 0,
-        pending: 0,
-        failed: 0,
-      };
-      current.applications += row.applications;
-      current.completed += row.completed;
-      current.pending += row.pending;
-      current.failed += row.failed;
+const current = operators.get(email) || {
+       email,
+       name: row.assignedTo,
+       applications: 0,
+       completed: 0,
+       applied: 0,
+       pending: 0,
+       failed: 0,
+     };
+current.applications += row.applications;
+       current.completed += row.completed;
+       current.applied += row.applied;
+       current.pending += row.pending;
+       current.failed += row.failed;
       operators.set(email, current);
     }
 
@@ -363,27 +369,29 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         if ((user.role || '').trim().toLowerCase() !== 'operator') continue;
         const email = user.email.trim().toLowerCase();
         if (!email || operators.has(email)) continue;
-        operators.set(email, {
-          email,
-          name: user.name || email.split('@')[0],
-          applications: 0,
-          completed: 0,
-          pending: 0,
-          failed: 0,
-        });
+operators.set(email, {
+           email,
+           name: user.name || email.split('@')[0],
+           applications: 0,
+           completed: 0,
+           applied: 0,
+           pending: 0,
+           failed: 0,
+         });
       }
       for (const user of directory) {
         const email = (user.email || '').trim().toLowerCase();
         if (!email || operators.has(email)) continue;
         if (user.role !== 'operator') continue;
-        operators.set(email, {
-          email,
-          name: user.displayName || email.split('@')[0],
-          applications: 0,
-          completed: 0,
-          pending: 0,
-          failed: 0,
-        });
+operators.set(email, {
+           email,
+           name: user.displayName || email.split('@')[0],
+           applications: 0,
+           completed: 0,
+           applied: 0,
+           pending: 0,
+           failed: 0,
+         });
       }
     }
 
@@ -391,22 +399,24 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       Array.from(operators.keys())
     );
 
-    const items = Array.from(operators.values()).map((operator) => {
-      const user = byEmail.get(operator.email);
-      const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
-      const completed = completedByOperator.get(operator.email) || 0;
-      return {
-        email: operator.email,
-        name: operator.name,
-        status: active ? 'active' : 'inactive',
-        applications: operator.applications,
-        completed,
-        pending: operator.pending,
-        failed: operator.failed,
-        lastSignInAt: user?.lastSignInAt || null,
-        workload: workloadByEmail.get(operator.email) || 0,
-      };
-    });
+const items = Array.from(operators.values()).map((operator) => {
+       const user = byEmail.get(operator.email);
+       const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
+       const completed = completedByOperator.get(operator.email) || 0;
+       const applied = appliedByOperator.get(operator.email) || 0;
+       return {
+         email: operator.email,
+         name: operator.name,
+         status: active ? 'active' : 'inactive',
+         applications: operator.applications,
+         completed,
+         applied,
+         pending: operator.pending,
+         failed: operator.failed,
+         lastSignInAt: user?.lastSignInAt || null,
+         workload: workloadByEmail.get(operator.email) || 0,
+       };
+     });
 
     res.json({
       date,
@@ -415,6 +425,7 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       totals: {
         assigned: items.reduce((total, item) => total + item.applications, 0),
         completed: items.reduce((total, item) => total + item.completed, 0),
+        applied: items.reduce((total, item) => total + item.applied, 0),
         active: items.filter((item) => item.status === 'active').length,
         inactive: items.filter((item) => item.status === 'inactive').length,
       },
