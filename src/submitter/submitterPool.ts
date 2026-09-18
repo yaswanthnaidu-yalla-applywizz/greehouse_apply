@@ -10,11 +10,13 @@ import {
   getNextQueuedApplicationForRoundRobin,
   logQueueStatusChange,
   updateStatus,
+  requeueApplicationForRetry,
   type ApplicationRow,
 } from '../db/applications.js';
 import { wsManager } from '../server/ws.js';
 import { runLiveSubmit, type LiveSubmitResult } from './liveSubmit.js';
 import { createLogger } from '../utils/logger.js';
+import { getRetryReason } from './submissionRetry.js';
 import {
   isEligibleForSubmission,
   SubmissionEligibilityBlockedError,
@@ -159,21 +161,47 @@ export class SubmitterPool {
           log.info(`[API] Status → APPLIED (application ${applicationId})`);
           await logQueueStatusChange(applicationId, 'APPLYING', 'APPLIED');
         } else if (result.status === 'FAILED') {
-          await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
-          this.emitFailure(application, result.errorMessage || 'Submission execution failed.', result);
+          const reason = getRetryReason(result);
+          if (reason) {
+            const retry = await requeueApplicationForRetry(applicationId, reason, application.job_url);
+            if (retry.requeued) {
+              await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
+            } else {
+              await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
+              this.emitFailure(application, result.errorMessage || reason, result);
+            }
+          } else {
+            await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
+            this.emitFailure(application, result.errorMessage || 'Submission execution failed.', result);
+          }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        try {
-          await updateStatus(applicationId, 'FAILED', {
-            error_message: message,
-            job_url: application.job_url,
-          });
-        } catch (statusError) {
-          log.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
+        const reason = getRetryReason(error instanceof Error ? error : message);
+        if (reason) {
+          const retry = await requeueApplicationForRetry(applicationId, reason, application.job_url);
+          if (retry.requeued) {
+            await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
+          } else {
+            await updateStatus(applicationId, 'FAILED', {
+              error_message: message,
+              job_url: application.job_url,
+            });
+            await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
+            this.emitFailure(application, message);
+          }
+        } else {
+          try {
+            await updateStatus(applicationId, 'FAILED', {
+              error_message: message,
+              job_url: application.job_url,
+            });
+          } catch (statusError) {
+            log.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
+          }
+          await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
+          this.emitFailure(application, message);
         }
-        await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
-        this.emitFailure(application, message);
         work.reject(error instanceof Error ? error : new Error(message));
       } finally {
         this.inFlightApplicationIds.delete(applicationId);

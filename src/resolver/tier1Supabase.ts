@@ -15,7 +15,7 @@ const log = createLogger('Tier1Supabase');
 /**
  * Matches target value to the closest matching option in dropdown or radio group.
  */
-function matchBestOption(targetValue: string, options?: string[]): string {
+function matchBestOption(targetValue: string, options?: string[], label = targetValue): string | null {
   if (!options || options.length === 0) {
     return targetValue;
   }
@@ -64,7 +64,10 @@ function matchBestOption(targetValue: string, options?: string[]): string {
     return results[0].item;
   }
 
-  return options[0];
+  log.warn(
+    `matchBestOption: no option matched for label=${label}, value=${targetValue} — marking unresolved`
+  );
+  return null;
 }
 
 /**
@@ -101,10 +104,15 @@ function resolveStandardProfileAttribute(
   ) {
     const targetCountry = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'India'));
     if (field.options && field.options.length > 0) {
-      const countryMatch = matchBestOption(targetCountry, field.options);
+      const countryMatch = matchBestOption(targetCountry, field.options, field.label);
       if (countryMatch) return countryMatch;
-      const codeMatch = matchBestOption(isYaswanth ? '+91' : (profile.country_code || (isAkshitha ? '+1' : '+91')), field.options);
+      const codeMatch = matchBestOption(
+        isYaswanth ? '+91' : (profile.country_code || (isAkshitha ? '+1' : '+91')),
+        field.options,
+        field.label
+      );
       if (codeMatch) return codeMatch;
+      return null;
     }
     return targetCountry;
   }
@@ -119,8 +127,9 @@ function resolveStandardProfileAttribute(
   ) {
     const targetCode = isYaswanth ? '+91' : (profile.country_code || (isAkshitha ? '+1' : '+91'));
     if (field.options && field.options.length > 0) {
-      const codeMatch = matchBestOption(targetCode, field.options);
+      const codeMatch = matchBestOption(targetCode, field.options, field.label);
       if (codeMatch) return codeMatch;
+      return null;
     }
     return targetCode;
   }
@@ -132,7 +141,7 @@ function resolveStandardProfileAttribute(
     /^(candidate|current)?\s*country(\s*of\s*residence)?$/i.test(normLabel)
   ) {
     const targetCountry = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'India'));
-    return matchBestOption(targetCountry, field.options);
+    return matchBestOption(targetCountry, field.options, field.label);
   }
 
   // First Name
@@ -229,13 +238,13 @@ function resolveStandardProfileAttribute(
   // Work Authorization / Legal authorization
   if (/authorized to work|legally authorized|work authorization|legal right to work/i.test(combined)) {
     const rawVal = profile.work_authorization || 'Yes';
-    return matchBestOption(rawVal, field.options);
+    return matchBestOption(rawVal, field.options, field.label);
   }
 
   // Visa Sponsorship (must precede location to prevent "United States" false match)
   if (/sponsorship|require.*visa|future.*sponsorship|visa status/i.test(combined)) {
     const rawVal = profile.requires_sponsorship ? 'Yes' : 'No';
-    return matchBestOption(rawVal, field.options);
+    return matchBestOption(rawVal, field.options, field.label);
   }
 
   // Prior Employment / Former Employee (Always "No")
@@ -247,7 +256,7 @@ function resolveStandardProfileAttribute(
     if (field.type === 'checkbox') {
       return 'false';
     }
-    return matchBestOption('No', field.options);
+    return matchBestOption('No', field.options, field.label);
   }
 
   // Restrictive Covenants / Non-Compete / NDAs / Restrictive Agreements (Always "No")
@@ -259,7 +268,7 @@ function resolveStandardProfileAttribute(
     if (field.type === 'checkbox') {
       return 'false';
     }
-    return matchBestOption('No', field.options);
+    return matchBestOption('No', field.options, field.label);
   }
 
   // Consent / Terms & Conditions / Privacy Policy / Declarations / Acknowledgment (Always "Yes")
@@ -273,7 +282,7 @@ function resolveStandardProfileAttribute(
     if (field.type === 'checkbox') {
       return 'true';
     }
-    return matchBestOption('Yes', field.options);
+    return matchBestOption('Yes', field.options, field.label);
   }
 
   // Relocation / same-city willingness (binary Yes/No — must precede city/location heuristics)
@@ -284,7 +293,7 @@ function resolveStandardProfileAttribute(
   ) {
     const addInfo = profile.raw_api_payload?.additional_information;
     const willing = addInfo?.willing_to_relocate !== false;
-    return matchBestOption(willing ? 'Yes' : 'No', field.options);
+    return matchBestOption(willing ? 'Yes' : 'No', field.options, field.label);
   }
 
   // Location (City, State, Residence) - must not match "United States" in visa questions
@@ -298,35 +307,35 @@ function resolveStandardProfileAttribute(
   // Country
   if (/\bcountry\b|\bnationality\b/i.test(combined)) {
     const rawVal = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'United States'));
-    return matchBestOption(rawVal, field.options);
+    return matchBestOption(rawVal, field.options, field.label);
   }
 
   // Demographics / Salary / Experience from raw_api_payload if present
   if (profile.raw_api_payload?.demographics) {
     const demo = profile.raw_api_payload.demographics;
     if (/salary|compensation|expected pay/i.test(combined) && demo.salaryRange) {
-      return matchBestOption(demo.salaryRange, field.options);
+      return matchBestOption(demo.salaryRange, field.options, field.label);
     }
     if (/transgender/i.test(combined)) {
-      return matchBestOption('No', field.options);
+      return matchBestOption('No', field.options, field.label);
     }
     if (/sexual orientation/i.test(combined)) {
-      return matchBestOption("I don't wish to answer", field.options);
+      return matchBestOption("I don't wish to answer", field.options, field.label);
     }
     if (/hispanic|latino/i.test(combined)) {
-      return matchBestOption(demo.isHispanicLatino || 'No', field.options);
+      return matchBestOption(demo.isHispanicLatino || 'No', field.options, field.label);
     }
     if (/gender/i.test(combined) && !/transgender/i.test(combined) && demo.gender) {
-      return matchBestOption(demo.gender, field.options);
+      return matchBestOption(demo.gender, field.options, field.label);
     }
     if (/race|ethnicity/i.test(combined) && !/hispanic|latino/i.test(combined) && demo.raceEthnicity) {
-      return matchBestOption(demo.raceEthnicity, field.options);
+      return matchBestOption(demo.raceEthnicity, field.options, field.label);
     }
     if (/veteran/i.test(combined) && demo.veteranStatus) {
-      return matchBestOption(demo.veteranStatus, field.options);
+      return matchBestOption(demo.veteranStatus, field.options, field.label);
     }
     if (/disability/i.test(combined) && demo.disabilityStatus) {
-      return matchBestOption(demo.disabilityStatus, field.options);
+      return matchBestOption(demo.disabilityStatus, field.options, field.label);
     }
   }
 
@@ -418,10 +427,11 @@ export async function resolveTier1(
         return null;
       }
 
-      let finalValue = rawVal;
+      let finalValue: string | null = rawVal;
       if (field.options && field.options.length > 0) {
-        finalValue = matchBestOption(finalValue, field.options);
+        finalValue = matchBestOption(finalValue, field.options, field.label);
       }
+      if (finalValue === null) return null;
 
       return {
         fieldId: field.fieldId,

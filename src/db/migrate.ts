@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { getDbClient } from './client.js';
 import { ensureBucketsExist, uploadResume } from './storage.js';
+import { getProfile } from './profiles.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Migrate');
@@ -186,7 +187,13 @@ export async function migrate(): Promise<MigrationResult> {
         const pdfPath = path.join(resumesDir, pdfFile);
         const buffer = fs.readFileSync(pdfPath);
 
-        const storagePath = await uploadResume(applywizzId, buffer, 'application/pdf');
+        const profile = await getProfile(applywizzId);
+        const storagePath = await uploadResume(applywizzId, buffer, 'application/pdf', {
+          firstName: profile?.first_name,
+          lastName: profile?.last_name,
+          jobTitle: (profile as any)?.job_title,
+          workExperience: profile?.work_experience,
+        });
 
         // Update profile with storage path
         await supabase
