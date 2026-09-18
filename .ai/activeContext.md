@@ -78,6 +78,7 @@ _Last updated: 2026-09-17_
 
 ## Immediate Blockers / Open Questions
 - None as of 2026-09-16 (migrations 016/017, Storage ingest keys, and prod smoke assumed done).
+- Operator-triggered retry is implemented locally; verify the retry button and atomic `FAILED` → `QUEUED` transition in operator smoke testing.
 
 ## Recent Decisions Made
 - Manager team scope uses **`users.manager_email` → operator emails → `assigned_ca_email` / work-history union**, not ApplyWizz `careerassociatemanager_id` API alone.

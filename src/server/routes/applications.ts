@@ -17,6 +17,7 @@ import {
   hydrateApplicationProofUrls,
   serializeApplicationDto,
   hydrateAndPersistApplicationFields,
+  retryFailedApplication,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../../db/applications.js';
@@ -39,6 +40,7 @@ import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
 import { applicationRowHasPersistedResolution } from '../../dashboard/candidateQueueFilter.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const log = createLogger('Applications');
 
@@ -468,6 +470,41 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
     });
   } catch (err: any) {
     log.error(`[Applications Router] ❌ Failed to approve application ${appId}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/applications/:id/retry
+ * Requeues an operator-approved retryable failed application.
+ */
+applicationsRouter.post('/:id/retry', requireAuth, async (req: Request, res: Response): Promise<void> => {
+  const rawAppId = req.params.id;
+  const appId = Array.isArray(rawAppId) ? rawAppId[0] : String(rawAppId || '');
+  const jobUrl = (req.body?.jobUrl as string) || (req.query?.jobUrl as string) || (req.query?.job_url as string);
+  const retryableError = /otp|one.?time|security.?code|unresolved.?required/i;
+
+  try {
+    const application = await getApplication(appId, jobUrl);
+    if (
+      !application ||
+      application.status !== 'FAILED' ||
+      !retryableError.test(application.error_message || '')
+    ) {
+      res.status(400).json({ error: 'This failure cannot be retried' });
+      return;
+    }
+
+    const requeued = await retryFailedApplication(application);
+    if (!requeued) {
+      res.status(400).json({ error: 'This failure cannot be retried' });
+      return;
+    }
+
+    log.info(`Operator triggered retry for ${appId}`);
+    res.status(200).json({ success: true });
+  } catch (err: any) {
+    log.error(`[Applications Router] Failed to retry application ${appId}:`, err);
     res.status(500).json({ error: err.message });
   }
 });

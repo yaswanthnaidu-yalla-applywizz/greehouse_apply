@@ -84,6 +84,9 @@ _Last updated: 2026-09-17_
 - [x] **Parallel ingest resolve + batched Tier 5 + admin stop** — `RESOLVER_WORKER_POOL_SIZE` (default 3); Tier 5 chunks of 15 with `finalizeRawAnswer`; stop enabled on Railway; admin ingest-status on all tabs (`56d5270`, 2026-09-17)
 - [x] **Admin operators by manager** — `GET /api/admin/operators?manager=` uses `users.manager_email`; `managerEmail` on operator rows (2026-09-16)
 - [x] **Submission eligibility gate** — ingest all CSV scores; resolve all templates; gate at submit (score 20–60, field_count &lt; 35); Dev dashboard toggle; migration 019 (2026-09-16)
+- [x] **Operator completion toast** — when a selected candidate's `READY_FOR_REVIEW` / `APPROVED` job count transitions to zero, show a dismissible five-second toast once per candidate per session (2026-09-17)
+- [x] **Unresolved-field helper hints** — context-aware inline guidance appears below unresolved answer inputs and hides on focus or typing (2026-09-17)
+- [x] **Operator-triggered retry** — retryable OTP/security-code/unresolved-required failures can be manually requeued from the operator dashboard; non-retryable failures remain terminal (2026-09-17)
 
 - [x] **Central logger** — `src/utils/logger.ts`; all `src/` `console.log`/`warn`/`error` → `createLogger`; `[ISO] [LEVEL] [MODULE] message`
 - [x] **AW app logo** — `dashboard/public/logo.webp` as favicon + header/auth/manager mark; `express.static(dashboard/public)` so `/logo.webp` is not swallowed by the HTML catch-all

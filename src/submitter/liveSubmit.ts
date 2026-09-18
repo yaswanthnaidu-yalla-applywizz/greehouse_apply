@@ -41,6 +41,7 @@ import { zohoReader } from '../services/zohoReader.js';
 import { config } from '../config/env.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { assertEligibleForSubmission } from '../submission/submissionEligibilityGate.js';
+import type { SubmissionRetryReason } from './submissionRetry.js';
 
 const log = createLogger('Live Submit');
 
@@ -71,6 +72,7 @@ export interface LiveSubmitResult {
   requiresCaptcha?: boolean;
   challengeType?: 'otp' | 'captcha';
   errorMessage?: string;
+  retryReason?: SubmissionRetryReason;
   summary?: FormFillSummary;
 }
 
@@ -1539,6 +1541,7 @@ export async function runLiveSubmit(
           log.info(
             `[Live Submit] 🤖 Automated OTP resolution enabled. Querying Zoho Mail Reader for ${companyEmail}...`
           );
+          let otpFetchFailed = false;
           try {
             const otpDetectedTime = pausedAt || Date.now();
             const zohoResult = await zohoReader.fetchLatestOtp(companyEmail, {
@@ -1572,6 +1575,7 @@ export async function runLiveSubmit(
                 throw new Error(submitResult.errorMessage || 'Auto-submitted OTP was rejected or failed verification.');
               }
             } else {
+              otpFetchFailed = true;
               throw new Error(zohoResult.errorMessage || 'Timeout: OTP was not filled in time.');
             }
           } catch (autoOtpErr: any) {
@@ -1599,6 +1603,7 @@ export async function runLiveSubmit(
               status: 'FAILED',
               applicationId,
               errorMessage: otpErrMsg,
+              retryReason: otpFetchFailed ? 'OTP_FETCH_FAIL' : undefined,
               summary: fillSummary,
               proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
               proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
@@ -1635,6 +1640,9 @@ export async function runLiveSubmit(
           status: 'FAILED',
           applicationId,
           errorMessage: fillErrMsg,
+          retryReason: /Required field validation failed/i.test(fillErrMsg)
+            ? 'UNRESOLVED_REQUIRED_FIELD'
+            : undefined,
           summary: fillSummary,
           proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
           proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
@@ -1812,6 +1820,9 @@ export async function runLiveSubmit(
         status: 'FAILED',
         applicationId,
         errorMessage: errorMsg,
+        retryReason: isFormError && /Required field validation failed/i.test(errorMsg)
+          ? 'UNRESOLVED_REQUIRED_FIELD'
+          : undefined,
         summary: fillSummary,
         proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
         proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
