@@ -10,7 +10,6 @@ import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
   applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
-  countOperatorWorkloadByProfileCaEmail,
   countCompletedApplicationsSince,
   countCompletedApplicationsByOperatorSince,
   countAppliedApplicationsByOperatorSince,
@@ -396,9 +395,7 @@ operators.set(email, {
       }
     }
 
-    const workloadByEmail = await countOperatorWorkloadByProfileCaEmail(
-      Array.from(operators.keys())
-    );
+    
 
 const items = Array.from(operators.values()).map((operator) => {
        const user = byEmail.get(operator.email);
@@ -415,7 +412,6 @@ const items = Array.from(operators.values()).map((operator) => {
          pending: operator.pending,
          failed: operator.failed,
          lastSignInAt: user?.lastSignInAt || null,
-         workload: workloadByEmail.get(operator.email) || 0,
        };
      });
 

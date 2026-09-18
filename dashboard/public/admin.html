@@ -73,6 +73,72 @@
       );
     }
 
+    function ApplicationProofModal({ application, onClose }) {
+      if (!application) return null;
+      
+      const { jobTitle, jobUrl, companyName, operator, assigned_ca_email, status, 
+              proof_web_url, proof_email_url, proof_email_json, error_message, candidate_name } = application;
+      
+      const displayOperator = (operator || assigned_ca_email || '').trim() || '—';
+      const displayCandidateName = candidate_name || '—';
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1A2E]/80" onClick={onClose}>
+          <div className="w-full max-w-2xl bg-white border-2 border-[#1A1A2E] rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <header className="px-5 py-4 bg-[#EFF6FF] border-b-2 border-[#1A1A2E] flex justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase text-[#64748B]">Application Details</p>
+                <h3 className="text-sm font-bold">{jobTitle || 'Job Application'}</h3>
+                <p className="text-xs font-mono mt-1">Candidate: {displayCandidateName}</p>
+                <p className="text-xs font-mono">Operator: {displayOperator}</p>
+                {companyName !== '—' && <p className="text-xs font-mono">Company: {companyName}</p>}
+              </div>
+              <button type="button" onClick={onClose} className="font-black">✕</button>
+            </header>
+            <div className="px-5 py-4 bg-[#FAF4EB] max-h-[50vh] overflow-y-auto">
+              <div className="space-y-4">
+                {proof_web_url && (
+                  <div className="text-center">
+                    <p className="text-xs font-bold text-[#64748B] mb-1">Web Proof Screenshot</p>
+                    <a href={proof_web_url} target="_blank" rel="noopener noreferrer" className="block max-w-xs rounded border border-[#1A1A2E]">
+                      View Web Proof Image
+                    </a>
+                  </div>
+                )}
+                
+                {(proof_email_url || proof_email_json) && (
+                  <div>
+                    <p className="text-xs font-bold text-[#64748B] mb-1">Email Proof</p>
+                    {proof_email_url ? (
+                      <a href={proof_email_url} target="_blank" rel="noopener noreferrer" className="underline font-bold">View Email Screenshot</a>
+                    ) : (
+                      <button type="button" className="underline font-bold" onClick={() => /* Would need email proof JSON handler */}>
+                        View Email Proof
+                      </button>
+                    )}
+                  </div>
+                )}
+                
+                {status === 'FAILED' && error_message && (
+                  <div className="bg-[#FEE2E2] border border-[#991B1B] rounded p-3">
+                    <p className="text-xs font-bold text-[#991B1B] mb-1">Error Message</p>
+                    <p className="text-xs text-[#991B1B] whitespace-pre-wrap">{error_message}</p>
+                  </div>
+                )}
+                
+                {status === 'EMAIL_PROOF_PENDING' && (
+                  <div className="bg-[#FFF8D6] border border-[#1A1A2E] rounded p-3">
+                    <p className="text-xs font-bold text-[#64748B] mb-1">Email Proof Status</p>
+                    <p className="text-xs text-[#64748B]">Email proof pending</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function ClientTable({ rows, loading, expanded, onToggle, onEmailProof }) {
       return (
         <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
@@ -134,6 +200,7 @@
       const [managerDash, setManagerDash] = useState({ rows: [], totals: {} });
       const [expanded, setExpanded] = useState(null);
       const [emailProof, setEmailProof] = useState(null);
+       const [applicationProof, setApplicationProof] = useState(null);
       const [operators, setOperators] = useState([]);
       const [opSearch, setOpSearch] = useState('');
       const [opStatus, setOpStatus] = useState('all');
@@ -276,6 +343,7 @@
       return (
         <main className="min-h-screen p-4 md:p-8 font-sans">
           <EmailProofModal proof={emailProof} onClose={() => setEmailProof(null)} />
+          <ApplicationProofModal proof={applicationProof} onClose={() => setApplicationProof(null)} />
           <div className="max-w-7xl mx-auto">
             <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6">
               <div className="flex items-center gap-3">
@@ -464,7 +532,38 @@
                           <td className="p-3"><a className="underline break-all" href={row.jobUrl} target="_blank" rel="noopener noreferrer">{row.jobTitle || row.jobUrl}</a></td>
                           <td className="p-3">{row.companyName || '—'}</td>
                           <td className="p-3 font-mono">{(row.operator || row.assigned_ca_email || '').trim() || '—'}</td>
-                          <td className="p-3 font-bold">{row.status}</td>
+                          <td className="p-3">
+  {row.status === 'APPLIED' && (
+    <button
+      type="button"
+      onClick={() => setApplicationProof(row)}
+      className="font-mono underline decoration-2 text-[#10B981] font-black"
+    >
+      {row.status}
+    </button>
+  )}
+  {row.status === 'FAILED' && (
+    <button
+      type="button"
+      onClick={() => setApplicationProof(row)}
+      className="font-mono underline decoration-2 text-[#EF4444] font-black"
+    >
+      {row.status}
+    </button>
+  )}
+  {row.status === 'EMAIL_PROOF_PENDING' && (
+    <button
+      type="button"
+      onClick={() => setApplicationProof(row)}
+      className="font-mono underline decoration-2 text-[#F59E0B] font-black"
+    >
+      {row.status}
+    </button>
+  )}
+  {(row.status !== 'APPLIED' && row.status !== 'FAILED' && row.status !== 'EMAIL_PROOF_PENDING') && (
+    <span className="font-mono">{row.status}</span>
+  )}
+</td>
                           <td className="p-3 font-mono">{row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}</td>
                         </tr>
                       ))}
