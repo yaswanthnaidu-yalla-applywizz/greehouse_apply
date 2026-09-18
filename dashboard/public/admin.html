@@ -219,7 +219,6 @@
           setError(payload.error || 'Unable to start ingest');
           return;
         }
-        setTab('system');
         setIngestRun({ running: true, startedAt: payload.startedAt, stopEnabled: true });
       };
 
@@ -234,7 +233,7 @@
       };
 
       useEffect(() => {
-        if (!ingestRun?.running || !token) return;
+        if (!token) return;
         let cancelled = false;
         const poll = async () => {
           try {
@@ -250,7 +249,15 @@
           cancelled = true;
           clearInterval(interval);
         };
-      }, [ingestRun?.running, token]);
+      }, [token]);
+
+      useEffect(() => {
+        if (!ingestRun || ingestRun.running || (!ingestRun.error && !ingestRun.finishedAt)) return;
+        const timeout = setTimeout(() => {
+          setIngestRun((current) => current && !current.running ? null : current);
+        }, 60000);
+        return () => clearTimeout(timeout);
+      }, [ingestRun?.running, ingestRun?.error, ingestRun?.finishedAt]);
 
       if (!token || access.reason === 'anon') {
         return (
@@ -284,10 +291,6 @@
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
                 </label>
                 <button type="button" onClick={refresh} className="bg-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
-                <button type="button" onClick={handleStart} disabled={Boolean(ingestRun?.running)} className="bg-[#9AC89A] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded disabled:opacity-60">{ingestRun?.running ? 'Running…' : '▶ Start'}</button>
-                {ingestRun?.running ? (
-                  <button type="button" onClick={handleStop} disabled={ingestRun?.stopEnabled === false} className="bg-[#FECACA] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded disabled:opacity-50">⏹ Stop</button>
-                ) : null}
                 <HeaderSignOut />
               </div>
             </header>
@@ -301,18 +304,46 @@
 
             {tab === 'overview' && overview && (
               <>
+                <div id="ingestStatusBar" className={`mb-6 border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold flex flex-wrap items-center justify-between gap-3 ${
+                  ingestRun?.running
+                    ? 'bg-[#E2F0FB] text-[#1E3A5F] animate-pulse'
+                    : ingestRun?.error
+                      ? 'bg-[#FECACA] text-[#991B1B]'
+                      : ingestRun?.finishedAt
+                        ? 'bg-[#D1FAE5] text-[#065F46]'
+                        : 'bg-[#E2E8F0] text-[#475569]'
+                }`}>
+                  <span id="ingestStatusText">
+                    {ingestRun?.running
+                      ? `Pipeline running — ${ingestRun.phase ? `${ingestRun.phase}: ` : ''}${ingestRun.message || ingestRun.processedFile || 'processing CSV'}`
+                      : ingestRun?.error
+                        ? `Last run failed: ${ingestRun.error}`
+                        : ingestRun?.finishedAt
+                          ? `Last run completed at ${new Date(ingestRun.finishedAt).toLocaleString()} — ${ingestRun.processedCount ?? 0} files processed`
+                          : 'Pipeline idle — awaiting CSV upload'}
+                  </span>
+                  <div className="flex gap-2">
+                    <button type="button" id="ingestStartBtn" onClick={handleStart} disabled={Boolean(ingestRun?.running)} className="bg-[#9AC89A] text-[#1A1A2E] border-2 border-[#1A1A2E] px-3 py-1.5 text-xs font-bold rounded disabled:opacity-60">
+                      {ingestRun?.running ? 'Running…' : '▶ Start'}
+                    </button>
+                    {ingestRun?.running ? (
+                      <button type="button" id="ingestStopBtn" onClick={handleStop} disabled={ingestRun?.stopEnabled === false} className="bg-[#FECACA] text-[#1A1A2E] border-2 border-[#1A1A2E] px-3 py-1.5 text-xs font-bold rounded disabled:opacity-50">⏹ Stop</button>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
                   {[
-                    ['Managers', overview.managers],
                     ['Operators', overview.operators],
                     ['Active operators', overview.activeOperators],
                     ['Inactive operators', overview.inactiveOperators],
-                    ['Submit clicks (day)', overview.submitClicks],
-                    ['Submitted Today', overview.submitted_today],
-                    ['Processed', overview.applicationsProcessed],
-                    ['Running', overview.applicationsRunning],
-                    ['Queued', overview.applicationsQueued],
-                    ['Failed', overview.applicationsFailed],
+                    ['Completed', overview.completed],
+                    ['Applied', overview.applied],
+                    ['Running', overview.running],
+                    ['Queued', overview.queued],
+                    ['Failed', overview.failed],
+                    ['Supabase %', overview.supabasePercent],
+                    ['AI %', overview.aiPercent],
+                    ['Resume %', overview.resumePercent],
                   ].map(([label, val]) => (
                     <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
                       <p className="text-xs font-bold uppercase">{label}</p>
@@ -362,7 +393,7 @@
                 <button type="button" className="text-xs font-bold underline" onClick={() => setSelectedManager(null)}>← All managers</button>
                 <p className="text-sm font-black">{selectedManager}</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[['Applications', managerDash.totals?.applications], ['Completed', managerDash.totals?.applied], ['Pending', managerDash.totals?.pending], ['Failed', managerDash.totals?.failed]].map(([label, val]) => (
+                  {[['Completed', managerDash.completed], ['Applied', managerDash.totals?.applied], ['Pending', managerDash.totals?.pending], ['Failed', managerDash.totals?.failed]].map(([label, val]) => (
                     <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-3"><p className="text-[10px] font-bold uppercase">{label}</p><p className="text-xl font-black">{val ?? 0}</p></div>
                   ))}
                 </div>
