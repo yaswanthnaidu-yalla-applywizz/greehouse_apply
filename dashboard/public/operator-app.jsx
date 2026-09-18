@@ -380,8 +380,12 @@
         }
       };
 
-      const canSubmit = !hasUnresolved && !isApplying && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'DRY_RUN_COMPLETE' || applicationStatus === 'FAILED' || applicationStatus === 'EMAIL_UNVERIFIED');
-      const canDryRun = !isApplying && !isDryRunning;
+      const canSubmit = !hasUnresolved && !isApplying && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'APPROVED');
+      const canDryRun = !isApplying && !isDryRunning && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'APPROVED');
+      const hideSubmissionActions = applicationStatus === 'APPLIED' ||
+        applicationStatus === 'DRY_RUN_COMPLETE' ||
+        applicationStatus === 'EMAIL_UNVERIFIED' ||
+        applicationStatus === 'FAILED';
 
       return (
         <>
@@ -414,6 +418,7 @@
             <SubmittingSpinner text="Submitting..." className="w-full" />
           ) : null}
 
+          {!hideSubmissionActions && (
           <div className="flex items-center gap-2.5 flex-wrap justify-end">
           <button
             type="button"
@@ -475,6 +480,8 @@
               </>
             )}
           </button>
+          </div>
+          )}
 
           {hasProofActions && (
             <div className="flex flex-wrap items-center justify-end gap-1.5 w-full pt-0.5">
@@ -769,6 +776,7 @@
                   onKeyDown={handleKeyDown}
                   disabled={isSaving || isConfirming}
                   rows={3}
+                  placeholder={(field.isRequired || field.required) ? 'REQUIRED — PLEASE FILL' : ''}
                   className="w-full text-xs font-mono p-2.5 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
                 />
               ) : (
@@ -783,6 +791,7 @@
                   }}
                   onKeyDown={handleKeyDown}
                   disabled={isSaving || isConfirming}
+                  placeholder={(field.isRequired || field.required) ? 'REQUIRED — PLEASE FILL' : ''}
                   className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
                 />
               )}
@@ -888,9 +897,7 @@
                 <span className="text-[#1A1A2E] font-medium">{field.value}</span>
               ) : (field.isRequired || field.required) ? (
                 <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved required field (click to provide answer)</span>
-              ) : (
-                <span className="text-[#64748B] italic">(Optional — left blank)</span>
-              )}
+              ) : null}
             </div>
           )}
         </div>
@@ -1389,8 +1396,10 @@
               const inProgress = CARD_IN_FLIGHT_STATUSES.has(cardStatus);
               const submitted = CARD_SUBMITTED_STATUSES.has(cardStatus);
               const failed = cardStatus === 'FAILED';
+              const retryCount = Number(job.retryCount ?? job.retry_count ?? 0);
               const retryableFailure =
                 failed &&
+                retryCount < 3 &&
                 RETRYABLE_FAILURE_PATTERN.test(job.errorMessage || job.error_message || '');
               const expiredOrSkipped = cardStatus === 'EXPIRED' || cardStatus === 'SKIPPED';
               let cardChrome = isSelected
@@ -1608,6 +1617,19 @@
         (f) => (f.isRequired || f.required) && (!f.value || f.value.trim().length === 0 || f.source === 'unresolved')
       ).length;
       const currentStatus = application?.status || 'READY_FOR_REVIEW';
+      const applicationError = String(
+        application?.error_message || application?.errorMessage || application?.error || ''
+      ).trim();
+      const retryCount = Number(application?.retry_count ?? application?.retryCount ?? 0);
+      const isRetryableFailure =
+        currentStatus === 'FAILED' && RETRYABLE_FAILURE_PATTERN.test(applicationError);
+      const isGateBlockedFailure =
+        currentStatus === 'FAILED' && /does not meet|requirements|gate|score|eligibility/i.test(applicationError);
+      const isFullFormStatus =
+        currentStatus === 'APPLIED' ||
+        currentStatus === 'DRY_RUN_COMPLETE' ||
+        currentStatus === 'EMAIL_UNVERIFIED' ||
+        currentStatus === 'FAILED';
       const submitFlowActive =
         isSubmitting ||
         currentStatus === 'APPLYING' ||
@@ -1667,9 +1689,14 @@
         (f) => !isDemographic(f.label) || f.source === 'ai' || f.source === 'unresolved' || (f.isRequired || f.required)
       );
 
-      const baseFields = filterActionableOnly && actionableFields.length > 0
+      const fieldsForDisplay = isFullFormStatus
+        ? visuallyRenderedFields
+        : filterActionableOnly && actionableFields.length > 0
         ? actionableFields
         : visuallyRenderedFields;
+      const baseFields = isFullFormStatus
+        ? fieldsForDisplay
+        : fieldsForDisplay.filter((field) => field.isRequired || field.required);
       const fieldsByFingerprint = new Map();
       baseFields.forEach((field) => {
         const fingerprint = field.question_fingerprint;
@@ -1763,7 +1790,7 @@
         );
       }
 
-      if (isOperatorFormPanelBlocked(currentStatus)) {
+      if (isOperatorFormPanelBlocked(currentStatus) && !isFullFormStatus) {
         return <OperatorFormBlockedPanel application={application} />;
       }
 
@@ -1929,6 +1956,37 @@
             }}
           />
 
+          {currentStatus === 'APPLIED' || currentStatus === 'DRY_RUN_COMPLETE' || currentStatus === 'EMAIL_UNVERIFIED' ? (
+            <div className="mb-3 bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#1A1A2E] text-[#065F46]">
+              <p className="text-lg font-black">✓ Already Submitted</p>
+            </div>
+          ) : currentStatus === 'FAILED' && isGateBlockedFailure ? (
+            <div className="mb-3 bg-[#E2E8F0] border-2 border-[#475569] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#475569] text-[#475569]">
+              <p className="text-sm font-bold">
+                This application does not fall within our requirements to apply today
+              </p>
+            </div>
+          ) : currentStatus === 'FAILED' ? (
+            <div className="mb-3 bg-[#FEE2E2] border-2 border-[#991B1B] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#991B1B] text-[#991B1B]">
+              <p className="text-sm font-bold font-mono break-words">
+                {applicationError || 'Submission failed.'}
+              </p>
+              {isRetryableFailure && retryCount < 3 ? (
+                <button
+                  type="button"
+                  onClick={handleRetrySubmission}
+                  disabled={isRetrying}
+                  className="mt-2 px-3 py-1.5 text-[11px] font-bold text-[#9A3412] bg-[#FED7AA] hover:bg-[#FDBA74] border border-[#1A1A2E] rounded shadow-[1px_1px_0px_#1A1A2E] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isRetrying ? 'Retrying...' : '↺ Retry Submission'}
+                </button>
+              ) : (
+                <p className="mt-2 text-xs font-bold">Max retries reached — manual review required</p>
+              )}
+              {retryError && <p className="mt-1.5 text-[11px] font-bold">{retryError}</p>}
+            </div>
+          ) : null}
+
           {/* Compact Job Header Card */}
           <div className="bg-white border-2 border-[#1A1A2E] rounded-xl px-4 py-3 md:px-5 md:py-3.5 mb-3 shadow-[3px_3px_0px_#1A1A2E]">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b-2 border-[#1A1A2E] pb-2.5 mb-2.5">
@@ -1968,34 +2026,6 @@
                 >
                   {application.jobUrl || application.job_url}
                 </a>
-                {currentStatus === 'FAILED' &&
-                  (application.error_message || application.errorMessage) && (
-                    <div className="mt-2 max-w-2xl">
-                      <p
-                        className="text-[11px] font-mono text-[#991B1B] bg-[#FEE2E2] border border-[#1A1A2E] rounded-lg px-2.5 py-1.5"
-                        title="Failure reason from submission worker"
-                      >
-                        {application.error_message || application.errorMessage}
-                      </p>
-                      {RETRYABLE_FAILURE_PATTERN.test(
-                        application.error_message || application.errorMessage || ''
-                      ) && (
-                        <button
-                          type="button"
-                          onClick={handleRetrySubmission}
-                          disabled={isRetrying}
-                          className="mt-2 px-3 py-1.5 text-[11px] font-bold text-[#9A3412] bg-[#FED7AA] hover:bg-[#FDBA74] border border-[#1A1A2E] rounded shadow-[1px_1px_0px_#1A1A2E] disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isRetrying ? 'Retrying...' : '↺ Retry Submission'}
-                        </button>
-                      )}
-                      {retryError && (
-                        <p className="mt-1.5 text-[11px] font-bold text-[#991B1B]">
-                          {retryError}
-                        </p>
-                      )}
-                    </div>
-                  )}
               </div>
 
               <div className="shrink-0 flex flex-col items-end gap-1.5">
@@ -3710,13 +3740,6 @@
                     <span>{stats.totalApplications}</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E4620] shadow-[1px_1px_0px_#1A1A2E]">
-                    <span>🌿 supabase: {stats.supabasePercentage}%</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-[#EDE9FE] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5B21B6] shadow-[1px_1px_0px_#1A1A2E]">
-                    <span>🔮 ai: {stats.aiPercentage}%</span>
-                  </div>
                 </div>
               )}
 
@@ -4032,51 +4055,40 @@
 
                   <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
                     <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
-                      Successful Applications
+                      Submitted Today
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.successfulApplications}
+                      {stats.completed}
                     </div>
                     <div className="text-[11px] font-mono text-[#065F46] mt-1">
-                      Submitted with APPLIED status
+                      Applications sent to queue today
+                    </div>
+                  </div>
+
+                  <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
+                      Successfully Applied
+                    </span>
+                    <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+                      {stats.applied}
+                    </div>
+                    <div className="text-[11px] font-mono text-[#065F46] mt-1">
+                      Confirmed by Greenhouse
                     </div>
                   </div>
 
                   <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
                     <span className="text-xs font-bold uppercase tracking-wider text-[#991B1B]">
-                      Failed Applications
+                      Failed
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.failedApplications}
+                      {stats.failed}
                     </div>
                     <div className="text-[11px] font-mono text-[#991B1B] mt-1">
-                      Terminal FAILED submissions
+                      Submission errors
                     </div>
                   </div>
 
-                  <div className="bg-[#E2F5E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#1E4620]">
-                      Supabase Cache
-                    </span>
-                    <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.supabasePercentage}%
-                    </div>
-                    <div className="text-[11px] font-mono text-[#1E4620] mt-1">
-                      {stats.supabaseTaggedCount} fields (0 API calls)
-                    </div>
-                  </div>
-
-                  <div className="bg-[#FFEAE8] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#6B2C2C]">
-                      AI Synthesis
-                    </span>
-                    <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.aiPercentage}%
-                    </div>
-                    <div className="text-[11px] font-mono text-[#6B2C2C] mt-1">
-                      {stats.aiTaggedCount} fields synthesized
-                    </div>
-                  </div>
                 </div>
               ) : (
                 <div className="p-8 text-center text-xs font-mono text-[#64748B]">Loading statistics...</div>

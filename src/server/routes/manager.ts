@@ -11,21 +11,15 @@ import {
   applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
   countOperatorWorkloadByProfileCaEmail,
-  countSubmittedApplicationsSince,
-  countSubmittedApplicationsByOperatorSince,
+  countCompletedApplicationsSince,
+  countCompletedApplicationsByOperatorSince,
   listApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
-import {
-  countAuditEventsByActionInRange,
-  insertAuditEvent,
-  listApplicationEvents,
-  SUBMIT_CLICK_AUDIT_ACTION,
-  type ApplicationEventRow,
-} from '../../db/events.js';
+import { insertAuditEvent, listApplicationEvents, type ApplicationEventRow } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { canAccessManagerDashboard, resolveRole } from './auth.js';
 import { loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
@@ -287,22 +281,19 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
     const operatorEmails = unrestricted
       ? undefined
       : await listOperatorEmailsForManager(managerEmail);
-    const submitClicks = await countAuditEventsByActionInRange({
-      action: SUBMIT_CLICK_AUDIT_ACTION,
-      startIso: parsedRange.startIso,
-      endIso: parsedRange.endIso,
-      actorEmails: operatorEmails,
-    });
-    const submittedToday = await countSubmittedApplicationsSince(
+    const completed = await countCompletedApplicationsSince(
       getISTDateRangeUtc(getISTDateString()).startIso,
       operatorEmails
     );
+    const { waiting_for_email: _waitingForEmail, ...totalsWithoutWaiting } = payload.totals;
     res.json({
       ...payload,
-      submitted_today: submittedToday,
-      submitClicks,
+      totalApplications: payload.totals.applications,
+      totals: totalsWithoutWaiting,
+      completed,
       rows: payload.rows.map((row) => ({
         ...row,
+        waiting_for_email: undefined,
         assigned_ca: (row.assigned_ca || '').trim(),
       })),
     });
@@ -325,7 +316,7 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
     const managerEmail = managerEmailForRequest(req);
     const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
     const unrestricted = hasUnrestrictedDashboardAccess(role);
-    const submittedByOperator = await countSubmittedApplicationsByOperatorSince(
+    const completedByOperator = await countCompletedApplicationsByOperatorSince(
       getISTDateRangeUtc(getISTDateString()).startIso,
       unrestricted ? undefined : await listOperatorEmailsForManager(managerEmail)
     );
@@ -403,15 +394,15 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
     const items = Array.from(operators.values()).map((operator) => {
       const user = byEmail.get(operator.email);
       const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
+      const completed = completedByOperator.get(operator.email) || 0;
       return {
         email: operator.email,
         name: operator.name,
         status: active ? 'active' : 'inactive',
         applications: operator.applications,
-        completed: operator.completed,
+        completed,
         pending: operator.pending,
         failed: operator.failed,
-        submitted_today: submittedByOperator.get(operator.email) || 0,
         lastSignInAt: user?.lastSignInAt || null,
         workload: workloadByEmail.get(operator.email) || 0,
       };
@@ -422,7 +413,8 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       dateRange: serializeDateRange(parsedRange),
       operators: items,
       totals: {
-        assigned: items.length,
+        assigned: items.reduce((total, item) => total + item.applications, 0),
+        completed: items.reduce((total, item) => total + item.completed, 0),
         active: items.filter((item) => item.status === 'active').length,
         inactive: items.filter((item) => item.status === 'inactive').length,
       },
@@ -512,6 +504,45 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
     }
 
     const names = await displayNameMapForEmails(Array.from(operatorMap.keys()));
+    const perOperator = await Promise.all(
+      Array.from(operatorMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(async ([email, applications]) => {
+          const [appsRes, completed, approvedRes] = await Promise.all([
+            getDbClient()
+              .from('candidate_applications')
+              .select('*', { count: 'exact', head: true })
+              .eq('assigned_ca_email', email),
+            countCompletedApplicationsSince(startIso, [email]),
+            getDbClient()
+              .from('candidate_applications')
+              .select('*', { count: 'exact', head: true })
+              .in('status', [
+                'QUEUED',
+                'APPLYING',
+                'APPLIED',
+                'EMAIL_PROOF_PENDING',
+                'EMAIL_UNVERIFIED',
+                'APPROVED',
+              ])
+              .eq('assigned_ca_email', email)
+              .gte('updated_at', startIso),
+          ]);
+          if (appsRes.error || approvedRes.error) {
+            log.warn(
+              `[Manager Router] reports counts failed for ${email}: ${appsRes.error?.message || approvedRes.error?.message}`
+            );
+          }
+          return {
+            email,
+            name: names.get(email) || email.split('@')[0],
+            applications,
+            apps: appsRes.count ?? 0,
+            completed,
+            approved: approvedRes.count ?? 0,
+          };
+        })
+    );
     res.json({
       range,
       start,
@@ -519,13 +550,7 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
       buckets: Array.from(bucketMap.entries())
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([date, applications]) => ({ date, applications })),
-      perOperator: Array.from(operatorMap.entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([email, applications]) => ({
-          email,
-          name: names.get(email) || email.split('@')[0],
-          applications,
-        })),
+      perOperator,
       warning: scoped.warning,
     });
   } catch (error) {
