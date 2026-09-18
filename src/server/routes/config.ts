@@ -5,8 +5,11 @@
 import { Router, type Request, type Response } from 'express';
 import config from '../../config/env.js';
 import { isSupabaseConfigured, resolveSupabaseAnonKey } from '../../db/client.js';
+import { createLogger } from '../../utils/logger.js';
 
 export const configRouter = Router();
+
+const log = createLogger('config');
 
 /**
  * GET /api/config/supabase-realtime
