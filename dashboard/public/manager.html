@@ -117,9 +117,9 @@
       return (
         <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-xs">
-            <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-              <tr>{['Client', 'Apps', 'Completed', 'Pending', 'Failed', 'Assigned'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
-            </thead>
+<thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
+  <tr>{['Client', 'Apps', 'Completed', 'Applied', 'Pending', 'Failed', 'Assigned'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+</thead>
             <tbody>
               {rows.map((row) => {
                 const completedKey = `${row.client}:completed`;
@@ -130,14 +130,15 @@
                 const items = mode === 'completed' ? row.completedApplications : mode === 'pending' ? row.pendingApplications : mode === 'failed' ? row.failedApplications : [];
                 return (
                   <React.Fragment key={row.client}>
-                    <tr className="border-b border-[#1A1A2E]/20">
-                      <td className="p-3 font-black">{row.client}</td>
-                      <td className="p-3 font-mono">{row.applications}</td>
-                      <td className="p-3"><CountButton value={row.completed} active={expanded === completedKey} onClick={() => onToggle(completedKey)} /></td>
-                      <td className="p-3"><CountButton value={row.pending} active={expanded === pendingKey} onClick={() => onToggle(pendingKey)} /></td>
-                      <td className="p-3"><CountButton value={row.failed} active={expanded === failedKey} onClick={() => onToggle(failedKey)} /></td>
-                      <td className="p-3 text-[#64748B]">{row.assigned_ca || '—'}</td>
-                    </tr>
+<tr className="border-b border-[#1A1A2E]/20">
+  <td className="p-3 font-black">{row.client}</td>
+  <td className="p-3 font-mono">{row.applications}</td>
+  <td className="p-3"><CountButton value={row.completed} active={expanded === completedKey} onClick={() => onToggle(completedKey)} /></td>
+  <td className="p-3 font-mono">{row.applied ?? 0}</td>
+  <td className="p-3"><CountButton value={row.pending} active={expanded === pendingKey} onClick={() => onToggle(pendingKey)} /></td>
+  <td className="p-3"><CountButton value={row.failed} active={expanded === failedKey} onClick={() => onToggle(failedKey)} /></td>
+  <td className="p-3 text-[#64748B]">{row.assigned_ca || '—'}</td>
+</tr>
                     {openKey && (
                       <tr className="border-b border-[#1A1A2E]/20">
                         <td colSpan={6} className="p-0">
@@ -520,14 +521,14 @@
 
             {tab === 'home' && (
               <>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-                  {[['Total Applications', totals.applications], ['Completed (team)', completed]].map(([label, val]) => (
-                    <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
-                      <p className="text-xs font-bold uppercase">{label}</p>
-                      <p className="text-2xl font-black mt-1">{val ?? 0}</p>
-                    </div>
-                  ))}
-                </div>
+<div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+  {[['Total Applications', totals.applications], ['Completed (team)', completed], ['Applied (team)', totals.applied]].map(([label, val]) => (
+    <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
+      <p className="text-xs font-bold uppercase">{label}</p>
+      <p className="text-2xl font-black mt-1">{val ?? 0}</p>
+    </div>
+  ))}
+</div>
                 <ClientTable
                   rows={rows}
                   loading={loading}
@@ -546,22 +547,23 @@
                   ))}
                 </div>
                 <table className="w-full min-w-[640px] text-left text-xs">
-                  <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-                    <tr>{['Operator', 'Status', 'Apps', 'Completed', 'Workload', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
-                  </thead>
+<thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
+  <tr>{['Operator', 'Status', 'Apps', 'Completed', 'Applied', 'Workload', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+</thead>
                   <tbody>
                     {operators.map((op) => (
-                      <tr key={op.email} className="border-b border-[#1A1A2E]/20">
-                        <td className="p-3">
-                          <button type="button" className="font-black underline" onClick={() => { setCa(op.email); setTab('home'); }}>{op.name}</button>
-                          <p className="text-[#64748B] font-mono">{op.email}</p>
-                        </td>
-                        <td className="p-3 uppercase font-bold">{op.status}</td>
-                        <td className="p-3 font-mono">{op.applications}</td>
-                        <td className="p-3 font-mono">{op.completed ?? 0}</td>
-                        <td className="p-3 font-mono">{op.workload ?? 0}</td>
-                        <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
-                      </tr>
+<tr key={op.email} className="border-b border-[#1A1A2E]/20">
+  <td className="p-3">
+    <button type="button" className="font-black underline" onClick={() => { setCa(op.email); setTab('home'); }}>{op.name}</button>
+    <p className="text-[#64748B] font-mono">{op.email}</p>
+  </td>
+  <td className="p-3 uppercase font-bold">{op.status}</td>
+  <td className="p-3 font-mono">{op.applications}</td>
+  <td className="p-3 font-mono">{op.completed ?? 0}</td>
+  <td className="p-3 font-mono">{op.applied ?? 0}</td>
+  <td className="p-3 font-mono">{op.workload ?? 0}</td>
+  <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
+</tr>
                     ))}
                   </tbody>
                 </table>

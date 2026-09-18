@@ -122,6 +122,11 @@ export function resolveSupabaseAnonKey(): string {
     config.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || ''
   );
   if (explicit) {
+    const diag = getSupabaseKeyDiagnostics(url, explicit);
+    if (diag.jwtRole === 'service_role') {
+      log.warn('resolveSupabaseAnonKey: resolved key is service_role — refusing to send to browser, returning empty');
+      return '';
+    }
     return explicit;
   }
 
@@ -133,10 +138,20 @@ export function resolveSupabaseAnonKey(): string {
   );
 
   if (serviceRoleKey && anonOrPublishableKey) {
+    const diag = getSupabaseKeyDiagnostics(url, anonOrPublishableKey);
+    if (diag.jwtRole === 'service_role') {
+      log.warn('resolveSupabaseAnonKey: resolved key is service_role — refusing to send to browser, returning empty');
+      return '';
+    }
     return anonOrPublishableKey;
   }
 
-  if (anonOrPublishableKey && getSupabaseKeyDiagnostics(url, anonOrPublishableKey).jwtRole !== 'service_role') {
+  if (anonOrPublishableKey) {
+    const diag = getSupabaseKeyDiagnostics(url, anonOrPublishableKey);
+    if (diag.jwtRole === 'service_role') {
+      log.warn('resolveSupabaseAnonKey: resolved key is service_role — refusing to send to browser, returning empty');
+      return '';
+    }
     return anonOrPublishableKey;
   }
 
