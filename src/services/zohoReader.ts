@@ -296,8 +296,8 @@ class ZohoReaderService {
       log.info(`[Zoho] Step 1: Navigating to ${url}`);
       log.info(`[Zoho Reader] 🌐 Navigating to connector endpoint: ${url}`);
       const navResponse = await this.page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: 45000,
+        waitUntil: 'networkidle',
+        timeout: 60000,
       });
       log.info(
         `[Zoho] Step 1 ✅ Landed on ${this.page.url()} HTTP ${navResponse?.status() ?? 'unknown'}`
@@ -365,6 +365,9 @@ class ZohoReaderService {
           stillShowingLogin ? 'FAILED — sign-in form still visible' : 'SUCCEEDED'
         } | url: ${this.page.url()}`
       );
+      if (stillShowingLogin) {
+        throw new Error('Zoho login failed — sign-in form still visible after submit (wrong credentials or JS not fully hydrated)');
+      }
     } else {
       log.info('[Zoho Reader] ℹ️ Sign-In form not present; assuming already on dashboard.');
     }
@@ -422,7 +425,7 @@ class ZohoReaderService {
     log.info(`[Zoho Reader] 🔄 Session reset before lookup for ${email}`);
     log.info(`[Zoho] Step 1: Navigating to ${rootUrl}`);
     const navResponse = await this.page.goto(rootUrl, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'load',
       timeout: 30000,
     });
     log.info(
