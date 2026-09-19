@@ -418,6 +418,139 @@ export function loadArtifacts(
  * @returns Configured Express application.
  */
 export function createServer(outputDir: string = config.OUTPUT_DIR): express.Application {
+  const isIngestOnly = config.INGEST_ONLY === 'true' || process.env.INGEST_ONLY === 'true';
+
+  if (isIngestOnly) {
+    log.info('[Server] Starting in INGEST_ONLY mode');
+    const app = express();
+    app.use(
+      cors({
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: [
+          'Authorization',
+          'Content-Type',
+          'X-View-As',
+          'X-View-As-Manager-Email',
+          'X-Dashboard-Date-Range',
+          'X-Work-History-Unreachable',
+        ],
+      })
+    );
+    app.use(express.json());
+
+    /**
+     * GET /api/health
+     * Health check endpoint.
+     */
+    app.get('/api/health', (_req: Request, res: Response) => {
+      res.json({
+        status: 'ok',
+        service: 'greenhouse-operator-api',
+        mode: 'ingest-only',
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+    /**
+     * POST /api/admin/trigger-ingest-from-storage
+     * Ingests newly uploaded CSV files from the Supabase Storage dropzone.
+     */
+    app.post('/api/admin/trigger-ingest-from-storage', async (req: AuthenticatedRequest, res: Response) => {
+      if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
+        res.status(403).json({ error: 'Forbidden: only admins can start the pipeline.' });
+        return;
+      }
+
+      if (getIngestRun().running) {
+        res.status(409).json({
+          error: 'Ingestion is already running.',
+          ...getIngestRun(),
+        });
+        return;
+      }
+
+      const startedAt = new Date().toISOString();
+      resetPipelineAbort();
+      setIngestRun({ running: true, startedAt });
+      const actorEmail = getAuthenticatedCaEmail(req) || (req.user as { email?: string } | undefined)?.email || '';
+      void insertAuditEvent({
+        actorEmail,
+        actorRole: resolveRole(req.user || actorEmail),
+        action: 'ingest_start',
+        targetType: 'pipeline',
+        targetId: startedAt,
+      });
+      log.info(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
+      res.status(202).json({ started: true, startedAt });
+
+      try {
+        const { ingestCsvFromStorage } = await import('../scanner/storageCsvIngestion.js');
+        const result = await ingestCsvFromStorage();
+        setIngestRun({
+          running: false,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          processedCount: result.processedCount,
+          processedFile: result.processedFile,
+          message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
+          error: result.success ? undefined : result.message,
+        });
+        log.info(
+          `[Admin] ${result.success ? '✅' : result.aborted ? '⏹️' : '❌'} Storage CSV ingestion finished: ${result.message}`
+        );
+      } catch (err: any) {
+        const message = err.message || 'Storage ingestion failed';
+        setIngestRun({
+          running: false,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          error: message,
+        });
+        log.error('[Admin] ❌ Storage CSV ingestion failed:', err);
+      } finally {
+        resetPipelineAbort();
+      }
+    });
+
+    /**
+     * POST /api/admin/stop-ingest
+     * Requests cooperative stop of the in-flight storage CSV pipeline (admin; enabled on Railway/dev).
+     */
+    app.post('/api/admin/stop-ingest', (req: AuthenticatedRequest, res: Response) => {
+      if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
+        res.status(403).json({ error: 'Forbidden: only admins can stop the pipeline.' });
+        return;
+      }
+      if (!isPipelineStopEnabled()) {
+        res.status(403).json({
+          error: 'Pipeline stop is disabled. Set NODE_ENV=development or ENABLE_PIPELINE_STOP=true.',
+        });
+        return;
+      }
+      if (!getIngestRun().running) {
+        res.status(409).json({ error: 'No ingestion run is in progress.', ...getIngestRun() });
+        return;
+      }
+      requestPipelineAbort();
+      log.warn('[Admin] ⏹️ Storage CSV ingestion stop requested by operator');
+      res.json({ stopping: true, ...getIngestRun() });
+    });
+
+    /**
+     * GET /api/admin/ingest-status
+     * Reports the state of the most recent storage CSV ingestion run.
+     */
+    app.get('/api/admin/ingest-status', (req: AuthenticatedRequest, res: Response) => {
+      if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
+        res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
+        return;
+      }
+      res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
+    });
+
+    return app;
+  }
+
   loadArtifacts(outputDir, { log: true });
   const app = express();
 
@@ -1729,9 +1862,25 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 export function startServer(
   port: number = process.env.PORT ? parseInt(process.env.PORT, 10) : (config.PORT || 3000)
 ): ReturnType<express.Application['listen']> {
+  const isIngestOnly = config.INGEST_ONLY === 'true' || process.env.INGEST_ONLY === 'true';
   const app = createServer();
 
   const server = app.listen(port, '0.0.0.0', () => {
+    if (isIngestOnly) {
+      log.info('================================================================');
+      log.info(`  🟢 Greenhouse INGEST-ONLY Service Live on 0.0.0.0:${port}`);
+      log.info('================================================================');
+      log.info(`• Mode:               INGEST_ONLY`);
+      log.info(`• Health:             /api/health`);
+      log.info(`• Trigger Ingest:     POST /api/admin/trigger-ingest-from-storage`);
+      log.info(`• Stop Ingest:        POST /api/admin/stop-ingest`);
+      log.info(`• Ingest Status:      GET /api/admin/ingest-status`);
+      log.info('================================================================\n');
+
+      logSupabaseCredentialIdentity('Server');
+      return;
+    }
+
     wsManager.init(server);
     log.info('================================================================');
     log.info(`  🟢 Greenhouse Operator REST API & Dashboard Live on 0.0.0.0:${port}`);

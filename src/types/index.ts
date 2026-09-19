@@ -232,6 +232,7 @@ export interface CandidateSegment {
 export type SourceTag =
   | 'supabase'
   | 'resume_parse'
+  | 'semantic'
   | 'fuzzy_match'
   | 'api'
   | 'ai'
