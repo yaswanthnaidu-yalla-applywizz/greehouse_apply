@@ -76,6 +76,8 @@ const WORK_HISTORY_FETCH_TIMEOUT_MS = 8000;
 const WORK_HISTORY_ADMIN_FETCH_TIMEOUT_MS = 15000;
 const WORK_HISTORY_MAX_ATTEMPTS = 3;
 const WORK_HISTORY_RETRY_BACKOFF_MS = 2000;
+/** ApplyWizz work-history default page size (matches CA Management API). */
+const WORK_HISTORY_PAGE_SIZE = 50;
 
 const CA_EMAIL_DATE_CACHE_TTL_MS = 60_000;
 
@@ -158,40 +160,109 @@ function parseWorkHistoryRecords(data: any): WorkHistoryCandidateRecord[] | null
   return Array.from(uniqueMap.values());
 }
 
-async function fetchRecordsForDateFromApi(
-  normalizedEmail: string,
-  dateStr: string
-): Promise<WorkHistoryCandidateRecord[] | null> {
-  const fullUrl = buildCaWorkHistoryUrl(normalizedEmail, dateStr);
-  log.info(`[WorkHistory] Fetching ${fullUrl}`);
-  const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
+/**
+ * Fetches every page for a work-history URL that already includes from/to (and optional filters).
+ * Reads `total` from page 1, then requests remaining pages when needed.
+ * Returns raw `records` arrays combined, or null on network/HTTP/parse failure.
+ */
+async function fetchAllWorkHistoryPages(
+  urlWithoutPage: string,
+  timeoutMs: number
+): Promise<unknown[] | null> {
+  const sep = urlWithoutPage.includes('?') ? '&' : '?';
+  const pageSize = WORK_HISTORY_PAGE_SIZE;
+  const page1Url = `${urlWithoutPage}${sep}page=1&pageSize=${pageSize}`;
+
+  const outcome = await fetchWorkHistoryWithRetry(page1Url, timeoutMs);
   if (!outcome.ok) {
     return null;
   }
 
   const res = outcome.response;
   if (!res.ok) {
-    const reason = `HTTP ${res.status}`;
-    log.warn(`[WorkHistory] Failed ${fullUrl}: ${reason}`);
+    log.warn(`[WorkHistory] Failed ${page1Url}: HTTP ${res.status}`);
     return null;
   }
 
+  let data: any;
   try {
-    const data: any = await res.json();
-    const records = parseWorkHistoryRecords(data);
-    if (records === null) {
-      log.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
-      return null;
-    }
-    log.info(
-      `[WorkHistory] Success date=${dateStr} ca_email=${normalizedEmail} records=${records.length}`
-    );
-    return records;
+    data = await res.json();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    log.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
+    log.warn(`[WorkHistory] Failed ${page1Url}: ${message}`);
     return null;
   }
+
+  if (!data || !Array.isArray(data.records)) {
+    log.warn(`[WorkHistory] Failed ${page1Url}: invalid response body (expected records array)`);
+    return null;
+  }
+
+  const total =
+    typeof data.total === 'number' && Number.isFinite(data.total)
+      ? data.total
+      : data.records.length;
+  const effectivePageSize =
+    typeof data.pageSize === 'number' && data.pageSize > 0 ? data.pageSize : pageSize;
+  const totalPages = Math.ceil(total / effectivePageSize);
+  const displayTotalPages = totalPages > 0 ? totalPages : 1;
+
+  log.info(`Work history: fetched page 1 of ${displayTotalPages}`);
+
+  const allRecords: unknown[] = [...data.records];
+
+  if (totalPages > 1) {
+    for (let page = 2; page <= totalPages; page++) {
+      const pageUrl = `${urlWithoutPage}${sep}page=${page}&pageSize=${effectivePageSize}`;
+      const pageOutcome = await fetchWorkHistoryWithRetry(pageUrl, timeoutMs);
+      if (!pageOutcome.ok) {
+        return null;
+      }
+      const pageRes = pageOutcome.response;
+      if (!pageRes.ok) {
+        log.warn(`[WorkHistory] Failed ${pageUrl}: HTTP ${pageRes.status}`);
+        return null;
+      }
+      let pageData: any;
+      try {
+        pageData = await pageRes.json();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`[WorkHistory] Failed ${pageUrl}: ${message}`);
+        return null;
+      }
+      if (!pageData || !Array.isArray(pageData.records)) {
+        log.warn(`[WorkHistory] Failed ${pageUrl}: invalid response body (expected records array)`);
+        return null;
+      }
+      allRecords.push(...pageData.records);
+      log.info(`Work history: fetched page ${page} of ${displayTotalPages}`);
+    }
+  }
+
+  return allRecords;
+}
+
+async function fetchRecordsForDateFromApi(
+  normalizedEmail: string,
+  dateStr: string
+): Promise<WorkHistoryCandidateRecord[] | null> {
+  const fullUrl = buildCaWorkHistoryUrl(normalizedEmail, dateStr);
+  log.info(`[WorkHistory] Fetching ${fullUrl}`);
+  const rawRecords = await fetchAllWorkHistoryPages(fullUrl, WORK_HISTORY_FETCH_TIMEOUT_MS);
+  if (rawRecords === null) {
+    return null;
+  }
+
+  const records = parseWorkHistoryRecords({ records: rawRecords });
+  if (records === null) {
+    log.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
+    return null;
+  }
+  log.info(
+    `[WorkHistory] Success date=${dateStr} ca_email=${normalizedEmail} records=${records.length}`
+  );
+  return records;
 }
 
 /**
@@ -267,36 +338,23 @@ export async function fetchAdminWorkHistoryForDate(dateStr: string): Promise<Wor
   const base = getWorkHistoryBaseUrl();
   const fullUrl = `${base}?from=${dateStr}&to=${dateStr}`;
 
-  const outcome = await fetchWorkHistoryWithRetry(fullUrl, WORK_HISTORY_ADMIN_FETCH_TIMEOUT_MS);
-  if (!outcome.ok) {
+  const rawRecords = await fetchAllWorkHistoryPages(fullUrl, WORK_HISTORY_ADMIN_FETCH_TIMEOUT_MS);
+  if (rawRecords === null) {
     return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
   }
 
-  const res = outcome.response;
-  if (!res.ok) {
-    log.warn(`[WorkHistory] Failed ${fullUrl}: HTTP ${res.status}`);
+  const records = parseWorkHistoryRecords({ records: rawRecords });
+  if (records === null) {
+    log.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
     return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
   }
-
-  try {
-    const data: any = await res.json();
-    const records = parseWorkHistoryRecords(data);
-    if (records === null) {
-      log.warn(`[WorkHistory] Failed ${fullUrl}: invalid response body (expected records array)`);
-      return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
-    }
-    log.info(`[WorkHistory] Success date=${dateStr} ca_email=(admin) records=${records.length}`);
-    return {
-      records,
-      candidateIds: records.map((r) => r.applywizzId),
-      unreachable: false,
-      resolvedDate: dateStr,
-    };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.warn(`[WorkHistory] Failed ${fullUrl}: ${message}`);
-    return { records: [], candidateIds: [], unreachable: true, resolvedDate: dateStr };
-  }
+  log.info(`[WorkHistory] Success date=${dateStr} ca_email=(admin) records=${records.length}`);
+  return {
+    records,
+    candidateIds: records.map((r) => r.applywizzId),
+    unreachable: false,
+    resolvedDate: dateStr,
+  };
 }
 
 /**
@@ -368,7 +426,7 @@ export async function fetchAllowedCandidates(caEmail: string): Promise<WorkHisto
   let unreachableCount = 0;
 
   for (let daysBack = 1; daysBack <= 7; daysBack++) {
-    const dateStr = daysBack === 1 ? getYesterdayIST() : getISTDateString(daysBack);
+    const dateStr = daysBack === 1 ? getISTDateString(0) : getISTDateString(daysBack);
     const records = await fetchRecordsForDate(caEmail, dateStr);
 
     if (records === null) {
