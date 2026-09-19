@@ -184,6 +184,19 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       {/* Input / Display Area */}
       {isEditing ? (
         <div className="relative mt-1">
+          {showHint && (
+            <div className="mb-1.5 flex items-center justify-between text-[11px] text-[#64748B] bg-[#FAF4EB] px-2 py-1 rounded border border-gray-200">
+              <span>💡 {getHintText()}</span>
+              <button
+                type="button"
+                onClick={() => setShowHint(false)}
+                className="text-gray-400 hover:text-gray-600 font-bold ml-2"
+                title="Hide hint"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {isTextarea ? (
             <textarea
               ref={inputRef as React.RefObject<HTMLTextAreaElement>}

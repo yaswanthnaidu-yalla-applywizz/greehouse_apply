@@ -33,19 +33,50 @@ import {
   isSameApplywizzId,
   normalizeApplywizzId,
 } from '../src/dashboard/candidateQueueFilter.js';
+import {
+  useSession,
+  apiFetch,
+  getAuthHeaders,
+  sessionRole,
+  isOpsMode,
+} from './hooks/useSession.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
 export const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
-    if (typeof window === 'undefined') return null;
-    try {
-      const saved = localStorage.getItem('applywizz_auth_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+  const [opsMode, setOpsMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      sessionStorage.getItem('applywizz_manager_view_as_operator') === 'true' ||
+      sessionStorage.getItem('applywizz_manager_view_as_operator') === '1'
+    );
   });
+  const [opsManagerEmail, setOpsManagerEmail] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return sessionStorage.getItem('applywizz_view_as_manager_email') ?? '';
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isOps =
+      sessionStorage.getItem('applywizz_manager_view_as_operator') === 'true' ||
+      sessionStorage.getItem('applywizz_manager_view_as_operator') === '1';
+    const mgrEmail = sessionStorage.getItem('applywizz_view_as_manager_email') ?? '';
+    setOpsMode(isOps);
+    setOpsManagerEmail(mgrEmail);
+  }, []);
+
+  const { user: sessionUser, signOut: sessionSignOut } = (useSession as any)({
+    opsMode,
+    opsManagerEmail,
+  });
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => sessionUser);
+
+  useEffect(() => {
+    if (sessionUser) {
+      setCurrentUser(sessionUser);
+    }
+  }, [sessionUser]);
 
   const getTodayIST = (): string => {
     const now = new Date();
@@ -92,17 +123,9 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!localStorage.getItem('applywizz_auth_token')) return;
-    let role = (localStorage.getItem('applywizz_role') || '').trim().toLowerCase();
-    try {
-      const user = JSON.parse(localStorage.getItem('applywizz_auth_user') || 'null');
-      const email = String(user?.email || '').trim().toLowerCase();
-      if (email === 'yaswanthnaiduyalla@applywizz.ai') role = 'dev';
-      else if (email === 'ramakrishna@applywizz.ai' || email === 'anushabandreddy@applywizz.ai') role = 'admin';
-      else if (email === 'balaji@applywizz.ai' || email === 'ramakrishnaa.tejavath@applywizz.ai') role = 'manager';
-      else if (email) role = 'operator';
-    } catch {}
+    const role = sessionRole();
     if (role === 'dev') window.location.replace('/dev');
-    else if (role === 'manager') window.location.replace('/manager');
+    else if (role === 'manager' && !isOpsMode()) window.location.replace('/manager');
     else if (role === 'admin') window.location.replace('/admin');
   }, []);
 
@@ -131,9 +154,8 @@ export const App: React.FC = () => {
   const clearNotification = async (id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
     try {
-      await fetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(id)}`, {
+      await apiFetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
       });
     } catch (err) {
       console.error(`Failed to delete notification ${id}:`, err);
@@ -143,9 +165,8 @@ export const App: React.FC = () => {
   const clearAllNotifs = async () => {
     setNotifications([]);
     try {
-      await fetch(`${API_BASE_URL}/api/notifications/all`, {
+      await apiFetch(`${API_BASE_URL}/api/notifications/all`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
       });
     } catch (err) {
       console.error('Failed to clear notifications:', err);
@@ -172,27 +193,6 @@ export const App: React.FC = () => {
     jobTitle?: string;
   } | null>(null);
 
-  const getAuthHeaders = (): HeadersInit => {
-    if (typeof window === 'undefined') return {};
-    const token = localStorage.getItem('applywizz_auth_token');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  };
-
-  const sessionRole = (): string => {
-    if (typeof window === 'undefined') return 'operator';
-    try {
-      const user = JSON.parse(localStorage.getItem('applywizz_auth_user') || 'null');
-      const email = String(user?.email || currentUser?.email || '').trim().toLowerCase();
-      if (email === 'yaswanthnaiduyalla@applywizz.ai') return 'dev';
-      if (email === 'ramakrishna@applywizz.ai' || email === 'anushabandreddy@applywizz.ai') return 'admin';
-      if (email === 'balaji@applywizz.ai' || email === 'ramakrishnaa.tejavath@applywizz.ai') return 'manager';
-      if (email) return 'operator';
-    } catch {}
-    const stored = (localStorage.getItem('applywizz_role') || currentUser?.role || '').trim().toLowerCase();
-    if (stored === 'dev' || stored === 'admin' || stored === 'manager' || stored === 'operator') return stored;
-    return 'operator';
-  };
-
   const isAdminSession = (): boolean => {
     const role = sessionRole();
     return role === 'dev' || role === 'admin';
@@ -204,10 +204,9 @@ export const App: React.FC = () => {
     if (!token) return;
     setIsAuthHydrating(true);
     try {
-      await fetch(`${API_BASE_URL}/api/auth/hydrate-admin`, {
+      await apiFetch(`${API_BASE_URL}/api/auth/hydrate-admin`, {
         method: 'POST',
         headers: {
-          ...getAuthHeaders(),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ date: dateStr }),
@@ -219,34 +218,20 @@ export const App: React.FC = () => {
     }
   }, [currentUser]);
 
-  const handleSignOut = () => {
-    const token = localStorage.getItem('applywizz_auth_token');
-    if (token) {
-      fetch(`${API_BASE_URL}/api/auth/logout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {});
-    }
-    localStorage.removeItem('applywizz_auth_token');
-    localStorage.removeItem('applywizz_refresh_token');
-    localStorage.removeItem('applywizz_session_expires_at');
-    localStorage.removeItem('applywizz_auth_user');
-    localStorage.removeItem('applywizz_wh_unreachable');
-    localStorage.removeItem('applywizz_is_admin');
-    localStorage.removeItem('applywizz_role');
+  const handleSignOut = async () => {
     setWorkHistoryUnreachable(false);
     setWorkHistoryBannerDismissed(false);
     setNoCandidatesMessage(null);
     setCurrentUser(null);
+    await sessionSignOut();
   };
 
   const fetchInitialData = useCallback(async (isPolling = false, dateStr = selectedDate) => {
     if (!isPolling) setIsLoadingCandidates(true);
     try {
-      const headers = getAuthHeaders();
       const [candidatesRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/candidates?date=${encodeURIComponent(dateStr)}`, { headers }),
-        fetch(`${API_BASE_URL}/api/stats?date=${encodeURIComponent(dateStr)}`, { headers }),
+        apiFetch(`${API_BASE_URL}/api/candidates?date=${encodeURIComponent(dateStr)}`),
+        apiFetch(`${API_BASE_URL}/api/stats?date=${encodeURIComponent(dateStr)}`),
       ]);
 
       if (candidatesRes.ok) {
@@ -263,6 +248,7 @@ export const App: React.FC = () => {
 
         setSelectedCandidateId((prev) => {
           if (prev && candidateData.some((c: CandidateSummary) => c.applywizzId === prev)) return prev;
+          if (isPolling) return prev;
           return candidateData.length > 0 ? candidateData[0].applywizzId : null;
         });
       }
@@ -280,8 +266,7 @@ export const App: React.FC = () => {
 
   const fetchNotifications = useCallback(async (dateStr = selectedDate) => {
     try {
-      const headers = getAuthHeaders();
-      const res = await fetch(`${API_BASE_URL}/api/notifications?date=${encodeURIComponent(dateStr)}`, { headers });
+      const res = await apiFetch(`${API_BASE_URL}/api/notifications?date=${encodeURIComponent(dateStr)}`);
       if (res.ok) {
         const serverNotifs = await res.json();
         if (Array.isArray(serverNotifs)) {
@@ -300,9 +285,8 @@ export const App: React.FC = () => {
       const isAdminUser = isAdminSession();
       if (isAdminUser) {
         try {
-          await fetch(`${API_BASE_URL}/api/admin/refresh-artifacts`, {
+          await apiFetch(`${API_BASE_URL}/api/admin/refresh-artifacts`, {
             method: 'POST',
-            headers: getAuthHeaders(),
           });
         } catch (e) {
           console.warn('Artifacts reload error:', e);
@@ -351,18 +335,14 @@ export const App: React.FC = () => {
     const requestedId = normalizeApplywizzId(applywizzId);
     console.log(`[Dashboard] Selected ${requestedId} → fetching jobs assigned to this candidate only`);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}`);
       if (res.ok) {
         const detail: CandidateDetail = await res.json();
         if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
           return;
         }
 
-        const jobsRes = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs`, {
-          headers: getAuthHeaders(),
-        });
+        const jobsRes = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs`);
 
         if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
           return;
@@ -435,9 +415,7 @@ export const App: React.FC = () => {
     setIsLoadingApplication(true);
     try {
       const encodedUrl = encodeURIComponent(jobUrl);
-      const res = await fetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}`);
 
       if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
         return;
@@ -567,13 +545,24 @@ export const App: React.FC = () => {
     []
   );
 
-  useCandidateApplicationsRealtime({
+  const refreshCandidatesList = useCallback(async () => {
+    await fetchInitialData(true, selectedDate);
+  }, [fetchInitialData, selectedDate]);
+
+  const { onGlobalUpdate } = useCandidateApplicationsRealtime({
     apiBaseUrl: API_BASE_URL,
     getAuthHeaders: () => getAuthHeaders() as Record<string, string>,
     applywizzId: selectedCandidateId,
-    enabled: Boolean(currentUser && selectedCandidateId),
+    enabled: Boolean(currentUser),
     onRowChange: handleRealtimeApplicationRow,
   });
+
+  useEffect(() => {
+    onGlobalUpdate((_row, eventType) => {
+      console.log(`[Realtime] Global update detected (${eventType}) - refreshing candidates list`);
+      refreshCandidatesList();
+    });
+  }, [onGlobalUpdate, refreshCandidatesList]);
 
   // Field Edit Handler
   const handleFieldUpdate = (updatedField: ResolvedField) => {
@@ -675,9 +664,9 @@ export const App: React.FC = () => {
       const appId = application.id || application.applywizzId || application.applywizz_id;
       const targetJobUrl = application.jobUrl || application.job_url || selectedJobUrl;
       try {
-        await fetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/status`, {
+        await apiFetch(`${API_BASE_URL}/api/applications/${encodeURIComponent(appId)}/status`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: newStatus,
             jobUrl: targetJobUrl,
@@ -715,6 +704,28 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1A1A2E] font-sans overflow-hidden select-none">
+      {opsMode && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#E2F0FB] border-b-2 border-[#1A1A2E] text-xs font-bold shrink-0">
+          <span>
+            {opsManagerEmail
+              ? `👤 Viewing as Operator — Manager mode active (${opsManagerEmail})`
+              : '👤 Viewing as Operator — Manager mode active'}
+          </span>
+          <button
+            type="button"
+            className="underline text-[#1E3A5F] hover:text-[#1A1A2E] cursor-pointer font-bold"
+            onClick={() => {
+              sessionStorage.removeItem('applywizz_manager_view_as_operator');
+              sessionStorage.removeItem('applywizz_view_as_manager_email');
+              setOpsMode(false);
+              setOpsManagerEmail('');
+              window.location.replace('/manager');
+            }}
+          >
+            Exit Ops Mode
+          </button>
+        </div>
+      )}
       {/* Top Navigation & Brand Header */}
       <header className="h-16 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] flex items-center justify-between px-6 flex-shrink-0">
         {/* Left: Brand Logo & Navigation Links */}
@@ -1141,7 +1152,7 @@ export const App: React.FC = () => {
           <CandidateList
             candidates={candidates}
             selectedId={selectedCandidateId}
-            onSelectCandidate={(id) => setSelectedCandidateId(id)}
+            onSelectCandidate={(id) => setSelectedCandidateId((prev) => (prev === id ? null : id))}
             isLoading={isLoadingCandidates || isAuthHydrating}
             emptyMessage={noCandidatesMessage}
             selectedDate={selectedDate}

@@ -9,18 +9,23 @@
  * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
-import React, { useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ApplicationStatusBadge } from './ApplicationStatusBadge.js';
 import type { ApplicationStatus } from '../../src/db/applications.js';
+import { apiFetch } from '../hooks/useSession.js';
 
 export interface ProofViewerProps {
   isOpen: boolean;
   onClose: () => void;
-  screenshotUrl: string | null;
+  screenshotUrl?: string | null;
+  applicationId?: string | null;
+  kind?: 'web' | 'failed' | 'email';
+  apiBaseUrl?: string;
   title?: string;
   metadata?: {
     candidateName?: string;
     applywizzId?: string;
+    applicationId?: string;
     companyName?: string;
     jobTitle?: string;
     jobUrl?: string;
@@ -33,9 +38,54 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
   isOpen,
   onClose,
   screenshotUrl,
+  applicationId,
+  kind,
+  apiBaseUrl = '',
   title = 'Application Verification Proof',
   metadata = {},
 }) => {
+  const [currentUrl, setCurrentUrl] = useState<string | null>(screenshotUrl || null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [fallbackAttempted, setFallbackAttempted] = useState<boolean>(false);
+
+  const fetchSignedUrl = useCallback(
+    async (appId: string, proofKind: 'web' | 'failed' | 'email', jobUrl?: string) => {
+      setIsLoading(true);
+      setErrorMessage(null);
+      setFallbackAttempted(true);
+
+      try {
+        const query = new URLSearchParams({ kind: proofKind });
+        if (jobUrl) query.set('jobUrl', jobUrl);
+        const endpoint = `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/proof-url?${query.toString()}`;
+        const res = await apiFetch(endpoint);
+
+        if (!res.ok) {
+          let errText = `Server returned ${res.status}`;
+          try {
+            const errJson = await res.json();
+            if (errJson.error) errText = errJson.error;
+          } catch {}
+          throw new Error(errText);
+        }
+
+        const data = await res.json();
+        if (data.url) {
+          setCurrentUrl(data.url);
+        } else {
+          throw new Error('No signed proof URL returned by server.');
+        }
+      } catch (err: any) {
+        console.warn(`[ProofViewer] Failed to fetch signed proof URL for ${appId}:`, err);
+        setErrorMessage(err.message || 'Failed to load proof screenshot');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [apiBaseUrl]
+  );
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -54,14 +104,82 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen || !screenshotUrl) {
+  useEffect(() => {
+    let isSubscribed = true;
+
+    if (!isOpen) {
+      setIsLoading(false);
+      setErrorMessage(null);
+      setFallbackAttempted(false);
+      return () => {
+        isSubscribed = false;
+      };
+    }
+
+    const targetAppId = applicationId || metadata?.applicationId || metadata?.applywizzId;
+    const statusStr = String(metadata?.status || '').toUpperCase();
+    const effectiveKind: 'web' | 'failed' | 'email' =
+      kind || (statusStr === 'FAILED' ? 'failed' : 'web');
+
+    if (screenshotUrl) {
+      setCurrentUrl(screenshotUrl);
+      setFallbackAttempted(false);
+      setErrorMessage(null);
+
+      fetch(screenshotUrl, { method: 'HEAD' })
+        .then((res) => {
+          if (!isSubscribed) return;
+          if (res.status === 403 || res.status === 404) {
+            if (targetAppId) {
+              fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+            }
+          }
+        })
+        .catch(() => {
+          // Ignore CORS / network errors on HEAD probe
+        });
+    } else if (targetAppId) {
+      setCurrentUrl(null);
+      fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+    }
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [
+    isOpen,
+    screenshotUrl,
+    applicationId,
+    metadata?.applicationId,
+    metadata?.applywizzId,
+    kind,
+    metadata?.status,
+    metadata?.jobUrl,
+    fetchSignedUrl,
+  ]);
+
+  const handleImageError = () => {
+    const targetAppId = applicationId || metadata?.applicationId || metadata?.applywizzId;
+    const statusStr = String(metadata?.status || '').toUpperCase();
+    const effectiveKind: 'web' | 'failed' | 'email' =
+      kind || (statusStr === 'FAILED' ? 'failed' : 'web');
+
+    if (targetAppId && !fallbackAttempted) {
+      fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+    } else {
+      setErrorMessage('Proof screenshot could not be loaded.');
+    }
+  };
+
+  if (!isOpen) {
     return null;
   }
 
   const handleDownload = () => {
+    if (!currentUrl) return;
     const link = document.createElement('a');
-    link.href = screenshotUrl;
-    link.download = `${metadata.applywizzId || 'candidate'}_${metadata.companyName || 'proof'}_verification.png`;
+    link.href = currentUrl;
+    link.download = `${metadata.applywizzId || applicationId || 'candidate'}_${metadata.companyName || 'proof'}_verification.png`;
     link.target = '_blank';
     document.body.appendChild(link);
     link.click();
@@ -103,7 +221,12 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
             <button
               type="button"
               onClick={handleDownload}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#E88474] hover:bg-[#D67161] border border-[#1A1A2E] rounded-md shadow-[2px_2px_0px_#1A1A2E] transition-all"
+              disabled={!currentUrl || isLoading}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border border-[#1A1A2E] rounded-md transition-all ${
+                !currentUrl || isLoading
+                  ? 'bg-[#E2E8F0] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed'
+                  : 'text-white bg-[#E88474] hover:bg-[#D67161] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+              }`}
             >
               <span>⬇️</span>
               <span>Download Image</span>
@@ -122,13 +245,17 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
         {/* Metadata Banner */}
         <div className="px-6 py-3 bg-[#FFF5EB] border-b border-[#1A1A2E] flex flex-wrap items-center justify-between gap-4 text-xs font-mono text-[#1A1A2E]">
           <div className="flex items-center gap-4 flex-wrap">
-            {metadata.candidateName && (
+            {(metadata.candidateName || metadata.applywizzId || applicationId) && (
               <div>
-                <span className="text-[#64748B] font-sans">Candidate: </span>
-                <span className="font-bold text-[#1A1A2E] font-sans">{metadata.candidateName}</span>
-                {metadata.applywizzId && (
+                {metadata.candidateName && (
+                  <>
+                    <span className="text-[#64748B] font-sans">Candidate: </span>
+                    <span className="font-bold text-[#1A1A2E] font-sans">{metadata.candidateName}</span>
+                  </>
+                )}
+                {(metadata.applywizzId || applicationId) && (
                   <span className="ml-1.5 px-2 py-0.5 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] font-bold">
-                    {metadata.applywizzId}
+                    {metadata.applywizzId || applicationId}
                   </span>
                 )}
               </div>
@@ -155,29 +282,64 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
         </div>
 
         {/* Screenshot Viewport */}
-        <div className="flex-1 overflow-auto p-6 bg-[#FAF4EB] flex justify-center custom-scrollbar">
-          <div className="bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden max-w-full">
-            <img
-              src={screenshotUrl}
-              alt="Application Confirmation Proof"
-              className="w-full h-auto object-contain select-text"
-              loading="lazy"
-            />
-          </div>
+        <div className="flex-1 overflow-auto p-6 bg-[#FAF4EB] flex items-center justify-center custom-scrollbar min-h-[350px]">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center p-12 text-[#1A1A2E]">
+              <div className="w-10 h-10 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-sm font-bold font-mono">Fetching signed proof URL...</p>
+              <p className="text-xs font-mono text-[#64748B] mt-1">Retrieving secure verification screenshot</p>
+            </div>
+          ) : errorMessage ? (
+            <div className="flex flex-col items-center justify-center p-8 text-center max-w-md bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E]">
+              <span className="text-3xl mb-2">⚠️</span>
+              <p className="text-sm font-bold text-[#EF4444] font-mono mb-1">Could not load proof</p>
+              <p className="text-xs text-[#64748B] font-mono">{errorMessage}</p>
+              {(applicationId || metadata?.applywizzId) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetAppId = applicationId || metadata?.applicationId || metadata?.applywizzId;
+                    const statusStr = String(metadata?.status || '').toUpperCase();
+                    const effectiveKind = kind || (statusStr === 'FAILED' ? 'failed' : 'web');
+                    if (targetAppId) fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+                  }}
+                  className="mt-4 px-3 py-1.5 text-xs font-bold text-[#1A1A2E] bg-[#FFF5EB] hover:bg-[#FFE8D6] border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E]"
+                >
+                  🔄 Retry
+                </button>
+              )}
+            </div>
+          ) : currentUrl ? (
+            <div className="bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden max-w-full">
+              <img
+                src={currentUrl}
+                alt="Application Confirmation Proof"
+                className="w-full h-auto object-contain select-text"
+                loading="lazy"
+                onError={handleImageError}
+              />
+            </div>
+          ) : (
+            <div className="text-center text-xs font-mono text-[#64748B]">
+              No proof image available.
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-3 border-t-2 border-[#1A1A2E] bg-[#FAF4EB] text-xs text-[#64748B]">
           <span className="font-mono">Press Esc to exit proof view</span>
           <div className="flex items-center gap-2">
-            <a
-              href={screenshotUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-bold text-[#1A1A2E] hover:underline"
-            >
-              Open raw URL ↗
-            </a>
+            {currentUrl && (
+              <a
+                href={currentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-bold text-[#1A1A2E] hover:underline"
+              >
+                Open raw URL ↗
+              </a>
+            )}
           </div>
         </div>
       </div>

@@ -9,8 +9,9 @@
  * - V2-implementation.md (Phase V2-UI)
  */
 
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { DifficultyBadge } from './components/DifficultyBadge.js';
+import { ProofViewer } from './components/ProofViewer.js';
 import type { CandidateDetail } from './types.js';
 import {
   candidateDetailMatchesSelection,
@@ -41,6 +42,52 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   selectedJobUrl,
   onSelectJob,
 }) => {
+  const [proofViewerState, setProofViewerState] = useState<{
+    isOpen: boolean;
+    applicationId: string | null;
+    kind: 'web' | 'failed' | 'email';
+    metadata: {
+      candidateName?: string;
+      applywizzId?: string;
+      companyName?: string;
+      jobTitle?: string;
+      jobUrl?: string;
+      status?: string;
+    };
+  }>({
+    isOpen: false,
+    applicationId: null,
+    kind: 'web',
+    metadata: {},
+  });
+
+  const handleProofBadgeClick = (job: CandidateJob, kind: 'web' | 'failed') => {
+    const appId =
+      (job as any).id ||
+      (job as any).applicationId ||
+      (job as any).application_id ||
+      job.applywizzId ||
+      job.applywizz_id ||
+      selectedApplywizzId ||
+      candidate.applywizzId;
+
+    const jobUrl = job.canonicalUrl || job.rawUrl;
+
+    setProofViewerState({
+      isOpen: true,
+      applicationId: appId,
+      kind,
+      metadata: {
+        candidateName: candidate.clientName,
+        applywizzId: job.applywizzId || job.applywizz_id || selectedApplywizzId || candidate.applywizzId,
+        companyName: jobCardCompanyLabel(job),
+        jobTitle: jobCardTitleLabel(job),
+        jobUrl,
+        status: job.status,
+      },
+    });
+  };
+
   const queueJobs = useMemo(() => {
     if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
       return [];
@@ -198,7 +245,23 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'APPLIED' && (
-                    <span className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleProofBadgeClick(job, 'web');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleProofBadgeClick(job, 'web');
+                        }
+                      }}
+                      title="Click to view confirmation proof directly"
+                      className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
+                    >
                       ✅ Applied
                     </span>
                   )}
@@ -218,7 +281,23 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'FAILED' && (
-                    <span className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleProofBadgeClick(job, 'failed');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleProofBadgeClick(job, 'failed');
+                        }
+                      }}
+                      title="Click to view failure screenshot proof directly"
+                      className="text-[10px] font-mono text-white font-bold bg-[#EF4444] hover:bg-[#DC2626] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
+                    >
                       ❌ Failed
                     </span>
                   )}
@@ -243,6 +322,15 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
           );
         })}
       </div>
+
+      <ProofViewer
+        isOpen={proofViewerState.isOpen}
+        onClose={() => setProofViewerState((prev) => ({ ...prev, isOpen: false }))}
+        applicationId={proofViewerState.applicationId}
+        kind={proofViewerState.kind}
+        title={proofViewerState.kind === 'failed' ? 'Failure Screenshot' : 'Application Verification Proof'}
+        metadata={proofViewerState.metadata}
+      />
     </div>
   );
 };
