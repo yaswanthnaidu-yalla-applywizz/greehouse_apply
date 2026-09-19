@@ -75,6 +75,9 @@ const envSchema = z.object({
   /** Submitter worker pool concurrency / lane count (default '3') */
   SUBMISSION_POOL_SIZE: z.string().optional().default('3'),
 
+  /** Operator dashboard delivery mode: 'html' (Babel in-browser) or 'tsx' (Vite bundle) */
+  DASHBOARD_MODE: z.string().optional().default('html'),
+
   /** JWT Secret for backend session verification */
   JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
 
