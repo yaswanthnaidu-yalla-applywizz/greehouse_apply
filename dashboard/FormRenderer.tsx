@@ -57,6 +57,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [viewerImageUrl, setViewerImageUrl] = useState<string | null>(null);
   const [viewerTitle, setViewerTitle] = useState<string>('Application Proof');
   const [emailProofOpen, setEmailProofOpen] = useState(false);
+  const [activeEmailProof, setActiveEmailProof] = useState<EmailProofJson | null>(null);
   const appId = application?.id || application?.applywizzId || application?.applywizz_id || 'app-default';
   const jobUrl = application?.jobUrl || application?.job_url || '';
   const storageKey = `greenhouse_approvals_${appId}_${typeof btoa !== 'undefined' ? btoa(encodeURIComponent(jobUrl || 'default')).slice(0, 32) : 'default'}`;
@@ -80,6 +81,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   useEffect(() => {
     setCarouselIndex(0);
     setApprovedFieldIds(getStoredApprovals(storageKey));
+    setActiveEmailProof(null);
   }, [appId, jobUrl, storageKey]);
 
   const saveApprovedFields = (nextSet: Set<string>) => {
@@ -333,7 +335,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       <EmailProofModal
         isOpen={emailProofOpen}
         onClose={() => setEmailProofOpen(false)}
-        proof={(application.proof_email_json || application.proofEmailJson) as EmailProofJson | null}
+        proof={(activeEmailProof || application.proof_email_json || application.proofEmailJson) as EmailProofJson | null}
         companyName={application.companyName || application.company_name}
         metadata={{
           candidateName: candidateName || application.clientName,
@@ -435,7 +437,16 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               apiBaseUrl={apiBaseUrl}
               onTriggerDryRun={handleTriggerDryRun}
               onTriggerSubmit={handleTriggerSubmit}
-              onStatusChange={onStatusChange}
+              onStatusChange={(newStatus, updatedApp, options) => {
+                const proof = updatedApp?.proofEmailJson || updatedApp?.proof_email_json;
+                if (proof) {
+                  setActiveEmailProof(proof);
+                  setEmailProofOpen(true);
+                }
+                if (onStatusChange) {
+                  onStatusChange(newStatus, updatedApp, options);
+                }
+              }}
               onViewProof={() => {
                 const url = application.proof_web_url || application.proofWebUrl;
                 if (url) {
@@ -444,9 +455,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   setViewerOpen(true);
                 }
               }}
-              onViewEmailProof={() => {
-                const json = application.proof_email_json || application.proofEmailJson;
+              onViewEmailProof={(proof?: EmailProofJson) => {
+                const json = proof || application.proof_email_json || application.proofEmailJson || activeEmailProof;
                 if (json) {
+                  setActiveEmailProof(json);
                   setEmailProofOpen(true);
                 }
               }}

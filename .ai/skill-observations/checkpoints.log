@@ -107,3 +107,11 @@
 2026-09-19 deliverable flush: added INGEST_ONLY mode to server (health/ingest endpoints only, no dashboards/workers) and configurable SUBMISSION_POOL_SIZE; tsc clean; no new observations
 2026-09-19 deliverable flush: added INGEST_SERVICE_URL proxy forwarding to adminDashboard.ts for trigger-ingest, stop-ingest, and ingest-status; tsc clean; no new observations
 2026-09-19 deliverable flush: updated submitterPool poolSize to parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10) and added startup logging in queueWorker; tsc clean; no new observations
+2026-09-19 deliverable flush: created dashboard/hooks/useSession.ts and ported session management & apiFetch into dashboard/App.tsx; tsc clean; no new observations
+2026-09-19 deliverable flush: ported Ops mode banner to dashboard/App.tsx with exit handler and opsMode propagation; tsc clean; no new observations
+2026-09-19 deliverable flush: updated apiFetch in dashboard/hooks/useSession.ts to check sessionStorage and inject X-View-As headers; tsc clean; no new observations
+2026-09-19 session-start scan: files=21 parsed=21
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: no observations
+2026-09-19 deliverable flush: configured Vite bundle for dashboard TSX (vite.config.ts, dashboard/index.tsx, dist/dashboard/index.html, package scripts); added DASHBOARD_MODE config and dual-serving with /fallback route in server; configured DASHBOARD_MODE=tsx on Railway service; typecheck and build pass clean; no new observations

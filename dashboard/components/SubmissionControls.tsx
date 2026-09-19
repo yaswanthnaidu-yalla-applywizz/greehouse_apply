@@ -7,6 +7,7 @@ import type { ApplicationStatus } from '../../src/db/applications.js';
 import { ProofViewer } from './ProofViewer.js';
 import type { EmailProofJson } from './EmailProofRenderer.js';
 import { SubmittingSpinner } from './SubmittingSpinner.js';
+import { apiFetch } from '../hooks/useSession.js';
 
 export interface SubmissionControlsProps {
   applicationId: string;
@@ -30,17 +31,12 @@ export interface SubmissionControlsProps {
     options?: { persist?: boolean }
   ) => void;
   onViewProof?: () => void;
-  onViewEmailProof?: () => void;
+  onViewEmailProof?: (proof?: EmailProofJson) => void;
   onViewDryRun?: () => void;
   onViewFailureScreenshot?: () => void;
 }
 
 const SUBMIT_FLOW_STATUSES = new Set(['APPLYING', 'QUEUED', 'OTP_REQUIRED', 'CAPTCHA_REQUIRED']);
-
-const getAuthHeaders = (): Record<string, string> => {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
 
 export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   applicationId,
@@ -102,18 +98,20 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const isApplied = applicationStatus === 'APPLIED';
   const isEmailUnverified = applicationStatus === 'EMAIL_UNVERIFIED';
   const isFailed = applicationStatus === 'FAILED';
+  const isEmailProofPending = applicationStatus === 'EMAIL_PROOF_PENDING' || status === 'EMAIL_PROOF_PENDING';
   const hasProofActions =
     Boolean(dryRunScreenshotUrl) ||
     Boolean(proofUrl || proofWebUrl || isApplied || isEmailUnverified) ||
     Boolean(emailProofJsonState || proofEmailJson) ||
     Boolean(emailProof || proofEmailUrl) ||
+    Boolean(isEmailProofPending) ||
     Boolean((proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl)) ||
     Boolean(isFailed && proofFailedUrl);
 
   const pollStatusUpdate = async () => {
     try {
       const pollUrl = `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}${jobUrl ? `?jobUrl=${encodeURIComponent(jobUrl)}` : ''}`;
-      const res = await fetch(pollUrl, { headers: getAuthHeaders() });
+      const res = await apiFetch(pollUrl);
       if (res.ok) {
         const appData = await res.json();
         const resolvedJson = appData.proofEmailJson || appData.proof_email_json || null;
@@ -136,7 +134,11 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   };
 
   useEffect(() => {
-    if (applicationStatus !== 'APPLIED' || emailProofStatus !== 'pending' || !applicationId) {
+    if (
+      (applicationStatus !== 'APPLIED' && applicationStatus !== 'EMAIL_PROOF_PENDING') ||
+      emailProofStatus !== 'pending' ||
+      !applicationId
+    ) {
       return;
     }
     const pollInterval = setInterval(() => {
@@ -145,17 +147,15 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
     return () => clearInterval(pollInterval);
   }, [applicationStatus, emailProofStatus, applicationId, jobUrl, apiBaseUrl]);
 
-  const handleCaptureEmailProof = async () => {
+  const captureEmailProof = async () => {
     setIsCapturingEmailProof(true);
     try {
-      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
-      const res = await fetch(
+      const res = await apiFetch(
         `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/capture-email-proof`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ jobUrl: jobUrl || undefined }),
         }
@@ -178,7 +178,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
           });
         }
         if (onViewEmailProof) {
-          onViewEmailProof();
+          onViewEmailProof(capturedJson);
         }
       } else {
         setToastMessage(data.error || 'Confirmation email not found in inbox yet. Please try again in a moment.');
@@ -343,11 +343,11 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                 </button>
               )}
 
-              {(proofUrl || proofWebUrl) &&
+              {(isEmailProofPending || Boolean(proofUrl || proofWebUrl)) &&
                 !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl) && (
                   <button
                     type="button"
-                    onClick={handleCaptureEmailProof}
+                    onClick={captureEmailProof}
                     disabled={isCapturingEmailProof}
                     title="Capture confirmation email proof from candidate inbox"
                     className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#DBEAFE] hover:bg-[#BFDBFE] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono disabled:opacity-60 disabled:cursor-not-allowed"
@@ -355,12 +355,12 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                     {isCapturingEmailProof ? (
                       <>
                         <span className="w-2.5 h-2.5 border-2 border-[#1E3A8A] border-t-transparent rounded-full animate-spin"></span>
-                        <span>Fetching Email SS...</span>
+                        <span>Capturing Email Proof...</span>
                       </>
                     ) : (
                       <>
-                        <span>📥</span>
-                        <span>Fetch email proof</span>
+                        <span>📧</span>
+                        <span>Capture Email Proof</span>
                       </>
                     )}
                   </button>
