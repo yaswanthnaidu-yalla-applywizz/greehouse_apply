@@ -578,17 +578,40 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   // Dashboard web assets (HTML guarded by role when Bearer token is sent)
   const publicDir = path.resolve(process.cwd(), 'dashboard/public');
+  const distDashboardDir = path.resolve(process.cwd(), 'dist/dashboard');
   const operatorIndexPath = path.join(publicDir, 'index.html');
+  const distDashboardIndexPath = path.join(distDashboardDir, 'index.html');
   const managerHtmlPath = path.join(publicDir, 'manager.html');
   const adminHtmlPath = path.join(publicDir, 'admin.html');
   const devHtmlPath = path.join(publicDir, 'dev.html');
 
+  const dashboardMode = (config.DASHBOARD_MODE ?? process.env.DASHBOARD_MODE ?? 'html').toLowerCase();
+
+  if (dashboardMode === 'tsx') {
+    app.use(express.static(distDashboardDir, { index: false }));
+  }
+
   app.get('/', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
+    if (dashboardMode === 'tsx') {
+      if (fs.existsSync(distDashboardIndexPath)) {
+        res.sendFile(distDashboardIndexPath);
+        return;
+      }
+      log.warn('[Server] dist/dashboard/index.html not found, falling back to public/index.html');
+    }
     if (fs.existsSync(operatorIndexPath)) {
       res.sendFile(operatorIndexPath);
       return;
     }
     res.status(404).send('Operator dashboard page not found.');
+  });
+
+  app.get('/fallback', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
+    if (fs.existsSync(operatorIndexPath)) {
+      res.sendFile(operatorIndexPath);
+      return;
+    }
+    res.status(404).send('Fallback operator dashboard page not found.');
   });
 
   app.get('/admin', requireRoleIfAuthenticated('admin', 'dev'), (_req: Request, res: Response) => {

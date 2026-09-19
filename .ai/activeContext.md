@@ -8,13 +8,11 @@ _Last updated: 2026-09-18_
 
 ## Current Focus
 
-### 0e. Planned — Dashboard UI: bundled TSX (not started; info only)
-- **Today (production):** Express serves `dashboard/public/*.html` + lazy `operator-app.jsx`; Babel Standalone on CDN compiles JSX in the browser. Styles: `dashboard/public/dashboard.css` (`npm run build:dashboard-css`). **`dashboard/App.tsx` and `components/*.tsx` are not served** — `dashboard/tsconfig.json` is `noEmit`; root `tsc` only builds `src/` → `dist/`.
-- **Why two trees:** Historical inline-HTML approach vs typed mirror for `npm run typecheck:dashboard`. Operator fixes ship in **`index.html` / `operator-app.jsx`** until migration; `.tsx` can drift (see `.ai/progress.md` gotcha).
-- **Target (recommended):** Vite (or similar) **multi-entry** build → static JS in `dashboard/public/`; thin HTML shells per route; drop in-browser Babel.
+### 0e. In Progress — Dashboard UI: bundled TSX operator parity
+- **Serving:** Dual-mode via `DASHBOARD_MODE` ('tsx' vs 'html'). In 'tsx' mode: serves `dist/dashboard` static bundle; `GET /` serves `dist/dashboard/index.html`; `GET /fallback` serves legacy `dashboard/public/index.html`. `DASHBOARD_MODE=tsx` set on Railway Service.
+- **Build:** Vite 6 with `@vitejs/plugin-react` (`npm run build:dashboard` / `vite build`, `npm run dev:dashboard`). Root `build` updated to `tsc && vite build`.
+- **Progress:** Ported session management (`useSession.ts`), ops mode banner (`App.tsx`), email proof capture (`SubmissionControls.tsx` + `FormRenderer.tsx`), direct proof viewing from queue badges (`ProofViewer.tsx` + `JobQueueView.tsx`), and dual global/per-candidate realtime subscriptions (`useCandidateApplicationsRealtime.ts` + `App.tsx`) to TSX.
 - **Migration order:** (1) operator — `App.tsx` entry, parity with `operator-app.jsx`; (2) manager — `ManagerDashboard.tsx` + `main-manager.tsx`; (3) **port** admin/dev from `admin.html` / `dev.html` (no `.tsx` exists yet); (4) delete duplicate Babel blocks + `operator-app.jsx`.
-- **Routes unchanged:** `GET /`, `/manager`, `/admin`, `/dev` stay role-guarded HTML; only assets become pre-built bundles. Shared `DevSwitcher` / auth → TS modules, not four copy-paste HTML files.
-- **Not a flip-switch:** needs CI/Railway `build:dashboard` step; cannot “use App.tsx only” without bundler + admin/dev port + QA on all four roles.
 
 ### 0a. Admin ingest status bar — shipped on **Overview** (corrected 2026-09-18)
 - **Actual state:** the bar sits at the **top of the Overview tab**, above the stat cards — **not** on **System**. It holds the dashboard's only **▶ Start** / ** Stop** controls (the header has none; the Guide tab's "Header: Date, Refresh, Start, Stop" heading is stale) and carries the ids **`ingestStatusBar`**, **`ingestStatusText`**, **`ingestStartBtn`**, **`ingestStopBtn`**.

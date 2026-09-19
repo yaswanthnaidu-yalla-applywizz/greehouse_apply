@@ -4,6 +4,7 @@
  */
 
 import fs from 'fs';
+// @ts-ignore
 import _pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { getProfile, updateParsedResume } from '../db/profiles.js';
 import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
