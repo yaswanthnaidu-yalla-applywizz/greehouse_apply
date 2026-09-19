@@ -15,9 +15,9 @@ _Last updated: 2026-09-18_
 ### 5-Tier Answer Resolver
 - [x] Tier 1 — Supabase profiles + qa_bank direct lookup (`tier1Supabase.ts`)
 - [x] Tier 2 — pdf-parse resume extraction with caching (`tier2ResumeParse.ts`)
-- [x] Tier 3 — Fuse.js fuzzy match on qa_bank (`tier3FuzzyMatch.ts`)
-- [x] Tier 4 — ApplyWizz API refetch + upsert (embedded in segregator / tier1 flow)
-- [x] Tier 5 — Multi-provider LLM synthesis with qa_bank write-back (`tier5LLM.ts`, `llmSynthesizer.ts`)
+- [x] Tier 3 — Semantic vector search via OpenRouter embeddings + pgvector (`semanticSearch.ts`, 2026-09-19)
+- [x] Tier 4 — Fuse.js fuzzy match on qa_bank (`tier3FuzzyMatch.ts`)
+- [x] Tier 5 — Multi-provider LLM synthesis with qa_bank write-back and embedding indexing (`tier5LLM.ts`, `llmSynthesizer.ts`, `semanticSearch.ts`, 2026-09-19)
 - [x] Question fingerprinting via SHA-256 (`fingerprint.ts`)
 - [x] Answer source tagging: `supabase`, `ai`, `manual`, `unresolved`
 
@@ -52,7 +52,7 @@ _Last updated: 2026-09-18_
 - [x] **Railway crash-loop fix** — `ERR_INVALID_CHAR` on `X-Dashboard-Date-Range` (en-dash in custom date label); `httpHeaders.ts` + ASCII label in `dashboardDateRange.ts` (2026-09-16)
 - [x] **Manager list API scoping** — `GET /api/candidates`, `/jobs`, `/stats`, `GET /api/users` team-filtered for managers; dev/admin unrestricted (2026-09-16)
 - [x] Manager UI at **`/manager`** (managers + dev). Secondary tabs: Operators, Activity, Reports (volume only); the 30s poll also refreshes Activity while that tab is open (2026-09-18)
-- [x] **Manager reports API per-operator metrics** — `GET /api/manager/reports` `perOperator[]` now also returns `apps` (all-time count, all statuses), `completed` (period, `countCompletedApplicationsSince`) and `approved` (period, 6-status pipeline set). The reports tab per-operator table now renders them as **Assigned / Completed / Approved** columns (2026-09-18)
+- [x] **Manager reports API per-operator metrics** — `GET /api/manager/reports` `perOperator[]` now also returns `apps` (all-time count, all statuses), `completed` (period, `countCompletedApplicationsSince`) and `approved` (period, 6-status pipeline set). The reports tab per-operator table renders **Assigned / Completed / Applied**: the API's `approved` field is intentionally no longer rendered (column removed 2026-09-18), and **Applied** is a clickable count that opens a modal of that operator's applied jobs (job title + company + web/email proof links, `AppliedModal` in `manager.html`). Applied data is composed client-side from `GET /api/manager/dashboard` APPLIED details (proof URLs hydrated server-side) over the reports window (daily=14d / weekly=56d / monthly=180d, ending today IST) because `/reports` returns no applied data (2026-09-18)
 - [x] Admin dashboard at **`/admin`** — org overview, managers, operators, applications, audit, system status, **▶ Start** ingest; the Overview ingest status bar is the dashboard's single Start/Stop location and carries ids `ingestStatusBar` / `ingestStatusText` / `ingestStartBtn` / `ingestStopBtn` (2026-09-18)
 - [x] Dev dashboard at **`/dev`** — health, runs, errors, queue, integrations, application debugger
 - [x] Login redirects by role (`homePath`); strict API isolation (`requireRole`)

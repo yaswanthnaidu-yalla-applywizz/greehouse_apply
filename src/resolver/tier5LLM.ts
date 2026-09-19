@@ -12,6 +12,7 @@ import {
 } from './llmSynthesizer.js';
 import { upsertAnswer } from '../db/qaBank.js';
 import { generateFingerprint } from './fingerprint.js';
+import { writeEmbedding } from './semanticSearch.js';
 import { profileRowToCandidateProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
@@ -130,6 +131,7 @@ export async function resolveTier5(
           source: 'ai',
           confidence: resolvedField.confidence,
         });
+        await writeEmbedding(applywizzId, fingerprint, field.label);
       } catch (writeErr: any) {
         log.warn(
           `[Tier 5] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${writeErr.message}`
@@ -210,7 +212,12 @@ export async function resolveTier5Batch(
       };
     });
 
-    const rawAnswers = await synthesizer.synthesizeBatchAnswers(batchQuestions, resumeText, jd);
+    const rawAnswers = await synthesizer.synthesizeBatchAnswers(
+      batchQuestions,
+      resumeText,
+      jd,
+      adaptedProfile
+    );
 
     for (let j = 0; j < llmFields.length; j++) {
       const field = llmFields[j];
@@ -256,6 +263,7 @@ export async function resolveTier5Batch(
           source: 'ai',
           confidence: resolvedField.confidence,
         });
+        await writeEmbedding(applywizzId, fingerprint, field.label);
       } catch (writeErr: any) {
         log.warn(
           `[Tier 5 Batch] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${writeErr.message}`

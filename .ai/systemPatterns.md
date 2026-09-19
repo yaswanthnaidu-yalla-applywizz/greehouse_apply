@@ -38,11 +38,11 @@ Short-circuits on first hit. Each tier feeds the next as fallback.
 |---|---|---|---|
 | 1 | `tier1Supabase.ts` | Direct lookup in `profiles` + `candidate_qa_bank` by fingerprint | Free (DB only) |
 | 2 | `tier2ResumeParse.ts` | `pdf-parse` on resume PDF → cached in `candidate_resume_parsed` (parse once) | Free after first parse |
-| 3 | `tier3FuzzyMatch.ts` | Fuse.js (threshold ≥ 0.85) against `candidate_qa_bank` fingerprints | Free (in-memory) |
-| 4 | *(embedded in segregator)* | Full ApplyWizz API refetch → upsert to `profiles` | API call |
-| 5 | `tier5LLM.ts` via `llmSynthesizer.ts` | Multi-provider LLM prompt → answer written to `candidate_qa_bank` for reuse | LLM cost |
+| 3 | `semanticSearch.ts` | OpenRouter `text-embedding-3-small` vector similarity (≥ 0.88) via Supabase RPC against `candidate_qa_bank` | Embedding API cost |
+| 4 | `tier3FuzzyMatch.ts` | Fuse.js (threshold ≥ 0.85) against `candidate_qa_bank` | Free (in-memory) |
+| 5 | `tier5LLM.ts` via `llmSynthesizer.ts` | Multi-provider LLM prompt → answer and embedding written to `candidate_qa_bank` for reuse | LLM cost |
 
-**Rule:** LLM answers and manual edits written to `candidate_qa_bank` → resolved at Tier 1 on next run (zero LLM spend).
+**Rule:** LLM answers and manual edits written to `candidate_qa_bank` with embeddings (`writeEmbedding`) → resolved at Tier 1/3 on next run.
 
 **Tier 5 fail-closed (`llmSynthesizer.ts`):** if the model answer is not an **exact** dropdown/radio option, or confidence is below `LLM_MIN_CONFIDENCE`, the field stays `unresolved` — never a guessed option. Profile Yes/No that is not an exact option is also left unresolved.
 

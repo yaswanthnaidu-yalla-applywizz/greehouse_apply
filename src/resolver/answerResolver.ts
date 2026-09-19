@@ -18,6 +18,8 @@ import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
 import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
+import { findSemanticMatch } from './semanticSearch.js';
+import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE } from './tier5LLM.js';
 import { upsertApplication } from '../db/applications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
@@ -51,6 +53,12 @@ export function formatResolutionSource(resolved: ResolvedField): string {
   if (resolved.source === 'resume_parse' || resolved.resolvedByTier === 2) {
     return '🔵 Resume';
   }
+  if (resolved.source === 'semantic' || resolved.resolvedByTier === 3) {
+    return '🧠 Semantic';
+  }
+  if (resolved.source === 'fuzzy_match' || resolved.resolvedByTier === 4) {
+    return '🟡 Fuzzy';
+  }
   if (resolved.source === 'ai' || resolved.resolvedByTier === 5) {
     return '🤖 LLM';
   }
@@ -69,9 +77,11 @@ export function isResolvedApplicationSuccessful(app: CandidateJobApplication): b
   return !app.resolvedFields.some((f) => f.source === 'unresolved' || f.resolvedByTier === null);
 }
 
-export function resolutionSourceKey(resolved: ResolvedField): 'supabase' | 'resume' | 'llm' | 'unresolved' | 'other' {
+export function resolutionSourceKey(resolved: ResolvedField): 'supabase' | 'resume' | 'semantic' | 'fuzzy' | 'llm' | 'unresolved' | 'other' {
   if (resolved.source === 'unresolved' || resolved.resolvedByTier === null) return 'unresolved';
   if (resolved.source === 'resume_parse' || resolved.resolvedByTier === 2) return 'resume';
+  if (resolved.source === 'semantic' || resolved.resolvedByTier === 3) return 'semantic';
+  if (resolved.source === 'fuzzy_match' || resolved.resolvedByTier === 4) return 'fuzzy';
   if (resolved.source === 'ai' || resolved.resolvedByTier === 5) return 'llm';
   if (resolved.source === 'supabase' || resolved.resolvedByTier === 1) return 'supabase';
   return 'other';
@@ -158,6 +168,38 @@ export class AnswerResolver {
       return tier2;
     }
 
+    // ------------------------------------------------------------------------
+    // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
+    // ------------------------------------------------------------------------
+    const semanticMatch = await findSemanticMatch(field.label, applywizzId, field.type);
+    if (semanticMatch) {
+      log.info(`[Resolver] Tier 3 semantic hit for ${field.label}`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: semanticMatch.value,
+        source: 'semantic',
+        resolvedByTier: 3,
+        confidence: semanticMatch.confidence,
+      };
+    }
+
+    // ------------------------------------------------------------------------
+    // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
+    // ------------------------------------------------------------------------
+    const tier4 = await resolveTier3(applywizzId, field, context?.qaEntries);
+    if (tier4) {
+      return {
+        ...tier4,
+        resolvedByTier: 4,
+      };
+    }
+
+    // ------------------------------------------------------------------------
+    // Tier 5: Multi-provider LLM Synthesis
+    // ------------------------------------------------------------------------
     if (profile) {
       const tier5 = await resolveTier5(
         applywizzId,
@@ -188,7 +230,7 @@ export class AnswerResolver {
   }
 
   /**
-   * Tier 1–2 only (used before batched Tier 5 within resolveJobApplication).
+   * Pre-LLM waterfall (Tiers 1–4) used before batched Tier 5 within resolveJobApplication.
    */
   private async resolveFieldThroughTier2(
     applywizzId: string,
@@ -242,6 +284,35 @@ export class AnswerResolver {
     const tier2 = await resolveTier2(applywizzId, field, parsedResume);
     if (tier2) {
       return tier2;
+    }
+
+    // ------------------------------------------------------------------------
+    // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
+    // ------------------------------------------------------------------------
+    const semanticMatch = await findSemanticMatch(field.label, applywizzId, field.type);
+    if (semanticMatch) {
+      log.info(`[Resolver] Tier 3 semantic hit for ${field.label}`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: semanticMatch.value,
+        source: 'semantic',
+        resolvedByTier: 3,
+        confidence: semanticMatch.confidence,
+      };
+    }
+
+    // ------------------------------------------------------------------------
+    // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
+    // ------------------------------------------------------------------------
+    const tier4 = await resolveTier3(applywizzId, field, context.qaEntries);
+    if (tier4) {
+      return {
+        ...tier4,
+        resolvedByTier: 4,
+      };
     }
 
     return this.unresolvedField(field);
@@ -539,12 +610,12 @@ export class AnswerResolver {
         }
 
         if (!compact) {
-          const counts = { supabase: 0, resume: 0, llm: 0, unresolved: 0, other: 0 };
+          const counts = { supabase: 0, resume: 0, semantic: 0, fuzzy: 0, llm: 0, unresolved: 0, other: 0 };
           for (const f of app.resolvedFields) {
             counts[resolutionSourceKey(f)]++;
           }
           log.info(
-            `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [Supabase:${counts.supabase} Resume:${counts.resume} LLM:${counts.llm} Unresolved:${counts.unresolved}]`
+            `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [Supabase:${counts.supabase} Resume:${counts.resume} Semantic:${counts.semantic} Fuzzy:${counts.fuzzy} LLM:${counts.llm} Unresolved:${counts.unresolved}]`
           );
         }
       }

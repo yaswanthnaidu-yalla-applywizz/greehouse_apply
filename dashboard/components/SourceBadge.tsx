@@ -79,6 +79,18 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
     );
   }
 
+  if (activeSource === 'semantic') {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#4338CA] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#6366F1]"></span>
+        <span>semantic</span>
+        {confidence !== undefined && (
+          <span className="text-[10px] text-[#4338CA]">({(confidence * 100).toFixed(0)}%)</span>
+        )}
+      </span>
+    );
+  }
+
   if (activeSource === 'api') {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#3730A3] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
