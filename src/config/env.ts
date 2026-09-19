@@ -55,10 +55,10 @@ const envSchema = z.object({
   PLAYWRIGHT_TIMEOUT: z.coerce.number().int().positive().default(30000),
 
   /** Maximum parallel Playwright browser instances / pages */
-  WORKER_POOL_SIZE: z.coerce.number().int().min(1).max(10).default(3),
+  WORKER_POOL_SIZE: z.coerce.number().int().min(0).max(50).optional().default(0),
 
   /** Parallel candidate×job resolution workers during ingest (Railway 1GB: keep at 3) */
-  RESOLVER_WORKER_POOL_SIZE: z.coerce.number().int().min(1).max(5).default(3),
+  RESOLVER_WORKER_POOL_SIZE: z.coerce.number().int().min(1).max(20).default(3),
 
   /** Flag indicating deployment on Railway free-tier (caps memory, disables headful) */
   RAILWAY_ENV: z.coerce.boolean().default(false),
