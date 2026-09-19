@@ -36,7 +36,8 @@ interface QueuedSubmission {
 
 export class SubmitterPool {
   private readonly pollIntervalMs: number;
-  private readonly lanes: QueuedSubmission[][] = [[], [], []];
+  private readonly poolSize: number;
+  private readonly lanes: QueuedSubmission[][];
   private readonly inFlightApplicationIds = new Set<string>();
   private nextWorkerIndex = 0;
   private pendingAssignments = 0;
@@ -44,6 +45,9 @@ export class SubmitterPool {
 
   constructor(options: SubmitterPoolOptions = {}) {
     this.pollIntervalMs = options.pollIntervalMs ?? 2000;
+    const poolSize = parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10);
+    this.poolSize = Number.isInteger(poolSize) && poolSize > 0 ? poolSize : 3;
+    this.lanes = Array.from({ length: this.poolSize }, () => []);
   }
 
   public start(): void {
@@ -52,7 +56,7 @@ export class SubmitterPool {
     }
 
     this.isRunning = true;
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < this.poolSize; index += 1) {
       void this.runWorker(index);
     }
     void this.dispatchQueue();
@@ -73,7 +77,7 @@ export class SubmitterPool {
   } {
     return {
       running: this.isRunning,
-      workerCount: 3,
+      workerCount: this.poolSize,
       idleCount: this.getIdleCount(),
       pendingAssignments: this.pendingAssignments,
       inFlightCount: this.inFlightApplicationIds.size,
@@ -84,7 +88,7 @@ export class SubmitterPool {
 
   public async enqueue(application: ApplicationRow): Promise<LiveSubmitResult> {
     const workerIndex = this.nextWorkerIndex;
-    this.nextWorkerIndex = (this.nextWorkerIndex + 1) % 3;
+    this.nextWorkerIndex = (this.nextWorkerIndex + 1) % this.poolSize;
     this.pendingAssignments += 1;
     const appRef = application.id || application.applywizz_id;
     log.info(
@@ -224,7 +228,7 @@ export class SubmitterPool {
   }
 
   private getIdleCount(): number {
-    return Math.max(0, 3 - this.pendingAssignments);
+    return Math.max(0, this.poolSize - this.pendingAssignments);
   }
 
   private sleep(milliseconds: number): Promise<void> {

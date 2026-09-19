@@ -12,14 +12,22 @@ import {
   type ApplicationStatus,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
-import { listAuditEvents } from '../../db/events.js';
+import { insertAuditEvent, listAuditEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
-import { emailsForRole } from './auth.js';
+import { emailsForRole, isUserAdmin, resolveRole } from './auth.js';
 import { buildManagerTeamStats } from '../adminManagerStats.js';
 import { loadClientDashboard } from '../clientDashboard.js';
 import { listAllDashboardUsers, listOperatorEmailsForManager } from '../../db/users.js';
 import { isActiveWithin, listAuthDirectory } from '../authDirectory.js';
 import { collectHealthSnapshot, trafficLights } from '../healthSnapshot.js';
+import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
+import { getIngestRun, setIngestRun } from '../runtimeState.js';
+import {
+  isPipelineStopEnabled,
+  requestPipelineAbort,
+  resetPipelineAbort,
+} from '../../orchestrator/pipelineAbort.js';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('Admin Dashboard');
@@ -303,3 +311,204 @@ adminDashboardRouter.get('/system-status', async (_req: Request, res: Response):
     res.status(500).json({ error: 'Unable to load system status.' });
   }
 });
+
+adminDashboardRouter.post(
+  '/trigger-ingest-from-storage',
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const ingestServiceUrl = (process.env.INGEST_SERVICE_URL || '').trim().replace(/\/+$/, '');
+
+    if (ingestServiceUrl) {
+      log.info(`[Admin] Forwarding ingest trigger to ingest service at ${ingestServiceUrl}`);
+      try {
+        const headers: Record<string, string> = {};
+        if (req.headers.authorization) {
+          headers.authorization = req.headers.authorization;
+        }
+        if (req.headers['content-type']) {
+          headers['content-type'] = req.headers['content-type'] as string;
+        }
+
+        const response = await fetch(`${ingestServiceUrl}/api/admin/trigger-ingest-from-storage`, {
+          method: 'POST',
+          headers,
+          body: req.body && Object.keys(req.body).length > 0 ? JSON.stringify(req.body) : undefined,
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          res.status(response.status).json(data);
+        } else {
+          const text = await response.text();
+          res.status(response.status).send(text);
+        }
+      } catch (err: any) {
+        log.error(`[Admin] Failed forwarding ingest trigger to ${ingestServiceUrl}:`, err);
+        res.status(502).json({
+          error: `Failed to communicate with ingest service at ${ingestServiceUrl}`,
+          details: err?.message || String(err),
+        });
+      }
+      return;
+    }
+
+    if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
+      res.status(403).json({ error: 'Forbidden: only admins can start the pipeline.' });
+      return;
+    }
+
+    if (getIngestRun().running) {
+      res.status(409).json({
+        error: 'Ingestion is already running.',
+        ...getIngestRun(),
+      });
+      return;
+    }
+
+    const startedAt = new Date().toISOString();
+    resetPipelineAbort();
+    setIngestRun({ running: true, startedAt });
+    const actorEmail = getAuthenticatedCaEmail(authReq) || (authReq.user as { email?: string } | undefined)?.email || '';
+    void insertAuditEvent({
+      actorEmail,
+      actorRole: resolveRole(authReq.user || actorEmail),
+      action: 'ingest_start',
+      targetType: 'pipeline',
+      targetId: startedAt,
+    });
+    log.info(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
+    res.status(202).json({ started: true, startedAt });
+
+    try {
+      const { ingestCsvFromStorage } = await import('../../scanner/storageCsvIngestion.js');
+      const result = await ingestCsvFromStorage();
+      setIngestRun({
+        running: false,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        processedCount: result.processedCount,
+        processedFile: result.processedFile,
+        message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
+        error: result.success ? undefined : result.message,
+      });
+      log.info(
+        `[Admin] ${result.success ? '✅' : result.aborted ? '⏹️' : '❌'} Storage CSV ingestion finished: ${result.message}`
+      );
+    } catch (err: any) {
+      const message = err?.message || 'Storage ingestion failed';
+      setIngestRun({
+        running: false,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        error: message,
+      });
+      log.error('[Admin] ❌ Storage CSV ingestion failed:', err);
+    } finally {
+      resetPipelineAbort();
+    }
+  }
+);
+
+adminDashboardRouter.post(
+  '/stop-ingest',
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const ingestServiceUrl = (process.env.INGEST_SERVICE_URL || '').trim().replace(/\/+$/, '');
+
+    if (ingestServiceUrl) {
+      log.info(`[Admin] Forwarding stop ingest to ingest service at ${ingestServiceUrl}`);
+      try {
+        const headers: Record<string, string> = {};
+        if (req.headers.authorization) {
+          headers.authorization = req.headers.authorization;
+        }
+
+        const response = await fetch(`${ingestServiceUrl}/api/admin/stop-ingest`, {
+          method: 'POST',
+          headers,
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          res.status(response.status).json(data);
+        } else {
+          const text = await response.text();
+          res.status(response.status).send(text);
+        }
+      } catch (err: any) {
+        log.error(`[Admin] Failed forwarding stop ingest to ${ingestServiceUrl}:`, err);
+        res.status(502).json({
+          error: `Failed to communicate with ingest service at ${ingestServiceUrl}`,
+          details: err?.message || String(err),
+        });
+      }
+      return;
+    }
+
+    if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
+      res.status(403).json({ error: 'Forbidden: only admins can stop the pipeline.' });
+      return;
+    }
+    if (!isPipelineStopEnabled()) {
+      res.status(403).json({
+        error: 'Pipeline stop is disabled. Set NODE_ENV=development or ENABLE_PIPELINE_STOP=true.',
+      });
+      return;
+    }
+    if (!getIngestRun().running) {
+      res.status(409).json({ error: 'No ingestion run is in progress.', ...getIngestRun() });
+      return;
+    }
+    requestPipelineAbort();
+    log.warn('[Admin] ⏹️ Storage CSV ingestion stop requested by operator');
+    res.json({ stopping: true, ...getIngestRun() });
+  }
+);
+
+adminDashboardRouter.get(
+  '/ingest-status',
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    const ingestServiceUrl = (process.env.INGEST_SERVICE_URL || '').trim().replace(/\/+$/, '');
+
+    if (ingestServiceUrl) {
+      log.info(`[Admin] Forwarding ingest status to ingest service at ${ingestServiceUrl}`);
+      try {
+        const headers: Record<string, string> = {};
+        if (req.headers.authorization) {
+          headers.authorization = req.headers.authorization;
+        }
+
+        const response = await fetch(`${ingestServiceUrl}/api/admin/ingest-status`, {
+          method: 'GET',
+          headers,
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          res.status(response.status).json(data);
+        } else {
+          const text = await response.text();
+          res.status(response.status).send(text);
+        }
+      } catch (err: any) {
+        log.error(`[Admin] Failed forwarding ingest status to ${ingestServiceUrl}:`, err);
+        res.status(502).json({
+          error: `Failed to communicate with ingest service at ${ingestServiceUrl}`,
+          details: err?.message || String(err),
+        });
+      }
+      return;
+    }
+
+    if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
+      res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
+      return;
+    }
+    res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
+  }
+);
+

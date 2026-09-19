@@ -17,13 +17,12 @@ export class SubmissionQueueDaemon {
   private readonly pool: SubmitterPool;
 
   public constructor(options: QueueDaemonOptions = {}) {
-    if (options.concurrency !== undefined && options.concurrency !== 3) {
-      log.warn('[SubmissionQueueDaemon] Pool concurrency is fixed at 3 workers.');
-    }
     this.pool = new SubmitterPool({ pollIntervalMs: options.pollIntervalMs });
   }
 
   public start(): void {
+    const poolSize = parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10);
+    log.info(`[QueueWorker] Starting with ${poolSize} submission lanes`);
     void assertSupabaseReady();
     this.pool.start();
   }

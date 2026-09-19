@@ -69,6 +69,12 @@ const envSchema = z.object({
   /** Per-URL scan + per-field resolution logs (default: compact pipeline summaries only) */
   PIPELINE_VERBOSE: z.coerce.boolean().default(false),
 
+  /** Ingest-only server mode: health check + ingest endpoints only */
+  INGEST_ONLY: z.string().optional().default('false'),
+
+  /** Submitter worker pool concurrency / lane count (default '3') */
+  SUBMISSION_POOL_SIZE: z.string().optional().default('3'),
+
   /** JWT Secret for backend session verification */
   JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
 

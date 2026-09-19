@@ -12,6 +12,7 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
+import Fuse from 'fuse.js';
 import { config } from '../config/env.js';
 import type {
   ApplyWizzCandidateProfile,
@@ -305,6 +306,56 @@ export function matchExactOption(text: string, options?: string[]): string | nul
 }
 
 /**
+ * Fuzzy option match fallback when exact match fails:
+ * 1. Normalized comparison (strip punctuation, lowercase, trim)
+ * 2. Substring / contains comparison (< 10 chars)
+ * 3. Fuse.js match (threshold: 0.85)
+ */
+export function matchFuzzyOption(text: string, options?: string[]): string | null {
+  if (!options || options.length === 0) return null;
+  const rawAnswer = text.trim();
+  if (!rawAnswer) return null;
+
+  // 1. Try normalized comparison: strip punctuation, lowercase, trim both answer and each option
+  const stripPunctuation = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const normAnswer = stripPunctuation(rawAnswer);
+  if (normAnswer) {
+    for (const opt of options) {
+      if (stripPunctuation(opt) === normAnswer) {
+        return opt;
+      }
+    }
+  }
+
+  // 2. Try contains check: if answer.toLowerCase() includes option.toLowerCase() or vice versa for short options (< 10 chars)
+  const lowerAnswer = rawAnswer.toLowerCase();
+  for (const opt of options) {
+    const lowerOpt = opt.toLowerCase().trim();
+    if (!lowerOpt) continue;
+    if (lowerAnswer.includes(lowerOpt)) {
+      return opt;
+    }
+    if (lowerOpt.length < 10 && lowerOpt.includes(lowerAnswer)) {
+      return opt;
+    }
+  }
+
+  // 3. Try Fuse.js match with threshold 0.85 against choiceOptions
+  try {
+    const fuse = new Fuse(options, { threshold: 0.85 });
+    const results = fuse.search(rawAnswer);
+    if (results.length > 0 && results[0]?.item) {
+      return results[0].item;
+    }
+  } catch {
+    // ignore search error
+  }
+
+  // 4. Only if all three fail
+  return null;
+}
+
+/**
  * Tier 2 Answer Synthesizer invoking OpenRouter, Google Gemini, or OpenAI.
  */
 export class LLMSynthesizer {
@@ -522,14 +573,26 @@ export class LLMSynthesizer {
     }
 
     if (choiceOptions && choiceOptions.length > 0) {
-      const exact = matchExactOption(answer, choiceOptions);
-      if (!exact) {
+      let matched = matchExactOption(answer, choiceOptions);
+      if (!matched) {
+        log.warn(
+          `[LLM Synthesizer] Exact match failed for '${answer}' — trying fuzzy fallback for '${field.label}'`
+        );
+        matched = matchFuzzyOption(answer, choiceOptions);
+        if (matched) {
+          log.info(
+            `[LLM Synthesizer] Fuzzy matched '${answer}' → '${matched}' for '${field.label}'`
+          );
+        }
+      }
+
+      if (!matched) {
         log.warn(
           `[LLM Synthesizer] "${answer}" is not an exact option for "${field.label}" — leaving unresolved`
         );
         return unresolvedField(field);
       }
-      answer = exact;
+      answer = matched;
       if (confidence == null) confidence = 0.9;
     }
 
@@ -555,9 +618,22 @@ export class LLMSynthesizer {
   public async synthesizeBatchAnswers(
     questions: BatchQuestion[],
     resumeText: string,
-    jobDescription: string
+    jobDescription: string,
+    profile?: ApplyWizzCandidateProfile
   ): Promise<string[]> {
     if (questions.length === 0) return [];
+
+    const candidateContext = profile
+      ? `Candidate Information:
+- Full Name: ${profile.clientName}
+- Work Authorization: ${profile.workAuthorization || 'not provided'}
+- Requires Sponsorship: ${profile.requiresSponsorship === true ? 'Yes' : 'No'}
+- Location: ${profile.location || 'not provided'}
+- Education: ${profile.education?.map((e) => `${e.degree} in ${e.fieldOfStudy}`).join(', ') || 'on file'}
+- Work Experience: ${profile.workExperience?.slice(0, 3).map((w) => `${w.title} at ${w.company}`).join(', ') || 'on file'}
+
+`
+      : '';
 
     const prompt = `Resolve every numbered job application question using only the candidate resume and job description.
 Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
@@ -568,7 +644,7 @@ ${resumeText.slice(0, 12000)}
 Job description:
 ${jobDescription.slice(0, 12000)}
 
-Questions:
+${candidateContext}Questions:
 ${questions
       .map((question, index) => {
         const opts =
