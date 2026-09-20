@@ -44,7 +44,7 @@ export async function buildManagerTeamStats(
   }
 
   const { data: operatorRows, error: usersError } = await getDbClient()
-    .from('users')
+    .from('gh_users')
     .select('email, role, manager_email')
     .eq('role', 'operator');
 
@@ -97,7 +97,7 @@ export async function buildManagerTeamStats(
   }
 
   const { data: appRows, error: appsError } = await getDbClient()
-    .from('candidate_applications')
+    .from('gh_candidate_applications')
     .select('id, profiles!inner(ca_email)');
 
   if (appsError) {

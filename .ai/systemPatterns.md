@@ -115,7 +115,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `parse_failed` | BOOLEAN | |
 | `parse_error` | TEXT | |
 
-### `candidate_qa_bank`
+### `gh_candidate_qa_bank`
 | Column | Type | Notes |
 |---|---|---|
 | `applywizz_id` | TEXT FK | |
@@ -127,7 +127,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `confidence` | FLOAT | LLM confidence score |
 | UNIQUE | | `(applywizz_id, question_fingerprint)` |
 
-### `scanned_job_templates`
+### `gh_scanned_job_templates`
 | Column | Type | Notes |
 |---|---|---|
 | `job_url` | TEXT UNIQUE | Normalized Greenhouse URL |
@@ -136,11 +136,11 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `field_count` | INTEGER | Computed; compared to `MAX_JOB_QUESTIONS` |
 | `is_expired` | BOOLEAN | |
 
-### `candidate_applications`
+### `gh_candidate_applications`
 | Column | Type | Notes |
 |---|---|---|
 | `applywizz_id` | TEXT FK | Must exist in `profiles` before upsert. Rows created at **resolve** (or SKIPPED over-cap), not at CSV segregator |
-| `template_id` | TEXT FK | References `scanned_job_templates` |
+| `template_id` | TEXT FK | References `gh_scanned_job_templates` |
 | `job_url` | TEXT | |
 | `status` | ENUM | See lifecycle above |
 | `resolved_fields` | JSONB | Snapshot of all resolved answers |
@@ -162,14 +162,17 @@ Tracks Zoho Mail accounts linked to candidates for email proof capture.
 | `proofs_web` | `proofs/{app_id}_web.png` | Confirmation screenshots |
 | `proofs_dry_run` | `dry-run/{app_id}_dryrun.png` | Dry-run screenshots |
 
-### `audit_events` (migration 015)
+### `gh_audit_events` (migration 015)
 Organization audit log written by the server (signup, login, logout, ingest start, assignment PATCH). Missing table is fail-closed (warn + continue). RLS on; `service_role` only — no anon/authenticated policies.
 
-### `application_events` (migration 015)
+### `gh_application_events` (migration 015)
 Status-change timeline written from `updateStatus()`. Used by manager Activity and the dev application debugger. Missing table is fail-closed. RLS on; `service_role` only.
 
-### DB Migrations (16 files, applied via `src/db/migrate.ts`)
-`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` audit_events + application_events + service_role RLS | `016` profiles.country + country_code | `latest` combined
+### `gh_users` (migration 017)
+Dashboard operator and manager profiles, mapping, and roles.
+
+### DB Migrations (18 files, applied via `src/db/migrate.ts`)
+`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on gh_candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` gh_audit_events + gh_application_events + service_role RLS | `016` profiles.country + country_code | `017` gh_users | `018` disable gh_users rls | `latest` combined
 
 ## Dashboard roles (email map — no DB)
 

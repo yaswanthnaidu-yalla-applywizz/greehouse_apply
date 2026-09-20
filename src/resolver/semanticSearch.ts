@@ -169,7 +169,7 @@ export async function writeEmbedding(
 
   try {
     const { error } = await supabase
-      .from('candidate_qa_bank')
+      .from('gh_candidate_qa_bank')
       .update({ embedding })
       .eq('applywizz_id', applywizzId)
       .eq('question_fingerprint', questionFingerprint);

@@ -31,7 +31,7 @@ export async function getAnswer(
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('candidate_qa_bank')
+        .from('gh_candidate_qa_bank')
         .select('*')
         .eq('applywizz_id', applywizzId)
         .eq('question_fingerprint', questionFingerprint)
@@ -78,7 +78,7 @@ export async function upsertAnswer(entry: QABankRow): Promise<void> {
     try {
       const supabase = getDbClient();
       const { error } = await supabase
-        .from('candidate_qa_bank')
+        .from('gh_candidate_qa_bank')
         .upsert(payload, { onConflict: 'applywizz_id,question_fingerprint' });
       if (error) {
         throw new Error(error.message);
@@ -121,7 +121,7 @@ export async function findAnswersByCandidate(applywizzId: string): Promise<QABan
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('candidate_qa_bank')
+        .from('gh_candidate_qa_bank')
         .select('*')
         .eq('applywizz_id', applywizzId)
         .order('updated_at', { ascending: false });

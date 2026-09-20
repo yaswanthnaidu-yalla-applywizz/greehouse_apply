@@ -115,3 +115,7 @@
 2026-09-19 checkpoint: no observations
 2026-09-19 checkpoint: no observations
 2026-09-19 deliverable flush: configured Vite bundle for dashboard TSX (vite.config.ts, dashboard/index.tsx, dist/dashboard/index.html, package scripts); added DASHBOARD_MODE config and dual-serving with /fallback route in server; configured DASHBOARD_MODE=tsx on Railway service; typecheck and build pass clean; no new observations
+2026-09-19 session-start scan: files=21 parsed=21
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: build crash fix — Vite dist/client collision with tsc dist/dashboard

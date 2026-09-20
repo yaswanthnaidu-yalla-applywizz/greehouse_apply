@@ -54,7 +54,7 @@ async function resolveApplicationIdForEvent(event: ApplicationEventInput): Promi
 
   try {
     const { data, error } = await getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('id')
       .eq('applywizz_id', applywizzId)
       .eq('job_url', jobUrl)
@@ -96,7 +96,7 @@ export interface ApplicationEventRow {
 export async function insertAuditEvent(event: AuditEventInput): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    const { error } = await getDbClient().from('audit_events').insert({
+    const { error } = await getDbClient().from('gh_audit_events').insert({
       actor_email: event.actorEmail?.trim().toLowerCase() || null,
       actor_role: event.actorRole || null,
       action: event.action,
@@ -105,31 +105,31 @@ export async function insertAuditEvent(event: AuditEventInput): Promise<void> {
       metadata: event.metadata || {},
     });
     if (error) {
-      if (isMissingTable(error, 'audit_events')) {
-        warnMissingOnce('audit_events', error);
+      if (isMissingTable(error, 'gh_audit_events')) {
+        warnMissingOnce('gh_audit_events', error);
         return;
       }
-      log.warn(`[Events] audit_events insert failed: ${error.message}`);
+      log.warn(`[Events] gh_audit_events insert failed: ${error.message}`);
     }
   } catch (err: any) {
-    log.warn(`[Events] audit_events insert exception: ${err?.message}`);
+    log.warn(`[Events] gh_audit_events insert exception: ${err?.message}`);
   }
 }
 
 export async function insertApplicationEvent(event: ApplicationEventInput): Promise<void> {
   if (!isSupabaseConfigured()) {
-    log.warn('[Events] application_events insert skipped: Supabase not configured.');
+    log.warn('[Events] gh_application_events insert skipped: Supabase not configured.');
     return;
   }
   const resolvedId = await resolveApplicationIdForEvent(event);
   if (!resolvedId) {
     log.warn(
-      `[Events] application_events insert skipped: could not resolve application_id (applywizz_id=${event.applywizzId || '—'}, job_url=${event.jobUrl || '—'}).`
+      `[Events] gh_application_events insert skipped: could not resolve application_id (applywizz_id=${event.applywizzId || '—'}, job_url=${event.jobUrl || '—'}).`
     );
     return;
   }
   try {
-    const { error } = await getDbClient().from('application_events').insert({
+    const { error } = await getDbClient().from('gh_application_events').insert({
       application_id: resolvedId,
       applywizz_id: event.applywizzId || null,
       from_status: event.fromStatus || null,
@@ -138,16 +138,16 @@ export async function insertApplicationEvent(event: ApplicationEventInput): Prom
       detail: event.detail || {},
     });
     if (error) {
-      if (isMissingTable(error, 'application_events')) {
-        warnMissingOnce('application_events', error);
+      if (isMissingTable(error, 'gh_application_events')) {
+        warnMissingOnce('gh_application_events', error);
         return;
       }
-      log.warn(`[Events] application_events insert failed: ${error.message}`);
+      log.warn(`[Events] gh_application_events insert failed: ${error.message}`);
       return;
     }
     log.info(`[Events] ✅ Status change written: ${resolvedId} → ${event.toStatus}`);
   } catch (err: any) {
-    log.warn(`[Events] application_events insert exception: ${err?.message}`);
+    log.warn(`[Events] gh_application_events insert exception: ${err?.message}`);
   }
 }
 
@@ -167,7 +167,7 @@ export async function countAuditEventsByActionInRange(options: {
 
   try {
     let query = getDbClient()
-      .from('audit_events')
+      .from('gh_audit_events')
       .select('*', { count: 'exact', head: true })
       .eq('action', options.action)
       .gte('created_at', options.startIso)
@@ -177,8 +177,8 @@ export async function countAuditEventsByActionInRange(options: {
     }
     const { count, error } = await query;
     if (error) {
-      if (isMissingTable(error, 'audit_events')) {
-        warnMissingOnce('audit_events', error);
+      if (isMissingTable(error, 'gh_audit_events')) {
+        warnMissingOnce('gh_audit_events', error);
         return 0;
       }
       log.warn(`[Events] countAuditEventsByActionInRange failed: ${error.message}`);
@@ -200,7 +200,7 @@ export async function listAuditEvents(options: {
   const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
   try {
     let query = getDbClient()
-      .from('audit_events')
+      .from('gh_audit_events')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -208,9 +208,9 @@ export async function listAuditEvents(options: {
     if (options.actorEmail) query = query.eq('actor_email', options.actorEmail.trim().toLowerCase());
     const { data, error } = await query;
     if (error) {
-      if (isMissingTable(error, 'audit_events')) {
-        warnMissingOnce('audit_events', error);
-        return { events: [], warning: 'Migration 015 not applied (audit_events).' };
+      if (isMissingTable(error, 'gh_audit_events')) {
+        warnMissingOnce('gh_audit_events', error);
+        return { events: [], warning: 'Migration 015 not applied (gh_audit_events).' };
       }
       throw error;
     }
@@ -231,21 +231,21 @@ export async function listApplicationEvents(options: {
   let probeError = null;
   try {
     await getDbClient()
-      .from('application_events')
+      .from('gh_application_events')
       .select('id')
       .limit(1);
   } catch (err) {
     probeError = err;
   }
 
-  if (probeError && isMissingTable(probeError, 'application_events')) {
-    warnMissingOnce('application_events', probeError);
-    return { events: [], warning: 'Migration 015 not applied (application_events).' };
+  if (probeError && isMissingTable(probeError, 'gh_application_events')) {
+    warnMissingOnce('gh_application_events', probeError);
+    return { events: [], warning: 'Migration 015 not applied (gh_application_events).' };
   }
 
   try {
     let query = getDbClient()
-      .from('application_events')
+      .from('gh_application_events')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(limit);

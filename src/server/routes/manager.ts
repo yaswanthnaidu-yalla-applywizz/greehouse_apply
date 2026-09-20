@@ -139,7 +139,7 @@ async function enrichApplicationEventsForActivity(
   if (isSupabaseConfigured()) {
     if (appIds.length > 0) {
       const { data: apps, error: appsError } = await getDbClient()
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('id, job_url, applywizz_id, job_title, company_name')
         .in('id', appIds);
       if (appsError) {
@@ -181,7 +181,7 @@ async function enrichApplicationEventsForActivity(
     ];
     if (jobUrls.length > 0) {
       const { data: templates, error: templatesError } = await getDbClient()
-        .from('scanned_job_templates')
+        .from('gh_scanned_job_templates')
         .select('job_url, job_title, company_name')
         .in('job_url', jobUrls);
       if (templatesError) {
@@ -482,7 +482,7 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
     const { endIso } = getISTDateRangeUtc(end);
 
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('created_at, assigned_ca_email, applywizz_id')
       .gte('created_at', startIso)
       .lte('created_at', endIso);
@@ -518,12 +518,12 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
         .map(async ([email, applications]) => {
           const [appsRes, completed, approvedRes] = await Promise.all([
             getDbClient()
-              .from('candidate_applications')
+              .from('gh_candidate_applications')
               .select('*', { count: 'exact', head: true })
               .eq('assigned_ca_email', email),
             countCompletedApplicationsSince(startIso, [email]),
             getDbClient()
-              .from('candidate_applications')
+              .from('gh_candidate_applications')
               .select('*', { count: 'exact', head: true })
               .in('status', [
                 'QUEUED',
@@ -581,7 +581,7 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
     const scoped = await scopedApplywizzIds(req);
     let applications: ApplicationRow[] = [];
     if (isSupabaseConfigured()) {
-      let query = getDbClient().from('candidate_applications').select('*');
+      let query = getDbClient().from('gh_candidate_applications').select('*');
       if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
       query = applyCreatedAtRangeFilter(query, createdAtRange);
       const { data, error } = await query;
@@ -747,7 +747,7 @@ managerRouter.patch('/applications/:id/assignment', async (req: Request, res: Re
     const scoped = await scopedApplywizzIds(req);
     const applicationId = String(req.params.id);
     const { data: existing, error: existingError } = await getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('*')
       .eq('id', applicationId)
       .maybeSingle();
@@ -763,7 +763,7 @@ managerRouter.patch('/applications/:id/assignment', async (req: Request, res: Re
 
     const nextEmail = typeof assignedCaEmail === 'string' ? assignedCaEmail.trim() || null : null;
     const { data, error } = await getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .update({ assigned_ca_email: nextEmail })
       .eq('id', applicationId)
       .select('*')

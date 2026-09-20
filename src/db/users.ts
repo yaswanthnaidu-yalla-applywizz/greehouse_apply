@@ -12,13 +12,13 @@ let missingTableWarned = false;
 
 function isMissingUsersTable(error: { message?: string; code?: string } | null | undefined): boolean {
   const message = (error?.message || '').toLowerCase();
-  return error?.code === '42P01' || (message.includes('users') && message.includes('does not exist'));
+  return error?.code === '42P01' || (message.includes('gh_users') && message.includes('does not exist'));
 }
 
 function warnMissingUsersTable(error: { message?: string }): void {
   if (missingTableWarned) return;
   missingTableWarned = true;
-  log.warn(`[Users] users table is missing (${error.message}). Apply migration 017.`);
+  log.warn(`[Users] gh_users table is missing (${error.message}). Apply migration 017.`);
 }
 
 export interface DashboardUserRow {
@@ -41,7 +41,7 @@ export async function getDashboardUserByEmail(email: string): Promise<DashboardU
 
   const supabase = getDbClient();
   const { data, error } = await supabase
-    .from('users')
+    .from('gh_users')
     .select('email, name, role, manager_email')
     .eq('email', normalized)
     .maybeSingle();
@@ -65,11 +65,11 @@ export async function upsertDashboardUserOnSignIn(input: {
 }): Promise<UpsertDashboardUserResult> {
   const normalized = input.email.trim().toLowerCase();
   if (!normalized) {
-    authLog.info('[Auth] users upsert result: data=null error=email missing');
+    authLog.info('[Auth] gh_users upsert result: data=null error=email missing');
     return { data: null, error: { message: 'email missing' } };
   }
   if (!isSupabaseConfigured()) {
-    authLog.info(`[Auth] users upsert result: data=null error=Supabase not configured`);
+    authLog.info(`[Auth] gh_users upsert result: data=null error=Supabase not configured`);
     return { data: null, error: { message: 'Supabase not configured' } };
   }
 
@@ -82,11 +82,11 @@ export async function upsertDashboardUserOnSignIn(input: {
     updated_at: new Date().toISOString(),
   };
 
-  authLog.info(`[Auth] Attempting users upsert for ${normalized}`);
+  authLog.info(`[Auth] Attempting gh_users upsert for ${normalized}`);
 
   const supabase = getDbClient();
   const { data, error } = await supabase
-    .from('users')
+    .from('gh_users')
     .upsert(row, { onConflict: 'email' })
     .select('email, name, role, manager_email')
     .maybeSingle();
@@ -126,7 +126,7 @@ export async function listDashboardOperatorsForManager(
 
   const supabase = getDbClient();
   const { data, error } = await supabase
-    .from('users')
+    .from('gh_users')
     .select('email, name, role, manager_email')
     .eq('manager_email', manager)
     .order('email');
@@ -148,7 +148,7 @@ export async function listAllDashboardUsers(): Promise<DashboardUserRow[]> {
 
   const supabase = getDbClient();
   const { data, error } = await supabase
-    .from('users')
+    .from('gh_users')
     .select('email, name, role, manager_email')
     .order('email');
 
@@ -174,7 +174,7 @@ export async function setDashboardUserManagerEmail(
 
   const supabase = getDbClient();
   const { error } = await supabase
-    .from('users')
+    .from('gh_users')
     .update({ manager_email: manager, updated_at: new Date().toISOString() })
     .eq('email', normalized);
 

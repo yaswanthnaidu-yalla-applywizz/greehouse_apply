@@ -43,7 +43,7 @@ export async function clearCandidateData(candidateIds?: string[]) {
 
       // Delete from candidate_qa_bank
       const { error: errQA, count: countQA } = await client
-        .from('candidate_qa_bank')
+        .from('gh_candidate_qa_bank')
         .delete({ count: 'exact' })
         .in('applywizz_id', candidateIds);
       if (errQA) log.warn(`  ⚠️ Error clearing candidate_qa_bank: ${errQA.message}`);
@@ -51,7 +51,7 @@ export async function clearCandidateData(candidateIds?: string[]) {
 
       // Delete from candidate_applications
       const { error: errApp, count: countApp } = await client
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .delete({ count: 'exact' })
         .in('applywizz_id', candidateIds);
       if (errApp) log.warn(`  ⚠️ Error clearing candidate_applications: ${errApp.message}`);
@@ -79,7 +79,7 @@ export async function clearCandidateData(candidateIds?: string[]) {
       log.info('  🗑️ Removing all answers, applications, and parsed resumes from Supabase...');
       // Clear all answers
       const { error: errQA, count: countQA } = await client
-        .from('candidate_qa_bank')
+        .from('gh_candidate_qa_bank')
         .delete({ count: 'exact' })
         .neq('applywizz_id', 'NON_EXISTENT');
       if (errQA) log.warn(`  ⚠️ Error clearing all candidate_qa_bank: ${errQA.message}`);
@@ -87,7 +87,7 @@ export async function clearCandidateData(candidateIds?: string[]) {
 
       // Clear all applications
       const { error: errApp, count: countApp } = await client
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .delete({ count: 'exact' })
         .neq('applywizz_id', 'NON_EXISTENT');
       if (errApp) log.warn(`  ⚠️ Error clearing all candidate_applications: ${errApp.message}`);

@@ -1425,7 +1425,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (isSupabaseConfigured()) {
       let appQuery = getDbClient()
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('*')
         .eq('applywizz_id', applywizzId);
       if (!unrestricted) {
@@ -1608,7 +1608,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       try {
         const supabase = getDbClient();
         const { data, error } = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .select('*')
           .eq('applywizz_id', applywizzId)
           .eq('job_url', decodedUrl)
@@ -1618,7 +1618,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           supabaseRecord = data;
         } else if (rawJobUrl !== decodedUrl) {
           const { data: altData } = await supabase
-            .from('candidate_applications')
+            .from('gh_candidate_applications')
             .select('*')
             .eq('applywizz_id', applywizzId)
             .eq('job_url', rawJobUrl)

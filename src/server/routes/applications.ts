@@ -91,7 +91,7 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
     if (!application && isSupabaseConfigured()) {
       const supabase = getDbClient();
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
-      let query = supabase.from('candidate_applications').select('*');
+      let query = supabase.from('gh_candidate_applications').select('*');
       if (isUuid) {
         query = query.eq('id', appId);
       } else {
@@ -249,7 +249,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     if (!application && isSupabaseConfigured()) {
       const supabase = getDbClient();
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
-      let query = supabase.from('candidate_applications').select('*');
+      let query = supabase.from('gh_candidate_applications').select('*');
       if (isUuid) {
         query = query.eq('id', appId);
       } else {
@@ -417,7 +417,7 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
     if (!application && isSupabaseConfigured()) {
       const supabase = getDbClient();
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
-      let query = supabase.from('candidate_applications').select('*');
+      let query = supabase.from('gh_candidate_applications').select('*');
       if (isUuid) {
         query = query.eq('id', appId);
       } else {
@@ -594,7 +594,7 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let applications: any[] = [];
     if (isSupabaseConfigured()) {
       const supabase = getDbClient();
-      let query = supabase.from('candidate_applications').select('*');
+      let query = supabase.from('gh_candidate_applications').select('*');
       if (applywizzId) {
         query = query.eq('applywizz_id', applywizzId);
       } else if (allowedIds) {
@@ -656,7 +656,7 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
     if (isSupabaseConfigured()) {
       const supabase = getDbClient();
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
-      let query = supabase.from('candidate_applications').select('*');
+      let query = supabase.from('gh_candidate_applications').select('*');
       if (isUuid) {
         query = query.eq('id', appId);
       } else {
