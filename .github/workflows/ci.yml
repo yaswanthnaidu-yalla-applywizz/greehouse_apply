@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'fix/**'
+      - 'feature/**'
+      - 'hotfix/**'
+      - 'patch/**'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        id: install_deps
+        run: npm ci
+
+      - name: Run typecheck
+        id: typecheck_step
+        run: npm run typecheck
+
+      - name: Comment PR on typecheck failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failedStep = '${{ steps.typecheck_step.outcome }}' === 'failure'
+              ? '`npm run typecheck`'
+              : '`npm ci` (dependency installation)';
+            const body = [
+              '### ❌ CI: Typecheck Failed',
+              '',
+              `The **Typecheck** job failed at step: ${failedStep}.`,
+              '',
+              `👉 **[View Workflow Run Logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})**`,
+              '',
+              '> *Note: `typecheck` is required to pass before merging to `main`.*'
+            ].join('\n');
+
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            } catch (err) {
+              core.warning(`Could not post PR comment: ${err.message}`);
+            }
+
+  build:
+    name: Build
+    needs: typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        id: install_deps
+        run: npm ci
+
+      - name: Run build
+        id: build_step
+        run: npm run build
+
+      - name: Comment PR on build failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const failedStep = '${{ steps.build_step.outcome }}' === 'failure'
+              ? '`npm run build`'
+              : '`npm ci` (dependency installation)';
+            const body = [
+              '### ❌ CI: Build Failed',
+              '',
+              `The **Build** job failed at step: ${failedStep}.`,
+              '',
+              `👉 **[View Workflow Run Logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})**`,
+              '',
+              '> *Note: `build` is required to pass before merging to `main`.*'
+            ].join('\n');
+
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            } catch (err) {
+              core.warning(`Could not post PR comment: ${err.message}`);
+            }
+
+  test:
+    name: Test (E2E Integration)
+    needs: build
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E integration test
+        id: test_step
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RAILWAY_ENV: 'true'
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "::notice::SUPABASE_URL not provided in secrets. Tests may fail or run in fallback mode."
+          fi
+          npm test
+        continue-on-error: true
+
+      - name: Report non-blocking test failure on PR
+        if: steps.test_step.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              '### ⚠️ CI: E2E Integration Test Notice',
+              '',
+              'The **Test** job (`npm test`) encountered errors, but merge is **not blocked** because E2E tests are environment-dependent (requires live Railway/Supabase environment).',
+              '',
+              `👉 **[View Workflow Run Logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})**`
+            ].join('\n');
+
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            } catch (err) {
+              core.warning(`Could not post PR comment: ${err.message}`);
+            }
