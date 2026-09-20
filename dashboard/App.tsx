@@ -124,9 +124,17 @@ export const App: React.FC = () => {
     if (typeof window === 'undefined') return;
     if (!localStorage.getItem('applywizz_auth_token')) return;
     const role = sessionRole();
-    if (role === 'dev') window.location.replace('/dev');
-    else if (role === 'manager' && !isOpsMode()) window.location.replace('/manager');
-    else if (role === 'admin') window.location.replace('/admin');
+    if (role === 'dev') {
+      if (sessionStorage.getItem('applywizz_dev_operator_view') === 'true') {
+        sessionStorage.removeItem('applywizz_dev_operator_view');
+        return;
+      }
+      window.location.replace('/dev');
+    } else if (role === 'manager' && !isOpsMode()) {
+      window.location.replace('/manager');
+    } else if (role === 'admin') {
+      window.location.replace('/admin');
+    }
   }, []);
 
   useEffect(() => {
