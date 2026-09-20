@@ -578,7 +578,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   // Dashboard web assets (HTML guarded by role when Bearer token is sent)
   const publicDir = path.resolve(process.cwd(), 'dashboard/public');
-  const distDashboardDir = path.resolve(process.cwd(), 'dist/client');
+  const distDashboardDir = path.resolve(process.cwd(), 'dist/dashboard');
   const operatorIndexPath = path.join(publicDir, 'index.html');
   const distDashboardIndexPath = path.join(distDashboardDir, 'index.html');
   const managerHtmlPath = path.join(publicDir, 'manager.html');
@@ -597,7 +597,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         res.sendFile(distDashboardIndexPath);
         return;
       }
-      log.warn('[Server] dist/client/index.html not found, falling back to public/index.html');
+      log.warn('[Server] dist/dashboard/index.html not found, falling back to public/index.html');
     }
     if (fs.existsSync(operatorIndexPath)) {
       res.sendFile(operatorIndexPath);
