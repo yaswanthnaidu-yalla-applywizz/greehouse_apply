@@ -1,7 +1,7 @@
 ---
 id: 12
 title: "A privilege flag must not be reused as the user's role"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "role resolution after login / session restore"
 date: 2026-09-15
 session_context: "Dev email yaswanthnaiduyalla@applywizz.ai was redirected to /admin because applywizz_is_admin was true for both admin and dev"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-09-20
+resolution: "Resolved via ROLE_BY_EMAIL mapping and sessionRole() in roleAccess.js, attachResolvedRole in server auth routes, and migration 015 dashboard_users.role; applywizz_is_admin no longer overrides role resolution."
 reference:
 ---
 
