@@ -121,7 +121,7 @@ devDashboardRouter.get('/runs', async (req: Request, res: Response): Promise<voi
     }
     const { startIso, endIso } = getISTDateRangeUtc(date);
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles!inner(client_name)', { count: 'exact' })
       .gte('created_at', startIso)
       .lte('created_at', endIso)

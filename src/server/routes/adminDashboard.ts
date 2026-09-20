@@ -243,7 +243,7 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
     }
 
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles!inner(client_name, ca_email)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);

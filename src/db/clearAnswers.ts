@@ -34,7 +34,7 @@ async function clearData() {
       const supabase = getDbClient();
 
       // Clear candidate_applications
-      let appQuery = supabase.from('candidate_applications').delete();
+      let appQuery = supabase.from('gh_candidate_applications').delete();
       if (candidateId) {
         appQuery = appQuery.eq('applywizz_id', candidateId);
       } else {
@@ -48,7 +48,7 @@ async function clearData() {
       }
 
       // Clear candidate_qa_bank
-      let qaQuery = supabase.from('candidate_qa_bank').delete();
+      let qaQuery = supabase.from('gh_candidate_qa_bank').delete();
       if (candidateId) {
         qaQuery = qaQuery.eq('applywizz_id', candidateId);
       } else {

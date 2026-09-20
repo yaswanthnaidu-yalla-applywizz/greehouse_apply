@@ -126,7 +126,7 @@ export async function countCompletedApplicationsSince(
 
   try {
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
       .in('status', [...COMPLETED_STATUSES])
       .gte('updated_at', startIso);
@@ -153,7 +153,7 @@ export async function countAppliedApplicationsSince(
 
   try {
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'APPLIED');
     if (since) query = query.gte('updated_at', since);
@@ -181,7 +181,7 @@ export async function countCompletedApplicationsByOperatorSince(
 
   try {
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('assigned_ca_email')
       .in('status', [...COMPLETED_STATUSES])
       .gte('updated_at', startIso);
@@ -212,7 +212,7 @@ export async function countAppliedApplicationsByOperatorSince(
 
   try {
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('assigned_ca_email')
       .eq('status', 'APPLIED')
       .gte('updated_at', startIso);
@@ -306,7 +306,7 @@ export async function upsertApplication(
     try {
       const supabase = getDbClient();
       const { data: existing } = await supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('resolved_fields')
         .eq('applywizz_id', payload.applywizz_id)
         .eq('job_url', payload.job_url)
@@ -345,7 +345,7 @@ export async function upsertApplication(
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .upsert(payload, { onConflict: 'applywizz_id,job_url' })
         .select()
         .single();
@@ -358,7 +358,7 @@ export async function upsertApplication(
         return row;
       }
       if (error) {
-        const missingProfileFk = /candidate_applications_applywizz_id_fkey/i.test(error.message);
+        const missingProfileFk = /(?:gh_)?candidate_applications_applywizz_id_fkey/i.test(error.message);
         if (missingProfileFk) {
           log.warn(
             `[DB] upsertApplication skipped — no profiles row for ${app.applywizz_id} (${app.job_url}). Sync the candidate before creating applications.`
@@ -394,7 +394,7 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
       const supabase = getDbClient();
       if (isUuid) {
         const { data, error } = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .select('*')
           .eq('id', cleanId)
           .maybeSingle();
@@ -416,7 +416,7 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
       // Query by applywizz_id
       const candidateId = cleanId.includes('_') ? cleanId.split('_')[0] : cleanId;
       let query = supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('*')
         .eq('applywizz_id', candidateId);
 
@@ -501,7 +501,7 @@ export async function getApplicationByCandidateAndJob(
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('*')
         .eq('applywizz_id', applywizzId)
         .eq('job_url', jobUrl)
@@ -555,18 +555,18 @@ export async function updateResolvedFields(
       let updateRes;
       if (isUuid) {
         updateRes = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update(updatePayload)
           .eq('id', id);
       } else if (cleanApplywizz && targetJobUrl) {
         updateRes = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update(updatePayload)
           .eq('applywizz_id', cleanApplywizz)
           .eq('job_url', targetJobUrl);
       } else if (cleanApplywizz) {
         updateRes = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update(updatePayload)
           .eq('applywizz_id', cleanApplywizz);
       }
@@ -622,7 +622,7 @@ export async function countOperatorWorkloadByProfileCaEmail(
 
   const emailSet = new Set(emails);
   const { data, error } = await getDbClient()
-    .from('candidate_applications')
+    .from('gh_candidate_applications')
     .select('id, profiles!inner(ca_email)')
     .in('status', OPERATOR_WORKLOAD_STATUSES);
 
@@ -695,7 +695,7 @@ export async function updateStatus(
     try {
       const supabase = getDbClient();
       if (!previousStatus) {
-        let statusQuery = supabase.from('candidate_applications').select('status');
+        let statusQuery = supabase.from('gh_candidate_applications').select('status');
         if (isUuid) {
           statusQuery = statusQuery.eq('id', id);
         } else if (targetJobUrl) {
@@ -706,7 +706,7 @@ export async function updateStatus(
         const { data: current } = await statusQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
         previousStatus = current?.status as ApplicationStatus | undefined;
       }
-      const query = supabase.from('candidate_applications').update(updatePayload);
+      const query = supabase.from('gh_candidate_applications').update(updatePayload);
       let updateRes;
       if (isUuid) {
         updateRes = await query.eq('id', id);
@@ -782,7 +782,7 @@ async function patchApplicationRecord(
       const supabase = getDbClient();
       if (application.id) {
         const { error } = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update(updatePayload)
           .eq('id', application.id);
         if (!error) {
@@ -796,7 +796,7 @@ async function patchApplicationRecord(
 
       if (!persisted && application.applywizz_id && application.job_url) {
         const { error } = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update(updatePayload)
           .eq('applywizz_id', application.applywizz_id)
           .eq('job_url', application.job_url);
@@ -1187,7 +1187,7 @@ export async function retryFailedApplication(
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      let query = supabase.from('candidate_applications').update(payload);
+      let query = supabase.from('gh_candidate_applications').update(payload);
       if (application.id) {
         query = query.eq('id', application.id);
       } else {
@@ -1238,7 +1238,7 @@ export async function requeueApplicationForRetry(
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      let query = supabase.from('candidate_applications').update(payload);
+      let query = supabase.from('gh_candidate_applications').update(payload);
       if (app.id) {
         query = query.eq('id', app.id);
       } else {
@@ -1290,12 +1290,12 @@ export async function getSubmissionOutcomeCounts(options?: {
     try {
       const supabase = getDbClient();
       let appliedQuery = supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'APPLIED');
 
       let failedQuery = supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'FAILED');
 
@@ -1388,7 +1388,7 @@ export async function getDashboardApplicationMetrics(options?: {
     try {
       const supabase = getDbClient();
       let query = supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('applywizz_id, job_url, status, resolved_fields, created_at');
       if (allowedSet && options?.allowedCandidateIds) {
         query = query.in('applywizz_id', options.allowedCandidateIds);
@@ -1439,7 +1439,7 @@ export async function distinctApplywizzIdsForCreatedAtRange(
 
   try {
     let query = getDbClient()
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('applywizz_id, status, created_at')
       .neq('status', 'SKIPPED');
     query = applyCreatedAtRangeFilter(query, createdAtRange);
@@ -1473,7 +1473,7 @@ export async function listApplications(filter?: {
     try {
       const supabase = getDbClient();
       const buildQuery = () => {
-        let q = supabase.from('candidate_applications').select('*');
+        let q = supabase.from('gh_candidate_applications').select('*');
         if (filter?.status) {
           q = q.eq('status', filter.status);
         }
@@ -1606,7 +1606,7 @@ export async function fetchCandidateApplicationAggregatesByApplywizzIds(
     try {
       const supabase = getDbClient();
       let query = supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select(
           scoped
             ? 'applywizz_id, status, assigned_ca_email, resolved_fields, created_at'
@@ -1682,7 +1682,7 @@ export async function countNonSkippedApplicationsByApplywizzIds(
     try {
       const supabase = getDbClient();
       let query = supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('applywizz_id, status, resolved_fields, created_at')
         .in('applywizz_id', ids);
       if (createdAtRange) {
@@ -1721,7 +1721,7 @@ export async function countApplicationsByStatus(status: ApplicationStatus): Prom
     try {
       const supabase = getDbClient();
       const { count, error } = await supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('*', { count: 'exact', head: true })
         .eq('status', status);
       if (!error && typeof count === 'number') {
@@ -1774,7 +1774,7 @@ export async function enqueueApplication(
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('submission_order')
         .in('status', ['QUEUED', 'APPLYING', 'APPLIED', 'FAILED'])
         .not('submission_order', 'is', null)
@@ -1815,12 +1815,12 @@ export async function enqueueApplication(
       let queueRes;
       if (isUuid) {
         queueRes = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update(updatePayload)
           .eq('id', app.id);
       } else {
         queueRes = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update(updatePayload)
           .eq('applywizz_id', app.applywizz_id)
           .eq('job_url', app.job_url);
@@ -1895,7 +1895,7 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
     // 2. Fallback query if RPC is not yet created in Supabase SQL editor
     try {
       const { data, error } = await supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('*')
         .eq('status', 'QUEUED')
         .order('submission_order', { ascending: true })
@@ -1904,7 +1904,7 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
 
       if (!error && data) {
         const updateRes = await supabase
-          .from('candidate_applications')
+          .from('gh_candidate_applications')
           .update({
             status: 'APPLYING',
             updated_at: new Date().toISOString(),
@@ -2050,7 +2050,7 @@ export async function getRecentNotifications(
     try {
       const supabase = getDbClient();
       let query = supabase
-        .from('candidate_applications')
+        .from('gh_candidate_applications')
         .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, proof_web_url, proof_failed_url, updated_at, submitted_at, created_at')
         .in('status', ['APPLYING', 'APPLIED', 'FAILED'])
         .neq('applywizz_id', 'AWL-YASWANTH');
