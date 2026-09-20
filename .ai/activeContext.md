@@ -1,6 +1,6 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-18_
+_Last updated: 2026-09-20_
 
 ## Docs
 
@@ -8,9 +8,14 @@ _Last updated: 2026-09-18_
 
 ## Current Focus
 
+### 0f. GitHub Actions CI & Worker Service Isolation (shipped 2026-09-20)
+- **CI Pipeline (`.github/workflows/ci.yml`):** Runs on push to `main` and feature/fix/hotfix branches, and PRs to `main`. Multi-job waterfall: `typecheck` (`npm run typecheck`) → `build` (`npm run build`) → `test` (`npm test`, non-blocking via `continue-on-error: true`). Includes PR failure comments and README status badge.
+- **Zoho Reader Service Isolation:** In `src/server/index.ts`, `zohoReader.init()` is gated on `ENABLE_QUEUE_WORKER === 'true'`. Worker Service (Service 2) runs background Zoho session; Web Service (Service 1) and Ingest Service (Service 3) skip launch cleanly with a log notice.
+- **Dev Operator View (`applywizz_dev_operator_view`):** DevSwitcher in `dev.html` sets session key before navigating to `/`; `App.tsx` respects session key on mount so dev users can view the operator dashboard without being bounced to `/dev`.
+
 ### 0e. In Progress — Dashboard UI: bundled TSX operator parity
-- **Serving:** Dual-mode via `DASHBOARD_MODE` ('tsx' vs 'html'). In 'tsx' mode: serves `dist/dashboard` static bundle; `GET /` serves `dist/dashboard/index.html`; `GET /fallback` serves legacy `dashboard/public/index.html`. `DASHBOARD_MODE=tsx` set on Railway Service.
-- **Build:** Vite 6 with `@vitejs/plugin-react` (`npm run build:dashboard` / `vite build`, `npm run dev:dashboard`). Root `build` updated to `tsc && vite build`.
+- **Serving:** Dual-mode via `DASHBOARD_MODE` ('tsx' vs 'html'). In 'tsx' mode: serves `dist/client` static bundle; `GET /` serves `dist/client/index.html`; `GET /fallback` serves legacy `dashboard/public/index.html`. `DASHBOARD_MODE=tsx` set on Railway Service.
+- **Build:** Vite 6 targets `dist/client` with `@vitejs/plugin-react` (`npm run build:dashboard` / `vite build`, `npm run dev:dashboard`). Root `build` is `tsc && vite build` (`tsc` outputs backend to `dist/`, Vite builds UI to `dist/client`).
 - **Progress:** Ported session management (`useSession.ts`), ops mode banner (`App.tsx`), email proof capture (`SubmissionControls.tsx` + `FormRenderer.tsx`), direct proof viewing from queue badges (`ProofViewer.tsx` + `JobQueueView.tsx`), and dual global/per-candidate realtime subscriptions (`useCandidateApplicationsRealtime.ts` + `App.tsx`) to TSX.
 - **Migration order:** (1) operator — `App.tsx` entry, parity with `operator-app.jsx`; (2) manager — `ManagerDashboard.tsx` + `main-manager.tsx`; (3) **port** admin/dev from `admin.html` / `dev.html` (no `.tsx` exists yet); (4) delete duplicate Babel blocks + `operator-app.jsx`.
 
