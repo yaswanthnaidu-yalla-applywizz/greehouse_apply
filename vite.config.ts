@@ -31,7 +31,7 @@ export default defineConfig({
   plugins: [react(), htmlTemplatePlugin()],
   base: '/',
   build: {
-    outDir: 'dist/dashboard',
+    outDir: 'dist/client',
     emptyOutDir: true,
     rollupOptions: {
       input: path.resolve(__dirname, 'dashboard/index.tsx'),
