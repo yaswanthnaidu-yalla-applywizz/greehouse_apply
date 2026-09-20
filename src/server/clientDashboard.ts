@@ -209,7 +209,7 @@ export async function loadClientDashboard(options: {
     })();
 
   let query = getDbClient()
-    .from('candidate_applications')
+    .from('gh_candidate_applications')
     .select('*, profiles!inner(applywizz_id, client_name, ca_email)');
   query = applyCreatedAtRangeFilter(query, createdAtRange);
 

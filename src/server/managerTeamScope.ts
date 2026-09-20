@@ -129,7 +129,7 @@ export async function distinctApplywizzIdsForOperatorEmails(
   if (emails.length === 0 || !isSupabaseConfigured()) return [];
 
   let query = getDbClient()
-    .from('candidate_applications')
+    .from('gh_candidate_applications')
     .select('applywizz_id')
     .in('assigned_ca_email', emails);
   if (createdAtRange) {
