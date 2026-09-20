@@ -1,8 +1,13 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-18_
+_Last updated: 2026-09-20_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
+
+### Infrastructure & CI/CD
+- [x] GitHub Actions CI pipeline (`.github/workflows/ci.yml`) — triggers on `main`, `feature/**`, `fix/**`, `hotfix/**`, `patch/**`, and PRs with `typecheck` → `build` → non-blocking `test` waterfall, automated PR failure comments, and status badge
+- [x] Multi-service isolation — Zoho Reader background session initialization restricted to worker service via `ENABLE_QUEUE_WORKER === 'true'` (web/ingest services skip launch cleanly)
+- [x] Dev Operator View navigation — `applywizz_dev_operator_view` session key signaling in `dev.html` DevSwitcher and `App.tsx` mount guard
 
 ### Core Pipeline
 - [x] CSV ingestion + URL normalization + deduplication (`csvDeduplicator.ts`)
