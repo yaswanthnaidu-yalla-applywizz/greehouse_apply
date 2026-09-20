@@ -1,20 +1,20 @@
--- Migration 007: Add proof_failed_url and proof_failed_captured_at to candidate_applications
+-- Migration 007: Add proof_failed_url and proof_failed_captured_at to gh_candidate_applications
 -- Add RLS policies for proofs_failed and proofs_mail in storage.objects
 
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'candidate_applications' AND column_name = 'proof_failed_url'
+    WHERE table_name = 'gh_candidate_applications' AND column_name = 'proof_failed_url'
   ) THEN
-    ALTER TABLE candidate_applications ADD COLUMN proof_failed_url TEXT;
+    ALTER TABLE gh_candidate_applications ADD COLUMN proof_failed_url TEXT;
   END IF;
 
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'candidate_applications' AND column_name = 'proof_failed_captured_at'
+    WHERE table_name = 'gh_candidate_applications' AND column_name = 'proof_failed_captured_at'
   ) THEN
-    ALTER TABLE candidate_applications ADD COLUMN proof_failed_captured_at TIMESTAMPTZ;
+    ALTER TABLE gh_candidate_applications ADD COLUMN proof_failed_captured_at TIMESTAMPTZ;
   END IF;
 END $$;
 

@@ -29,17 +29,17 @@ ALTER TABLE profiles
   DROP COLUMN IF EXISTS last_api_fetch_at,
   DROP COLUMN IF EXISTS resume_storage_path;
 
--- 5. Add queue prioritization columns to candidate_applications
-ALTER TABLE candidate_applications
+-- 5. Add queue prioritization columns to gh_candidate_applications
+ALTER TABLE gh_candidate_applications
   ADD COLUMN IF NOT EXISTS has_manual_edits BOOLEAN DEFAULT false,
   ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 
 -- 6. Update CHECK constraint on status to include CAPTCHA_TIMEOUT
-ALTER TABLE candidate_applications
-  DROP CONSTRAINT IF EXISTS candidate_applications_status_check;
+ALTER TABLE gh_candidate_applications
+  DROP CONSTRAINT IF EXISTS gh_candidate_applications_status_check;
 
-ALTER TABLE candidate_applications
-  ADD CONSTRAINT candidate_applications_status_check
+ALTER TABLE gh_candidate_applications
+  ADD CONSTRAINT gh_candidate_applications_status_check
   CHECK (status IN (
     'READY_FOR_REVIEW',
     'DRY_RUN_COMPLETE',
@@ -51,11 +51,11 @@ ALTER TABLE candidate_applications
     'CAPTCHA_TIMEOUT'
   ));
 
--- 7. Drop redundant template_id column from candidate_applications (jobs are identified by job_url)
-ALTER TABLE candidate_applications
+-- 7. Drop redundant template_id column from gh_candidate_applications (jobs are identified by job_url)
+ALTER TABLE gh_candidate_applications
   DROP COLUMN IF EXISTS template_id;
 
 -- 8. Add queue index for prioritizing unedited applications first
 CREATE INDEX IF NOT EXISTS idx_applications_queue_order
-  ON candidate_applications(has_manual_edits ASC, reviewed_at ASC)
+  ON gh_candidate_applications(has_manual_edits ASC, reviewed_at ASC)
   WHERE status = 'READY_FOR_REVIEW';

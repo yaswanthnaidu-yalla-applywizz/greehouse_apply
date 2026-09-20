@@ -36,9 +36,9 @@ export async function migrate(): Promise<MigrationResult> {
   const supabase = getDbClient();
   const tables = [
     'profiles',
-    'scanned_job_templates',
-    'candidate_qa_bank',
-    'candidate_applications',
+    'gh_scanned_job_templates',
+    'gh_candidate_qa_bank',
+    'gh_candidate_applications',
   ];
 
   // 1. Ensure Storage Buckets exist
@@ -93,7 +93,7 @@ export async function migrate(): Promise<MigrationResult> {
         for (let i = 0; i < records.length; i += chunkSize) {
           const chunk = records.slice(i, i + chunkSize);
           const { error } = await supabase
-            .from('scanned_job_templates')
+            .from('gh_scanned_job_templates')
             .upsert(chunk, { onConflict: 'job_url' });
 
           if (error) {

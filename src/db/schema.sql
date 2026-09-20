@@ -43,10 +43,10 @@ CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
 CREATE INDEX IF NOT EXISTS idx_profiles_company_email ON profiles(company_email);
 
 -- ============================================================================
--- 2. scanned_job_templates — Greenhouse Form Schema Cache
+-- 2. gh_scanned_job_templates — Greenhouse Form Schema Cache
 -- Migrated from output/scanned_jobs.json; upserted by Branch 1 scanner
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS scanned_job_templates (
+CREATE TABLE IF NOT EXISTS gh_scanned_job_templates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     job_url TEXT UNIQUE NOT NULL,
     company_name TEXT,
@@ -58,14 +58,14 @@ CREATE TABLE IF NOT EXISTS scanned_job_templates (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_templates_job_url ON scanned_job_templates(job_url);
-CREATE INDEX IF NOT EXISTS idx_templates_field_count ON scanned_job_templates(field_count);
+CREATE INDEX IF NOT EXISTS idx_templates_job_url ON gh_scanned_job_templates(job_url);
+CREATE INDEX IF NOT EXISTS idx_templates_field_count ON gh_scanned_job_templates(field_count);
 
 -- ============================================================================
--- 3. candidate_qa_bank — Historical Answer Bank
+-- 3. gh_candidate_qa_bank — Historical Answer Bank
 -- Persistent Q&A memory populated by LLM (Tier 5) and manual operator edits
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS candidate_qa_bank (
+CREATE TABLE IF NOT EXISTS gh_candidate_qa_bank (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     applywizz_id TEXT NOT NULL REFERENCES profiles(applywizz_id) ON DELETE CASCADE,
     question_fingerprint TEXT NOT NULL,                  -- SHA-256(normalized label + type)[0:16]
@@ -79,14 +79,14 @@ CREATE TABLE IF NOT EXISTS candidate_qa_bank (
     CONSTRAINT uq_candidate_qa_fingerprint UNIQUE(applywizz_id, question_fingerprint)
 );
 
-CREATE INDEX IF NOT EXISTS idx_qa_bank_applywizz ON candidate_qa_bank(applywizz_id);
-CREATE INDEX IF NOT EXISTS idx_qa_bank_fingerprint ON candidate_qa_bank(question_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_qa_bank_applywizz ON gh_candidate_qa_bank(applywizz_id);
+CREATE INDEX IF NOT EXISTS idx_qa_bank_fingerprint ON gh_candidate_qa_bank(question_fingerprint);
 
 -- ============================================================================
--- 5. candidate_applications — Application State & Verification Proofs
+-- 5. gh_candidate_applications — Application State & Verification Proofs
 -- Tracks lifecycle from resolution through dry-run and verified submission
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS candidate_applications (
+CREATE TABLE IF NOT EXISTS gh_candidate_applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     applywizz_id TEXT NOT NULL REFERENCES profiles(applywizz_id) ON DELETE CASCADE,
     job_url TEXT NOT NULL,
@@ -131,19 +131,19 @@ CREATE TABLE IF NOT EXISTS candidate_applications (
     CONSTRAINT uq_candidate_application_pair UNIQUE(applywizz_id, job_url)
 );
 
-CREATE INDEX IF NOT EXISTS idx_applications_applywizz ON candidate_applications(applywizz_id);
-CREATE INDEX IF NOT EXISTS idx_applications_status ON candidate_applications(status);
-CREATE INDEX IF NOT EXISTS idx_applications_queue_order ON candidate_applications(has_manual_edits ASC, reviewed_at ASC);
-CREATE INDEX IF NOT EXISTS idx_applications_submission_order ON candidate_applications(submission_order ASC) WHERE status = 'QUEUED';
+CREATE INDEX IF NOT EXISTS idx_applications_applywizz ON gh_candidate_applications(applywizz_id);
+CREATE INDEX IF NOT EXISTS idx_applications_status ON gh_candidate_applications(status);
+CREATE INDEX IF NOT EXISTS idx_applications_queue_order ON gh_candidate_applications(has_manual_edits ASC, reviewed_at ASC);
+CREATE INDEX IF NOT EXISTS idx_applications_submission_order ON gh_candidate_applications(submission_order ASC) WHERE status = 'QUEUED';
 
 -- ============================================================================
 -- 6. Row Level Security (RLS) Policies for Tables
 -- Enables RLS and grants full access policies for backend operations
 -- ============================================================================
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE scanned_job_templates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE candidate_qa_bank ENABLE ROW LEVEL SECURITY;
-ALTER TABLE candidate_applications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gh_scanned_job_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gh_candidate_qa_bank ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gh_candidate_applications ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Allow full access to profiles" ON profiles;
 CREATE POLICY "Allow full access to profiles" ON profiles
@@ -151,20 +151,20 @@ CREATE POLICY "Allow full access to profiles" ON profiles
     USING (true)
     WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Allow full access to scanned_job_templates" ON scanned_job_templates;
-CREATE POLICY "Allow full access to scanned_job_templates" ON scanned_job_templates
+DROP POLICY IF EXISTS "Allow full access to gh_scanned_job_templates" ON gh_scanned_job_templates;
+CREATE POLICY "Allow full access to gh_scanned_job_templates" ON gh_scanned_job_templates
     FOR ALL
     USING (true)
     WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Allow full access to candidate_qa_bank" ON candidate_qa_bank;
-CREATE POLICY "Allow full access to candidate_qa_bank" ON candidate_qa_bank
+DROP POLICY IF EXISTS "Allow full access to gh_candidate_qa_bank" ON gh_candidate_qa_bank;
+CREATE POLICY "Allow full access to gh_candidate_qa_bank" ON gh_candidate_qa_bank
     FOR ALL
     USING (true)
     WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Allow full access to candidate_applications" ON candidate_applications;
-CREATE POLICY "Allow full access to candidate_applications" ON candidate_applications
+DROP POLICY IF EXISTS "Allow full access to gh_candidate_applications" ON gh_candidate_applications;
+CREATE POLICY "Allow full access to gh_candidate_applications" ON gh_candidate_applications
     FOR ALL
     USING (true)
     WITH CHECK (true);

@@ -36,27 +36,27 @@ ALTER TABLE profiles
 -- ----------------------------------------------------------------------------
 -- 2. Candidate Applications Table: Add proof & queue prioritization columns
 -- ----------------------------------------------------------------------------
-ALTER TABLE candidate_applications
+ALTER TABLE gh_candidate_applications
   ADD COLUMN IF NOT EXISTS proof_email_url TEXT,
   ADD COLUMN IF NOT EXISTS proof_email_captured_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS has_manual_edits BOOLEAN DEFAULT false,
   ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 
 -- Drop redundant template_id column if present (jobs identified by job_url)
-ALTER TABLE candidate_applications
+ALTER TABLE gh_candidate_applications
   DROP COLUMN IF EXISTS template_id;
 
 -- Migrate any legacy status values before updating constraint
-UPDATE candidate_applications
+UPDATE gh_candidate_applications
 SET status = 'OTP_REQUIRED'
 WHERE status = 'CAPTCHA_REQUIRED';
 
--- Update candidate_applications CHECK constraint for status
-ALTER TABLE candidate_applications
-  DROP CONSTRAINT IF EXISTS candidate_applications_status_check;
+-- Update gh_candidate_applications CHECK constraint for status
+ALTER TABLE gh_candidate_applications
+  DROP CONSTRAINT IF EXISTS gh_candidate_applications_status_check;
 
-ALTER TABLE candidate_applications
-  ADD CONSTRAINT candidate_applications_status_check
+ALTER TABLE gh_candidate_applications
+  ADD CONSTRAINT gh_candidate_applications_status_check
   CHECK (status IN (
     'READY_FOR_REVIEW',
     'APPROVED',
@@ -80,5 +80,5 @@ ALTER TABLE candidate_applications
 DROP INDEX IF EXISTS idx_applications_template_id;
 
 CREATE INDEX IF NOT EXISTS idx_applications_queue_order
-  ON candidate_applications(has_manual_edits ASC, reviewed_at ASC)
+  ON gh_candidate_applications(has_manual_edits ASC, reviewed_at ASC)
   WHERE status = 'READY_FOR_REVIEW';

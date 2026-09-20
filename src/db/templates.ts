@@ -36,7 +36,7 @@ export async function upsertTemplate(
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('scanned_job_templates')
+        .from('gh_scanned_job_templates')
         .upsert(payload, { onConflict: 'job_url' })
         .select()
         .single();
@@ -60,7 +60,7 @@ export async function getTemplateByUrl(jobUrl: string): Promise<TemplateRow | nu
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('scanned_job_templates')
+        .from('gh_scanned_job_templates')
         .select('*')
         .eq('job_url', jobUrl)
         .maybeSingle();
@@ -104,7 +104,7 @@ export async function listTemplates(): Promise<TemplateRow[]> {
     try {
       const supabase = getDbClient();
       const { data, error } = await supabase
-        .from('scanned_job_templates')
+        .from('gh_scanned_job_templates')
         .select('*')
         .order('scanned_at', { ascending: false });
 

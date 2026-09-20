@@ -1,10 +1,10 @@
 -- Migration 014: SKIPPED status for jobs over MAX_JOB_QUESTIONS field cap
 
-ALTER TABLE candidate_applications
-  DROP CONSTRAINT IF EXISTS candidate_applications_status_check;
+ALTER TABLE gh_candidate_applications
+  DROP CONSTRAINT IF EXISTS gh_candidate_applications_status_check;
 
-ALTER TABLE candidate_applications
-  ADD CONSTRAINT candidate_applications_status_check
+ALTER TABLE gh_candidate_applications
+  ADD CONSTRAINT gh_candidate_applications_status_check
   CHECK (status IN (
     'READY_FOR_REVIEW',
     'APPROVED',
