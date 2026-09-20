@@ -1916,10 +1916,16 @@ export function startServer(
 
     logSupabaseCredentialIdentity('Server');
 
-    if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
-      zohoReader.init().catch((err: any) => {
-        log.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
-      });
+    if (process.env.ENABLE_QUEUE_WORKER === 'true') {
+      if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
+        zohoReader.init().catch((err: any) => {
+          log.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
+        });
+      }
+    } else {
+      createLogger('ZohoReader').info(
+        '[ZohoReader] Skipping background session — queue worker disabled on this service'
+      );
     }
 
     // Launch background round-robin submission worker daemon if enabled (Phase V2-4c)

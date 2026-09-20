@@ -123,3 +123,4 @@
 2026-09-20 deliverable flush: created .github/workflows/ci.yml with typecheck, build, test jobs, PR failure comments, and added status badge to README.md; branch feature/ci-pipeline; no new observations
 2026-09-20 deliverable flush: added applywizz_dev_operator_view session signaling in DevSwitcher (dev.html) and App.tsx mount redirect guard; branch feature/ci-pipeline; no new observations
 2026-09-20 weekly review: archived 10 resolved observations (0001, 0002, 0004, 0006, 0007, 0008, 0009, 0010, 0014, 0015); actioned 0012; triaged 10 open observations; updated id-floor to 21 and last-review-date to 2026-09-20
+2026-09-20 deliverable flush: gated Zoho Reader session initialization on ENABLE_QUEUE_WORKER === 'true' in src/server/index.ts; no new observations
