@@ -112,6 +112,12 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
       return;
     }
 
+    const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
+    if (!isAdmin && (req as any).user && application.assigned_ca_email !== (req as any).user.email) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
     // 2. Locate and update the target field in resolved_fields JSONB array
     const resolvedFields: ResolvedField[] = Array.isArray(application.resolved_fields)
       ? [...application.resolved_fields]
@@ -259,6 +265,14 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       }
       const { data } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
       application = data;
+    }
+
+    if (application) {
+      const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
+      if (!isAdmin && (req as any).user && application.assigned_ca_email !== (req as any).user.email) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
     }
 
     const targetAppId = application?.id || appId;
@@ -427,6 +441,14 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
       }
       const { data } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
       application = data;
+    }
+
+    if (application) {
+      const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
+      if (!isAdmin && (req as any).user && application.assigned_ca_email !== (req as any).user.email) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
     }
 
     const finalJobUrl = targetJobUrl || application?.job_url || application?.jobUrl;
@@ -678,6 +700,12 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
 
     if (!app) {
       res.status(404).json({ error: `Application '${appId}' not found.` });
+      return;
+    }
+
+    const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
+    if (!isAdmin && (req as any).user && app.assigned_ca_email !== (req as any).user.email) {
+      res.status(403).json({ error: 'Access denied' });
       return;
     }
 
