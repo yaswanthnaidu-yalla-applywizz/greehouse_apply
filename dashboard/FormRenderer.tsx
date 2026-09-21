@@ -155,13 +155,25 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     );
   };
 
-  const actionableFields = fields.filter(
-    (f) => !isDemographic(f.label) || f.source === 'ai' || f.source === 'unresolved'
-  );
+  const isIdentityField = (f: ResolvedField) => {
+    const name = String(f?.name || f?.fieldId || '').toLowerCase();
+    const label = String(f?.label || '').toLowerCase().trim();
+    const identityNames = ['first_name', 'last_name', 'phone', 'email'];
+    if (identityNames.includes(name)) return true;
+    if (identityNames.some((id) => name.endsWith(`[${id}]`) || name.endsWith(`.${id}`) || name.endsWith(`_${id}`))) return true;
+    if (label === 'first name' || label === 'last name' || label === 'phone number' || label === 'email address') return true;
+    return false;
+  };
 
-  const displayFields = filterActionableOnly && actionableFields.length > 0
-    ? actionableFields
-    : fields;
+  // Only show: identity profile fields + required fields + unresolved required fields.
+  // Drop all non-required resolved fields — they don't need operator attention.
+  const actionableFields = fields.filter((f) => {
+    if (isIdentityField(f)) return true;
+    const isReq = f?.isRequired || (f as any)?.required;
+    return Boolean(isReq);
+  });
+
+  const displayFields = actionableFields.length > 0 ? actionableFields : fields;
 
   const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
   const currentField = displayFields[boundedIndex];

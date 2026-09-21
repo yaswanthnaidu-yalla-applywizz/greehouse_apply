@@ -706,18 +706,67 @@
       const isTextarea = field.type === 'textarea';
       const isUnresolved = field.source === 'unresolved';
       const fieldType = String(field.field_type || field.type || '').toLowerCase();
+      const fieldOptions = field.options && field.options.length > 0 ? field.options : null;
+      // Derive quick-pick options for unresolved fields: use field.options, or Yes/No for boolean-type labels
+      const quickPickOptions = (() => {
+        if (!isUnresolved) return null;
+        if (fieldOptions) return fieldOptions.slice(0, 12); // cap at 12 to avoid overflow
+        const lc = (field.label || '').toLowerCase();
+        if (/\bdo you\b|\bare you\b|\bhave you\b|\bwill you\b|\bcan you\b|\bwould you\b|\bis your\b/.test(lc)) {
+          return ['Yes', 'No'];
+        }
+        return null;
+      })();
+
       const unresolvedHint =
         fieldType === 'text' || fieldType === 'textarea'
           ? 'Enter a specific answer. Example: years of experience, a number, a short sentence.'
-          : fieldType === 'select' || fieldType === 'radio'
-          ? "Choose the option that best matches the candidate's profile."
-          : fieldType === 'checkbox'
-          ? "Check if applicable based on candidate's background."
           : fieldType === 'file'
           ? 'Upload the required document.'
           : fieldType === 'location_autocomplete'
           ? 'Enter city, state, or country as applicable.'
           : 'Provide a clear, specific answer for this field.';
+
+      // Handles quick-pick tap: directly PATCHes the selected option — no confirm step needed for tap actions.
+      const handleQuickPick = async (optionValue) => {
+        const fieldKey = field.fieldId || field.name;
+        if (!fieldKey) return;
+        setIsSaving(true);
+        setValue(optionValue);
+        try {
+          const response = await fetch(
+            `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(fieldKey)}`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ value: optionValue, jobUrl }),
+            }
+          );
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP error ${response.status}`);
+          }
+          const updatedField = await response.json();
+          setIsEditing(false);
+          setIsConfirming(false);
+          if (onFieldUpdate) {
+            onFieldUpdate({
+              ...field,
+              ...updatedField,
+              fieldId: updatedField.fieldId || field.fieldId || field.name,
+              name: updatedField.name || field.name || field.fieldId,
+              label: updatedField.label || field.label,
+              value: optionValue,
+              source: 'manual',
+              isEdited: true,
+            });
+          }
+        } catch (err) {
+          setError(err.message || 'Failed to save');
+        } finally {
+          setIsSaving(false);
+        }
+      };
 
       return (
         <div
@@ -794,7 +843,7 @@
                   className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
                 />
               )}
-              {isUnresolved && showHint && (
+              {isUnresolved && showHint && !quickPickOptions && (
                 <p className="mt-1.5 text-[10px] text-[#64748B]">{unresolvedHint}</p>
               )}
 
@@ -877,7 +926,7 @@
                           disabled={isSaving}
                           className="px-2 py-1.5 text-xs text-[#64748B] hover:text-[#EF4444] font-medium"
                         >
-                          Discard & Cancel
+                          Discard &amp; Cancel
                         </button>
                       </div>
                       {error && <p className="mt-2 text-xs font-bold text-[#EF4444]">{error}</p>}
@@ -887,25 +936,66 @@
               )}
             </div>
           ) : (
-            <div
-              onClick={() => setIsEditing(true)}
-              title="Click to edit answer"
-              className="mt-1 p-2 rounded-md bg-[#FAF4EB] border border-[#1A1A2E] hover:bg-[#F5ECE0] cursor-pointer transition text-xs font-mono break-words"
-            >
-              {field.value && field.value.trim().length > 0 ? (
-                <span className="text-[#1A1A2E] font-medium">{field.value}</span>
-              ) : (field.isRequired || field.required) ? (
-                <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved required field (click to provide answer)</span>
-              ) : null}
+            <div>
+              {/* Unresolved quick-pick option buttons */}
+              {isUnresolved && quickPickOptions && (
+                <div className="mt-1.5 mb-2">
+                  <p className="text-[10px] text-[#64748B] mb-1.5 font-medium">Pick an answer:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {quickPickOptions.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => handleQuickPick(opt)}
+                        disabled={isSaving}
+                        className="px-3 py-1 text-xs font-semibold rounded-full border-2 border-[#1A1A2E] bg-[#FAF4EB] hover:bg-[#E88474] hover:text-white hover:border-[#E88474] transition-all shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[0.5px] active:translate-y-[0.5px] disabled:opacity-50"
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(true)}
+                      className="px-3 py-1 text-xs font-medium text-[#64748B] rounded-full border border-[#CBD5E1] bg-white hover:bg-[#F1F5F9] transition-all"
+                    >
+                      other…
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* Unresolved free-text: click whole card to edit */}
+              {isUnresolved && !quickPickOptions && (
+                <div
+                  onClick={() => setIsEditing(true)}
+                  title="Click to provide answer"
+                  className="mt-1 p-2 rounded-md bg-[#FEF2F2] border border-[#EF4444] hover:bg-[#FEE2E2] cursor-pointer transition text-xs font-mono break-words"
+                >
+                  <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved required field — click to provide answer</span>
+                </div>
+              )}
+              {/* Resolved: show value, click to edit */}
+              {!isUnresolved && (
+                <div
+                  onClick={() => setIsEditing(true)}
+                  title="Click to edit answer"
+                  className="mt-1 p-2 rounded-md bg-[#FAF4EB] border border-[#1A1A2E] hover:bg-[#F5ECE0] cursor-pointer transition text-xs font-mono break-words"
+                >
+                  {field.value && field.value.trim().length > 0 ? (
+                    <span className="text-[#1A1A2E] font-medium">{field.value}</span>
+                  ) : (field.isRequired || field.required) ? (
+                    <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved required field (click to provide answer)</span>
+                  ) : null}
+                </div>
+              )}
             </div>
           )}
         </div>
       );
-    }
 
     // -------------------------------------------------------------
     // Email proof (JSON) renderer — no screenshots
     // -------------------------------------------------------------
+
     function EmailProofRenderer({ proof, companyName }) {
       if (!proof) return null;
       const received = proof.received_at ? new Date(proof.received_at).toLocaleString() : proof.received_at;
@@ -1676,26 +1766,27 @@
       };
 
       const isVisuallyRenderedField = (field) => {
+        // Always show identity profile fields (name, email, phone)
         if (isIdentityProfileField(field)) return true;
-        const source = (field?.source || '').toLowerCase();
-        return source === 'unresolved' || source === 'ai' || source === 'manual' || source === 'resume';
+        const isReq = field?.isRequired || field?.required;
+        const isUnresolved = (field?.source || '').toLowerCase() === 'unresolved';
+        // Show required fields and unresolved required fields only — drop non-required resolved fields
+        return Boolean(isReq) || (isUnresolved && Boolean(isReq));
       };
 
       // Display-only: underlying `fields` stays complete for approve/submit payloads.
       const visuallyRenderedFields = fields.filter(isVisuallyRenderedField);
 
-      const actionableFields = visuallyRenderedFields.filter(
-        (f) => !isDemographic(f.label) || f.source === 'ai' || f.source === 'unresolved' || (f.isRequired || f.required)
-      );
+      const actionableFields = visuallyRenderedFields;
 
       const fieldsForDisplay = isFullFormStatus
-        ? visuallyRenderedFields
-        : filterActionableOnly && actionableFields.length > 0
-        ? actionableFields
+        ? fields.filter((f) => {
+            if (isIdentityProfileField(f)) return true;
+            const isReq = f?.isRequired || f?.required;
+            return Boolean(isReq);
+          })
         : visuallyRenderedFields;
-      const baseFields = isFullFormStatus
-        ? fieldsForDisplay
-        : fieldsForDisplay.filter((field) => field.isRequired || field.required);
+      const baseFields = fieldsForDisplay;
       const fieldsByFingerprint = new Map();
       baseFields.forEach((field) => {
         const fingerprint = field.question_fingerprint;
