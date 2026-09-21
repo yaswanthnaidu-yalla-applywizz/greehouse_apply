@@ -8,6 +8,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
+import axios from 'axios';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Ws');
@@ -69,8 +70,25 @@ class WebSocketManager {
 
   /**
    * Broadcasts a JSON event to all connected dashboard operator sessions.
+   * If running on worker service (ENABLE_QUEUE_WORKER=true), forwards the event
+   * via HTTP to Service 1's /api/internal/ws-broadcast endpoint.
    */
   public broadcast(message: WebSocketMessage): void {
+    const webServiceUrl =
+      process.env.WEB_SERVICE_URL ||
+      (process.env.WORKER_SERVICE_URL
+        ? process.env.WORKER_SERVICE_URL.replace('worker', 'main').replace('worker', 'greehouse_apply')
+        : undefined);
+
+    if (process.env.ENABLE_QUEUE_WORKER === 'true' && webServiceUrl) {
+      axios
+        .post(`${webServiceUrl}/api/internal/ws-broadcast`, message, { timeout: 5000 })
+        .catch((err: any) => {
+          log.warn(`[WebSocket] ⚠️ Failed to forward WS event to web service (${webServiceUrl}): ${err.message}`);
+        });
+      return;
+    }
+
     const payload = JSON.stringify(message);
     for (const client of this.clients) {
       if (client.readyState === WebSocket.OPEN) {
@@ -81,6 +99,25 @@ class WebSocketManager {
         }
       }
     }
+  }
+
+  /**
+   * Broadcasts APPLICATION_STATUS_CHANGED event.
+   */
+  public broadcastApplicationStatusChange(event: {
+    appId: string;
+    status: string;
+    timestamp?: string;
+    [key: string]: any;
+  }): void {
+    const { appId, status, timestamp, ...rest } = event;
+    this.broadcast({
+      type: 'APPLICATION_STATUS_CHANGED',
+      appId,
+      status,
+      timestamp: timestamp || new Date().toISOString(),
+      ...rest,
+    });
   }
 
   /**

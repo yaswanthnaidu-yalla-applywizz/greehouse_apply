@@ -137,6 +137,15 @@ async function proxyToWorker(
     if (req.headers.authorization) {
       headers.authorization = req.headers.authorization;
     }
+    if (req.headers.cookie) {
+      headers.cookie = req.headers.cookie;
+    }
+    if (req.headers['x-view-as']) {
+      headers['x-view-as'] = String(req.headers['x-view-as']);
+    }
+    if (req.headers['x-view-as-manager-email']) {
+      headers['x-view-as-manager-email'] = String(req.headers['x-view-as-manager-email']);
+    }
     const userEmail = (req as any).user?.email || req.body?.assignedCaEmail;
     if (userEmail) {
       headers['x-user-email'] = String(userEmail);
@@ -453,6 +462,24 @@ submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Re
       return;
     }
 
+    const targetUrl = application.job_url;
+    let url: URL;
+    try {
+      url = new URL(targetUrl);
+    } catch {
+      res.status(400).json({ error: 'Invalid job URL' });
+      return;
+    }
+    const isGreenhouse = /(^|\.)greenhouse\.io$/i.test(url.hostname) || url.hostname === 'grnh.se';
+    if (!isGreenhouse) {
+      res.status(400).json({ error: 'Invalid job URL' });
+      return;
+    }
+
+    if (await proxyToWorker(req, res, `/api/applications/${encodeURIComponent(appId)}/open-captcha-session`)) {
+      return;
+    }
+
     const hadExistingSession = Boolean(resolvePausedSession(appId));
     await closePausedSession(appId);
 
@@ -478,27 +505,6 @@ submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Re
       });
 
       page = await context.newPage();
-      const targetUrl = application.job_url;
-
-      const ALLOWED_GREENHOUSE_HOSTS = [
-        'boards.greenhouse.io',
-        'job-boards.greenhouse.io',
-        'app.greenhouse.io',
-        'grnh.se',
-      ];
-      let url: URL;
-      try {
-        url = new URL(targetUrl);
-      } catch {
-        if (browser) await browser.close().catch(() => {});
-        res.status(400).json({ error: 'Invalid job URL' });
-        return;
-      }
-      if (!ALLOWED_GREENHOUSE_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith('.' + h))) {
-        if (browser) await browser.close().catch(() => {});
-        res.status(400).json({ error: 'Invalid job URL' });
-        return;
-      }
 
       log.info(
         `[Submissions Router] 🌐 Opening headful CAPTCHA browser for ${application.applywizz_id} → ${targetUrl}`
