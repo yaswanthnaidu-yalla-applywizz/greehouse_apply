@@ -132,3 +132,7 @@
 2026-09-21 session-start scan: files=11 parsed=11
 2026-09-21 deliverable flush: implemented RELIABILITY-1 (30m session TTL in captchaResume.ts & liveSubmit.ts), RELIABILITY-2 (error classification & typed failure bubble in tier5LLM.ts), PERF-3 (query pushdown in manager.ts & devDashboard.ts), PERF-4 (adaptive WS/polling interval in App.tsx & operator-app.jsx); no new observations
 2026-09-21 deliverable flush: implemented PERF-5 (LRUCache for embeddings in semanticSearch.ts), SEC-6 (safe img data-uri for MFA QR in AuthView.tsx & index.html), SEC-9 (sessionStorage token migration in roleAccess.js), SEC-10 (CSP meta tags across HTML shells), QUALITY-1 (masked 500 error messages in applications.ts & submissions.ts); no new observations
+2026-09-21 session-start scan: files=11 parsed=11
+2026-09-21 10:14:31 checkpoint: TSX port of admin, dev, and manager dashboards completed and verified with Vite multi-entry build
+2026-09-21 10:18:30 checkpoint: Fixed production crash caused by required JWT_SECRET env var. Added safe fallback default + warning log, and added server boot smoke check to CI build workflow.
+2026-09-21 deliverable flush: logged and actioned observation 0022; TSX port of dashboards and JWT_SECRET boot fix verified and ready for push
