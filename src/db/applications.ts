@@ -1910,7 +1910,10 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
             updated_at: new Date().toISOString(),
           })
           .eq('id', data.id)
-          .eq('status', 'QUEUED'); // concurrency optimistic lock
+          .eq('status', 'QUEUED')
+          .select('id');
+
+        if (!updateRes.data || updateRes.data.length === 0) return null; // another worker claimed it
 
         if (!updateRes.error) {
           const applyingApp: ApplicationRow = {

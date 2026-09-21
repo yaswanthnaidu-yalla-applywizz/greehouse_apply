@@ -1717,8 +1717,13 @@ export async function runLiveSubmit(
       log.info(`[Live Submit] 🎉 Submission verified! Signal: ${verification.signal}`);
 
       // 8. Capture full-page proof screenshot & attach to application (like dry-run)
-      const proofResult = await captureWebProof(page, application);
-      screenshotCaptured = true;
+      let proofResult: { proofWebUrl?: string; proofCapturedAt?: string } = {};
+      try {
+        proofResult = await captureWebProof(page, application);
+        screenshotCaptured = true;
+      } catch (err: any) {
+        log.warn(`[liveSubmit] Proof capture failed after submit — marking APPLIED anyway: ${err.message}`);
+      }
       if (proofResult.proofWebUrl) {
         log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
       }
