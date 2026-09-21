@@ -1770,8 +1770,8 @@
         if (isIdentityProfileField(field)) return true;
         const isReq = field?.isRequired || field?.required;
         const isUnresolved = (field?.source || '').toLowerCase() === 'unresolved';
-        // Show required fields and unresolved required fields only — drop non-required resolved fields
-        return Boolean(isReq) || (isUnresolved && Boolean(isReq));
+        // Show required fields and all unresolved fields — drop non-required resolved fields
+        return Boolean(isReq) || isUnresolved;
       };
 
       // Display-only: underlying `fields` stays complete for approve/submit payloads.

@@ -165,12 +165,13 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     return false;
   };
 
-  // Only show: identity profile fields + required fields + unresolved required fields.
-  // Drop all non-required resolved fields — they don't need operator attention.
+  // Only show: identity profile fields + required fields + unresolved fields.
+  // Drop non-required resolved fields — they don't need operator attention.
   const actionableFields = fields.filter((f) => {
     if (isIdentityField(f)) return true;
     const isReq = f?.isRequired || (f as any)?.required;
-    return Boolean(isReq);
+    const isUnresolved = f?.source === 'unresolved' || f?.resolvedByTier == null;
+    return Boolean(isReq) || isUnresolved;
   });
 
   const displayFields = actionableFields.length > 0 ? actionableFields : fields;
