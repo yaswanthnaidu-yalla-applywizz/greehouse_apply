@@ -425,6 +425,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const app = express();
     app.use(
       cors({
+        origin: process.env.ALLOWED_ORIGINS?.split(',') ?? false,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: [
           'Authorization',
@@ -556,6 +557,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   app.use(
     cors({
+      origin: process.env.ALLOWED_ORIGINS?.split(',') ?? false,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: [
         'Authorization',
