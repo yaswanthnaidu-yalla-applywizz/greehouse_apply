@@ -345,6 +345,22 @@ export async function upsertApplication(
     delete payload.id;
   }
 
+  if (!payload.assigned_ca_email && payload.applywizz_id && isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('ca_email')
+        .eq('applywizz_id', payload.applywizz_id)
+        .maybeSingle();
+      if (profile?.ca_email) {
+        payload.assigned_ca_email = profile.ca_email.trim().toLowerCase();
+      }
+    } catch {
+      /* fall through on profile lookup failure */
+    }
+  }
+
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();

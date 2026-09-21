@@ -21,6 +21,7 @@ import {
   isEligibleForSubmission,
   SubmissionEligibilityBlockedError,
 } from '../submission/submissionEligibilityGate.js';
+import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 
 const log = createLogger('Submitter Pool');
 
@@ -42,12 +43,36 @@ export class SubmitterPool {
   private nextWorkerIndex = 0;
   private pendingAssignments = 0;
   private isRunning = false;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private signalHandlerAttached = false;
 
   constructor(options: SubmitterPoolOptions = {}) {
     this.pollIntervalMs = options.pollIntervalMs ?? 2000;
     const poolSize = parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10);
     this.poolSize = Number.isInteger(poolSize) && poolSize > 0 ? poolSize : 3;
     this.lanes = Array.from({ length: this.poolSize }, () => []);
+  }
+
+  private async writeHeartbeat(statusOverride?: string): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const snap = this.getSnapshot();
+      const payload = {
+        service_name: 'submitter_pool',
+        status: statusOverride ?? (snap.running ? 'running' : 'stopped'),
+        worker_count: snap.workerCount,
+        idle_count: snap.idleCount,
+        in_flight_count: snap.inFlightCount,
+        in_flight_ids: snap.inFlightIds,
+        lane_lengths: snap.laneLengths,
+        updated_at: new Date().toISOString(),
+      };
+      await getDbClient()
+        .from('system_worker_heartbeats')
+        .upsert(payload, { onConflict: 'service_name' });
+    } catch (err: any) {
+      log.warn(`[Submitter Pool] Heartbeat write failed: ${err.message}`);
+    }
   }
 
   public start(): void {
@@ -60,10 +85,35 @@ export class SubmitterPool {
       void this.runWorker(index);
     }
     void this.dispatchQueue();
+
+    void this.writeHeartbeat('running');
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+    this.heartbeatInterval = setInterval(() => {
+      void this.writeHeartbeat();
+    }, 5000);
+    this.heartbeatInterval.unref?.();
+
+    if (!this.signalHandlerAttached) {
+      this.signalHandlerAttached = true;
+      const onSignal = async () => {
+        try {
+          await this.stop();
+        } catch {}
+      };
+      process.once('SIGTERM', onSignal);
+      process.once('SIGINT', onSignal);
+    }
   }
 
   public async stop(): Promise<void> {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
     this.isRunning = false;
+    await this.writeHeartbeat('stopped');
   }
 
   public getSnapshot(): {

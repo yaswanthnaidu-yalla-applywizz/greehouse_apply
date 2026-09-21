@@ -331,6 +331,7 @@ export interface ProfileListingFields {
   clientName: string;
   email: string;
   location: string;
+  resumeStoragePath?: string | null;
 }
 
 /** Batch load directory listing fields for applywizz IDs (Supabase only). */
@@ -344,7 +345,7 @@ export async function fetchProfileListingFieldsByApplywizzIds(
   try {
     const { data, error } = await getDbClient()
       .from('profiles')
-      .select('applywizz_id, client_name, email, company_email, location')
+      .select('applywizz_id, client_name, email, company_email, location, resume_storage_path')
       .in('applywizz_id', ids);
     if (error) {
       log.warn(`[Profiles] listing batch failed: ${error.message}`);
@@ -360,6 +361,7 @@ export async function fetchProfileListingFieldsByApplywizzIds(
         clientName: String(r.client_name || applywizzId).trim() || applywizzId,
         email: String(r.email || r.company_email || '').trim(),
         location: String(r.location || '').trim(),
+        resumeStoragePath: r.resume_storage_path || null,
       });
     }
   } catch (err: any) {

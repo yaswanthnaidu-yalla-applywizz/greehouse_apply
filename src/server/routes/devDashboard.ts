@@ -40,26 +40,54 @@ function parseLimit(value: unknown, fallback = 100): number {
   return Math.min(parsed, 500);
 }
 
-devDashboardRouter.get('/submission-gate', (_req: Request, res: Response): void => {
+devDashboardRouter.get('/submission-gate', async (_req: Request, res: Response): Promise<void> => {
+  let enabled = getSubmissionEligibilityGateEnabled();
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await getDbClient()
+        .from('system_config')
+        .select('value')
+        .eq('key', 'submission_eligibility_gate_enabled')
+        .maybeSingle();
+      if (!error && data && data.value !== undefined && data.value !== null) {
+        enabled = typeof data.value === 'boolean' ? data.value : (data.value === 'true' || data.value === true);
+      }
+    } catch {
+      // Fall through to in-memory gate value
+    }
+  }
   res.json({
-    enabled: getSubmissionEligibilityGateEnabled(),
+    enabled,
     criteria: submissionGateCriteria(),
-    source: 'runtime',
+    source: 'system_config',
   });
 });
 
-devDashboardRouter.patch('/submission-gate', (req: Request, res: Response): void => {
+devDashboardRouter.patch('/submission-gate', async (req: Request, res: Response): Promise<void> => {
   const enabled = req.body?.enabled;
   if (typeof enabled !== 'boolean') {
     res.status(400).json({ error: 'Body must include boolean "enabled".' });
     return;
   }
   setSubmissionEligibilityGateEnabled(enabled);
+  if (isSupabaseConfigured()) {
+    try {
+      await getDbClient()
+        .from('system_config')
+        .upsert({
+          key: 'submission_eligibility_gate_enabled',
+          value: enabled,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'key' });
+    } catch (err: any) {
+      log.warn(`[Dev] Could not update system_config in Supabase: ${err.message}`);
+    }
+  }
   log.info(`[Dev] Submission eligibility gate → ${enabled ? 'ON' : 'OFF'}`);
   res.json({
-    enabled: getSubmissionEligibilityGateEnabled(),
+    enabled,
     criteria: submissionGateCriteria(),
-    source: 'runtime',
+    source: 'system_config',
   });
 });
 

@@ -478,6 +478,37 @@ adminDashboardRouter.post(
 adminDashboardRouter.get(
   '/ingest-status',
   async (req: Request, res: Response): Promise<void> => {
+    if (isSupabaseConfigured()) {
+      try {
+        const { data, error } = await getDbClient()
+          .from('ingest_runs')
+          .select('*')
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!error && data) {
+          res.json({
+            id: data.id,
+            running: data.status === 'running',
+            status: data.status,
+            phase: data.phase,
+            startedAt: data.started_at,
+            finishedAt: data.finished_at,
+            processedCount: data.processed_count ?? 0,
+            processedFile: data.processed_file,
+            message: data.message,
+            error: data.error,
+            triggeredBy: data.triggered_by,
+            stopEnabled: isPipelineStopEnabled(),
+          });
+          return;
+        }
+      } catch (err: any) {
+        log.warn(`[Admin] Could not query latest ingest_run from DB: ${err.message}`);
+      }
+    }
+
     const authReq = req as AuthenticatedRequest;
     const ingestServiceUrl = (process.env.INGEST_SERVICE_URL || '').trim().replace(/\/+$/, '');
 
@@ -516,10 +547,6 @@ adminDashboardRouter.get(
       return;
     }
 
-    if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
-      res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
-      return;
-    }
     res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
   }
 );

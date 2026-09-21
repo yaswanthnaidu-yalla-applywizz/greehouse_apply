@@ -11,6 +11,8 @@
  */
 
 import { Router, Request, Response } from 'express';
+import axios from 'axios';
+import { config } from '../../config/env.js';
 import { chromium } from 'playwright';
 import { runDryRun } from '../../submitter/dryRun.js';
 import {
@@ -108,6 +110,77 @@ async function closePausedSession(applicationId: string): Promise<void> {
   log.info(`[Submissions Router] 🧹 Cleaned up paused session for application ${applicationId}`);
 }
 
+function getWorkerServiceUrl(): string {
+  if (process.env.ENABLE_QUEUE_WORKER === 'true') {
+    return ''; // Worker service itself executes in-process
+  }
+  return (process.env.WORKER_SERVICE_URL || config.WORKER_SERVICE_URL || '').trim().replace(/\/+$/, '');
+}
+
+async function proxyToWorker(
+  req: Request,
+  res: Response,
+  targetPath: string
+): Promise<boolean> {
+  const workerUrl = getWorkerServiceUrl();
+  if (!workerUrl) {
+    return false; // Fall back to local execution
+  }
+
+  const fullUrl = `${workerUrl}${targetPath}`;
+  log.info(`[Submissions Router] 🔀 Proxying ${req.method} ${targetPath} to worker at ${fullUrl}`);
+
+  try {
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+    };
+    if (req.headers.authorization) {
+      headers.authorization = req.headers.authorization;
+    }
+    const userEmail = (req as any).user?.email || req.body?.assignedCaEmail;
+    if (userEmail) {
+      headers['x-user-email'] = String(userEmail);
+    }
+    if ((req as any).user?.role) {
+      headers['x-user-role'] = String((req as any).user.role);
+    }
+
+    const response = await axios({
+      method: req.method as any,
+      url: fullUrl,
+      headers,
+      params: req.query,
+      data: req.body,
+      validateStatus: () => true, // Pipe all status codes through
+      timeout: 120000,
+    });
+
+    if (response.status >= 400) {
+      log.error('[Submissions] Proxy to worker failed', {
+        url: fullUrl,
+        status: response.status,
+        body: response.data,
+      });
+    }
+
+    res.status(response.status).json(response.data);
+    return true;
+  } catch (err: any) {
+    log.error('[Submissions] Proxy to worker failed', {
+      url: fullUrl,
+      status: err.response?.status || 502,
+      body: err.response?.data || err.message,
+    });
+    res.status(err.response?.status || 502).json(
+      err.response?.data || {
+        success: false,
+        error: `Failed to proxy request to worker service: ${err.message}`,
+      }
+    );
+    return true;
+  }
+}
+
 /**
  * POST /api/applications/:id/dry-run
  * Executes a headful dry-run for the specified application.
@@ -117,6 +190,10 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
   const userEmail = (req as any).user?.email || req.body?.assignedCaEmail || 'anonymous';
   log.info(`[Submissions Router] 🎬 POST /api/applications/${appId}/dry-run requested by ${userEmail}`);
+
+  if (await proxyToWorker(req, res, `/api/applications/${encodeURIComponent(appId)}/dry-run`)) {
+    return;
+  }
 
   if (!(await ensureZohoConnectedForApplication(req, res, appId))) {
     return;
@@ -179,6 +256,10 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       sync: isSync,
     },
   });
+
+  if (await proxyToWorker(req, res, `/api/applications/${encodeURIComponent(appId)}/submit`)) {
+    return;
+  }
 
   if (!(await ensureZohoConnectedForApplication(req, res, appId))) {
     return;
@@ -495,6 +576,10 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
     return;
   }
 
+  if (await proxyToWorker(req, res, `/api/internal/applications/${encodeURIComponent(appId)}/submit-otp`)) {
+    return;
+  }
+
   const pausedSession = resolvePausedSession(appId);
   if (!pausedSession) {
     res.status(404).json({
@@ -577,6 +662,10 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
   const rawId = req.params.id;
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
   const timeoutMs = req.body?.timeoutMs ?? 30000;
+
+  if (await proxyToWorker(req, res, `/api/internal/applications/${encodeURIComponent(appId)}/resume-submission`)) {
+    return;
+  }
 
   try {
     const resolvedSession = resolvePausedSession(appId);
