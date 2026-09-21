@@ -4,6 +4,14 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### CA Email Pipeline Step & Live Backfill (2026-09-21)
+- [x] Implemented `fetchCaEmailForApplywizzId` and `fetchCaBatchEmailMap` in `src/candidate/applywizzClient.ts` querying the CA Management work-history API to resolve `careerassociateid` to `ca_email`.
+- [x] Added `upsertProfileCaEmail` in `src/db/profiles.ts` to update `profiles.ca_email`.
+- [x] Added Phase B.5 in `src/orchestrator/pipeline.ts` and updated phase regex in `src/scanner/storageCsvIngestion.ts`.
+- [x] Injected `assigned_ca_email` in `src/resolver/answerResolver.ts` and cached lookup in `src/db/applications.ts` `upsertApplication`.
+- [x] Updated `GET /api/admin/applications` in `src/server/routes/adminDashboard.ts` with left join on `profiles` and display fallback for `assigned_ca_email`.
+- [x] Executed live backfill on remote database: 294 profiles populated with `ca_email`, 876/876 applications populated with `assigned_ca_email`.
+
 ### TSX Port of Admin, Dev & Manager Dashboards (2026-09-21)
 - [x] Ported `dashboard/public/admin.html` to `dashboard/components/AdminDashboard.tsx` with full tab parity (Overview Ingest Bar, Managers, Operators, Applications, Activity, System, Guide) and modals (`EmailProofModal`, `ApplicationProofModal`).
 - [x] Ported `dashboard/public/dev.html` to `dashboard/components/DevDashboard.tsx` with full tab parity (System with Submission Eligibility Gate toggle, Runs, Errors, Queue, Integrations, Debugger, Guide).

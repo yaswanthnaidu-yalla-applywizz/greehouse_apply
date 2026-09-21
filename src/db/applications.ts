@@ -270,6 +270,7 @@ export function rowCreatedAtInRange(
 }
 
 const memoryApplications = new Map<string, ApplicationRow>();
+const profileCaEmailCache = new Map<string, string>();
 
 /**
  * Caches an application record in local memory for dry-run/submit lookups.
@@ -346,19 +347,28 @@ export async function upsertApplication(
   }
 
   if (!payload.assigned_ca_email && payload.applywizz_id && isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('ca_email')
-        .eq('applywizz_id', payload.applywizz_id)
-        .maybeSingle();
-      if (profile?.ca_email) {
-        payload.assigned_ca_email = profile.ca_email.trim().toLowerCase();
+    const cachedCaEmail = profileCaEmailCache.get(payload.applywizz_id);
+    if (cachedCaEmail) {
+      payload.assigned_ca_email = cachedCaEmail;
+    } else {
+      try {
+        const supabase = getDbClient();
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('ca_email')
+          .eq('applywizz_id', payload.applywizz_id)
+          .maybeSingle();
+        if (profile?.ca_email) {
+          const normalized = profile.ca_email.trim().toLowerCase();
+          payload.assigned_ca_email = normalized;
+          profileCaEmailCache.set(payload.applywizz_id, normalized);
+        }
+      } catch {
+        /* fall through on profile lookup failure */
       }
-    } catch {
-      /* fall through on profile lookup failure */
     }
+  } else if (payload.assigned_ca_email && payload.applywizz_id) {
+    profileCaEmailCache.set(payload.applywizz_id, String(payload.assigned_ca_email).trim().toLowerCase());
   }
 
   if (isSupabaseConfigured()) {

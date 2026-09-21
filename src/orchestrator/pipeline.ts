@@ -21,6 +21,8 @@ import { readAndDeduplicateUrls } from '../scanner/csvDeduplicator.js';
 import { PlaywrightScanner } from '../scanner/playwrightScanner.js';
 import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
+import { fetchCaBatchEmailMap } from '../candidate/applywizzClient.js';
+import { upsertProfileCaEmail } from '../db/profiles.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
 import type {
   CandidateJobApplication,
@@ -228,6 +230,30 @@ export class V1Pipeline {
     }
 
     throwIfPipelineAborted('Phase C');
+
+    // -------------------------------------------------------------
+    // Phase B.5: CA Email Mapping
+    // -------------------------------------------------------------
+    log.info('[Pipeline] Phase B.5 — CA email mapping');
+    try {
+      const allApplywizzIds = candidateSegments.map((c) => c.applywizzId);
+      const caEmailMap = await fetchCaBatchEmailMap(allApplywizzIds);
+      for (const [applywizzId, caEmail] of caEmailMap) {
+        await upsertProfileCaEmail(applywizzId, caEmail);
+        const segment = candidateSegments.find((c) => c.applywizzId.toUpperCase() === applywizzId.toUpperCase());
+        if (segment) {
+          if (segment.profile) {
+            segment.profile.ca_email = caEmail;
+          }
+          (segment as any).assignedCaEmail = caEmail;
+        }
+      }
+      log.info(`[Pipeline] Phase B.5 complete — mapped ${caEmailMap.size} CA emails`);
+    } catch (caErr: any) {
+      log.warn(`[Pipeline] ⚠️ Phase B.5 warning: ${caErr.message}`);
+    }
+
+    throwIfPipelineAborted('Phase B.5');
 
     // -------------------------------------------------------------
     // Phase D: Multi-Tier Answer Resolution Engine
