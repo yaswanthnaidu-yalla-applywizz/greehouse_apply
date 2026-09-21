@@ -28,6 +28,7 @@ import { emailProofPoller } from '../../submitter/emailProofPoller.js';
 import { fillForm } from '../../submitter/formFiller.js';
 import {
   getApplication,
+  getApplicationByCandidateAndJob,
   updateStatus,
   enqueueApplication,
   hydrateApplicationProofUrls,
@@ -41,6 +42,7 @@ import {
 } from '../../db/zohoConnected.js';
 import {
   getSignedProofUrl,
+  downloadProofBuffer,
   PROOFS_BUCKET,
   PROOFS_FAILED_BUCKET,
   PROOFS_MAIL_BUCKET,
@@ -933,7 +935,7 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
 });
 
 /**
- * GET /api/applications/:id/proof-url?kind=web|failed|email
+ * GET /api/applications/:id/proof-url?kind=web|failed|dryrun|email
  * Returns a fresh signed URL for a private proof object (for dashboard <img> tags).
  */
 submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Promise<void> => {
@@ -945,15 +947,32 @@ submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Pro
   const kind = String(req.query.kind || 'web').toLowerCase();
 
   try {
-    const app = await getApplication(appId, jobUrl);
-    if (!app) {
-      res.status(404).json({ error: `Application '${appId}' not found.` });
-      return;
+    let app = await getApplication(appId, jobUrl);
+    if (!app && isApplicationUuid(appId)) {
+      app = await getApplication(appId);
     }
 
-    const storageKey = app.id && isApplicationUuid(app.id) ? app.id : null;
+    let storageKey: string | null = null;
+    if (app?.id && isApplicationUuid(app.id)) {
+      storageKey = app.id;
+    } else if (isApplicationUuid(appId)) {
+      storageKey = appId;
+    } else if (app?.applywizz_id && (jobUrl || app?.job_url)) {
+      try {
+        const dbApp = await getApplicationByCandidateAndJob(app.applywizz_id, jobUrl || app.job_url);
+        if (dbApp?.id && isApplicationUuid(dbApp.id)) {
+          storageKey = dbApp.id;
+          if (!app) app = dbApp;
+        }
+      } catch {}
+    }
+
     if (!storageKey) {
-      res.status(400).json({ error: 'Application record has no UUID; cannot resolve storage proof path.' });
+      storageKey = app?.id || appId || null;
+    }
+
+    if (!storageKey) {
+      res.status(400).json({ error: 'Application record identifier missing; cannot resolve storage proof path.' });
       return;
     }
 
@@ -965,13 +984,26 @@ submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Pro
     } else if (kind === 'email' || kind === 'mail') {
       bucket = PROOFS_MAIL_BUCKET;
       objectPath = emailProofStoragePath(storageKey);
+    } else if (kind === 'dryrun' || kind === 'dry_run') {
+      bucket = 'proofs_dry_run';
+      objectPath = `dry-run/${storageKey}_dryrun.png`;
     } else if (kind !== 'web') {
-      res.status(400).json({ error: `Invalid kind '${kind}'. Use web, failed, or email.` });
+      res.status(400).json({ error: `Invalid kind '${kind}'. Use web, failed, dryrun, or email.` });
       return;
     }
 
     const expiresIn = 86400;
-    const signedUrl = await getSignedProofUrl(bucket, objectPath, expiresIn);
+    let signedUrl = await getSignedProofUrl(bucket, objectPath, expiresIn);
+
+    // Fallback: if not found under storageKey and candidate has applywizz_id, try that path
+    if (!signedUrl && app?.applywizz_id && storageKey !== app.applywizz_id) {
+      let altPath = webProofStoragePath(app.applywizz_id);
+      if (kind === 'failed') altPath = failedProofStoragePath(app.applywizz_id);
+      else if (kind === 'email' || kind === 'mail') altPath = emailProofStoragePath(app.applywizz_id);
+      else if (kind === 'dryrun' || kind === 'dry_run') altPath = `dry-run/${app.applywizz_id}_dryrun.png`;
+      signedUrl = await getSignedProofUrl(bucket, altPath, expiresIn);
+    }
+
     if (!signedUrl) {
       res.status(404).json({ error: `No signed URL available for ${kind} proof.` });
       return;
@@ -981,10 +1013,88 @@ submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Pro
       kind: kind === 'mail' ? 'email' : kind,
       url: signedUrl,
       expiresIn,
-      applicationId: app.id,
+      applicationId: app?.id || storageKey,
     });
   } catch (err: unknown) {
     log.error(`[Submissions Router] ❌ proof-url error for ${appId}:`, err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/applications/:id/proof-image?kind=web|failed|dryrun|email&jobUrl=...
+ * Proxies and streams the proof image directly to the client (immune to client CORS or token expiry).
+ */
+submissionsRouter.get('/:id/proof-image', async (req: Request, res: Response): Promise<void> => {
+  const rawId = req.params.id;
+  const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+  const jobUrl =
+    (typeof req.query.jobUrl === 'string' ? req.query.jobUrl : '') ||
+    (typeof req.query.job_url === 'string' ? req.query.job_url : '');
+  const kind = String(req.query.kind || 'web').toLowerCase();
+
+  try {
+    let app = await getApplication(appId, jobUrl);
+    if (!app && isApplicationUuid(appId)) {
+      app = await getApplication(appId);
+    }
+
+    let storageKey: string | null = null;
+    if (app?.id && isApplicationUuid(app.id)) {
+      storageKey = app.id;
+    } else if (isApplicationUuid(appId)) {
+      storageKey = appId;
+    } else if (app?.applywizz_id && (jobUrl || app?.job_url)) {
+      try {
+        const dbApp = await getApplicationByCandidateAndJob(app.applywizz_id, jobUrl || app.job_url);
+        if (dbApp?.id && isApplicationUuid(dbApp.id)) {
+          storageKey = dbApp.id;
+          if (!app) app = dbApp;
+        }
+      } catch {}
+    }
+
+    if (!storageKey) {
+      storageKey = app?.id || appId || null;
+    }
+
+    if (!storageKey) {
+      res.status(400).json({ error: 'Application record identifier missing.' });
+      return;
+    }
+
+    let bucket = PROOFS_BUCKET;
+    let objectPath = webProofStoragePath(storageKey);
+    if (kind === 'failed') {
+      bucket = PROOFS_FAILED_BUCKET;
+      objectPath = failedProofStoragePath(storageKey);
+    } else if (kind === 'email' || kind === 'mail') {
+      bucket = PROOFS_MAIL_BUCKET;
+      objectPath = emailProofStoragePath(storageKey);
+    } else if (kind === 'dryrun' || kind === 'dry_run') {
+      bucket = 'proofs_dry_run';
+      objectPath = `dry-run/${storageKey}_dryrun.png`;
+    }
+
+    let buffer = await downloadProofBuffer(bucket, objectPath);
+    if (!buffer && app?.applywizz_id && storageKey !== app.applywizz_id) {
+      let altPath = webProofStoragePath(app.applywizz_id);
+      if (kind === 'failed') altPath = failedProofStoragePath(app.applywizz_id);
+      else if (kind === 'email' || kind === 'mail') altPath = emailProofStoragePath(app.applywizz_id);
+      else if (kind === 'dryrun' || kind === 'dry_run') altPath = `dry-run/${app.applywizz_id}_dryrun.png`;
+      buffer = await downloadProofBuffer(bucket, altPath);
+    }
+
+    if (!buffer) {
+      res.status(404).json({ error: `Proof image not found for ${kind}.` });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.status(200).send(buffer);
+  } catch (err: unknown) {
+    log.error(`[Submissions Router] ❌ proof-image error for ${appId}:`, err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -996,9 +1106,15 @@ submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Pro
 submissionsRouter.get('/:id/proof', async (req: Request, res: Response): Promise<void> => {
   const rawId = req.params.id;
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+  const jobUrl =
+    (typeof req.query.jobUrl === 'string' ? req.query.jobUrl : '') ||
+    (typeof req.query.job_url === 'string' ? req.query.job_url : '');
 
   try {
-    let app = await getApplication(appId);
+    let app = await getApplication(appId, jobUrl);
+    if (!app && isApplicationUuid(appId)) {
+      app = await getApplication(appId);
+    }
     if (!app) {
       res.status(404).json({ error: `Application '${appId}' not found.` });
       return;

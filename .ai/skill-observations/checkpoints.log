@@ -305,3 +305,5 @@
 2026-09-21 deliverable flush: fixed Admin Applications modal candidate display and proof rendering (adminDashboard.ts select/mapping + admin.html / AdminDashboard.tsx modal); no new observations
 2026-09-21 session-start scan: files=13 parsed=13 suspect=0
 2026-09-21 session-end: P0-P2 stat & flow inconsistencies fixes shipped (NULL-safe & case-insensitive CA ownership, submission 403 error banner, DRY_RUN_COMPLETE submit action, INTERNAL_API_SECRET auth on internal routes, OTP/CAPTCHA distinct UI, canonical metrics submitted/pending/applied/failed, submitted_at timestamp queries, dev health scoping, divide-by-zero guards, EMAIL_PROOF_PENDING UI, status-specific blocked panel, non-Greenhouse SQL cleanup); typecheck and build clean; no new observations
+2026-09-21 session-start scan: files=0 parsed=0
+2026-09-21 checkpoint: observation 0024 logged and actioned

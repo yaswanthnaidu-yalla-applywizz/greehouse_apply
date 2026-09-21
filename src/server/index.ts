@@ -65,6 +65,7 @@ import {
   upsertApplication,
   serializeApplicationDto,
   hydrateAndPersistApplicationFields,
+  hydrateApplicationProofUrls,
   fetchCandidateApplicationAggregatesByApplywizzIds,
   distinctApplywizzIdsForCreatedAtRange,
   type ApplicationRow,
@@ -1768,6 +1769,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
       let row = supabaseRecord as ApplicationRow;
       row = await hydrateAndPersistApplicationFields(row);
+      row = await hydrateApplicationProofUrls(row);
 
       const resolvedFields = row.resolved_fields?.length
         ? row.resolved_fields

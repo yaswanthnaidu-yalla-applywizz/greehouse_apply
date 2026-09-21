@@ -407,11 +407,13 @@
       return (
         <>
           {/* Proof Viewer Modal */}
-          {showProofViewer && proofUrl && (
+          {showProofViewer && (proofUrl || applicationId) && (
             <ProofViewer
               isOpen={showProofViewer}
               onClose={() => setShowProofViewer(false)}
               screenshotUrl={proofUrl}
+              applicationId={applicationId}
+              kind="web"
               title="Application Confirmation Proof"
               metadata={{
                 applywizzId: applicationId,
@@ -1076,7 +1078,53 @@
     // -------------------------------------------------------------
     // Proof Viewer Modal Component
     // -------------------------------------------------------------
-    function ProofViewer({ isOpen, onClose, screenshotUrl, title = 'Application Verification Proof', metadata = {} }) {
+    function ProofViewer({ isOpen, onClose, screenshotUrl, applicationId, kind, title = 'Application Verification Proof', metadata = {} }) {
+      const [currentUrl, setCurrentUrl] = useState(screenshotUrl || null);
+      const [isLoading, setIsLoading] = useState(false);
+      const [errorMessage, setErrorMessage] = useState(null);
+      const [fallbackStage, setFallbackStage] = useState(0); // 0: initial, 1: signed_url, 2: proxy_stream, 3: failed
+
+      const targetAppId = applicationId || metadata?.applicationId || metadata?.applywizzId;
+      const statusStr = String(metadata?.status || '').toUpperCase();
+      const effectiveKind = kind || (statusStr === 'FAILED' ? 'failed' : title?.includes('Dry-Run') ? 'dryrun' : 'web');
+
+      const fetchSignedUrl = useCallback(async (appId, proofKind, jobUrl) => {
+        setIsLoading(true);
+        setErrorMessage(null);
+        try {
+          const query = new URLSearchParams({ kind: proofKind });
+          if (jobUrl) query.set('jobUrl', jobUrl);
+          const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/proof-url?${query.toString()}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          if (!res.ok) {
+            let errText = `Server returned ${res.status}`;
+            try {
+              const errJson = await res.json();
+              if (errJson.error) errText = errJson.error;
+            } catch {}
+            throw new Error(errText);
+          }
+          const data = await res.json();
+          if (data.url) {
+            setCurrentUrl(data.url);
+            setFallbackStage(1);
+            setIsLoading(false);
+            return true;
+          }
+          throw new Error('No signed proof URL returned');
+        } catch (err) {
+          console.warn('[ProofViewer] Signed URL fetch failed, trying proxy stream:', err);
+          const query = new URLSearchParams({ kind: proofKind });
+          if (jobUrl) query.set('jobUrl', jobUrl);
+          const proxyUrl = `/api/applications/${encodeURIComponent(appId)}/proof-image?${query.toString()}`;
+          setCurrentUrl(proxyUrl);
+          setFallbackStage(2);
+          setIsLoading(false);
+          return false;
+        }
+      }, []);
+
       useEffect(() => {
         const handleKeyDown = (e) => {
           if (e.key === 'Escape') onClose();
@@ -1091,11 +1139,53 @@
         };
       }, [isOpen, onClose]);
 
-      if (!isOpen || !screenshotUrl) return null;
+      useEffect(() => {
+        if (!isOpen) {
+          setIsLoading(false);
+          setErrorMessage(null);
+          setFallbackStage(0);
+          return;
+        }
+
+        if (screenshotUrl) {
+          setCurrentUrl(screenshotUrl);
+          setFallbackStage(0);
+          setErrorMessage(null);
+          setIsLoading(false);
+        } else if (targetAppId) {
+          setCurrentUrl(null);
+          setFallbackStage(1);
+          fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+        }
+      }, [isOpen, screenshotUrl, targetAppId, effectiveKind, metadata?.jobUrl, fetchSignedUrl]);
+
+      const handleImageError = () => {
+        if (!targetAppId) {
+          setErrorMessage('Proof screenshot could not be loaded.');
+          return;
+        }
+
+        if (fallbackStage === 0) {
+          setFallbackStage(1);
+          fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+        } else if (fallbackStage === 1) {
+          const query = new URLSearchParams({ kind: effectiveKind });
+          if (metadata?.jobUrl) query.set('jobUrl', metadata.jobUrl);
+          const proxyUrl = `/api/applications/${encodeURIComponent(targetAppId)}/proof-image?${query.toString()}`;
+          setCurrentUrl(proxyUrl);
+          setFallbackStage(2);
+        } else {
+          setFallbackStage(3);
+          setErrorMessage('Proof screenshot could not be loaded from storage.');
+        }
+      };
+
+      if (!isOpen) return null;
 
       const handleDownload = () => {
+        if (!currentUrl) return;
         const link = document.createElement('a');
-        link.href = screenshotUrl;
+        link.href = currentUrl;
         link.download = `${metadata.applywizzId || 'candidate'}_${metadata.companyName || 'proof'}_verification.png`;
         link.target = '_blank';
         document.body.appendChild(link);
@@ -1130,14 +1220,16 @@
 
               <div className="flex items-center gap-3">
                 {metadata.status && <ApplicationStatusBadge status={metadata.status} />}
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#E88474] hover:bg-[#D67161] border border-[#1A1A2E] rounded-md shadow-[2px_2px_0px_#1A1A2E] transition-all"
-                >
-                  <span>⬇️</span>
-                  <span>Download Image</span>
-                </button>
+                {currentUrl && (
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#E88474] hover:bg-[#D67161] border border-[#1A1A2E] rounded-md shadow-[2px_2px_0px_#1A1A2E] transition-all"
+                  >
+                    <span>⬇️</span>
+                    <span>Download Image</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onClose}
@@ -1180,27 +1272,61 @@
               )}
             </div>
 
-            <div className="flex-1 overflow-auto p-6 bg-[#FAF4EB] flex justify-center custom-scrollbar">
-              <div className="bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden max-w-full">
-                <img
-                  src={screenshotUrl}
-                  alt="Application Confirmation Proof"
-                  className="w-full h-auto object-contain select-text"
-                  loading="lazy"
-                />
-              </div>
+            <div className="flex-1 overflow-auto p-6 bg-[#FAF4EB] flex items-center justify-center custom-scrollbar min-h-[350px]">
+              {isLoading ? (
+                <div className="flex flex-col items-center justify-center p-12 text-[#1A1A2E]">
+                  <div className="w-10 h-10 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4" />
+                  <p className="text-sm font-bold font-mono">Fetching proof URL...</p>
+                  <p className="text-xs font-mono text-[#64748B] mt-1">Retrieving verification screenshot</p>
+                </div>
+              ) : errorMessage ? (
+                <div className="flex flex-col items-center justify-center p-8 text-center max-w-md bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E]">
+                  <span className="text-3xl mb-2">⚠️</span>
+                  <p className="text-sm font-bold text-[#EF4444] font-mono mb-1">Could not load proof</p>
+                  <p className="text-xs text-[#64748B] font-mono">{errorMessage}</p>
+                  {targetAppId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setErrorMessage(null);
+                        setFallbackStage(1);
+                        fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+                      }}
+                      className="mt-4 px-3 py-1.5 text-xs font-bold text-[#1A1A2E] bg-[#FFF5EB] hover:bg-[#FFE8D6] border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E]"
+                    >
+                      🔄 Retry
+                    </button>
+                  )}
+                </div>
+              ) : currentUrl ? (
+                <div className="bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden max-w-full">
+                  <img
+                    src={currentUrl}
+                    alt="Application Confirmation Proof"
+                    className="w-full h-auto object-contain select-text"
+                    loading="lazy"
+                    onError={handleImageError}
+                  />
+                </div>
+              ) : (
+                <div className="text-center text-xs font-mono text-[#64748B]">
+                  No proof image available.
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between px-6 py-3 border-t-2 border-[#1A1A2E] bg-[#FAF4EB] text-xs text-[#64748B]">
               <span className="font-mono">Press Esc to exit proof view</span>
-              <a
-                href={screenshotUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-bold text-[#1A1A2E] hover:underline"
-              >
-                Open raw URL ↗
-              </a>
+              {currentUrl && (
+                <a
+                  href={currentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-bold text-[#1A1A2E] hover:underline"
+                >
+                  Open raw URL ↗
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -2058,10 +2184,19 @@
             isOpen={viewerOpen}
             onClose={() => setViewerOpen(false)}
             screenshotUrl={viewerImageUrl}
+            applicationId={application.id || application.applicationId || ''}
+            kind={
+              viewerTitle.includes('Dry-Run')
+                ? 'dryrun'
+                : viewerTitle.includes('Failure')
+                ? 'failed'
+                : 'web'
+            }
             title={viewerTitle}
             metadata={{
               candidateName: candidateName || application.clientName,
               applywizzId: application.applywizzId || application.applywizz_id,
+              applicationId: application.id || application.applicationId,
               companyName: application.companyName || application.company_name,
               jobTitle: application.jobTitle || application.job_title,
               jobUrl: application.jobUrl || application.job_url,
@@ -2177,11 +2312,9 @@
                   onStatusChange={onStatusChange}
                   onViewProof={() => {
                     const url = application.proof_web_url || application.proofWebUrl;
-                    if (url) {
-                      setViewerImageUrl(url);
-                      setViewerTitle('Live Application Confirmation Proof');
-                      setViewerOpen(true);
-                    }
+                    setViewerImageUrl(url || null);
+                    setViewerTitle('Live Application Confirmation Proof');
+                    setViewerOpen(true);
                   }}
                   onViewEmailProof={() => {
                     const json = application.proof_email_json || application.proofEmailJson;
@@ -2191,19 +2324,15 @@
                   }}
                   onViewDryRun={() => {
                     const url = application.dry_run_screenshot_url || application.dryRunScreenshotUrl;
-                    if (url) {
-                      setViewerImageUrl(url);
-                      setViewerTitle('Dry-Run Form Verification Screenshot');
-                      setViewerOpen(true);
-                    }
+                    setViewerImageUrl(url || null);
+                    setViewerTitle('Dry-Run Form Verification Screenshot');
+                    setViewerOpen(true);
                   }}
                   onViewFailureScreenshot={() => {
                     const url = application.proof_failed_url || application.proofFailedUrl;
-                    if (url) {
-                      setViewerImageUrl(url);
-                      setViewerTitle('Failure Screenshot');
-                      setViewerOpen(true);
-                    }
+                    setViewerImageUrl(url || null);
+                    setViewerTitle('Failure Screenshot');
+                    setViewerOpen(true);
                   }}
                 />
               </div>
