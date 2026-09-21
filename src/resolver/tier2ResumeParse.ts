@@ -184,6 +184,18 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
     if (!tempPath || !fs.existsSync(tempPath)) {
       return null;
     }
+    const stat = fs.statSync(tempPath);
+    const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+    if (stat.size > MAX_PDF_SIZE_BYTES) {
+      log.warn(`[Tier 2] PDF exceeds 5MB limit (${stat.size} bytes) for ${applywizzId} — skipping parse`);
+      return {
+        applywizz_id: applywizzId,
+        raw_text: '',
+        structured: { skills: [], experience: [], education: [], rawSections: {} },
+        parse_failed: true,
+        parse_error: `File size exceeds 5MB limit (${stat.size} bytes)`,
+      };
+    }
     const dataBuffer = fs.readFileSync(tempPath);
     const parsed = await pdfParse(dataBuffer);
 
