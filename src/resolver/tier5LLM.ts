@@ -19,6 +19,64 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Tier5LLM');
 
+export type LlmFailureReason = 'timeout' | 'rate_limit' | 'server_error' | 'permanent';
+
+export interface LlmFailureInfo {
+  reason: LlmFailureReason;
+  isRetriable: boolean;
+  message: string;
+  statusCode?: number;
+  timestamp: number;
+}
+
+let lastLlmFailure: LlmFailureInfo | null = null;
+
+export function getLastLlmFailure(): LlmFailureInfo | null {
+  return lastLlmFailure;
+}
+
+export function clearLastLlmFailure(): void {
+  lastLlmFailure = null;
+}
+
+export function classifyLlmError(err: unknown): LlmFailureInfo {
+  const message = err instanceof Error ? err.message : String(err);
+  const status =
+    typeof err === 'object' && err !== null
+      ? (err as { status?: number; statusCode?: number }).status ??
+        (err as { statusCode?: number }).statusCode
+      : undefined;
+
+  let reason: LlmFailureReason = 'permanent';
+  let isRetriable = false;
+
+  if (status === 429 || /429|rate\s*limit|quota|too\s*many\s*requests/i.test(message)) {
+    reason = 'rate_limit';
+    isRetriable = true;
+  } else if (
+    (typeof status === 'number' && status >= 500 && status < 600) ||
+    /5\d\d|bad\s*gateway|gateway\s*timeout|service\s*unavailable|internal\s*server\s*error/i.test(message)
+  ) {
+    reason = 'server_error';
+    isRetriable = true;
+  } else if (
+    /timeout|timed\s*out|ETIMEDOUT|ECONNRESET|ECONNABORTED|ESOCKETTIMEDOUT|AbortError/i.test(message) ||
+    (typeof err === 'object' && err !== null && (err as { name?: string }).name === 'TimeoutError') ||
+    (typeof err === 'object' && err !== null && (err as { name?: string }).name === 'AbortError')
+  ) {
+    reason = 'timeout';
+    isRetriable = true;
+  }
+
+  return {
+    reason,
+    isRetriable,
+    message,
+    statusCode: status,
+    timestamp: Date.now(),
+  };
+}
+
 let synthesizerInstance: LLMSynthesizer | null = null;
 
 function getSynthesizer(): LLMSynthesizer {
@@ -83,7 +141,7 @@ export async function resolveTier5(
 
   try {
     const resumeFacts =
-      (candidateProfile as any).resume_facts ||
+      (candidateProfile as { resume_facts?: Record<string, unknown> }).resume_facts ||
       (candidateProfile.work_experience || candidateProfile.education
         ? { experience: candidateProfile.work_experience, education: candidateProfile.education }
         : undefined);
@@ -132,16 +190,27 @@ export async function resolveTier5(
           confidence: resolvedField.confidence,
         });
         await writeEmbedding(applywizzId, fingerprint, field.label);
-      } catch (writeErr: any) {
+      } catch (writeErr: unknown) {
+        const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
         log.warn(
-          `[Tier 5] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${writeErr.message}`
+          `[Tier 5] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${msg}`
         );
       }
 
       return resolvedField;
     }
-  } catch (err: any) {
-    log.warn(`[Tier 5] LLM synthesis error for ${applywizzId} [${field.label}]: ${err.message}`);
+  } catch (err: unknown) {
+    const failure = classifyLlmError(err);
+    lastLlmFailure = failure;
+    if (failure.isRetriable) {
+      log.warn(
+        `[Tier 5] Retriable LLM synthesis failure (${failure.reason}) for ${applywizzId} [${field.label}]: ${failure.message}`
+      );
+    } else {
+      log.error(
+        `[Tier 5] Permanent LLM synthesis error for ${applywizzId} [${field.label}]: ${failure.message}`
+      );
+    }
   }
 
   return null;
@@ -264,16 +333,27 @@ export async function resolveTier5Batch(
           confidence: resolvedField.confidence,
         });
         await writeEmbedding(applywizzId, fingerprint, field.label);
-      } catch (writeErr: any) {
+      } catch (writeErr: unknown) {
+        const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
         log.warn(
-          `[Tier 5 Batch] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${writeErr.message}`
+          `[Tier 5 Batch] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${msg}`
         );
       }
 
       results[llmIndices[j]] = resolvedField;
     }
-  } catch (err: any) {
-    log.warn(`[Tier 5 Batch] LLM batch error for ${applywizzId}: ${err.message}`);
+  } catch (err: unknown) {
+    const failure = classifyLlmError(err);
+    lastLlmFailure = failure;
+    if (failure.isRetriable) {
+      log.warn(
+        `[Tier 5 Batch] Retriable LLM batch failure (${failure.reason}) for ${applywizzId}: ${failure.message}`
+      );
+    } else {
+      log.error(
+        `[Tier 5 Batch] Permanent LLM batch error for ${applywizzId}: ${failure.message}`
+      );
+    }
   }
 
   return results;

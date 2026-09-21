@@ -191,6 +191,7 @@ export const App: React.FC = () => {
   });
   const [workHistoryBannerDismissed, setWorkHistoryBannerDismissed] = useState<boolean>(false);
   const [noCandidatesMessage, setNoCandidatesMessage] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState<boolean>(true);
 
   // Real-time failure toast/banner alert received via WebSocket
   const [failureAlert, setFailureAlert] = useState<{
@@ -331,12 +332,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
+    const intervalMs = wsConnected ? 30000 : 3000;
     const pollInterval = setInterval(() => {
       fetchInitialData(true, selectedDate);
       fetchNotifications(selectedDate);
-    }, 3000);
+    }, intervalMs);
     return () => clearInterval(pollInterval);
-  }, [currentUser, selectedDate, fetchInitialData, fetchNotifications]);
+  }, [currentUser, selectedDate, wsConnected, fetchInitialData, fetchNotifications]);
 
   // 2. Fetch Selected Candidate Details & Jobs Queue
   const fetchCandidateDetail = useCallback(async (applywizzId: string) => {
@@ -468,7 +470,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser || typeof window === 'undefined') return;
     let ws: WebSocket | null = null;
-    let reconnectTimeout: any = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let isDisposed = false;
 
     const connectWs = () => {
@@ -477,6 +479,10 @@ export const App: React.FC = () => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          setWsConnected(true);
+        };
 
         ws.onmessage = (event) => {
           try {
@@ -512,16 +518,19 @@ export const App: React.FC = () => {
         };
 
         ws.onclose = () => {
+          setWsConnected(false);
           if (!isDisposed) {
             reconnectTimeout = setTimeout(connectWs, 5000);
           }
         };
 
         ws.onerror = () => {
+          setWsConnected(false);
           if (ws) ws.close();
         };
       } catch (err) {
         console.warn('[Dashboard WS] Connection error:', err);
+        setWsConnected(false);
         if (!isDisposed) {
           reconnectTimeout = setTimeout(connectWs, 5000);
         }
@@ -534,7 +543,9 @@ export const App: React.FC = () => {
       isDisposed = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) {
+        ws.onopen = null;
         ws.onclose = null;
+        ws.onerror = null;
         ws.close();
       }
     };
