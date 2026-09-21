@@ -14,6 +14,7 @@ import { config } from '../config/env.js';
 import { getISTDateString } from '../services/workHistoryClient.js';
 import { displayNameMapForEmails } from './authDirectory.js';
 import { listOperatorEmailsForManager } from '../db/users.js';
+import { applywizzIdsForManagerTeamProfiles } from './managerTeamScope.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Client Dashboard');
@@ -226,7 +227,14 @@ export async function loadClientDashboard(options: {
         'No operators are assigned to this manager yet.'
       );
     }
-    query = query.in('assigned_ca_email', operatorEmails);
+    const teamCandidateIds = await applywizzIdsForManagerTeamProfiles(managerEmail);
+    const emailsFormatted = operatorEmails.map((e) => `"${e}"`).join(',');
+    if (teamCandidateIds.length > 0) {
+      const idsFormatted = teamCandidateIds.map((id) => `"${id}"`).join(',');
+      query = query.or(`assigned_ca_email.in.(${emailsFormatted}),applywizz_id.in.(${idsFormatted})`);
+    } else {
+      query = query.in('assigned_ca_email', operatorEmails);
+    }
   }
 
   const { data, error } = await query;

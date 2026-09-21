@@ -184,6 +184,9 @@ const envSchema = z.object({
 
   /** Microsoft Graph API Base URL */
   MS_GRAPH_BASE_URL: z.string().default('https://graph.microsoft.com'),
+
+  /** External worker service URL for Playwright dry-run / submissions */
+  WORKER_SERVICE_URL: z.string().optional(),
 });
 
 /**

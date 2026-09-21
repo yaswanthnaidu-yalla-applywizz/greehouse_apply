@@ -178,24 +178,56 @@ export async function collectHealthSnapshot(): Promise<{
     return Number.isFinite(at) && at < stuckCutoff;
   }).length;
 
+  let heartbeat: any = null;
+  if (isSupabaseConfigured()) {
+    try {
+      const cutoff = new Date(Date.now() - 30000).toISOString();
+      const { data } = await getDbClient()
+        .from('system_worker_heartbeats')
+        .select('*')
+        .eq('service_name', 'submitter_pool')
+        .gt('updated_at', cutoff)
+        .maybeSingle();
+      if (data) {
+        heartbeat = data;
+      }
+    } catch {
+      // Fall through to in-process snapshot
+    }
+  }
+
   const daemon = getQueueDaemon();
-  const workers = daemon
-    ? { ...daemon.getSnapshot(), enabled: process.env.ENABLE_QUEUE_WORKER === 'true' }
-    : {
-        running: false,
-        workerCount: 0,
-        idleCount: 0,
-        pendingAssignments: 0,
-        inFlightCount: 0,
-        inFlightIds: [] as string[],
-        laneLengths: [] as number[],
-        enabled: process.env.ENABLE_QUEUE_WORKER === 'true',
-      };
+  const localSnapshot = daemon ? daemon.getSnapshot() : null;
+
+  const isRunning = heartbeat
+    ? heartbeat.status === 'running'
+    : (localSnapshot?.running ?? false);
+  const workerCount = heartbeat ? heartbeat.worker_count : (localSnapshot?.workerCount ?? 0);
+  const idleCount = heartbeat ? heartbeat.idle_count : (localSnapshot?.idleCount ?? 0);
+  const inFlightCount = heartbeat ? heartbeat.in_flight_count : (localSnapshot?.inFlightCount ?? 0);
+  const inFlightIds = heartbeat
+    ? (Array.isArray(heartbeat.in_flight_ids) ? heartbeat.in_flight_ids : [])
+    : (localSnapshot?.inFlightIds ?? []);
+  const laneLengths = heartbeat
+    ? (Array.isArray(heartbeat.lane_lengths) ? heartbeat.lane_lengths : [])
+    : (localSnapshot?.laneLengths ?? []);
+  const isEnabled = Boolean(heartbeat || process.env.ENABLE_QUEUE_WORKER === 'true');
+
+  const workers = {
+    running: isRunning,
+    workerCount,
+    idleCount,
+    pendingAssignments: localSnapshot?.pendingAssignments ?? 0,
+    inFlightCount,
+    inFlightIds,
+    laneLengths,
+    enabled: isEnabled,
+  };
 
   probes.push({
     name: 'queue',
     status: workers.enabled ? (queued > 50 ? 'degraded' : 'ok') : 'not_configured',
-    detail: workers.enabled ? `${queued} queued, ${applying} applying` : 'ENABLE_QUEUE_WORKER is not true',
+    detail: workers.enabled ? `${queued} queued, ${applying} applying` : 'Queue worker not active',
   });
   probes.push({
     name: 'workers',
@@ -203,7 +235,7 @@ export async function collectHealthSnapshot(): Promise<{
     detail: workers.running
       ? `${workers.inFlightCount} in flight, ${workers.idleCount} idle`
       : workers.enabled
-        ? 'daemon registered but not running'
+        ? 'worker registered but not running'
         : 'queue worker disabled',
   });
   probes.push({

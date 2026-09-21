@@ -18,10 +18,12 @@ if (typeof globalThis.WebSocket === 'undefined') {
   (globalThis as any).WebSocket = WebSocket;
 }
 
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { upsertIngestRun } from '../db/ingestRuns.js';
 import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
@@ -39,7 +41,7 @@ import {
   requireRole,
   requireRoleIfAuthenticated,
 } from './routes/requireRole.js';
-import { getIngestRun, registerQueueDaemon, setIngestRun } from './runtimeState.js';
+import { getIngestRun, getQueueDaemon, registerQueueDaemon, setIngestRun } from './runtimeState.js';
 import {
   isPipelineStopEnabled,
   requestPipelineAbort,
@@ -469,6 +471,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
 
       const startedAt = new Date().toISOString();
+      const runId = crypto.randomUUID();
       resetPipelineAbort();
       setIngestRun({ running: true, startedAt });
       const actorEmail = getAuthenticatedCaEmail(req) || (req.user as { email?: string } | undefined)?.email || '';
@@ -479,12 +482,20 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         targetType: 'pipeline',
         targetId: startedAt,
       });
+      void upsertIngestRun({
+        id: runId,
+        status: 'running',
+        started_at: startedAt,
+        phase: 'Starting',
+        message: 'Storage CSV ingestion started',
+        triggered_by: actorEmail,
+      });
       log.info(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
-      res.status(202).json({ started: true, startedAt });
+      res.status(202).json({ started: true, startedAt, runId });
 
       try {
         const { ingestCsvFromStorage } = await import('../scanner/storageCsvIngestion.js');
-        const result = await ingestCsvFromStorage();
+        const result = await ingestCsvFromStorage({ runId, triggeredBy: actorEmail });
         setIngestRun({
           running: false,
           startedAt,
@@ -493,6 +504,17 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           processedFile: result.processedFile,
           message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
           error: result.success ? undefined : result.message,
+        });
+        void upsertIngestRun({
+          id: runId,
+          status: result.success ? 'completed' : result.aborted ? 'aborted' : 'failed',
+          finished_at: new Date().toISOString(),
+          processed_count: result.processedCount,
+          processed_file: result.processedFile,
+          phase: result.success ? 'Completed' : result.aborted ? 'Aborted' : 'Failed',
+          message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
+          error: result.success ? undefined : result.message,
+          triggered_by: actorEmail,
         });
         log.info(
           `[Admin] ${result.success ? '✅' : result.aborted ? '⏹️' : '❌'} Storage CSV ingestion finished: ${result.message}`
@@ -504,6 +526,15 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           startedAt,
           finishedAt: new Date().toISOString(),
           error: message,
+        });
+        void upsertIngestRun({
+          id: runId,
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          phase: 'Failed',
+          error: message,
+          message,
+          triggered_by: actorEmail,
         });
         log.error('[Admin] ❌ Storage CSV ingestion failed:', err);
       } finally {
@@ -715,8 +746,67 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   // Operator candidate queue + admin namespace
   app.use('/api/candidates', ...candidateListApiGuard);
   app.use('/api/users', ...usersApiGuard, usersRouter);
-  app.use('/api/admin', ...adminApiGuard);
+  app.use('/api/admin', (req: Request, res: Response, next: NextFunction) => {
+    if (req.method === 'GET' && req.path === '/ingest-status') {
+      requireAuth(req, res, next);
+      return;
+    }
+    adminApiGuard[0](req, res, () => {
+      adminApiGuard[1](req, res, next);
+    });
+  });
   app.use('/api/dev', ...devApiGuard, devDashboardRouter);
+
+  if (process.env.ENABLE_QUEUE_WORKER === 'true') {
+    app.post('/api/internal/applications/:id/submit-otp', async (req: Request, res: Response): Promise<void> => {
+      const rawId = req.params.id;
+      const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+      const otp = req.body?.otp;
+      if (!otp || typeof otp !== 'string' || !otp.trim()) {
+        res.status(400).json({ success: false, error: 'Missing required body field: otp (string).' });
+        return;
+      }
+      try {
+        const { submitOtpToPausedSession } = await import('../submitter/liveSubmit.js');
+        const result = await submitOtpToPausedSession(appId, otp.trim(), {
+          timeoutMs: req.body?.timeoutMs ?? 30000,
+          jobUrl: req.body?.jobUrl,
+        });
+        res.json(result);
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err?.message || 'Failed to submit OTP' });
+      }
+    });
+
+    app.post('/api/internal/applications/:id/resume-submission', async (req: Request, res: Response): Promise<void> => {
+      const rawId = req.params.id;
+      const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
+      try {
+        const { resumeSubmission } = await import('../submitter/captchaResume.js');
+        const result = await resumeSubmission(appId);
+        res.json(result);
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err?.message || 'Failed to resume submission' });
+      }
+    });
+
+    app.get('/api/internal/worker-status', (_req: Request, res: Response): void => {
+      const daemon = getQueueDaemon();
+      if (daemon) {
+        res.json(daemon.getSnapshot());
+      } else {
+        res.json({
+          running: false,
+          workerCount: 0,
+          idleCount: 0,
+          pendingAssignments: 0,
+          inFlightCount: 0,
+          inFlightIds: [],
+          laneLengths: [],
+        });
+      }
+    });
+  }
 
   /**
    * GET /api/health
@@ -929,116 +1019,76 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     res.setHeader('X-Work-History-Unreachable', String(workHistoryUnreachable));
     res.setHeader('X-Dashboard-Date-Range', sanitizeHttpHeaderValue(parsedRange.label));
 
-    // 1. Process candidateSegments
-    const matchedSegments = artifactCache.candidateSegments.filter((seg) => {
-      if (allowedIds && !allowedIds.has(seg.applywizzId.toUpperCase())) return false;
-      if (!mayServeInMemoryDemoFixtures(unrestricted) && isPinnedDemoApplywizzId(seg.applywizzId)) {
-        return false;
-      }
-      return true;
-    });
+    let candidateSummaries: CandidateSummary[] = [];
 
-    let candidateSummaries: CandidateSummary[] = matchedSegments.map((seg) => {
-      const candidateApps = artifactCache.resolvedApplications.filter(
-        (a) => a.applywizzId === seg.applywizzId
-      );
-      const readyCount = candidateApps.filter((a) => a.status === 'READY_FOR_REVIEW').length;
-      const expiredCount = candidateApps.filter((a) => a.status === 'EXPIRED').length;
-
-      const eligibleJobs = seg.jobs;
-
-      const resumePath = path.join(config.RESUMES_DIR, `${seg.applywizzId}_resume.pdf`);
-      const resumeAvailable = fs.existsSync(resumePath);
-
-      let status: 'READY' | 'PENDING' | 'EXPIRED' = 'PENDING';
-      if (readyCount > 0) {
-        status = 'READY';
-      } else if (expiredCount === eligibleJobs.length && eligibleJobs.length > 0) {
-        status = 'EXPIRED';
-      }
-
-      return {
-        applywizzId: seg.applywizzId,
-        clientName: seg.clientName,
-        email: seg.profile?.email || '',
-        location: seg.profile?.location || '',
-        totalJobs: 0,
-        job_count: 0,
-        queue_status: 'NO_APPLICATIONS' as CandidateQueueStatus,
-        readyCount,
-        expiredCount,
-        status,
-        syncedAt: seg.syncedAt,
-        resumeAvailable,
-      };
-    });
-
-    // 2. Synthesize candidates from workHistoryRecords that are not yet in candidateSegments
+    // Gather candidate IDs from workHistoryRecords
+    const candidateMap = new Map<string, { applywizzId: string; clientName: string; email: string }>();
     if (workHistoryRecords.length > 0) {
-      const existingIds = new Set(candidateSummaries.map((c) => c.applywizzId.toUpperCase()));
       for (const rec of workHistoryRecords) {
         const idUpper = rec.applywizzId.toUpperCase();
-        if (!existingIds.has(idUpper)) {
-          const resumePath = path.join(config.RESUMES_DIR, `${rec.applywizzId}_resume.pdf`);
-          candidateSummaries.push({
-            applywizzId: rec.applywizzId,
-            clientName: rec.clientName,
-            email: rec.clientEmail,
-            location: '',
-            totalJobs: 0,
-            job_count: 0,
-            queue_status: 'NO_APPLICATIONS',
-            readyCount: 0,
-            expiredCount: 0,
-            status: 'PENDING',
-            resumeAvailable: fs.existsSync(resumePath),
-          });
-          existingIds.add(idUpper);
+        if (allowedIds && !allowedIds.has(idUpper)) continue;
+        if (!mayServeInMemoryDemoFixtures(unrestricted) && isPinnedDemoApplywizzId(rec.applywizzId)) {
+          continue;
         }
+        candidateMap.set(idUpper, {
+          applywizzId: rec.applywizzId,
+          clientName: rec.clientName,
+          email: rec.clientEmail,
+        });
       }
     }
 
-    {
-      const existingIds = new Set(candidateSummaries.map((c) => c.applywizzId.toUpperCase()));
-      let supplementalIds: string[] = [];
-      if (unrestricted && isSupabaseConfigured()) {
-        supplementalIds = await distinctApplywizzIdsForCreatedAtRange({
-          startIso: parsedRange.startIso,
-          endIso: parsedRange.endIso,
+    // Supplement with database IDs for the date range
+    let supplementalIds: string[] = [];
+    if (unrestricted && isSupabaseConfigured()) {
+      supplementalIds = await distinctApplywizzIdsForCreatedAtRange({
+        startIso: parsedRange.startIso,
+        endIso: parsedRange.endIso,
+      });
+    } else if (allowedIds && !unrestricted) {
+      supplementalIds = [...allowedIds].filter((id) => !candidateMap.has(id.trim().toUpperCase()));
+    }
+
+    for (const rawId of supplementalIds) {
+      const idUpper = rawId.trim().toUpperCase();
+      if (!idUpper) continue;
+      if (allowedIds && !allowedIds.has(idUpper)) continue;
+      if (!mayServeInMemoryDemoFixtures(unrestricted) && isPinnedDemoApplywizzId(idUpper)) {
+        continue;
+      }
+      if (!candidateMap.has(idUpper)) {
+        candidateMap.set(idUpper, {
+          applywizzId: rawId.trim(),
+          clientName: rawId.trim(),
+          email: '',
         });
-      } else if (allowedIds && !unrestricted) {
-        supplementalIds = [...allowedIds].filter((id) => !existingIds.has(id));
       }
-      const missingIds = supplementalIds.filter((id) => !existingIds.has(id.trim().toUpperCase()));
-      if (missingIds.length > 0) {
-        if (unrestricted) {
-          log.info(
-            `[API] GET /api/candidates dev/admin DB supplement: +${missingIds.length} candidates (${parsedRange.label})`
-          );
-        }
-        const profileFields = await fetchProfileListingFieldsByApplywizzIds(missingIds);
-        for (const idUpper of missingIds) {
-          const key = idUpper.trim().toUpperCase();
-          if (existingIds.has(key)) continue;
-          const fields = profileFields.get(key);
-          const applywizzId = fields?.applywizzId || idUpper;
-          const resumePath = path.join(config.RESUMES_DIR, `${applywizzId}_resume.pdf`);
-          candidateSummaries.push({
-            applywizzId,
-            clientName: fields?.clientName || applywizzId,
-            email: fields?.email || '',
-            location: fields?.location || '',
-            totalJobs: 0,
-            job_count: 0,
-            queue_status: 'NO_APPLICATIONS',
-            readyCount: 0,
-            expiredCount: 0,
-            status: 'PENDING',
-            resumeAvailable: fs.existsSync(resumePath),
-          });
-          existingIds.add(key);
-        }
-      }
+    }
+
+    const allCandidateIds = Array.from(candidateMap.keys());
+    const profileFields = await fetchProfileListingFieldsByApplywizzIds(allCandidateIds);
+
+    for (const [idUpper, info] of candidateMap.entries()) {
+      const fields = profileFields.get(idUpper);
+      const applywizzId = fields?.applywizzId || info.applywizzId;
+      const resumeAvailable = Boolean(
+        fields?.resumeStoragePath ||
+          (!isSupabaseConfigured() && fs.existsSync(path.join(config.RESUMES_DIR, `${applywizzId}_resume.pdf`)))
+      );
+
+      candidateSummaries.push({
+        applywizzId,
+        clientName: fields?.clientName || info.clientName || applywizzId,
+        email: fields?.email || info.email || '',
+        location: fields?.location || '',
+        totalJobs: 0,
+        job_count: 0,
+        queue_status: 'NO_APPLICATIONS' as CandidateQueueStatus,
+        readyCount: 0,
+        expiredCount: 0,
+        status: 'PENDING',
+        resumeAvailable,
+      });
     }
 
     if (isSupabaseConfigured() && !unrestricted) {
@@ -1867,6 +1917,13 @@ export function startServer(
     log.info('================================================================\n');
 
     logSupabaseCredentialIdentity('Server');
+
+    const workerServiceUrl = (process.env.WORKER_SERVICE_URL || config.WORKER_SERVICE_URL || '').trim();
+    if (!workerServiceUrl) {
+      log.warn('[Server] WORKER_SERVICE_URL not set — submit/dry-run will execute in-process (no worker service).');
+    } else {
+      log.info(`[Server] WORKER_SERVICE_URL configured: ${workerServiceUrl} — submit/dry-run will proxy to worker service.`);
+    }
 
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
