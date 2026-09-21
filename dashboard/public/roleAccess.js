@@ -69,6 +69,9 @@
   }
 
   function clearSession() {
+    // TODO: migrate to HttpOnly cookies (ARCH phase)
+    sessionStorage.removeItem('applywizz_auth_token');
+    sessionStorage.removeItem('applywizz_refresh_token');
     localStorage.removeItem('applywizz_auth_token');
     localStorage.removeItem('applywizz_refresh_token');
     localStorage.removeItem('applywizz_session_expires_at');
@@ -84,9 +87,16 @@
 
   function persistSession(data, renewExpiry) {
     if (!data) return sessionRole();
-    if (data.token) localStorage.setItem('applywizz_auth_token', data.token);
+    // TODO: migrate to HttpOnly cookies (ARCH phase)
+    if (data.token) {
+      sessionStorage.setItem('applywizz_auth_token', data.token);
+      localStorage.removeItem('applywizz_auth_token');
+    }
     var refresh = data.refreshToken || data.refresh_token;
-    if (refresh) localStorage.setItem('applywizz_refresh_token', refresh);
+    if (refresh) {
+      sessionStorage.setItem('applywizz_refresh_token', refresh);
+      localStorage.removeItem('applywizz_refresh_token');
+    }
     if (data.user) localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
     if (renewExpiry) {
       var ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : WEEK_MS;
@@ -109,7 +119,8 @@
   }
 
   function signOut() {
-    var token = localStorage.getItem('applywizz_auth_token');
+    // TODO: migrate to HttpOnly cookies (ARCH phase)
+    var token = sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token');
     if (token) {
       nativeFetch('/api/auth/logout', {
         method: 'POST',
@@ -143,9 +154,9 @@
 
   function needsRefresh() {
     if (sessionCapExpired()) return false;
-    var refresh = localStorage.getItem('applywizz_refresh_token');
+    var refresh = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     if (!refresh) return false;
-    var exp = tokenExpiryMs(localStorage.getItem('applywizz_auth_token'));
+    var exp = tokenExpiryMs(sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token'));
     if (!exp) return true;
     return Date.now() >= exp - REFRESH_SKEW_MS;
   }
@@ -156,7 +167,7 @@
       clearSession();
       return Promise.resolve(false);
     }
-    var refreshToken = localStorage.getItem('applywizz_refresh_token');
+    var refreshToken = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     if (!refreshToken) return Promise.resolve(false);
 
     refreshInFlight = nativeFetch('/api/auth/refresh', {
@@ -204,8 +215,8 @@
   }
 
   function enforcePageAccess(allowedRoles) {
-    var token = localStorage.getItem('applywizz_auth_token');
-    var refresh = localStorage.getItem('applywizz_refresh_token');
+    var token = sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token');
+    var refresh = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     var role = sessionRole();
     if (!token && !refresh) return { ok: false, reason: 'anon', role: null };
     if (sessionCapExpired()) {
@@ -265,7 +276,7 @@
   }
 
   function getAuthHeaders() {
-    var token = localStorage.getItem('applywizz_auth_token');
+    var token = sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token');
     if (!token) return {};
     var headers = { Authorization: 'Bearer ' + token };
     if (isOpsMode()) {
@@ -299,7 +310,7 @@
     var url = requestUrl(input);
     if (!shouldManageAuth(url)) return nativeFetch(input, init);
 
-    var previousToken = localStorage.getItem('applywizz_auth_token');
+    var previousToken = sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token');
     var incomingAuth = headerValue(init && init.headers, 'Authorization');
 
     return ensureSession().then(function () {
@@ -314,7 +325,7 @@
       }
       var opts = Object.assign({}, init || {}, { headers: headers });
       return nativeFetch(input, opts).then(function (res) {
-        if (res.status !== 401 || !localStorage.getItem('applywizz_refresh_token')) return res;
+        if (res.status !== 401 || (!sessionStorage.getItem('applywizz_refresh_token') && !localStorage.getItem('applywizz_refresh_token'))) return res;
         return refreshSession().then(function (ok) {
           if (!ok) return res;
           Object.assign(headers, getAuthHeaders());

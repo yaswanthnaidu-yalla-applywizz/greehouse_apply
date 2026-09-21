@@ -99,6 +99,8 @@ export interface PausedSession {
   boxSelectors?: string[];
   /** Whether a success or failure screenshot was already captured before closing */
   screenshotCaptured?: boolean;
+  /** 30-minute auto-close timer handle to prevent leaking browser processes */
+  ttlTimer?: NodeJS.Timeout;
 }
 
 /**
@@ -179,6 +181,22 @@ export function storePausedSession(
     session.jobUrl ??
     (typeof applicationOrId === 'string' ? '' : applicationOrId.job_url || '');
 
+  const existing = PAUSED_SESSIONS.get(canonicalKey);
+  if (existing?.ttlTimer) {
+    clearTimeout(existing.ttlTimer);
+  }
+
+  const ttlTimer = setTimeout(async () => {
+    log.warn(
+      `[Live Submit] ⏰ Paused session ${canonicalKey} timed out after 30m. Closing browser context...`
+    );
+    await clearPausedSession(canonicalKey);
+  }, 30 * 60 * 1000);
+
+  if (ttlTimer.unref) {
+    ttlTimer.unref();
+  }
+
   const fullSession: PausedSession = {
     browser: session.browser,
     page: session.page,
@@ -195,6 +213,7 @@ export function storePausedSession(
     boxCount: session.boxCount,
     boxSelectors: session.boxSelectors,
     screenshotCaptured: session.screenshotCaptured ?? false,
+    ttlTimer,
   };
 
   PAUSED_SESSIONS.set(canonicalKey, fullSession);
@@ -239,6 +258,9 @@ export async function clearPausedSession(id: string): Promise<void> {
   if (!resolved) return;
 
   const { session } = resolved;
+  if (session.ttlTimer) {
+    clearTimeout(session.ttlTimer);
+  }
   try {
     if (session.page && !session.page.isClosed() && !session.screenshotCaptured) {
       try {

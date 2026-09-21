@@ -129,3 +129,6 @@
 2026-09-21 checkpoint: no observations
 2026-09-21 checkpoint: applied SEC-3 (IDOR checks on mutation routes), SEC-4 (SSRF URL validation before page.goto), RACE-1 (queue worker TOCTOU .select('id') claim check), RACE-3 (proof capture try/catch preserving APPLIED status); no new observations
 2026-09-21 checkpoint: applied PERF-1 (5MB PDF size guard in tier2ResumeParse.ts), PERF-2 (per-URL page lifecycle in playwrightScanner.ts), SEC-5 (remove default from JWT_SECRET in env.ts), SEC-8 (restrict CORS via ALLOWED_ORIGINS in server/index.ts and .env.example); no new observations
+2026-09-21 session-start scan: files=11 parsed=11
+2026-09-21 deliverable flush: implemented RELIABILITY-1 (30m session TTL in captchaResume.ts & liveSubmit.ts), RELIABILITY-2 (error classification & typed failure bubble in tier5LLM.ts), PERF-3 (query pushdown in manager.ts & devDashboard.ts), PERF-4 (adaptive WS/polling interval in App.tsx & operator-app.jsx); no new observations
+2026-09-21 deliverable flush: implemented PERF-5 (LRUCache for embeddings in semanticSearch.ts), SEC-6 (safe img data-uri for MFA QR in AuthView.tsx & index.html), SEC-9 (sessionStorage token migration in roleAccess.js), SEC-10 (CSP meta tags across HTML shells), QUALITY-1 (masked 500 error messages in applications.ts & submissions.ts); no new observations

@@ -202,9 +202,9 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
     }
 
     res.json(updatedField);
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error('[Applications Router] ❌ Unexpected error:', err);
-    res.status(500).json({ error: `Server error: ${err.message}` });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -410,9 +410,9 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       applicationId: targetAppId,
       ...serializedDto,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Applications Router] ❌ Failed to update status for ${appId}:`, err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -490,9 +490,9 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
       success: true,
       application: saved,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Applications Router] ❌ Failed to approve application ${appId}:`, err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -525,9 +525,9 @@ applicationsRouter.post('/:id/retry', requireAuth, async (req: Request, res: Res
 
     log.info(`Operator triggered retry for ${appId}`);
     res.status(200).json({ success: true });
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Applications Router] Failed to retry application ${appId}:`, err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -539,9 +539,9 @@ applicationsRouter.get('/notifications', async (_req: Request, res: Response): P
   try {
     const notifications = await getRecentNotifications(40);
     res.json(notifications);
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error('[Applications Router] Failed to get notifications:', err);
-    res.status(500).json({ error: err.message || 'Failed to fetch notifications' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -628,7 +628,8 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
       });
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) {
-        res.status(500).json({ error: error.message });
+        log.error('[Applications Router] Failed to fetch applications from db:', error);
+        res.status(500).json({ error: 'Internal server error' });
         return;
       }
       applications = (data || []).filter((app: any) => {
@@ -655,9 +656,9 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
       `[API] GET /api/applications (ca_email=${userEmail || 'admin'}${logCandidate}) → filtered to ${applications.length} applications`
     );
     res.json({ applications });
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error('[Applications Router] Failed to fetch applications:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -730,9 +731,9 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
         job_title: jobTitle,
       })
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Applications Router] ❌ Error fetching application ${appId}:`, err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

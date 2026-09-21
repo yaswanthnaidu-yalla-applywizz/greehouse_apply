@@ -146,11 +146,11 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
         summary: result.summary,
       });
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Submissions Router] ❌ Dry-run route error for ${appId}:`, err);
     res.status(500).json({
       success: false,
-      error: err.message,
+      error: 'Internal server error',
     });
   }
 });
@@ -218,9 +218,10 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         message: `Application queued for submission (Order: ${submissionOrder}).`,
       });
       return;
-    } catch (err: any) {
-      if (err?.name === 'SubmissionEligibilityBlockedError') {
-        log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${err.message}`);
+    } catch (err: unknown) {
+      const errObj = err as { name?: string; message?: string };
+      if (errObj?.name === 'SubmissionEligibilityBlockedError') {
+        log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${errObj.message}`);
         respondEligibilityBlockedAsQueued(res, appId);
         return;
       }
@@ -228,7 +229,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       res.status(500).json({
         success: false,
         status: 'FAILED',
-        error: err.message || 'Failed to queue application.',
+        error: 'Internal server error',
       });
       return;
     }
@@ -311,9 +312,10 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         summary: result.summary,
       });
     }
-  } catch (err: any) {
-    if (err?.name === 'SubmissionEligibilityBlockedError') {
-      log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${err.message}`);
+  } catch (err: unknown) {
+    const errObj = err as { name?: string; message?: string };
+    if (errObj?.name === 'SubmissionEligibilityBlockedError') {
+      log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${errObj.message}`);
       respondEligibilityBlockedAsQueued(res, appId);
       return;
     }
@@ -331,16 +333,17 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         return;
       }
     }
+    const errMessage = err instanceof Error ? err.message : String(err);
     log.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
     await updateStatus(appId, 'FAILED', {
-      error_message: err.message || 'Unexpected submit route error',
+      error_message: errMessage || 'Unexpected submit route error',
       job_url: req.body?.jobUrl,
     }).catch(() => {});
 
     res.status(500).json({
       success: false,
       status: 'FAILED',
-      error: err.message,
+      error: 'Internal server error',
     });
   }
 });
@@ -460,11 +463,11 @@ submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Re
       if (browser) await browser.close().catch(() => {});
       throw innerErr;
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Submissions Router] ❌ Open CAPTCHA session route error for ${appId}:`, err);
     res.status(500).json({
       success: false,
-      error: err.message,
+      error: 'Internal server error',
     });
   }
 });
@@ -535,10 +538,11 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
       proofFailedUrl: result.proofFailedUrl,
       proofFailedCapturedAt: result.proofFailedCapturedAt,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : String(err);
     log.error(`[Submissions Router] ❌ Submit OTP route error for ${appId}:`, err);
 
-    const isMissingSession = /no paused.*session/i.test(err.message || '');
+    const isMissingSession = /no paused.*session/i.test(errMessage);
     if (isMissingSession) {
       res.status(404).json({
         success: false,
@@ -548,14 +552,14 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
     }
 
     await updateStatus(appId, 'FAILED', {
-      error_message: err.message || 'OTP submission failed.',
+      error_message: errMessage || 'OTP submission failed.',
       job_url: req.body?.jobUrl,
     }).catch(() => {});
 
     res.status(200).json({
       status: 'FAILED',
       applicationId: appId,
-      error: err.message || 'OTP submission failed.',
+      error: errMessage || 'OTP submission failed.',
     });
   }
 });
@@ -685,10 +689,11 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
       proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
       proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : String(err);
     log.error(`[Submissions Router] ❌ Resume route error for ${appId}:`, err);
 
-    let errProof: any = null;
+    let errProof: Awaited<ReturnType<typeof captureFailedScreenshot>> | null = null;
     try {
       const resolved = resolvePausedSession(appId);
       if (resolved?.session?.page && !resolved.session.page.isClosed()) {
@@ -700,7 +705,7 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
       const application = await getApplication(appId, req.body?.jobUrl);
       if (application?.id) {
         await updateStatus(application.id, 'FAILED', {
-          error_message: err.message,
+          error_message: errMessage,
           proof_failed_url: errProof?.proofFailedUrl || errProof?.url,
           proof_failed_captured_at: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
           job_url: application.job_url,
@@ -713,7 +718,7 @@ submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Respo
     res.status(500).json({
       success: false,
       status: 'FAILED',
-      error: err.message,
+      error: 'Internal server error',
       proofFailedUrl: errProof?.proofFailedUrl || errProof?.url,
       proofFailedCapturedAt: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
     });
@@ -813,11 +818,11 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
         emailProofStatus: 'timed_out',
       });
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Submissions Router] ❌ Capture email proof error for ${appId}:`, err);
     res.status(500).json({
       success: false,
-      error: err.message || 'Failed to capture email proof.',
+      error: 'Internal server error',
     });
   }
 });
@@ -873,9 +878,9 @@ submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Pro
       expiresIn,
       applicationId: app.id,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Submissions Router] ❌ proof-url error for ${appId}:`, err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -916,9 +921,9 @@ submissionsRouter.get('/:id/proof', async (req: Request, res: Response): Promise
       emailProofStatus: app.email_proof_status || (app.proof_email_url ? 'captured' : (app.proof_web_url ? 'timed_out' : null)),
       emailProofAttemptedAt: app.email_proof_attempted_at,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     log.error(`[Submissions Router] ❌ Proof route error for ${appId}:`, err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
