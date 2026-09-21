@@ -3,13 +3,14 @@
  */
 
 import axios from 'axios';
+import { LRUCache } from 'lru-cache';
 import config from '../config/env.js';
 import { supabase } from '../db/client.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Semantic');
 
-const embeddingCache = new Map<string, number[]>();
+const embeddingCache = new LRUCache<string, number[]>({ max: 5000 });
 
 let semanticWarnLogged = false;
 

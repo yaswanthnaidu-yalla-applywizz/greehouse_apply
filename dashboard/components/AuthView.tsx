@@ -370,18 +370,11 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
             </p>
             {mfaQrCode ? (
               <div className="flex justify-center my-3">
-                {mfaQrCode.trim().startsWith('<svg') ? (
-                  <div
-                    className="w-44 h-44 border-2 border-[#1A1A2E] rounded-xl p-1.5 bg-white shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:block"
-                    dangerouslySetInnerHTML={{ __html: mfaQrCode }}
-                  />
-                ) : (
-                  <img
-                    src={formatQrCodeSrc(mfaQrCode)}
-                    alt="MFA QR Code"
-                    className="w-44 h-44 border-2 border-[#1A1A2E] rounded-xl p-1 bg-white shadow-[2px_2px_0px_#1A1A2E] object-contain"
-                  />
-                )}
+                <img
+                  src={formatQrCodeSrc(mfaQrCode)}
+                  alt="MFA QR Code"
+                  className="w-44 h-44 border-2 border-[#1A1A2E] rounded-xl p-1 bg-white shadow-[2px_2px_0px_#1A1A2E] object-contain"
+                />
               </div>
             ) : (
               <div className="w-44 h-44 mx-auto border-2 border-[#1A1A2E] rounded-xl flex items-center justify-center bg-gray-100 text-xs font-mono text-gray-500">
