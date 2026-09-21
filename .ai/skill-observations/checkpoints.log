@@ -153,3 +153,4 @@
 2026-09-21 session-end: 4 submission flow & cross-service fixes shipped (URL allowlist regex, proxy forwarded headers, open-captcha-session proxy, cross-service WS broadcast route & forward); typecheck and build clean; no observations
 2026-09-21 session-start scan: files=13 parsed=13
 2026-09-21 session-end: CA email pipeline step (Phase B.5) & live backfill shipped (294 profiles, 876 applications); typecheck & build clean; no new observations
+2026-09-21 deliverable flush: fixed Admin Applications modal candidate display and proof rendering (adminDashboard.ts select/mapping + admin.html / AdminDashboard.tsx modal); no new observations
