@@ -344,6 +344,7 @@ export class AnswerResolver {
         jobTitle: template.jobTitle || '',
         status: 'EXPIRED',
         resolvedFields: [],
+        assignedCaEmail: profile?.ca_email || null,
       };
     }
 
@@ -421,6 +422,7 @@ export class AnswerResolver {
       jobTitle: template.jobTitle || '',
       status: 'READY_FOR_REVIEW' as ApplicationStatus,
       resolvedFields,
+      assignedCaEmail: profile?.ca_email || null,
     };
   }
 
@@ -589,6 +591,7 @@ export class AnswerResolver {
               resolved_fields: app.resolvedFields,
               csv_job_score: parseScoreFromJob(job.score),
               field_count: questionCount,
+              assigned_ca_email: app.assignedCaEmail || (seg as any).assignedCaEmail || seg.profile?.ca_email || null,
             });
           } catch (dbErr: any) {
             if (isMissingTableError(dbErr)) {

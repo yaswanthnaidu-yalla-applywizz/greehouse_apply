@@ -244,7 +244,7 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
 
     let query = getDbClient()
       .from('gh_candidate_applications')
-      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles!inner(client_name, ca_email)', { count: 'exact' })
+      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles(client_name, ca_email)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
     if (status) query = query.eq('status', status);
@@ -263,7 +263,9 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
       companyName: row.company_name,
       jobTitle: row.job_title,
       status: row.status,
-      operator: row.profiles?.ca_email || '',
+      operator: row.assigned_ca_email || row.profiles?.ca_email || '',
+      assigned_ca_email: row.assigned_ca_email || row.profiles?.ca_email || '',
+      assignedCaEmail: row.assigned_ca_email || row.profiles?.ca_email || '',
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       submittedAt: row.submitted_at,
