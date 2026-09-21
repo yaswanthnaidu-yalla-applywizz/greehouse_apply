@@ -1,12 +1,18 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-20_
+_Last updated: 2026-09-21_
 
 ## Docs
 
 - **`OVERVIEW.md`** (repo root, 2026-09-17) — four-perspective analysis (architect / developer / product / critique) with Mermaid diagrams. Not a sprint tracker; use this file for current focus.
 
 ## Current Focus
+
+### 0g. Security, Reliability & Performance Hardening (shipped 2026-09-21)
+- **Security:** SEC-1 & SEC-2 auth bypass test gate (`requireRole.ts`), SEC-3 IDOR ownership verification (`applications.ts`), SEC-4 SSRF URL validation (`liveSubmit.ts`), SEC-5 enforced `JWT_SECRET` (`env.ts`), SEC-8 CORS origin restriction (`server/index.ts`), SEC-6 safe MFA QR data-URI rendering (`AuthView.tsx`, `index.html`), SEC-9 session storage token migration (`roleAccess.js`), SEC-10 CSP meta tags across all HTML shells (`index.html`, `manager.html`, `admin.html`, `dev.html`).
+- **Race Conditions:** RACE-1 TOCTOU claim check (`queueWorker.ts`), RACE-3 proof capture error isolation preserving `APPLIED` (`liveSubmit.ts`).
+- **Reliability:** RELIABILITY-1 30-min session TTL on paused CAPTCHA/OTP sessions (`captchaResume.ts`, `liveSubmit.ts`), RELIABILITY-2 LLM error classification and typed failure bubble in Tier 5 (`tier5LLM.ts`), QUALITY-1 masked internal server errors on 500 HTTP responses (`applications.ts`, `submissions.ts`).
+- **Performance:** PERF-1 5MB PDF size guard (`tier2ResumeParse.ts`), PERF-2 per-URL page lifecycle in scanner (`playwrightScanner.ts`), PERF-3 database query pushdown (`manager.ts`, `devDashboard.ts`), PERF-4 adaptive polling interval (`App.tsx`, `operator-app.jsx`), PERF-5 LRUCache capped at 5000 entries for embeddings (`semanticSearch.ts`).
 
 ### 0f. GitHub Actions CI & Worker Service Isolation (shipped 2026-09-20)
 - **CI Pipeline (`.github/workflows/ci.yml`):** Runs on push to `main` and feature/fix/hotfix branches, and PRs to `main`. Multi-job waterfall: `typecheck` (`npm run typecheck`) → `build` (`npm run build`) → `test` (`npm test`, non-blocking via `continue-on-error: true`). Includes PR failure comments and README status badge.
