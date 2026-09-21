@@ -16,11 +16,13 @@ export type AppRole = 'admin' | 'manager' | 'operator' | 'dev';
 const SUPABASE_AUTH_ROLES = new Set(['authenticated', 'anon', 'service_role']);
 
 function authGuardBypassed(req: AuthenticatedRequest): boolean {
+  if (req.headers['x-test-bypass'] === 'true') {
+    return process.env.NODE_ENV === 'test';
+  }
   return (
     !isSupabaseConfigured() ||
     process.env.NODE_ENV === 'test' ||
-    process.argv.some((arg) => arg.toLowerCase().includes('test')) ||
-    req.headers['x-test-bypass'] === 'true'
+    process.argv.some((arg) => arg.toLowerCase().includes('test'))
   );
 }
 
@@ -103,14 +105,7 @@ export function resolveRoleFromRequest(req: AuthenticatedRequest): AppRole | nul
   if (email) {
     return resolveEffectiveAppRole(email, jwtRole);
   }
-
-  const testRole = req.headers['x-user-role'];
-  if (typeof testRole === 'string') {
-    return normalizeAppRole(testRole);
-  }
-
-  const fallback = normalizeAppRole(jwtRole);
-  return fallback;
+  return normalizeAppRole(jwtRole) || 'operator';
 }
 
 /**
