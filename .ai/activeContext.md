@@ -21,6 +21,7 @@ _Last updated: 2026-09-21_
 
 ### 0e. Dashboard UI: bundled TSX parity (shipped 2026-09-21)
 - **Serving:** Dual-mode via `DASHBOARD_MODE` ('tsx' vs 'html'). In 'tsx' mode: serves `dist/client` static bundle; `GET /` serves `dist/client/index.html`; `GET /fallback` serves legacy `dashboard/public/index.html`. `GET /admin`, `/dev`, `/manager` serve `dist/client/{admin,dev,manager}/index.html` with fallbacks under `GET /{admin,dev,manager}/fallback`. `DASHBOARD_MODE=tsx` set on Railway Service.
+- **Production Status:** Verified live on `https://gh.applywizz.ai`. Resolved Railway service variable drift (`INGEST_ONLY=true` removed from primary `greehouse_apply` service and `ALLOWED_ORIGINS` configured). All dashboard routes (`/`, `/admin`, `/dev`, `/manager`) return 200 OK.
 - **Build:** Vite 6 multi-entry build (`vite.config.ts`) targets `dist/client` with `@vitejs/plugin-react` (`npm run build:dashboard` / `vite build`, `npm run dev:dashboard`). Root `build` is `tsc && vite build`.
 - **Dashboards:** Operator (`App.tsx`), Manager (`components/ManagerDashboard.tsx`), Admin (`components/AdminDashboard.tsx`), Developer (`components/DevDashboard.tsx`), all with hook-based auth (`useRequireRole` in `useSession.ts`).
 
