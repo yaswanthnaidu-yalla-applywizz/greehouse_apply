@@ -2839,6 +2839,7 @@
       const [workHistoryBannerDismissed, setWorkHistoryBannerDismissed] = useState(false);
       const [noCandidatesMessage, setNoCandidatesMessage] = useState(null);
       const [failureAlert, setFailureAlert] = useState(null);
+      const [wsConnected, setWsConnected] = useState(true);
 
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [ingestRun, setIngestRun] = useState(null);
@@ -3142,15 +3143,16 @@
           fetchInitialData(false);
           fetchNotifications();
         })();
+        const intervalMs = wsConnected ? 30000 : 3000;
         const pollInterval = setInterval(() => {
           fetchInitialData(true);
           fetchNotifications();
-        }, 3000);
+        }, intervalMs);
         return () => {
           cancelled = true;
           clearInterval(pollInterval);
         };
-      }, [currentUser, fetchInitialData, fetchNotifications, ensureAdminHydrated]);
+      }, [currentUser, wsConnected, fetchInitialData, fetchNotifications, ensureAdminHydrated]);
 
       // Connect to WebSocket /ws for real-time application failure toasts
       useEffect(() => {
@@ -3165,6 +3167,10 @@
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws`;
             ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+              setWsConnected(true);
+            };
 
             ws.onmessage = (event) => {
               try {
@@ -3198,16 +3204,19 @@
             };
 
             ws.onclose = () => {
+              setWsConnected(false);
               if (!isDisposed) {
                 reconnectTimeout = setTimeout(connectWs, 5000);
               }
             };
 
             ws.onerror = () => {
+              setWsConnected(false);
               if (ws) ws.close();
             };
           } catch (err) {
             console.warn('[Dashboard WS] Connection error:', err);
+            setWsConnected(false);
             if (!isDisposed) {
               reconnectTimeout = setTimeout(connectWs, 5000);
             }
@@ -3220,7 +3229,9 @@
           isDisposed = true;
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
           if (ws) {
+            ws.onopen = null;
             ws.onclose = null;
+            ws.onerror = null;
             ws.close();
           }
         };

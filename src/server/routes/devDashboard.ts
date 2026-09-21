@@ -166,17 +166,44 @@ devDashboardRouter.get('/errors', async (req: Request, res: Response): Promise<v
     return;
   }
   try {
-    let failed = await listApplications({ status: 'FAILED' });
-    const captchaTimeout = await listApplications({ status: 'CAPTCHA_TIMEOUT' });
-    failed = [...failed, ...captchaTimeout];
-    if (date) {
-      const { startIso, endIso } = getISTDateRangeUtc(date);
-      const start = Date.parse(startIso);
-      const end = Date.parse(endIso);
-      failed = failed.filter((row) => {
-        const at = Date.parse(row.updated_at || row.created_at || '');
-        return Number.isFinite(at) && at >= start && at <= end;
-      });
+    let failed: Array<{
+      id?: string;
+      status: string;
+      error_message?: string | null;
+      updated_at?: string | null;
+      created_at?: string | null;
+    }> = [];
+
+    if (isSupabaseConfigured()) {
+      let query = getDbClient()
+        .from('gh_candidate_applications')
+        .select('id, status, error_message, updated_at, created_at')
+        .in('status', ['FAILED', 'CAPTCHA_TIMEOUT']);
+      if (date) {
+        const { startIso, endIso } = getISTDateRangeUtc(date);
+        query = query.gte('updated_at', startIso).lte('updated_at', endIso);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        failed = data;
+      } else if (error) {
+        log.warn(`[Dev] Supabase query for /errors failed, falling back: ${error.message}`);
+      }
+    }
+
+    if (failed.length === 0 && !isSupabaseConfigured()) {
+      const failedApps = await listApplications({ status: 'FAILED' });
+      const captchaTimeout = await listApplications({ status: 'CAPTCHA_TIMEOUT' });
+      failed = [...failedApps, ...captchaTimeout];
+      if (date) {
+        const { startIso, endIso } = getISTDateRangeUtc(date);
+        const start = Date.parse(startIso);
+        const end = Date.parse(endIso);
+        failed = failed.filter((row) => {
+          const at = Date.parse(row.updated_at || row.created_at || '');
+          return Number.isFinite(at) && at >= start && at <= end;
+        });
+      }
     }
 
     const groups = new Map<

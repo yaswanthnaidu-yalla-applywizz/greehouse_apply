@@ -333,10 +333,26 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
     });
     const directory = await listAuthDirectory();
     const byEmail = new Map(directory.map((user) => [user.email, user]));
+    let inFlightRows: Array<{ assigned_ca_email?: string | null }> = [];
+    if (isSupabaseConfigured()) {
+      const { data, error } = await getDbClient()
+        .from('gh_candidate_applications')
+        .select('assigned_ca_email')
+        .in('status', ['QUEUED', 'APPLYING']);
+      if (!error && data) {
+        inFlightRows = data;
+      }
+    } else {
+      const [queued, applying] = await Promise.all([
+        listApplications({ status: 'QUEUED' }),
+        listApplications({ status: 'APPLYING' }),
+      ]);
+      inFlightRows = [...queued, ...applying];
+    }
     const inFlight = new Set(
-      (await listApplications())
-        .filter((row) => row.status === 'QUEUED' || row.status === 'APPLYING')
+      inFlightRows
         .map((row) => (row.assigned_ca_email || '').trim().toLowerCase())
+        .filter(Boolean)
     );
 
 const operators = new Map<
@@ -579,17 +595,24 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
 
   try {
     const scoped = await scopedApplywizzIds(req);
-    let applications: ApplicationRow[] = [];
+    let applications: Array<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'status' | 'created_at'>> = [];
     if (isSupabaseConfigured()) {
-      let query = getDbClient().from('gh_candidate_applications').select('*');
+      let query = getDbClient()
+        .from('gh_candidate_applications')
+        .select('id, applywizz_id, status, created_at');
       if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
       query = applyCreatedAtRangeFilter(query, createdAtRange);
       const { data, error } = await query;
       if (!error && data) {
-        applications = (data as ApplicationRow[]).filter((application) => inScope(application, scoped.ids));
+        applications = (data as Array<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'status' | 'created_at'>>)
+          .filter((application) => inScope(application as ApplicationRow, scoped.ids));
       }
     } else {
-      applications = (await listApplications())
+      const allApps =
+        scoped.ids && scoped.ids.length === 1
+          ? await listApplications({ applywizzId: scoped.ids[0] })
+          : await listApplications();
+      applications = allApps
         .filter((application) => inScope(application, scoped.ids))
         .filter((application) => rowCreatedAtInRange(application, createdAtRange));
     }
@@ -710,7 +733,11 @@ managerRouter.get('/candidates', async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const applications = (await listApplications()).filter((application) => inScope(application, scoped.ids));
+    const applications = (
+      scoped.ids && scoped.ids.length === 1
+        ? await listApplications({ applywizzId: scoped.ids[0] })
+        : await listApplications()
+    ).filter((application) => inScope(application, scoped.ids));
     const candidates = Array.from(
       new Map(
         applications.map((application) => [

@@ -21,7 +21,11 @@ export interface ActiveSubmissionSession {
   page: Page;
   application: ApplicationRow;
   startedAt: number;
+  ttlTimer?: NodeJS.Timeout;
 }
+
+/** 30-minute timeout for paused CAPTCHA sessions to prevent leaking browser contexts */
+export const CAPTCHA_SESSION_TTL_MS = 30 * 60 * 1000;
 
 /**
  * In-memory registry of active browser contexts paused for CAPTCHA resolution.
@@ -39,8 +43,25 @@ export function hasActiveSubmissionSession(applicationId: string): boolean {
  * Registers an active paused browser session.
  */
 export function registerSubmissionSession(session: ActiveSubmissionSession): void {
+  const existing = activeSubmissions.get(session.applicationId);
+  if (existing?.ttlTimer) {
+    clearTimeout(existing.ttlTimer);
+  }
+
+  const timer = setTimeout(async () => {
+    log.warn(
+      `[Captcha Resume] ⏰ Paused session for application ${session.applicationId} timed out after 30m. Closing browser context...`
+    );
+    await closeSubmissionSession(session.applicationId);
+  }, CAPTCHA_SESSION_TTL_MS);
+
+  if (timer.unref) {
+    timer.unref();
+  }
+
+  session.ttlTimer = timer;
   activeSubmissions.set(session.applicationId, session);
-  log.info(`[Captcha Resume] ⏸️ Registered paused session for application ${session.applicationId}`);
+  log.info(`[Captcha Resume] ⏸️ Registered paused session for application ${session.applicationId} (TTL: 30m)`);
 }
 
 /**
@@ -49,6 +70,9 @@ export function registerSubmissionSession(session: ActiveSubmissionSession): voi
 export async function closeSubmissionSession(applicationId: string): Promise<void> {
   const session = activeSubmissions.get(applicationId);
   if (session) {
+    if (session.ttlTimer) {
+      clearTimeout(session.ttlTimer);
+    }
     try {
       await session.page.close().catch(() => {});
       await session.context.close().catch(() => {});
