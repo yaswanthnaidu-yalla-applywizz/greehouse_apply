@@ -187,6 +187,9 @@ const envSchema = z.object({
 
   /** External worker service URL for Playwright dry-run / submissions */
   WORKER_SERVICE_URL: z.string().optional(),
+
+  /** Service 1 Railway private URL for cross-service events and callbacks */
+  WEB_SERVICE_URL: z.string().optional(),
 });
 
 /**
