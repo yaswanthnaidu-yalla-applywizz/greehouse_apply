@@ -127,3 +127,4 @@
 2026-09-20 session-end checkpoint: session closed; progress.md updated; all changes merged and pushed to main; no pending observations
 2026-09-21 session-start scan: files=11 parsed=11
 2026-09-21 checkpoint: no observations
+2026-09-21 deliverable flush: pushed fix/security with SEC-1 (x-test-bypass test-only gate) and SEC-2 (remove x-user-role fallback); no new observations
