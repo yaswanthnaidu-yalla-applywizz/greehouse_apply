@@ -1,8 +1,28 @@
 # Progress — What Works, What's Pending
 
-_Last updated: 2026-09-20_
+_Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
+
+### Security, Reliability & Performance Hardening (2026-09-21)
+- [x] SEC-1 & SEC-2 — Auth bypass gated strictly to `NODE_ENV === 'test'` with real test token validation; `x-user-role` header fallback removed (`requireRole.ts`)
+- [x] SEC-3 — Strict IDOR ownership validation on application update and approve routes (`applications.ts`)
+- [x] SEC-4 — SSRF URL protocol and host whitelist validation prior to Playwright navigation (`liveSubmit.ts`)
+- [x] RACE-1 — Atomic queue worker TOCTOU claim check via `.select('id')` validation (`queueWorker.ts`)
+- [x] RACE-3 — Proof capture failure isolation preserving `APPLIED` status (`liveSubmit.ts`)
+- [x] PERF-1 — 5MB PDF file size guard before reading resumes (`tier2ResumeParse.ts`)
+- [x] PERF-2 — Per-URL page lifecycle recreation avoiding browser memory accumulation (`playwrightScanner.ts`)
+- [x] SEC-5 — Removed default fallback for `JWT_SECRET` in Zod env validation (`env.ts`)
+- [x] SEC-8 — Restricted CORS origins via `ALLOWED_ORIGINS` whitelist (`server/index.ts`)
+- [x] RELIABILITY-1 — 30-minute auto-close TTL for paused CAPTCHA/OTP browser sessions (`captchaResume.ts`, `liveSubmit.ts`)
+- [x] RELIABILITY-2 — LLM error classification (retriable vs permanent) and typed failure bubble in Tier 5 (`tier5LLM.ts`)
+- [x] PERF-3 — Database query pushdown for unconstrained status/date application queries (`manager.ts`, `devDashboard.ts`)
+- [x] PERF-4 — Adaptive dashboard polling interval: 30s connected, 3s on disconnect (`App.tsx`, `operator-app.jsx`)
+- [x] PERF-5 — LRUCache capped at 5000 entries for semantic search embeddings (`semanticSearch.ts`)
+- [x] SEC-6 — Eliminated `dangerouslySetInnerHTML` for MFA QR SVG in favor of sandboxed `<img>` data URIs (`AuthView.tsx`, `index.html`)
+- [x] SEC-9 — Migrated token persistence from `localStorage` to `sessionStorage` (`roleAccess.js`)
+- [x] SEC-10 — Content Security Policy `<meta>` tags on all public HTML shells (`index.html`, `manager.html`, `admin.html`, `dev.html`)
+- [x] QUALITY-1 — Masked internal server errors in 500 HTTP responses with generic messages (`applications.ts`, `submissions.ts`)
 
 ### Infrastructure & CI/CD
 - [x] GitHub Actions CI pipeline (`.github/workflows/ci.yml`) — triggers on `main`, `feature/**`, `fix/**`, `hotfix/**`, `patch/**`, and PRs with `typecheck` → `build` → non-blocking `test` waterfall, automated PR failure comments, and status badge
