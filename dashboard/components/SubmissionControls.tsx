@@ -205,11 +205,14 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
 
   return (
     <>
-      {showProofViewer && proofUrl && (
+      {showProofViewer && (proofUrl || applicationId) && (
         <ProofViewer
           isOpen={showProofViewer}
           onClose={() => setShowProofViewer(false)}
           screenshotUrl={proofUrl}
+          applicationId={applicationId}
+          kind="web"
+          apiBaseUrl={apiBaseUrl}
           title="Application Confirmation Proof"
           metadata={{
             applywizzId: applicationId,

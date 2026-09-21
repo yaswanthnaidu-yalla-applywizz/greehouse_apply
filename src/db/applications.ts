@@ -875,23 +875,57 @@ async function patchApplicationRecord(
  * Re-signs private bucket proof URLs for API/dashboard consumers (avoids expired signed URLs in <img>).
  */
 export async function hydrateApplicationProofUrls(app: ApplicationRow): Promise<ApplicationRow> {
-  const storageKey = app.id && isApplicationUuid(app.id) ? app.id : null;
-  if (!storageKey || !isSupabaseConfigured()) {
+  if (!isSupabaseConfigured()) {
+    return app;
+  }
+
+  let storageKey = app.id && isApplicationUuid(app.id) ? app.id : null;
+  if (!storageKey && app.applywizz_id && app.job_url) {
+    try {
+      const supabase = getDbClient();
+      const { data } = await supabase
+        .from('gh_candidate_applications')
+        .select('id')
+        .eq('applywizz_id', app.applywizz_id)
+        .eq('job_url', app.job_url)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data?.id && isApplicationUuid(data.id)) {
+        storageKey = data.id;
+      }
+    } catch {}
+  }
+
+  if (!storageKey) {
+    storageKey = app.id || app.applywizz_id || null;
+  }
+
+  if (!storageKey) {
     return app;
   }
 
   const hydrated = { ...app };
 
   if (hydrated.proof_web_url) {
-    const signed = await getSignedProofUrl(PROOFS_BUCKET, webProofStoragePath(storageKey));
+    let signed = await getSignedProofUrl(PROOFS_BUCKET, webProofStoragePath(storageKey));
+    if (!signed && app.applywizz_id && storageKey !== app.applywizz_id) {
+      signed = await getSignedProofUrl(PROOFS_BUCKET, webProofStoragePath(app.applywizz_id));
+    }
     if (signed) hydrated.proof_web_url = signed;
   }
   if (hydrated.proof_failed_url) {
-    const signed = await getSignedProofUrl(PROOFS_FAILED_BUCKET, failedProofStoragePath(storageKey));
+    let signed = await getSignedProofUrl(PROOFS_FAILED_BUCKET, failedProofStoragePath(storageKey));
+    if (!signed && app.applywizz_id && storageKey !== app.applywizz_id) {
+      signed = await getSignedProofUrl(PROOFS_FAILED_BUCKET, failedProofStoragePath(app.applywizz_id));
+    }
     if (signed) hydrated.proof_failed_url = signed;
   }
   if (hydrated.proof_email_url) {
-    const signed = await getSignedProofUrl(PROOFS_MAIL_BUCKET, emailProofStoragePath(storageKey));
+    let signed = await getSignedProofUrl(PROOFS_MAIL_BUCKET, emailProofStoragePath(storageKey));
+    if (!signed && app.applywizz_id && storageKey !== app.applywizz_id) {
+      signed = await getSignedProofUrl(PROOFS_MAIL_BUCKET, emailProofStoragePath(app.applywizz_id));
+    }
     if (signed) hydrated.proof_email_url = signed;
   }
 

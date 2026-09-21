@@ -200,6 +200,36 @@ export async function getSignedProofUrl(
 }
 
 /**
+ * Downloads a proof screenshot binary buffer from Supabase Storage or local disk.
+ */
+export async function downloadProofBuffer(
+  bucket: string,
+  storagePath: string
+): Promise<Buffer | null> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase.storage.from(bucket).download(storagePath);
+      if (!error && data) {
+        const arrayBuf = await data.arrayBuffer();
+        return Buffer.from(arrayBuf);
+      }
+    } catch {}
+  }
+
+  // Local filesystem fallback
+  try {
+    const filename = path.basename(storagePath);
+    const localPath = path.resolve(process.cwd(), 'output', 'proofs', filename);
+    if (fs.existsSync(localPath)) {
+      return fs.readFileSync(localPath);
+    }
+  } catch {}
+
+  return null;
+}
+
+/**
  * Uploads a Greenhouse confirmation screenshot proof to the proofs bucket or local folder.
  */
 export async function uploadProof(

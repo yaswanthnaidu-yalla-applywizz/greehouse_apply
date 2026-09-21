@@ -350,10 +350,20 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         isOpen={viewerOpen}
         onClose={() => setViewerOpen(false)}
         screenshotUrl={viewerImageUrl}
+        applicationId={application.id || application.applicationId || ''}
+        kind={
+          viewerTitle.includes('Dry-Run')
+            ? 'dryrun'
+            : viewerTitle.includes('Failure')
+            ? 'failed'
+            : 'web'
+        }
+        apiBaseUrl={apiBaseUrl}
         title={viewerTitle}
         metadata={{
           candidateName: candidateName || application.clientName,
           applywizzId: application.applywizzId || application.applywizz_id,
+          applicationId: application.id || application.applicationId,
           companyName: application.companyName || application.company_name,
           jobTitle: application.jobTitle || application.job_title,
           jobUrl: application.jobUrl || application.job_url,
@@ -451,11 +461,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               }}
               onViewProof={() => {
                 const url = application.proof_web_url || application.proofWebUrl;
-                if (url) {
-                  setViewerImageUrl(url);
-                  setViewerTitle('Live Application Confirmation Proof');
-                  setViewerOpen(true);
-                }
+                setViewerImageUrl(url || null);
+                setViewerTitle('Live Application Confirmation Proof');
+                setViewerOpen(true);
               }}
               onViewEmailProof={(proof?: EmailProofJson) => {
                 const json = proof || application.proof_email_json || application.proofEmailJson || activeEmailProof;
@@ -467,19 +475,15 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               onViewDryRun={() => {
                 const url =
                   application.dry_run_screenshot_url || application.dryRunScreenshotUrl;
-                if (url) {
-                  setViewerImageUrl(url);
-                  setViewerTitle('Dry-Run Form Verification Screenshot');
-                  setViewerOpen(true);
-                }
+                setViewerImageUrl(url || null);
+                setViewerTitle('Dry-Run Form Verification Screenshot');
+                setViewerOpen(true);
               }}
               onViewFailureScreenshot={() => {
                 const url = application.proof_failed_url || application.proofFailedUrl;
-                if (url) {
-                  setViewerImageUrl(url);
-                  setViewerTitle('Failure Screenshot');
-                  setViewerOpen(true);
-                }
+                setViewerImageUrl(url || null);
+                setViewerTitle('Failure Screenshot');
+                setViewerOpen(true);
               }}
             />
           </div>

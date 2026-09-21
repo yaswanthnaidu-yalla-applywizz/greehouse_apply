@@ -19,7 +19,7 @@ export interface ProofViewerProps {
   onClose: () => void;
   screenshotUrl?: string | null;
   applicationId?: string | null;
-  kind?: 'web' | 'failed' | 'email';
+  kind?: 'web' | 'failed' | 'dryrun' | 'email';
   apiBaseUrl?: string;
   title?: string;
   metadata?: {
@@ -47,13 +47,12 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
   const [currentUrl, setCurrentUrl] = useState<string | null>(screenshotUrl || null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [fallbackAttempted, setFallbackAttempted] = useState<boolean>(false);
+  const [fallbackStage, setFallbackStage] = useState<number>(0); // 0: initial, 1: signed_url, 2: proxy_stream, 3: failed
 
   const fetchSignedUrl = useCallback(
-    async (appId: string, proofKind: 'web' | 'failed' | 'email', jobUrl?: string) => {
+    async (appId: string, proofKind: 'web' | 'failed' | 'dryrun' | 'email', jobUrl?: string) => {
       setIsLoading(true);
       setErrorMessage(null);
-      setFallbackAttempted(true);
 
       try {
         const query = new URLSearchParams({ kind: proofKind });
@@ -73,14 +72,22 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
         const data = await res.json();
         if (data.url) {
           setCurrentUrl(data.url);
+          setFallbackStage(1);
+          setIsLoading(false);
+          return true;
         } else {
           throw new Error('No signed proof URL returned by server.');
         }
       } catch (err: any) {
-        console.warn(`[ProofViewer] Failed to fetch signed proof URL for ${appId}:`, err);
-        setErrorMessage(err.message || 'Failed to load proof screenshot');
-      } finally {
+        console.warn(`[ProofViewer] Failed to fetch signed proof URL for ${appId}, switching to proxy stream:`, err);
+        // Fallback to proxy stream directly
+        const query = new URLSearchParams({ kind: proofKind });
+        if (jobUrl) query.set('jobUrl', jobUrl);
+        const proxyUrl = `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/proof-image?${query.toString()}`;
+        setCurrentUrl(proxyUrl);
+        setFallbackStage(2);
         setIsLoading(false);
+        return false;
       }
     },
     [apiBaseUrl]
@@ -105,47 +112,28 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    let isSubscribed = true;
-
     if (!isOpen) {
       setIsLoading(false);
       setErrorMessage(null);
-      setFallbackAttempted(false);
-      return () => {
-        isSubscribed = false;
-      };
+      setFallbackStage(0);
+      return;
     }
 
     const targetAppId = applicationId || metadata?.applicationId || metadata?.applywizzId;
     const statusStr = String(metadata?.status || '').toUpperCase();
-    const effectiveKind: 'web' | 'failed' | 'email' =
-      kind || (statusStr === 'FAILED' ? 'failed' : 'web');
+    const effectiveKind: 'web' | 'failed' | 'dryrun' | 'email' =
+      kind || (statusStr === 'FAILED' ? 'failed' : title?.includes('Dry-Run') ? 'dryrun' : 'web');
 
     if (screenshotUrl) {
       setCurrentUrl(screenshotUrl);
-      setFallbackAttempted(false);
+      setFallbackStage(0);
       setErrorMessage(null);
-
-      fetch(screenshotUrl, { method: 'HEAD' })
-        .then((res) => {
-          if (!isSubscribed) return;
-          if (res.status === 403 || res.status === 404) {
-            if (targetAppId) {
-              fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
-            }
-          }
-        })
-        .catch(() => {
-          // Ignore CORS / network errors on HEAD probe
-        });
+      setIsLoading(false);
     } else if (targetAppId) {
       setCurrentUrl(null);
+      setFallbackStage(1);
       fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
     }
-
-    return () => {
-      isSubscribed = false;
-    };
   }, [
     isOpen,
     screenshotUrl,
@@ -153,6 +141,7 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
     metadata?.applicationId,
     metadata?.applywizzId,
     kind,
+    title,
     metadata?.status,
     metadata?.jobUrl,
     fetchSignedUrl,
@@ -161,13 +150,29 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
   const handleImageError = () => {
     const targetAppId = applicationId || metadata?.applicationId || metadata?.applywizzId;
     const statusStr = String(metadata?.status || '').toUpperCase();
-    const effectiveKind: 'web' | 'failed' | 'email' =
-      kind || (statusStr === 'FAILED' ? 'failed' : 'web');
+    const effectiveKind: 'web' | 'failed' | 'dryrun' | 'email' =
+      kind || (statusStr === 'FAILED' ? 'failed' : title?.includes('Dry-Run') ? 'dryrun' : 'web');
 
-    if (targetAppId && !fallbackAttempted) {
+    if (!targetAppId) {
+      setErrorMessage('Proof screenshot could not be loaded (no application ID available).');
+      return;
+    }
+
+    if (fallbackStage === 0) {
+      // The initial screenshotUrl failed (likely expired). Fetch fresh signed URL.
+      setFallbackStage(1);
       fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
+    } else if (fallbackStage === 1) {
+      // The signed URL failed to load. Fall back to backend streaming proxy.
+      const query = new URLSearchParams({ kind: effectiveKind });
+      if (metadata?.jobUrl) query.set('jobUrl', metadata.jobUrl);
+      const proxyUrl = `${apiBaseUrl}/api/applications/${encodeURIComponent(targetAppId)}/proof-image?${query.toString()}`;
+      setCurrentUrl(proxyUrl);
+      setFallbackStage(2);
     } else {
-      setErrorMessage('Proof screenshot could not be loaded.');
+      // Both signed URL and proxy stream failed.
+      setFallbackStage(3);
+      setErrorMessage('Proof screenshot could not be loaded from storage.');
     }
   };
 
@@ -300,7 +305,10 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
                   onClick={() => {
                     const targetAppId = applicationId || metadata?.applicationId || metadata?.applywizzId;
                     const statusStr = String(metadata?.status || '').toUpperCase();
-                    const effectiveKind = kind || (statusStr === 'FAILED' ? 'failed' : 'web');
+                    const effectiveKind: 'web' | 'failed' | 'dryrun' | 'email' =
+                      kind || (statusStr === 'FAILED' ? 'failed' : title?.includes('Dry-Run') ? 'dryrun' : 'web');
+                    setErrorMessage(null);
+                    setFallbackStage(1);
                     if (targetAppId) fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
                   }}
                   className="mt-4 px-3 py-1.5 text-xs font-bold text-[#1A1A2E] bg-[#FFF5EB] hover:bg-[#FFE8D6] border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E]"

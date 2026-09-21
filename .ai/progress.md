@@ -4,6 +4,12 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### Proof Image Rendering & Viewer Resilience (2026-09-21)
+- [x] **Candidate Job Proof Hydration:** Added `hydrateApplicationProofUrls(row)` to `GET /api/candidates/:applywizzId/jobs/*` so operators always receive fresh valid signed URLs up front.
+- [x] **Dual-Lookup & Resilient Proof URL Renewal:** Updated `GET /api/applications/:id/proof-url` and `GET /api/applications/:id/proof` to support UUID and candidate ApplyWizz ID + `jobUrl` composite lookup.
+- [x] **Server-Side Streaming Proxy (`/api/applications/:id/proof-image`):** Added a first-party binary image streaming proxy with service-role access that bypasses external storage token expiration and CORS restrictions.
+- [x] **Multi-Stage Progressive Fallback in ProofViewer:** Updated `dashboard/components/ProofViewer.tsx` and `dashboard/public/operator-app.jsx` with progressive fallback (`initial signed URL` → `refreshed signed URL` → `proxy stream`) and passed `applicationId` and `kind` across `FormRenderer`, `SubmissionControls`, and `JobQueueView`. Eliminated infinite retry loops.
+
 ### Stat & Flow Inconsistencies Fixes (P0, P1, P2 — 2026-09-21)
 - [x] **P0-1 (Ownership check NULL-safe & case-insensitive):** Ownership checks across `applications.ts` and `submissions.ts` allow submission when `assigned_ca_email` is NULL or undefined (open pool), and perform case-insensitive normalized email comparison.
 - [x] **P0-2 (HTTP 403 user-facing error & status safety):** FormRenderer displays visible error banner on 403 ("Access denied — this application is not assigned to you") and prevents local status from transitioning to `QUEUED`.
