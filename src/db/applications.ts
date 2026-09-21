@@ -118,7 +118,8 @@ export function getISTDateRangeUtc(dateStr: string): { startIso: string; endIso:
 
 export async function countCompletedApplicationsSince(
   startIso: string,
-  assignedCaEmails?: string[]
+  assignedCaEmails?: string[],
+  endIso?: string | null
 ): Promise<number> {
   if (!isSupabaseConfigured()) return 0;
   const emails = assignedCaEmails?.map((email) => email.trim().toLowerCase()).filter(Boolean);
@@ -130,6 +131,7 @@ export async function countCompletedApplicationsSince(
       .select('id', { count: 'exact', head: true })
       .in('status', [...COMPLETED_STATUSES])
       .gte('updated_at', startIso);
+    if (endIso) query = query.lte('updated_at', endIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
@@ -145,7 +147,8 @@ export async function countCompletedApplicationsSince(
 
 export async function countAppliedApplicationsSince(
   since?: string,
-  assignedCaEmails?: string[]
+  assignedCaEmails?: string[],
+  endIso?: string | null
 ): Promise<number> {
   if (!isSupabaseConfigured()) return 0;
   const emails = assignedCaEmails?.map((email) => email.trim().toLowerCase()).filter(Boolean);
@@ -157,6 +160,7 @@ export async function countAppliedApplicationsSince(
       .select('id', { count: 'exact', head: true })
       .eq('status', 'APPLIED');
     if (since) query = query.gte('updated_at', since);
+    if (endIso) query = query.lte('updated_at', endIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {

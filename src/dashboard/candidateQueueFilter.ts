@@ -82,6 +82,9 @@ type ResolvedFieldLike = {
 export const OPERATOR_SUBMITTABLE_APPLICATION_STATUSES = new Set([
   'READY_FOR_REVIEW',
   'APPROVED',
+  'DRY_RUN_COMPLETE',
+  'FAILED',
+  'EMAIL_UNVERIFIED',
   'QUEUED',
   'APPLYING',
   'APPLIED',

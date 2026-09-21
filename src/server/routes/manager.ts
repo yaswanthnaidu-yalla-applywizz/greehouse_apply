@@ -11,8 +11,6 @@ import {
   applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
   countCompletedApplicationsSince,
-  countCompletedApplicationsByOperatorSince,
-  countAppliedApplicationsByOperatorSince,
   listApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
@@ -316,14 +314,6 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
     const managerEmail = managerEmailForRequest(req);
     const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
     const unrestricted = hasUnrestrictedDashboardAccess(role);
-    const completedByOperator = await countCompletedApplicationsByOperatorSince(
-      getISTDateRangeUtc(getISTDateString()).startIso,
-      unrestricted ? undefined : await listOperatorEmailsForManager(managerEmail)
-    );
-    const appliedByOperator = await countAppliedApplicationsByOperatorSince(
-      getISTDateRangeUtc(getISTDateString()).startIso,
-      unrestricted ? undefined : await listOperatorEmailsForManager(managerEmail)
-    );
     const dashboard = await loadClientDashboard({
       managerEmail,
       date,
@@ -360,7 +350,7 @@ const operators = new Map<
        { email: string; name: string; applications: number; completed: number; applied: number; pending: number; failed: number }
      >();
     for (const row of dashboard.rows) {
-      const email = row.assignedToEmail || '';
+       const email = (row.assignedToEmail || '').trim().toLowerCase();
       if (!email) continue;
 const current = operators.get(email) || {
        email,
@@ -416,15 +406,13 @@ operators.set(email, {
 const items = Array.from(operators.values()).map((operator) => {
        const user = byEmail.get(operator.email);
        const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
-       const completed = completedByOperator.get(operator.email) || 0;
-       const applied = appliedByOperator.get(operator.email) || 0;
        return {
          email: operator.email,
          name: operator.name,
          status: active ? 'active' : 'inactive',
          applications: operator.applications,
-         completed,
-         applied,
+         completed: operator.completed,
+         applied: operator.applied,
          pending: operator.pending,
          failed: operator.failed,
          lastSignInAt: user?.lastSignInAt || null,
@@ -459,9 +447,16 @@ managerRouter.get('/activity', async (req: Request, res: Response): Promise<void
       res.json({ events: [], warning: scoped.warning || 'No clients linked to this manager.' });
       return;
     }
+    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
+    }
     const listed = await listApplicationEvents({
       applywizzIds: scoped.ids || undefined,
       limit,
+      startIso: parsedRange.startIso,
+      endIso: parsedRange.endIso,
     });
     const events = await enrichApplicationEventsForActivity(listed.events);
     res.json({
@@ -532,38 +527,14 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
       Array.from(operatorMap.entries())
         .sort((a, b) => b[1] - a[1])
         .map(async ([email, applications]) => {
-          const [appsRes, completed, approvedRes] = await Promise.all([
-            getDbClient()
-              .from('gh_candidate_applications')
-              .select('*', { count: 'exact', head: true })
-              .eq('assigned_ca_email', email),
-            countCompletedApplicationsSince(startIso, [email]),
-            getDbClient()
-              .from('gh_candidate_applications')
-              .select('*', { count: 'exact', head: true })
-              .in('status', [
-                'QUEUED',
-                'APPLYING',
-                'APPLIED',
-                'EMAIL_PROOF_PENDING',
-                'EMAIL_UNVERIFIED',
-                'APPROVED',
-              ])
-              .eq('assigned_ca_email', email)
-              .gte('updated_at', startIso),
-          ]);
-          if (appsRes.error || approvedRes.error) {
-            log.warn(
-              `[Manager Router] reports counts failed for ${email}: ${appsRes.error?.message || approvedRes.error?.message}`
-            );
-          }
+          const completed = await countCompletedApplicationsSince(startIso, [email]);
           return {
             email,
             name: names.get(email) || email.split('@')[0],
             applications,
-            apps: appsRes.count ?? 0,
+            apps: applications,
             completed,
-            approved: approvedRes.count ?? 0,
+            approved: completed,
           };
         })
     );

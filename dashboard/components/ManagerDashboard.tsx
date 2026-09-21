@@ -361,6 +361,7 @@ export const ManagerDashboard: React.FC = () => {
   const [appliedOperator, setAppliedOperator] = useState<AppliedOperatorData | null>(null);
   const [operators, setOperators] = useState<ManagerOperatorItem[]>([]);
   const [operatorTotals, setOperatorTotals] = useState<{ assigned?: number; completed?: number }>({});
+  const [operatorError, setOperatorError] = useState<string>('');
   const [activity, setActivity] = useState<ManagerActivityItem[]>([]);
   const [activityWarning, setActivityWarning] = useState<string>('');
   const [reports, setReports] = useState<ReportsPayload>({ buckets: [], perOperator: [] });
@@ -418,26 +419,32 @@ export const ManagerDashboard: React.FC = () => {
 
   const loadOperators = useCallback(async () => {
     if (!token || !isAuthorized) return;
-    const opParams = dateQuery ? `?${dateQuery}` : '';
-    const res = await apiFetch(`/api/manager/operators${opParams}`);
+    const opParams = dateQuery || `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`;
+    const res = await apiFetch(`/api/manager/operators?${opParams}`);
     const payload: unknown = await res.json();
     if (res.ok) {
       const data = payload as { operators?: ManagerOperatorItem[]; totals?: { assigned?: number; completed?: number } };
       setOperators(data.operators || []);
       setOperatorTotals(data.totals || {});
+      setOperatorError('');
+    } else {
+      setOperatorError(payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+        ? payload.error
+        : 'Unable to load manager operators.');
     }
-  }, [token, isAuthorized, dateQuery]);
+  }, [token, isAuthorized, dateQuery, customFrom, customTo]);
 
   const loadActivity = useCallback(async () => {
     if (!token || !isAuthorized) return;
-    const res = await apiFetch('/api/manager/activity?limit=100');
+    const range = dateQuery || `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`;
+    const res = await apiFetch(`/api/manager/activity?limit=100&${range}`);
     const payload: unknown = await res.json();
     if (res.ok) {
       const data = payload as { events?: ManagerActivityItem[]; warning?: string };
       setActivity(data.events || []);
       setActivityWarning(data.warning || '');
     }
-  }, [token, isAuthorized]);
+  }, [token, isAuthorized, dateQuery, customFrom, customTo]);
 
   const loadReports = useCallback(async () => {
     if (!token || !isAuthorized) return;
@@ -671,6 +678,7 @@ export const ManagerDashboard: React.FC = () => {
           ))}
         </nav>
         {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
+        {operatorError && tab === 'operators' && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{operatorError}</div>}
         {warning && <div className="mb-4 bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">{warning}</div>}
         {loading && <p className="text-xs font-mono font-bold mb-4">Loading…</p>}
 

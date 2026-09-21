@@ -137,3 +137,8 @@
 2026-09-21 10:18:30 checkpoint: Fixed production crash caused by required JWT_SECRET env var. Added safe fallback default + warning log, and added server boot smoke check to CI build workflow.
 2026-09-21 deliverable flush: logged and actioned observation 0022; TSX port of dashboards and JWT_SECRET boot fix verified and ready for push
 2026-09-21 deliverable flush: resolved Cannot GET / on gh.applywizz.ai by removing INGEST_ONLY=true from greehouse_apply service on Railway and configuring ALLOWED_ORIGINS; logged observation 0023
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 session-start scan: task-observer skill unavailable through runtime; manual protocol read; no observations
+2026-09-21 session-end: operator dashboard now shows identity and unresolved questions; no observations
+2026-09-21 session-end: manager Operators aggregation aligned with Home; Activity date-scoped; Reports Assigned period-scoped; focused dashboard tests pass; no new observations

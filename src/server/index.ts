@@ -55,7 +55,6 @@ import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHyd
 import {
   cacheApplicationLocally,
   applyCreatedAtRangeFilter,
-  getISTDateRangeUtc,
   getSubmissionOutcomeCounts,
   getDashboardApplicationMetrics,
   countCompletedApplicationsSince,
@@ -69,7 +68,6 @@ import {
   type ApplicationRow,
   type CandidateQueueStatus,
 } from '../db/applications.js';
-import { getISTDateString } from '../services/workHistoryClient.js';
 import {
   istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
@@ -751,7 +749,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
     const authReq = req as AuthenticatedRequest;
-    const todayRange = getISTDateRangeUtc(getISTDateString());
     const userEmail = getAuthenticatedCaEmail(authReq);
     const role = resolveRequestAppRole(authReq, userEmail);
     const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(authReq);
@@ -794,10 +791,19 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const [outcomes, completed, applied] = await Promise.all([
       getSubmissionOutcomeCounts({
+        createdAtRange,
         allowedCandidateIds,
       }),
-      countCompletedApplicationsSince(todayRange.startIso, unrestricted ? undefined : submittedOperatorEmails),
-      countAppliedApplicationsSince(undefined, unrestricted ? undefined : submittedOperatorEmails),
+      countCompletedApplicationsSince(
+        createdAtRange.startIso,
+        unrestricted ? undefined : submittedOperatorEmails,
+        createdAtRange.endIso
+      ),
+      countAppliedApplicationsSince(
+        createdAtRange.startIso,
+        unrestricted ? undefined : submittedOperatorEmails,
+        createdAtRange.endIso
+      ),
     ]);
     const metrics = await getDashboardApplicationMetrics({
       createdAtRange,
