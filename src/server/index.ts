@@ -59,7 +59,7 @@ import {
   applyCreatedAtRangeFilter,
   getSubmissionOutcomeCounts,
   getDashboardApplicationMetrics,
-  countCompletedApplicationsSince,
+  countSubmittedApplicationsSince,
   countAppliedApplicationsSince,
   getApplication,
   upsertApplication,
@@ -178,7 +178,7 @@ function applyApplicationAggregatesToSummaries(
 export interface DashboardStats {
   totalCandidates: number;
   totalApplications: number;
-  completed: number;
+  submitted: number;
   applied: number;
   failed: number;
   dateRange?: {
@@ -757,13 +757,41 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   });
   app.use('/api/dev', ...devApiGuard, devDashboardRouter);
 
-  // Internal cross-service WebSocket broadcast receiver (no auth required from loopback/internal)
-  app.post('/api/internal/ws-broadcast', (req: Request, res: Response): void => {
+  function validateInternalSecret(req: Request, res: Response, next: NextFunction): void {
+    const secret = process.env.INTERNAL_API_SECRET;
+    if (!secret) {
+      if (process.env.NODE_ENV === 'production') {
+        res.status(401).json({ success: false, error: 'Unauthorized: INTERNAL_API_SECRET is required' });
+        return;
+      }
+      return next();
+    }
+    const provided = req.headers['x-internal-secret'];
+    if (!provided || typeof provided !== 'string') {
+      res.status(401).json({ success: false, error: 'Unauthorized: missing or invalid x-internal-secret header' });
+      return;
+    }
+    try {
+      const bufA = Buffer.from(provided);
+      const bufB = Buffer.from(secret);
+      if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+        res.status(401).json({ success: false, error: 'Unauthorized: secret mismatch' });
+        return;
+      }
+    } catch {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+    next();
+  }
+
+  // Internal cross-service WebSocket broadcast receiver
+  app.post('/api/internal/ws-broadcast', validateInternalSecret, (req: Request, res: Response): void => {
     const ip = req.ip || req.socket.remoteAddress || '';
     const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip.includes('127.0.0.1');
     const isPublic = Boolean(req.headers['x-forwarded-for']);
 
-    if (isPublic && !isLoopback) {
+    if (isPublic && !isLoopback && !req.headers['x-internal-secret']) {
       const role = (req as any).user?.role;
       if (role !== 'admin' && role !== 'dev') {
         res.status(403).json({ success: false, error: 'Internal or admin access only' });
@@ -781,7 +809,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   });
 
   if (process.env.ENABLE_QUEUE_WORKER === 'true') {
-    app.post('/api/internal/applications/:id/submit-otp', async (req: Request, res: Response): Promise<void> => {
+    app.post('/api/internal/applications/:id/submit-otp', validateInternalSecret, async (req: Request, res: Response): Promise<void> => {
       const rawId = req.params.id;
       const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
       const otp = req.body?.otp;
@@ -801,7 +829,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     });
 
-    app.post('/api/internal/applications/:id/resume-submission', async (req: Request, res: Response): Promise<void> => {
+    app.post('/api/internal/applications/:id/resume-submission', validateInternalSecret, async (req: Request, res: Response): Promise<void> => {
       const rawId = req.params.id;
       const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
       try {
@@ -813,7 +841,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     });
 
-    app.get('/api/internal/worker-status', (_req: Request, res: Response): void => {
+    app.get('/api/internal/worker-status', validateInternalSecret, (_req: Request, res: Response): void => {
       const daemon = getQueueDaemon();
       if (daemon) {
         res.json(daemon.getSnapshot());
@@ -902,12 +930,12 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    const [outcomes, completed, applied] = await Promise.all([
+    const [outcomes, submitted, applied] = await Promise.all([
       getSubmissionOutcomeCounts({
         createdAtRange,
         allowedCandidateIds,
       }),
-      countCompletedApplicationsSince(
+      countSubmittedApplicationsSince(
         createdAtRange.startIso,
         unrestricted ? undefined : submittedOperatorEmails,
         createdAtRange.endIso
@@ -926,7 +954,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const stats: DashboardStats = {
       totalCandidates: metrics.totalCandidates,
       totalApplications: metrics.totalApplications,
-      completed,
+      submitted,
       applied,
       failed: outcomes.failedApplications,
       dateRange: serializeDateRange(parsedRange),

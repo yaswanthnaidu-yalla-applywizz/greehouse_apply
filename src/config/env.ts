@@ -190,6 +190,9 @@ const envSchema = z.object({
 
   /** Service 1 Railway private URL for cross-service events and callbacks */
   WEB_SERVICE_URL: z.string().optional(),
+
+  /** Shared secret for inter-service internal worker routes (/api/internal/*) */
+  INTERNAL_API_SECRET: z.string().optional(),
 });
 
 /**

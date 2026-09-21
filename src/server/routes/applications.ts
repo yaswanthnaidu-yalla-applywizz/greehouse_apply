@@ -152,7 +152,14 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
     const userRole = String((req as any).user?.role || '').trim().toLowerCase();
     const isAdmin = ['admin', 'dev'].includes(userRole);
     const isOperator = userRole === 'operator' || userRole === 'ca';
-    if (!isAdmin && !isOperator && (req as any).user && application.assigned_ca_email?.trim().toLowerCase() !== String((req as any).user.email || '').trim().toLowerCase()) {
+    if (
+      !isAdmin &&
+      !isOperator &&
+      (req as any).user &&
+      application.assigned_ca_email !== null &&
+      application.assigned_ca_email !== undefined &&
+      application.assigned_ca_email.trim().toLowerCase() !== String((req as any).user.email || '').trim().toLowerCase()
+    ) {
       res.status(403).json({ error: 'Access denied' });
       return;
     }
@@ -308,7 +315,13 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
 
     if (application) {
       const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
-      if (!isAdmin && (req as any).user && application.assigned_ca_email !== (req as any).user.email) {
+      if (
+        !isAdmin &&
+        (req as any).user?.email &&
+        application.assigned_ca_email !== null &&
+        application.assigned_ca_email !== undefined &&
+        application.assigned_ca_email.trim().toLowerCase() !== String((req as any).user.email).trim().toLowerCase()
+      ) {
         res.status(403).json({ error: 'Access denied' });
         return;
       }
@@ -509,7 +522,13 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
 
     if (application) {
       const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
-      if (!isAdmin && (req as any).user && application.assigned_ca_email !== (req as any).user.email) {
+      if (
+        !isAdmin &&
+        (req as any).user?.email &&
+        application.assigned_ca_email !== null &&
+        application.assigned_ca_email !== undefined &&
+        application.assigned_ca_email.trim().toLowerCase() !== String((req as any).user.email).trim().toLowerCase()
+      ) {
         res.status(403).json({ error: 'Access denied' });
         return;
       }
@@ -769,7 +788,13 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
     }
 
     const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
-    if (!isAdmin && (req as any).user && app.assigned_ca_email !== (req as any).user.email) {
+    if (
+      !isAdmin &&
+      (req as any).user &&
+      app.assigned_ca_email !== null &&
+      app.assigned_ca_email !== undefined &&
+      app.assigned_ca_email.trim().toLowerCase() !== String((req as any).user.email).trim().toLowerCase()
+    ) {
       res.status(403).json({ error: 'Access denied' });
       return;
     }

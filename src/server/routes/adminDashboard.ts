@@ -6,7 +6,7 @@ import { Router, type Request, type Response } from 'express';
 import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
-  countCompletedApplicationsSince,
+  countSubmittedApplicationsSince,
   getDashboardApplicationMetrics,
   getISTDateRangeUtc,
   type ApplicationStatus,
@@ -65,33 +65,36 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
     const operators = directory.filter((user) => user.role === 'operator');
     const activeOperators = operators.filter((user) => isActiveWithin(user.lastSignInAt));
 
-    const [applied, queued, applying, failed, completed, metrics, audit] = await Promise.all([
+    const [applied, queued, applying, failedCount, timeoutCount, submitted, metrics, audit] = await Promise.all([
       countApplicationsByStatus('APPLIED'),
       countApplicationsByStatus('QUEUED'),
       countApplicationsByStatus('APPLYING'),
       countApplicationsByStatus('FAILED'),
-      countCompletedApplicationsSince(todayStart),
+      countApplicationsByStatus('CAPTCHA_TIMEOUT'),
+      countSubmittedApplicationsSince(todayStart),
       getDashboardApplicationMetrics(),
       listAuditEvents({ limit: 15 }),
     ]);
+
+    const totalFields = metrics.totalFieldsPopulated ?? 0;
 
     res.json({
       operators: operators.length,
       activeOperators: activeOperators.length,
       inactiveOperators: Math.max(0, operators.length - activeOperators.length),
-      completed,
+      submitted,
       applied,
       running: applying,
       queued,
-      failed,
-      supabasePercent: metrics.totalFieldsPopulated
-        ? Number(((metrics.supabaseTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
+      failed: failedCount + timeoutCount,
+      supabasePercent: totalFields > 0
+        ? Math.round((metrics.supabaseTaggedCount / totalFields) * 100)
         : 0,
-      aiPercent: metrics.totalFieldsPopulated
-        ? Number(((metrics.aiTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
+      aiPercent: totalFields > 0
+        ? Math.round((metrics.aiTaggedCount / totalFields) * 100)
         : 0,
-      resumePercent: metrics.totalFieldsPopulated
-        ? Number(((metrics.resumeTaggedCount / metrics.totalFieldsPopulated) * 100).toFixed(1))
+      resumePercent: totalFields > 0
+        ? Math.round((metrics.resumeTaggedCount / totalFields) * 100)
         : 0,
       recentActivity: audit.events,
       warning: audit.warning,
