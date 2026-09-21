@@ -8,6 +8,18 @@ _Last updated: 2026-09-21_
 
 ## Current Focus
 
+### 0j. Stat & Flow Inconsistencies Hardening (P0, P1, P2 — 2026-09-21)
+- **P0-1:** Ownership checks across `applications.ts` and `submissions.ts` are NULL-safe (unassigned applications belong to the open pool and can be submitted by any operator) and perform case-insensitive comparison.
+- **P0-2:** Submission 403 displays visible error banner in `operator-app.jsx` and never sets status to `QUEUED`.
+- **P0-3:** `DRY_RUN_COMPLETE` retains `Approve & Submit` and action buttons in `operator-app.jsx`.
+- **P0-4:** Internal worker routes (`/api/internal/*`) enforce `INTERNAL_API_SECRET` validation via `validateInternalSecret` middleware.
+- **P0-5:** `OTP_REQUIRED` and `CAPTCHA_REQUIRED` render dedicated status badges and action panels rather than remapping to `APPLYING`.
+- **P1-1:** Standardized canonical status counts across backend and all dashboards (`AdminDashboard.tsx`, `ManagerDashboard.tsx`, `DevDashboard.tsx`, `operator-app.jsx`, and HTML shells). Replaced UI labels "Completed" with "Submitted".
+- **P1-2 & P1-3:** Used `submitted_at` for applied metrics; manager and dev dashboards honor requested date ranges.
+- **P1-4:** Added divide-by-zero guards on resolution source percentages in Admin overview.
+- **P2-1 & P2-2:** Added dedicated `EMAIL_PROOF_PENDING` badge and retry action; enhanced blocked panel with specific guidance for `SKIPPED`, `EXPIRED`, `CAPTCHA_TIMEOUT`, `OTP_REQUIRED`, `CAPTCHA_REQUIRED`.
+- **P2-3:** Cleaned non-Greenhouse jobs in Supabase (`READY_FOR_REVIEW` → `SKIPPED`).
+
 ### 0i. Submission Flow & Cross-Service Hardening (shipped 2026-09-21)
 - **CA Email Pipeline Step & Backfill (`applywizzClient.ts`, `profiles.ts`, `pipeline.ts`, `answerResolver.ts`):** 
   - Added `fetchCaEmailForApplywizzId` and `fetchCaBatchEmailMap` to resolve candidate `careerassociateid` to `ca_email` via CA Management work-history API (`/api/ca/work-history`).

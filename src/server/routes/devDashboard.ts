@@ -8,7 +8,7 @@ import {
   getISTDateRangeUtc,
   hydrateApplicationProofUrls,
   listApplications,
-  countCompletedApplicationsSince,
+  countSubmittedApplicationsSince,
   countAppliedApplicationsSince,
   countApplicationsByStatus,
 } from '../../db/applications.js';
@@ -108,23 +108,26 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
       startIso,
       endIso,
     });
-    const [completedMonth, completedToday, applied, failed, queued] = await Promise.all([
-      countCompletedApplicationsSince(monthStart),
-      countCompletedApplicationsSince(todayStart),
-      countAppliedApplicationsSince(),
+    const [submittedMonth, submittedToday, applied, failedCount, timeoutCount, queued, pending] = await Promise.all([
+      countSubmittedApplicationsSince(monthStart),
+      countSubmittedApplicationsSince(todayStart),
+      countAppliedApplicationsSince(startIso, undefined, endIso),
       countApplicationsByStatus('FAILED'),
+      countApplicationsByStatus('CAPTCHA_TIMEOUT'),
       countApplicationsByStatus('QUEUED'),
+      countApplicationsByStatus('READY_FOR_REVIEW'),
     ]);
     res.json({
       ...(await collectHealthSnapshot()),
       submitClicks,
       submitClicksDate: date,
-      submitted_today: completedToday,
-      completedMonth,
-      completedToday,
+      submitted_today: submittedToday,
+      submittedMonth,
+      submittedToday,
       applied,
-      failed,
+      failed: failedCount + timeoutCount,
       queued,
+      pending,
     });
   } catch (error) {
     log.error('[Dev] health failed:', error);

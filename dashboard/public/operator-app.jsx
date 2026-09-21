@@ -143,7 +143,19 @@
             </span>
           );
         case 'CAPTCHA_REQUIRED':
+          return (
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FEF08A] text-[#854D0E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Manual CAPTCHA challenge requires operator intervention">
+              <span>🤖</span>
+              <span>CAPTCHA Required</span>
+            </span>
+          );
         case 'OTP_REQUIRED':
+          return (
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Candidate email verification code required">
+              <span>🔑</span>
+              <span>OTP Required</span>
+            </span>
+          );
         case 'APPLYING':
           return (
             <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Automated submission in progress">
@@ -380,12 +392,17 @@
         }
       };
 
-      const canSubmit = !hasUnresolved && !isApplying && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'APPROVED');
+      const isEmailProofPending = applicationStatus === 'EMAIL_PROOF_PENDING';
+      const canSubmit = !hasUnresolved && !isApplying && (
+        applicationStatus === 'READY_FOR_REVIEW' ||
+        applicationStatus === 'APPROVED' ||
+        applicationStatus === 'DRY_RUN_COMPLETE'
+      );
       const canDryRun = !isApplying && !isDryRunning && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'APPROVED');
       const hideSubmissionActions = applicationStatus === 'APPLIED' ||
-        applicationStatus === 'DRY_RUN_COMPLETE' ||
         applicationStatus === 'EMAIL_UNVERIFIED' ||
-        applicationStatus === 'FAILED';
+        applicationStatus === 'FAILED' ||
+        applicationStatus === 'EMAIL_PROOF_PENDING';
 
       return (
         <>
@@ -499,6 +516,13 @@
             </button>
           )}
 
+          {isEmailProofPending && (
+            <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] animate-pulse">
+              <span className="w-2.5 h-2.5 rounded-full border-2 border-[#0369A1] border-t-transparent animate-spin"></span>
+              <span>Waiting for email proof</span>
+            </div>
+          )}
+
           {(proofUrl || isApplied || isEmailUnverified) && (
             <button
               type="button"
@@ -516,8 +540,8 @@
             </button>
           )}
 
-          {/* Get Email SS Button (Manual retry when web proof is present but email proof is missing) */}
-          {(proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl) && (
+          {/* Get Email SS Button (Manual retry when web proof is present or email proof is pending, but email proof is missing) */}
+          {(isEmailProofPending || proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl) && (
             <button
               type="button"
               onClick={handleCaptureEmailProof}
@@ -533,7 +557,7 @@
               ) : (
                 <>
                   <span>📥</span>
-                  <span>Fetch email proof</span>
+                  <span>Get email screenshot</span>
                 </>
               )}
             </button>
@@ -1638,6 +1662,7 @@
       const [isDryRunning, setIsDryRunning] = useState(false);
       const [isRetrying, setIsRetrying] = useState(false);
       const [retryError, setRetryError] = useState('');
+      const [submitError, setSubmitError] = useState('');
       const [viewerOpen, setViewerOpen] = useState(false);
       const [viewerImageUrl, setViewerImageUrl] = useState(null);
       const [viewerTitle, setViewerTitle] = useState('Application Proof');
@@ -1667,6 +1692,7 @@
       useEffect(() => {
         setCarouselIndex(0);
         setApprovedFieldIds(getStoredApprovals(storageKey));
+        setSubmitError('');
       }, [appId, jobUrl, storageKey]);
 
       const saveApprovedFields = (nextSet) => {
@@ -1726,11 +1752,7 @@
         currentStatus === 'OTP_REQUIRED' ||
         currentStatus === 'CAPTCHA_REQUIRED' ||
         currentStatus === 'EMAIL_PROOF_PENDING';
-      const badgeStatus =
-        currentStatus === 'OTP_REQUIRED' ||
-        currentStatus === 'CAPTCHA_REQUIRED'
-          ? 'APPLYING'
-          : currentStatus;
+      const badgeStatus = currentStatus;
 
       useEffect(() => {
         if (currentStatus === 'APPLIED' || currentStatus === 'FAILED' || currentStatus === 'EMAIL_UNVERIFIED') {
@@ -1881,7 +1903,7 @@
       }
 
       if (isOperatorFormPanelBlocked(currentStatus) && !isFullFormStatus) {
-        return <OperatorFormBlockedPanel application={application} />;
+        return <OperatorFormBlockedPanel application={application} onStatusChange={onStatusChange} />;
       }
 
       const handleTriggerDryRun = async () => {
@@ -1919,6 +1941,7 @@
         setCelebrationMessage(pick);
         setCelebrationOpen(true);
         setIsSubmitting(true);
+        setSubmitError('');
         try {
           const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit`, {
             method: 'POST',
@@ -1931,17 +1954,18 @@
           const data = await res.json();
 
           if (res.status === 403) {
-            if (onStatusChange) {
-              onStatusChange('QUEUED', { status: 'QUEUED', success: true }, { persist: false });
-            }
+            setSubmitError('Access denied — this application is not assigned to you');
+            setIsSubmitting(false);
             return;
           }
 
           if (!res.ok || data.status === 'FAILED') {
+            const err = data.error || data.error_message || 'Submit request failed';
+            setSubmitError(err);
             if (onStatusChange) {
               onStatusChange('FAILED', {
                 ...data,
-                error: data.error || data.error_message || 'Submit request failed',
+                error: err,
               }, { persist: false });
             }
             setIsSubmitting(false);
@@ -2045,6 +2069,22 @@
               status: currentStatus,
             }}
           />
+
+          {submitError && (
+            <div className="mb-4 p-3.5 bg-[#FEE2E2] border-2 border-[#EF4444] rounded-lg text-[#991B1B] text-xs font-bold font-mono flex items-center justify-between shadow-[2px_2px_0px_#1A1A2E]">
+              <div className="flex items-center gap-2">
+                <span>⛔</span>
+                <span>{submitError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubmitError('')}
+                className="text-[#991B1B] hover:text-[#7F1D1D] text-sm font-bold ml-2"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {currentStatus === 'APPLIED' || currentStatus === 'DRY_RUN_COMPLETE' || currentStatus === 'EMAIL_UNVERIFIED' ? (
             <div className="mb-3 bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#1A1A2E] text-[#065F46]">
@@ -2490,7 +2530,268 @@
       return 'Please contact support for assistance with this application.';
     }
 
-    function OperatorFormBlockedPanel({ application }) {
+    function OperatorFormBlockedPanel({ application, onStatusChange }) {
+      const status = (application?.status || '').toUpperCase();
+      const appId = application?.id || application?.applywizzId || application?.applywizz_id || '';
+      const jobUrl = application?.jobUrl || application?.job_url || '';
+
+      const [otpVal, setOtpVal] = useState('');
+      const [otpSubmitting, setOtpSubmitting] = useState(false);
+      const [otpError, setOtpError] = useState('');
+
+      const [captchaOpening, setCaptchaOpening] = useState(false);
+      const [captchaOpened, setCaptchaOpened] = useState(false);
+      const [captchaResuming, setCaptchaResuming] = useState(false);
+      const [captchaError, setCaptchaError] = useState('');
+
+      const [resubmitting, setResubmitting] = useState(false);
+
+      if (status === 'SKIPPED') {
+        return (
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full">
+            <p className="text-4xl mb-3">⏭️</p>
+            <p className="text-base md:text-lg font-bold text-[#1A1A2E] mb-2 leading-snug">
+              Skipped — too many fields (&gt;35)
+            </p>
+            <p className="text-xs font-mono text-[#64748B] leading-relaxed">
+              This application exceeds the maximum allowed form questions and was skipped automatically.
+            </p>
+          </div>
+        );
+      }
+
+      if (status === 'EXPIRED') {
+        return (
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full">
+            <p className="text-4xl mb-3">⏳</p>
+            <p className="text-base md:text-lg font-bold text-[#1A1A2E] mb-2 leading-snug">
+              Job posting has expired
+            </p>
+            <p className="text-xs font-mono text-[#64748B] leading-relaxed">
+              This position is no longer accepting applications on Greenhouse.
+            </p>
+          </div>
+        );
+      }
+
+      if (status === 'CAPTCHA_TIMEOUT') {
+        const handleResubmit = async () => {
+          setResubmitting(true);
+          try {
+            const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ headless: true, jobUrl }),
+            });
+            const data = await res.json();
+            if (onStatusChange) onStatusChange(data.status || 'QUEUED', data);
+          } catch (e) {
+            console.error('Failed to resubmit:', e);
+          } finally {
+            setResubmitting(false);
+          }
+        };
+
+        return (
+          <div className="flex-1 p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full">
+            <p className="text-4xl mb-3">⏰</p>
+            <p className="text-base md:text-lg font-bold text-[#1A1A2E] mb-2 leading-snug">
+              CAPTCHA timed out — resubmit to retry
+            </p>
+            <p className="text-xs font-mono text-[#64748B] mb-4 leading-relaxed">
+              The CAPTCHA session expired before verification was completed.
+            </p>
+            <button
+              type="button"
+              disabled={resubmitting}
+              onClick={handleResubmit}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold text-white bg-[#059669] hover:bg-[#047857] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-mono transition-all disabled:opacity-60"
+            >
+              {resubmitting ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>Resubmitting...</span>
+                </>
+              ) : (
+                <>
+                  <span>🔄</span>
+                  <span>Resubmit Application</span>
+                </>
+              )}
+            </button>
+          </div>
+        );
+      }
+
+      if (status === 'OTP_REQUIRED') {
+        const handleOtpSubmit = async (e) => {
+          if (e) e.preventDefault();
+          if (!otpVal.trim()) {
+            setOtpError('Please enter the verification code.');
+            return;
+          }
+          setOtpSubmitting(true);
+          setOtpError('');
+          try {
+            const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/submit-otp`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ otp: otpVal.trim(), jobUrl }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.success === false) {
+              setOtpError(data.error || 'Failed to submit OTP');
+            } else {
+              if (onStatusChange) onStatusChange(data.status || 'APPLYING', data);
+            }
+          } catch (err) {
+            setOtpError(err.message || 'Network error submitting OTP');
+          } finally {
+            setOtpSubmitting(false);
+          }
+        };
+
+        return (
+          <div className="flex-1 p-8 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full">
+            <p className="text-4xl mb-3">🔑</p>
+            <p className="text-lg font-bold text-[#1A1A2E] mb-1">
+              One-Time Password (OTP) Required
+            </p>
+            <p className="text-xs font-mono text-[#64748B] mb-4">
+              Enter the verification code sent to the candidate's inbox.
+            </p>
+            <form onSubmit={handleOtpSubmit} className="w-full flex flex-col gap-3">
+              <input
+                type="text"
+                value={otpVal}
+                onChange={(e) => setOtpVal(e.target.value)}
+                placeholder="Enter 6-8 digit code..."
+                className="w-full px-4 py-2.5 rounded-lg border-2 border-[#1A1A2E] text-center font-mono text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-[#3B82F6]"
+                autoFocus
+              />
+              {otpError && (
+                <p className="text-xs text-[#DC2626] font-mono font-bold">{otpError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={otpSubmitting || !otpVal.trim()}
+                className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-mono transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {otpSubmitting ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <span>Submitting OTP...</span>
+                  </>
+                ) : (
+                  <span>Submit OTP</span>
+                )}
+              </button>
+            </form>
+          </div>
+        );
+      }
+
+      if (status === 'CAPTCHA_REQUIRED') {
+        const handleOpenCaptcha = async () => {
+          setCaptchaOpening(true);
+          setCaptchaError('');
+          try {
+            const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/open-captcha-session`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ jobUrl }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.success === false) {
+              setCaptchaError(data.error || 'Failed to open browser session');
+            } else {
+              setCaptchaOpened(true);
+            }
+          } catch (err) {
+            setCaptchaError(err.message || 'Error opening CAPTCHA session');
+          } finally {
+            setCaptchaOpening(false);
+          }
+        };
+
+        const handleResume = async () => {
+          setCaptchaResuming(true);
+          setCaptchaError('');
+          try {
+            const res = await fetch(`/api/applications/${encodeURIComponent(appId)}/resume-submission`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+              body: JSON.stringify({ jobUrl }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.success === false) {
+              setCaptchaError(data.error || 'Failed to resume submission');
+            } else {
+              if (onStatusChange) onStatusChange(data.status || 'APPLYING', data);
+            }
+          } catch (err) {
+            setCaptchaError(err.message || 'Error resuming submission');
+          } finally {
+            setCaptchaResuming(false);
+          }
+        };
+
+        return (
+          <div className="flex-1 p-8 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full">
+            <p className="text-4xl mb-3">🤖</p>
+            <p className="text-lg font-bold text-[#1A1A2E] mb-1">
+              Open browser to solve CAPTCHA
+            </p>
+            <p className="text-xs font-mono text-[#64748B] mb-5">
+              Greenhouse triggered a bot verification challenge. Open the session to solve it.
+            </p>
+            {captchaError && (
+              <p className="text-xs text-[#DC2626] font-mono font-bold mb-3">{captchaError}</p>
+            )}
+            <div className="flex flex-col gap-3 w-full">
+              <button
+                type="button"
+                disabled={captchaOpening}
+                onClick={handleOpenCaptcha}
+                className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-[#D97706] hover:bg-[#B45309] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-mono transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {captchaOpening ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <span>Opening Browser...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🌐</span>
+                    <span>Open browser to solve CAPTCHA</span>
+                  </>
+                )}
+              </button>
+              {captchaOpened && (
+                <button
+                  type="button"
+                  disabled={captchaResuming}
+                  onClick={handleResume}
+                  className="w-full py-2.5 rounded-lg text-sm font-bold text-[#1A1A2E] bg-[#6EE7B7] hover:bg-[#34D399] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-mono transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  {captchaResuming ? (
+                    <>
+                      <span className="w-3 h-3 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin"></span>
+                      <span>Resuming...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>✅</span>
+                      <span>I Solved It — Resume Submission</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      }
+
       const detail = operatorFormBlockedDetailMessage(application);
       return (
         <div className="flex-1 p-12 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full">
@@ -4162,7 +4463,7 @@
                       Submitted Today
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.completed}
+                      {stats.submitted ?? stats.completed}
                     </div>
                     <div className="text-[11px] font-mono text-[#065F46] mt-1">
                       Applications sent to queue today

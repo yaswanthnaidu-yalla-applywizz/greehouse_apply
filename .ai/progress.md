@@ -4,6 +4,20 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### Stat & Flow Inconsistencies Fixes (P0, P1, P2 — 2026-09-21)
+- [x] **P0-1 (Ownership check NULL-safe & case-insensitive):** Ownership checks across `applications.ts` and `submissions.ts` allow submission when `assigned_ca_email` is NULL or undefined (open pool), and perform case-insensitive normalized email comparison.
+- [x] **P0-2 (HTTP 403 user-facing error & status safety):** FormRenderer displays visible error banner on 403 ("Access denied — this application is not assigned to you") and prevents local status from transitioning to `QUEUED`.
+- [x] **P0-3 (DRY_RUN_COMPLETE submission actions):** Removed `DRY_RUN_COMPLETE` from `hideSubmissionActions` and included it in `canSubmit`, allowing operators to approve and submit directly after dry-run completes.
+- [x] **P0-4 (Internal worker authentication):** Added `INTERNAL_API_SECRET` to environment validation and `.env.example`, enforced constant-time secret check middleware on `/api/internal/*`, and sent `x-internal-secret` on worker proxy and internal WebSocket broadcasts.
+- [x] **P0-5 (OTP_REQUIRED & CAPTCHA_REQUIRED UI separation):** Dedicated badge status and rendering in `operator-app.jsx` (stopped remapping to `APPLYING`). Added OTP code input + submission and CAPTCHA browser resume actions.
+- [x] **P1-1 (Eliminated `completed` in favor of canonical metrics):** Standardized canonical definitions across all backend routes and frontend dashboards: `submitted = status != 'READY_FOR_REVIEW'`, `pending = status = 'READY_FOR_REVIEW'`, `applied = status = 'APPLIED'`, `failed = status IN ('FAILED', 'CAPTCHA_TIMEOUT')`. Replaced all UI labels "Completed" with "Submitted".
+- [x] **P1-2 (Correct timestamp columns):** `applied` counts use `submitted_at` instead of `updated_at`; manager dashboard date range query parameters (`parsedRange.startIso`, `parsedRange.endIso`) are strictly honored in dashboard stats and reports.
+- [x] **P1-3 (Dev health applied date-scoping):** Dev dashboard applied metric is scoped to requested date range using `submitted_at`.
+- [x] **P1-4 (Divide-by-zero guards):** Admin dashboard percentages (`supabasePercent`, `aiPercent`, `resumePercent`) guarded with ternary checks against zero denominators.
+- [x] **P2-1 (EMAIL_PROOF_PENDING UI state):** Dedicated UI badge, "Waiting for email proof" status indicator, and "Get email screenshot" action button.
+- [x] **P2-2 (Status-specific error messages in blocked panel):** Added actionable descriptions and buttons for `SKIPPED`, `EXPIRED`, `CAPTCHA_TIMEOUT`, `OTP_REQUIRED`, and `CAPTCHA_REQUIRED`.
+- [x] **P2-3 (Database cleanup):** Executed SQL cleanup on remote Supabase instance updating non-Greenhouse URLs to `SKIPPED` with `error_message = 'Non-Greenhouse job URL'`. Verified 3 rows updated and 1 demo localhost row preserved.
+
 ### CA Email Pipeline Step & Live Backfill (2026-09-21)
 - [x] Implemented `fetchCaEmailForApplywizzId` and `fetchCaBatchEmailMap` in `src/candidate/applywizzClient.ts` querying the CA Management work-history API to resolve `careerassociateid` to `ca_email`.
 - [x] Added `upsertProfileCaEmail` in `src/db/profiles.ts` to update `profiles.ca_email`.

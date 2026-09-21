@@ -147,6 +147,155 @@
 2026-09-21 session-end: created migration 020_multi_service_state.sql for multi-service shared state and backfill; no observations
 2026-09-21 session-end: migration 020 applied successfully via supabase cli linked database; no observations
 2026-09-21 session-end: multi-service shared state fixes shipped (submitterPool heartbeat every 5s, gate flag 15s TTL from system_config, internal routes proxy on ENABLE_QUEUE_WORKER=true, ingest_runs tracking, assigned_ca_email profile fallback); typecheck passed; no observations
+2026-09-14 session-start scan: files=0 parsed=0
+2026-09-15 session-end: docs updated (progress, activeContext, systemPatterns, techContext); observation 0001 logged
+2026-09-15 session-start scan: files=1 parsed=1
+2026-09-15 session-start scan: files=1 parsed=1
+2026-09-15 deliverable flush: no observations (sponsorship debug run)
+2026-09-15 deliverable flush: observation 0002 actioned (Zoho OTP gate + extractor patterns); evidence saved to skill-observations/evidence/
+2026-09-15 session-start scan: files=2 parsed=2
+2026-09-15 deliverable flush: observation 0003 logged (double-submission diagnosis contradicts prescribed fix)
+2026-09-15 deliverable flush: duplicate-submission fix shipped (route in-flight guard + pool inFlightApplicationIds); docs updated
+2026-09-15 deliverable flush: poll write-back removed (persist flag, both pollers); no new observations (0003 already covers the diagnosis finding)
+2026-09-15 deliverable flush: dashboard .tsx tree 35 -> 0 type errors (4 root causes); src typecheck clean; no new observations
+2026-09-15 deliverable flush: dashboard typecheck enforced (dashboard/tsconfig.json + chained script, positive control verified); docs updated
+2026-09-15 session end: .ai docs updated per AGENTS.md (activeContext focus/blockers/decisions, progress shipped + In Progress row, techContext commands + key files, systemPatterns submission rules)
+2026-09-15 session end: observations 0004 and 0005 logged; 0001-0003 unchanged (0001/0002 actioned today, archive tomorrow; 0003 open)
+2026-09-15 session-end catch-up: task-observer backlog — logged 0006 (Storage listBuckets credential blindness), 0007 actioned (no auto ingest trigger); prior turn updated AGENTS.md docs only without observation flush
+2026-09-15 session-start scan: files=7 parsed=7
+2026-09-15 session-start scan: files=8 parsed=8
+2026-09-15 session end: docs updated (activeContext, progress, systemPatterns, techContext); observations 0006 and 0008 actioned; uncommitted work since 37bab44 documented
+2026-09-15 session-start scan: files=8 parsed=8 (context-load session)
+2026-09-15 session-start scan: files=8 parsed=8
+2026-09-18 session-start scan: files=16 parsed=16 suspect=0 (fresh start-session; open=0003,0005,0011,0012,0013,0016 | branch patch/v2.6 @ 1a53b0c, 11 modified files uncommitted)
+
+2026-09-15 session-start scan: files=8 parsed=8
+2026-09-15 deliverable flush: observation 0006 resolution updated (prefer SERVICE_ROLE_KEY including sb_secret; empty dropzone list is failure); ingest listing no longer gates on listBuckets
+2026-09-15 session: fields_schema chain fix  no new observation
+2026-09-15 session-end: no new observations (LLM fail-closed + SMS skip shipped in 31b830e)
+2026-09-15 session-start scan: files=8 parsed=8
+2026-09-15 session-end: docs aligned to 31b830e (ingest probes, SKIPPED/014, cap 35, LLM fail-closed, hydration); 0004 and 0009 actioned; 0003+0005 remain open
+2026-09-15 session-end: docs (activeContext, progress, systemPatterns, techContext); 0002 extended (LLM fail-open); 0010 actioned (Playwright session reset); open 0003+0005; uncommitted Zoho Step logs + dashboard field filter
+2026-09-15 session-start: requireRole JWT middleware task
+2026-09-15 session-end: requireRole middleware shipped; no new observation entries
+2026-09-15 session-start scan: files=10 parsed=10
+2026-09-15 deliverable flush: 0011 logged (mechanical rewrite on dirty unrelated files); central logger chore typecheck pass
+2026-09-15 review listing (no apply): open 0003, 0005, 0011 presented; 8 actioned skipped; last-review-date left never
+2026-09-15 session-start scan: files=10 parsed=10 (AW logo session)
+2026-09-15 deliverable flush: no new observations (app logo from ChatGPT AW mark; 0003,0005,0011 remain open)
+2026-09-15 session-end: no new observations; docs (activeContext, progress, techContext); AW logo uncommitted; open 0003+0005+0011 left for later review; actioned 0001/0002/0004/0006-0010 stay until tomorrow archival
+2026-09-15 session-end: logger chore docs (activeContext, progress, systemPatterns rule 7, techContext); 0011 stays open; 0003+0005+0011 deferred to end of week (no apply, last-review-date still never)
+2026-09-15 session-start scan: files=11 parsed=11 (role dashboards impl)
+2026-09-15 checkpoint: no new observations (implemented role-based admin/manager/dev dashboards per plan; 0003/0005/0011 remain open until end of week)
+2026-09-15 session-start scan: files=11 parsed=11 (commit-and-push session)
+2026-09-15 session-end: no new observations; dashboards + logger + AW logo committed; skipped logs.1789457232530.json; open 0003+0005+0011 deferred to end of week
+2026-09-15 session-start scan: files=11 parsed=11 (015 RLS policies)
+2026-09-15 session-end: no new observations; docs synced (activeContext, progress, systemPatterns rule 5, techContext, projectbrief, AGENTS.md); 015 RLS in-repo still uncommitted vs 2d268a3; open 0003+0005+0011 deferred to end of week
+2026-09-15 session-start scan: files=11 parsed=11 (push-and-session-end)
+2026-09-15 session-end: observation 0012 logged (privilege flag is not a role); 7-day sessions + Sign Out + email-map /dev + 015 RLS shipping; open 0003+0005+0011+0012
+2026-09-15 session-start scan: files=12 parsed=12 (015 applied confirmation)
+2026-09-15: operator applied migration 015; docs (activeContext, progress, techContext, AGENTS.md); no new observations
+2026-09-15 session-end: no new observations; HEAD 7f91c59 (ApplyWizz 400 ping = reachable; 015 applied); open 0003+0005+0011+0012; actioned 0001/0002/0004/0006-0010
+2026-09-15 session-start scan: files=12 parsed=12 (ingest FK AWL-39218)
+2026-09-15 checkpoint: logged 0013 (safety-net must reuse eligibility gate); ingest FK fix not committed
+2026-09-15 session-start scan: files=13 parsed=13
+2026-09-15 session-end: no new observations; haltWithDevAlert shipped (systemic ingest halt); typecheck clean; open 0003+0005+0011+0012+0013
+2026-09-15 session-start scan: files=13 parsed=13 (ingest skip audit)
+2026-09-15 checkpoint: no observations  answered ingest scan/resolve skip behavior (no code changes)
+2026-09-15 checkpoint: shipped dev pipeline stop (pipelineAbort, admin Stop, ENABLE_PIPELINE_STOP)
+2026-09-15 session-start scan: files=13 parsed=13 suspect=0 (new-profile create failures)
+2026-09-15 session-end: logged 0014 (TS row fields need SQL columns); migration 016 + upsertProfile country retry; open 0003+0005+0011+0012+0013+0014
+2026-09-15 session-end: commit+push; 0014 actioned; excluded greenhouse_logs + logs json from commit
+2026-09-16 session-start scan: files=14 parsed=14 suspect=0 (AGENTS session start)
+2026-09-16 checkpoint: default 2-day created_at filters on dashboard APIs + operator/manager UI date labels
+2026-09-16 10:49 session: operator manager_email mapping on sign-in (auth + migration 017)
+2026-09-16 session: operator Guide tab in dashboard/public/index.html
+2026-09-16 session-start scan: files=14 parsed=14 suspect=0 (AGENTS session start)
+2026-09-16 session: role from users.role + manager X-View-As operator on candidate APIs
+2026-09-16 session: submission eligibility gate + dev toggle + ingest unfilter
+2026-09-16 session-end: admin operators manager filter + manager operator view UI shipped (c018d50); no new skill observations
+2026-09-16 session-start scan: files=14 parsed=14 suspect=0 (AGENTS session start)
+2026-09-16 session: Manager/Dev Ops mode UI + X-View-As-Manager-Email scoping; no new skill observations
+2026-09-17 session-end | Ops/operator job scope fix pushed 5b70d04 | docs activeContext+progress updated | no new observation-log entries
+2026-09-17 session-end | fix(dashboard) role/candidate hydration pushed 3b42135 | docs activeContext+progress | no new observation-log entries
+2026-09-17 session-start scan: files=14 parsed=14 suspect=0 (Shell fallback; Read denied by .cursorignore)
+2026-09-17 session-end | OVERVIEW.md four-perspective analysis | observation 0015 actioned | docs activeContext + README pointer
+2026-09-17 session-start scan: files=15 parsed=15 suspect=0 (act-mode session start; 0015 actioned, uncommitted)
+2026-09-17 session-end: paginated auth lookup + CORS/qa_bank fixes; tests/authUserLookup.test.ts
+2026-09-17 session: dashboard load perf (split operator-app, prod React, static tailwind)  no observations
+2026-09-17 session: job card status Map persistence  no observations
+2026-09-17 session: submitted-today stats scoped by role; dashboard polling and manager operator column shipped
+2026-09-17 14:28 session-start + push commit ac0caa5 (excluded cache, supabase/.temp, rules.md, skill-obs log delta)
+2026-09-17 session-start scan: files=15 parsed=15 suspect=0 (fresh start-session prompt; open=0003,0005,0011,0012,0013)
+2026-09-17 checkpoint: no observations  start-session only; user declined all suggested tasks (no task selected)
+2026-09-17 deliverable flush: logged 0016 (token presence is not shape - stats card nested, poll 3s vs spec 30s); extended 0003 (second instance: spec already implemented in ae4946b); no code changes made
+2026-09-17 deliverable flush: no observations (operator-triggered retry implemented; backend typecheck and diff check passed)
+2026-09-17 deliverable flush: operator completion toast added; no new observations
+2026-09-17 session-start scan: files=16 parsed=16 suspect=0
+2026-09-17 session-end: unresolved-field helper hints added; diff check passed; no new observations
+2026-09-17 no observations
+2026-09-17 no observations
+2026-09-18 session-start scan: observation frontmatter scanned, no suspect entries
+2026-09-18 session-end: enqueueApplication QUEUED event insert verified already present in patch tree (grep + git diff hunk + tsc pass); no duplicate added; 0003 extended with third instance
+2026-09-18 session-start scan: files=16 parsed=16
+2026-09-18 deliverable flush: added QUEUED->APPLYING application_events insert to getNextQueuedApplicationForRoundRobin (both dequeue branches, static import; tsc clean; CRLF delta 17 = exactly the added lines); logged 0017 (convention copied into different control-flow context); extended 0003 with 4th instance (positional call vs single-object signature); activeContext decision line updated
+2026-09-18 deliverable flush (2): manager.html setInterval now refreshes Activity tab when active - spec said activeTab which does not exist in the file, used tab (line 339 precedent); 1 line added, timing/deps untouched, git diff = 1 added line; extended 0003 (5th instance: nonexistent identifier); logged 0018 (verification coverage is per-surface); progress.md manager bullet updated
+2026-09-18 deliverable flush (3): manager.ts /reports perOperator now returns apps + completed + approved per spec predicates (literal); hoisted inline mapping to awaited const; +33 lines exactly as predicted, CRLF consistent, tsc clean for manager.ts; logged 0019 (field inherits sibling scope by implication - apps is all-time vs period-scoped neighbours); progress.md + activeContext open question
+2026-09-18 deliverable flush (4): manager.html reports per-operator table gained Assigned/Completed/Approved columns (spec said operator.apps; local binding is row) - 5 th / 5 td verified, td style byte-identical to existing applications cell, line count + EOL unchanged (single-line replacements), buckets table and ClientTable colSpan={6} untouched; extended 0003 with 6th instance (identifier borrowed from the adjacent layer); progress.md gotcha added for same-label-different-window across tabs + stale API-only note corrected; activeContext open question updated
+2026-09-18 findings flush (no code changed): admin.html ingest-bar request NOT implemented - literal change impossible on this surface (file is JSX-only: 0 style=" and 0 lowercase onclick; body = #root + one babel script), apiFetch does not exist anywhere (0/584 files; roleAccess.js wraps window.fetch), named insertion point already holds an equivalent status bar (lines ~307-333) with same copy + Start/Stop + 3s poller + 60s clear, and no other Start/Stop buttons exist to remove; 0003 extended with 7th instance (premise = the file technology); awaiting user decision on approach
+2026-09-18 deliverable (admin ingest bar, user chose Option A): added ids ingestStatusBar/ingestStatusText/ingestStartBtn/ingestStopBtn to the EXISTING React bar in admin.html - 4 within-line edits, lineCount 557 unchanged, CRLF unchanged, setInterval still 2 (no second poller), apiFetch still 0, no second bar; literal spec (raw HTML + inline style/onclick + apiFetch) not implementable on this JSX-only surface and its feature already existed; 0003 frontmatter context extended to instances 5-7; activeContext 0a corrected from stale Planned(not started) to actual shipped-on-Overview state; progress.md admin bullet updated
+2026-09-18T14:47:38+05:30 session-start task-observer
+2026-09-18T14:50:06+05:30 session-continue work-history date IST
+2026-09-18T14:51:10+05:30 session-continue work-history pagination
+2026-09-18T15:11:35+05:30 session-continue diagnostic stats/events/supabase
+2026-09-18 session-end: manager.html Reports per-operator Approved column replaced with clickable Applied count (open modal of applied jobs). Applied data composed client-side from GET /api/manager/dashboard (APPLIED details, hydrated proofs) over the reports window daily=14d weekly=56d monthly=180d since /reports has no applied data; AppliedModal chrome from EmailProofModal, proof rows from DetailList; EmailProofModal stacks above via render order; approved occurrences in file = 0; inline babel script compiles via esbuild jsx transform (43570 bytes); logged 0020 (one-file UI sourcing from sibling endpoint, count+list from one fetch) and 0021 (editor create EEXIST, shell fallback); progress.md manager-reports bullet updated; activeContext decision added (API still returns unused approved field)
+2026-09-19 session-start scan: files=21 parsed=21
+2026-09-19 deliverable flush: added candidate context block to batch prompt in synthesizeBatchAnswers and fuzzy post-processing fallback in finalizeLlmAnswer; tsc passed clean; no new observations
+2026-09-19 deliverable flush: created src/resolver/semanticSearch.ts with embedText, findSemanticMatch, and writeEmbedding; tsc clean; no new observations
+2026-09-19 deliverable flush: wired Tier 3 semantic search into answerResolver.ts and writeEmbedding writeback into tier5LLM.ts; tsc clean; no new observations
+2026-09-19 deliverable flush: added INGEST_ONLY mode to server (health/ingest endpoints only, no dashboards/workers) and configurable SUBMISSION_POOL_SIZE; tsc clean; no new observations
+2026-09-19 deliverable flush: added INGEST_SERVICE_URL proxy forwarding to adminDashboard.ts for trigger-ingest, stop-ingest, and ingest-status; tsc clean; no new observations
+2026-09-19 deliverable flush: updated submitterPool poolSize to parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10) and added startup logging in queueWorker; tsc clean; no new observations
+2026-09-19 deliverable flush: created dashboard/hooks/useSession.ts and ported session management & apiFetch into dashboard/App.tsx; tsc clean; no new observations
+2026-09-19 deliverable flush: ported Ops mode banner to dashboard/App.tsx with exit handler and opsMode propagation; tsc clean; no new observations
+2026-09-19 deliverable flush: updated apiFetch in dashboard/hooks/useSession.ts to check sessionStorage and inject X-View-As headers; tsc clean; no new observations
+2026-09-19 session-start scan: files=21 parsed=21
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: no observations
+2026-09-19 deliverable flush: configured Vite bundle for dashboard TSX (vite.config.ts, dashboard/index.tsx, dist/dashboard/index.html, package scripts); added DASHBOARD_MODE config and dual-serving with /fallback route in server; configured DASHBOARD_MODE=tsx on Railway service; typecheck and build pass clean; no new observations
+2026-09-19 session-start scan: files=21 parsed=21
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: no observations
+2026-09-19 checkpoint: build crash fix  Vite dist/client collision with tsc dist/dashboard
+2026-09-20 deliverable flush: fixed Vite outDir back to dist/client and updated static serve path in src/server/index.ts to prevent Vite from wiping tsc-compiled dist/dashboard files (ERR_MODULE_NOT_FOUND candidateQueueFilter); pushed to main; no new observations
+2026-09-20 deliverable flush: created .github/workflows/ci.yml with typecheck, build, test jobs, PR failure comments, and added status badge to README.md; branch feature/ci-pipeline; no new observations
+2026-09-20 deliverable flush: added applywizz_dev_operator_view session signaling in DevSwitcher (dev.html) and App.tsx mount redirect guard; branch feature/ci-pipeline; no new observations
+2026-09-20 weekly review: archived 10 resolved observations (0001, 0002, 0004, 0006, 0007, 0008, 0009, 0010, 0014, 0015); actioned 0012; triaged 10 open observations; updated id-floor to 21 and last-review-date to 2026-09-20
+2026-09-20 deliverable flush: gated Zoho Reader session initialization on ENABLE_QUEUE_WORKER === 'true' in src/server/index.ts; no new observations
+2026-09-20 session-end checkpoint: session closed; progress.md updated; all changes merged and pushed to main; no pending observations
+2026-09-21 session-start scan: files=11 parsed=11
+2026-09-21 checkpoint: no observations
+2026-09-21 checkpoint: applied SEC-3 (IDOR checks on mutation routes), SEC-4 (SSRF URL validation before page.goto), RACE-1 (queue worker TOCTOU .select('id') claim check), RACE-3 (proof capture try/catch preserving APPLIED status); no new observations
+2026-09-21 checkpoint: applied PERF-1 (5MB PDF size guard in tier2ResumeParse.ts), PERF-2 (per-URL page lifecycle in playwrightScanner.ts), SEC-5 (remove default from JWT_SECRET in env.ts), SEC-8 (restrict CORS via ALLOWED_ORIGINS in server/index.ts and .env.example); no new observations
+2026-09-21 session-start scan: files=11 parsed=11
+2026-09-21 deliverable flush: implemented RELIABILITY-1 (30m session TTL in captchaResume.ts & liveSubmit.ts), RELIABILITY-2 (error classification & typed failure bubble in tier5LLM.ts), PERF-3 (query pushdown in manager.ts & devDashboard.ts), PERF-4 (adaptive WS/polling interval in App.tsx & operator-app.jsx); no new observations
+2026-09-21 deliverable flush: implemented PERF-5 (LRUCache for embeddings in semanticSearch.ts), SEC-6 (safe img data-uri for MFA QR in AuthView.tsx & index.html), SEC-9 (sessionStorage token migration in roleAccess.js), SEC-10 (CSP meta tags across HTML shells), QUALITY-1 (masked 500 error messages in applications.ts & submissions.ts); no new observations
+2026-09-21 session-start scan: files=11 parsed=11
+2026-09-21 10:14:31 checkpoint: TSX port of admin, dev, and manager dashboards completed and verified with Vite multi-entry build
+2026-09-21 10:18:30 checkpoint: Fixed production crash caused by required JWT_SECRET env var. Added safe fallback default + warning log, and added server boot smoke check to CI build workflow.
+2026-09-21 deliverable flush: logged and actioned observation 0022; TSX port of dashboards and JWT_SECRET boot fix verified and ready for push
+2026-09-21 deliverable flush: resolved Cannot GET / on gh.applywizz.ai by removing INGEST_ONLY=true from greehouse_apply service on Railway and configuring ALLOWED_ORIGINS; logged observation 0023
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 session-start scan: task-observer skill unavailable through runtime; manual protocol read; no observations
+2026-09-21 session-end: operator dashboard now shows identity and unresolved questions; no observations
+2026-09-21 session-end: manager Operators aggregation aligned with Home; Activity date-scoped; Reports Assigned period-scoped; focused dashboard tests pass; no new observations
+2026-09-21 session-end: stats now use selected Supabase ranges; operator answer edits and retryable submission statuses fixed; typecheck/build/focused tests and CI passed; no observations
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 session-end: created migration 020_multi_service_state.sql for multi-service shared state and backfill; no observations
+2026-09-21 session-end: migration 020 applied successfully via supabase cli linked database; no observations
+2026-09-21 session-end: multi-service shared state fixes shipped (submitterPool heartbeat every 5s, gate flag 15s TTL from system_config, internal routes proxy on ENABLE_QUEUE_WORKER=true, ingest_runs tracking, assigned_ca_email profile fallback); typecheck passed; no observations
 2026-09-21 session-start scan: files=13 parsed=13
 2026-09-21 checkpoint: no observations
 2026-09-21 session-start scan: files=13 parsed=13
@@ -154,3 +303,5 @@
 2026-09-21 session-start scan: files=13 parsed=13
 2026-09-21 session-end: CA email pipeline step (Phase B.5) & live backfill shipped (294 profiles, 876 applications); typecheck & build clean; no new observations
 2026-09-21 deliverable flush: fixed Admin Applications modal candidate display and proof rendering (adminDashboard.ts select/mapping + admin.html / AdminDashboard.tsx modal); no new observations
+2026-09-21 session-start scan: files=13 parsed=13 suspect=0
+2026-09-21 session-end: P0-P2 stat & flow inconsistencies fixes shipped (NULL-safe & case-insensitive CA ownership, submission 403 error banner, DRY_RUN_COMPLETE submit action, INTERNAL_API_SECRET auth on internal routes, OTP/CAPTCHA distinct UI, canonical metrics submitted/pending/applied/failed, submitted_at timestamp queries, dev health scoping, divide-by-zero guards, EMAIL_PROOF_PENDING UI, status-specific blocked panel, non-Greenhouse SQL cleanup); typecheck and build clean; no new observations
