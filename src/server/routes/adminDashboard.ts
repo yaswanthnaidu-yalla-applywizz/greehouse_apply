@@ -328,6 +328,10 @@ adminDashboardRouter.post(
         if (req.headers['content-type']) {
           headers['content-type'] = req.headers['content-type'] as string;
         }
+        const actorEmail = getAuthenticatedCaEmail(authReq) || (authReq.user as { email?: string } | undefined)?.email || '';
+        if (actorEmail) {
+          headers['x-user-email'] = actorEmail;
+        }
 
         const response = await fetch(`${ingestServiceUrl}/api/admin/trigger-ingest-from-storage`, {
           method: 'POST',
@@ -423,6 +427,10 @@ adminDashboardRouter.post(
         if (req.headers.authorization) {
           headers.authorization = req.headers.authorization;
         }
+        const actorEmail = getAuthenticatedCaEmail(authReq) || (authReq.user as { email?: string } | undefined)?.email || '';
+        if (actorEmail) {
+          headers['x-user-email'] = actorEmail;
+        }
 
         const response = await fetch(`${ingestServiceUrl}/api/admin/stop-ingest`, {
           method: 'POST',
@@ -479,6 +487,10 @@ adminDashboardRouter.get(
         const headers: Record<string, string> = {};
         if (req.headers.authorization) {
           headers.authorization = req.headers.authorization;
+        }
+        const actorEmail = getAuthenticatedCaEmail(authReq) || (authReq.user as { email?: string } | undefined)?.email || '';
+        if (actorEmail) {
+          headers['x-user-email'] = actorEmail;
         }
 
         const response = await fetch(`${ingestServiceUrl}/api/admin/ingest-status`, {

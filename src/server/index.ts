@@ -456,7 +456,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
      * POST /api/admin/trigger-ingest-from-storage
      * Ingests newly uploaded CSV files from the Supabase Storage dropzone.
      */
-    app.post('/api/admin/trigger-ingest-from-storage', async (req: AuthenticatedRequest, res: Response) => {
+    app.post('/api/admin/trigger-ingest-from-storage', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
       if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
         res.status(403).json({ error: 'Forbidden: only admins can start the pipeline.' });
         return;
@@ -517,7 +517,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
      * POST /api/admin/stop-ingest
      * Requests cooperative stop of the in-flight storage CSV pipeline (admin; enabled on Railway/dev).
      */
-    app.post('/api/admin/stop-ingest', (req: AuthenticatedRequest, res: Response) => {
+    app.post('/api/admin/stop-ingest', requireAuth, (req: AuthenticatedRequest, res: Response) => {
       if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
         res.status(403).json({ error: 'Forbidden: only admins can stop the pipeline.' });
         return;
@@ -541,7 +541,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
      * GET /api/admin/ingest-status
      * Reports the state of the most recent storage CSV ingestion run.
      */
-    app.get('/api/admin/ingest-status', (req: AuthenticatedRequest, res: Response) => {
+    app.get('/api/admin/ingest-status', requireAuth, (req: AuthenticatedRequest, res: Response) => {
       if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
         res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
         return;
@@ -825,110 +825,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     res.json({ reloaded: true, timestamp: artifactCache.lastLoadedAt });
   });
 
-  /**
-   * POST /api/admin/trigger-ingest-from-storage
-   * Ingests newly uploaded CSV files from the Supabase Storage dropzone.
-   *
-   * The pipeline takes minutes, so the run happens in the background and the caller
-   * polls GET /api/admin/ingest-status for the outcome.
-   */
-  app.post('/api/admin/trigger-ingest-from-storage', async (req: AuthenticatedRequest, res: Response) => {
-    if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
-      res.status(403).json({ error: 'Forbidden: only admins can start the pipeline.' });
-      return;
-    }
-
-    if (getIngestRun().running) {
-      res.status(409).json({
-        error: 'Ingestion is already running.',
-        ...getIngestRun(),
-      });
-      return;
-    }
-
-    const startedAt = new Date().toISOString();
-    resetPipelineAbort();
-    setIngestRun({ running: true, startedAt });
-    const actorEmail = getAuthenticatedCaEmail(req) || (req.user as { email?: string } | undefined)?.email || '';
-    void insertAuditEvent({
-      actorEmail,
-      actorRole: resolveRole(req.user || actorEmail),
-      action: 'ingest_start',
-      targetType: 'pipeline',
-      targetId: startedAt,
-    });
-    log.info(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
-    res.status(202).json({ started: true, startedAt });
-
-    try {
-      const { ingestCsvFromStorage } = await import('../scanner/storageCsvIngestion.js');
-      const result = await ingestCsvFromStorage();
-      if (result.processedCount > 0) {
-        loadArtifacts(outputDir);
-      }
-      setIngestRun({
-        running: false,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        processedCount: result.processedCount,
-        processedFile: result.processedFile,
-        // A failed run reports through `message`; surface it as an error so the
-        // dashboard does not show a misconfiguration as a calm "nothing to do".
-        message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
-        error: result.success ? undefined : result.message,
-      });
-      log.info(
-        `[Admin] ${result.success ? '✅' : result.aborted ? '⏹️' : '❌'} Storage CSV ingestion finished: ${result.message}`
-      );
-    } catch (err: any) {
-      const message = err.message || 'Storage ingestion failed';
-      setIngestRun({
-        running: false,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        error: message,
-      });
-      log.error('[Admin] ❌ Storage CSV ingestion failed:', err);
-    } finally {
-      resetPipelineAbort();
-    }
-  });
-
-  /**
-   * POST /api/admin/stop-ingest
-   * Requests cooperative stop of the in-flight storage CSV pipeline (admin; enabled on Railway/dev).
-   */
-  app.post('/api/admin/stop-ingest', (req: AuthenticatedRequest, res: Response) => {
-    if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
-      res.status(403).json({ error: 'Forbidden: only admins can stop the pipeline.' });
-      return;
-    }
-    if (!isPipelineStopEnabled()) {
-      res.status(403).json({
-        error: 'Pipeline stop is disabled. Set NODE_ENV=development or ENABLE_PIPELINE_STOP=true.',
-      });
-      return;
-    }
-    if (!getIngestRun().running) {
-      res.status(409).json({ error: 'No ingestion run is in progress.', ...getIngestRun() });
-      return;
-    }
-    requestPipelineAbort();
-    log.warn('[Admin] ⏹️ Storage CSV ingestion stop requested by operator');
-    res.json({ stopping: true, ...getIngestRun() });
-  });
-
-  /**
-   * GET /api/admin/ingest-status
-   * Reports the state of the most recent storage CSV ingestion run.
-   */
-  app.get('/api/admin/ingest-status', (req: AuthenticatedRequest, res: Response) => {
-    if (!isUserAdmin(req.user || getAuthenticatedCaEmail(req))) {
-      res.status(403).json({ error: 'Forbidden: only admins can view ingestion status.' });
-      return;
-    }
-    res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
-  });
 
   /**
    * GET /api/admin/supabase-storage-health
