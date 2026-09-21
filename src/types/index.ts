@@ -172,6 +172,9 @@ export interface ApplyWizzProfile {
   resumeText?: string;
   /** Structured facts (experience, skills, projects) extracted from resume */
   resumeFacts?: any;
+  /** Assigned Career Associate email address */
+  ca_email?: string | null;
+  caEmail?: string | null;
 }
 
 /**
@@ -324,6 +327,8 @@ export interface CandidateJobApplication {
   status: ApplicationStatus;
   /** List of resolved fields */
   resolvedFields: ResolvedField[];
+  /** Assigned Career Associate email */
+  assignedCaEmail?: string | null;
 }
 
 // ============================================================================

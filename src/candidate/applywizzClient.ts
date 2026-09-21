@@ -457,3 +457,95 @@ export class ApplyWizzClient {
     };
   }
 }
+
+/**
+ * Fetches CA email for a single ApplyWizz candidate from the CA Management work-history API.
+ *
+ * @param applywizzId - Candidate identifier (e.g. 'AWL-30967')
+ * @returns CA email string or null if not assigned / unreachable
+ */
+export async function fetchCaEmailForApplywizzId(applywizzId: string): Promise<string | null> {
+  const id = (applywizzId || '').trim().toUpperCase();
+  if (!id) return null;
+
+  const baseUrl = (config.AUTHORIZED_EMAILS_API || 'https://applywizz-ca-management.vercel.app/api/ca/emails')
+    .replace('/emails', '/work-history');
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const from = thirtyDaysAgo.toISOString().slice(0, 10);
+
+  try {
+    const url = `${baseUrl}?from=${from}&to=${to}&applywizz_id=${encodeURIComponent(id)}&pageSize=50`;
+    const res = await axios.get(url, { timeout: 10000 });
+    const records = res.data?.records;
+    if (Array.isArray(records)) {
+      for (const r of records) {
+        if (r.ca_email && typeof r.ca_email === 'string') {
+          return r.ca_email.trim().toLowerCase();
+        }
+      }
+    }
+  } catch (err: any) {
+    log.warn(`[ApplyWizz Client] ⚠️ Failed to fetch CA email for ${id}: ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * Fetches CA email mapping for a batch of candidate ApplyWizz IDs using a single/bounded
+ * query to the CA Management work-history API over a 30-day window.
+ *
+ * @param applywizzIds - Array of candidate identifiers
+ * @returns Map of applywizz_id -> ca_email
+ */
+export async function fetchCaBatchEmailMap(applywizzIds: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const idSet = new Set(applywizzIds.map((id) => (id || '').trim().toUpperCase()).filter(Boolean));
+  if (idSet.size === 0) return result;
+
+  const baseUrl = (config.AUTHORIZED_EMAILS_API || 'https://applywizz-ca-management.vercel.app/api/ca/emails')
+    .replace('/emails', '/work-history');
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const from = thirtyDaysAgo.toISOString().slice(0, 10);
+
+  try {
+    const url = `${baseUrl}?from=${from}&to=${to}&pageSize=200`;
+    const res = await axios.get(url, { timeout: 15000 });
+    const records = res.data?.records;
+    if (Array.isArray(records)) {
+      for (const r of records) {
+        const id = (r.applywizz_id || '').trim().toUpperCase();
+        const email = (r.ca_email || '').trim().toLowerCase();
+        if (id && email && idSet.has(id) && !result.has(id)) {
+          result.set(id, email);
+        }
+      }
+    }
+
+    // If some candidates from the batch are still missing and more pages exist, fetch up to 5 pages
+    const total = res.data?.total ?? 0;
+    const pageSize = res.data?.pageSize || 200;
+    const totalPages = Math.min(5, Math.ceil(total / pageSize));
+    for (let page = 2; page <= totalPages && result.size < idSet.size; page++) {
+      const pageUrl = `${baseUrl}?from=${from}&to=${to}&page=${page}&pageSize=${pageSize}`;
+      const pageRes = await axios.get(pageUrl, { timeout: 15000 });
+      const pageRecords = pageRes.data?.records;
+      if (Array.isArray(pageRecords)) {
+        for (const r of pageRecords) {
+          const id = (r.applywizz_id || '').trim().toUpperCase();
+          const email = (r.ca_email || '').trim().toLowerCase();
+          if (id && email && idSet.has(id) && !result.has(id)) {
+            result.set(id, email);
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    log.warn(`[ApplyWizz Client] ⚠️ Failed to fetch CA batch email map: ${err.message}`);
+  }
+
+  return result;
+}

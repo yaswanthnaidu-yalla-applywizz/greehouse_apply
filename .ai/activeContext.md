@@ -9,6 +9,13 @@ _Last updated: 2026-09-21_
 ## Current Focus
 
 ### 0i. Submission Flow & Cross-Service Hardening (shipped 2026-09-21)
+- **CA Email Pipeline Step & Backfill (`applywizzClient.ts`, `profiles.ts`, `pipeline.ts`, `answerResolver.ts`):** 
+  - Added `fetchCaEmailForApplywizzId` and `fetchCaBatchEmailMap` to resolve candidate `careerassociateid` to `ca_email` via CA Management work-history API (`/api/ca/work-history`).
+  - Added `upsertProfileCaEmail` in `profiles.ts`.
+  - Added Phase B.5 in `pipeline.ts` between Candidate Sync (Phase C) and Resolution (Phase D).
+  - Populated `assigned_ca_email` on applications in `answerResolver.ts` and `upsertApplication` in `applications.ts` with memory caching (`profileCaEmailCache`).
+  - Admin applications endpoint (`adminDashboard.ts`) left joins `profiles` and displays `assigned_ca_email || profiles.ca_email`.
+  - Executed live backfill on `profiles` (294 profiles populated) and `gh_candidate_applications` (876/876 applications now have `assigned_ca_email` populated).
 - **URL Allowlist (SEC-4):** Replaced static hostname array with regex `/(^|\.)greenhouse\.io$/i` and exact `grnh.se` match in `submissions.ts`, allowing all subdomains including EU boards (`boards.eu.greenhouse.io`).
 - **Proxy Header Forwarding:** `proxyToWorker` forwards `cookie`, `x-view-as`, and `x-view-as-manager-email` (when present) to preserve operator context and session cookies across services.
 - **CAPTCHA Session Proxying:** `POST /api/applications/:id/open-captcha-session` runs SEC-4 URL check first, then proxies to `WORKER_SERVICE_URL` so Playwright browser sessions run on the worker service.
