@@ -143,3 +143,9 @@
 2026-09-21 session-end: operator dashboard now shows identity and unresolved questions; no observations
 2026-09-21 session-end: manager Operators aggregation aligned with Home; Activity date-scoped; Reports Assigned period-scoped; focused dashboard tests pass; no new observations
 2026-09-21 session-end: stats now use selected Supabase ranges; operator answer edits and retryable submission statuses fixed; typecheck/build/focused tests and CI passed; no observations
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 session-end: created migration 020_multi_service_state.sql for multi-service shared state and backfill; no observations
+2026-09-21 session-end: migration 020 applied successfully via supabase cli linked database; no observations
+2026-09-21 session-end: multi-service shared state fixes shipped (submitterPool heartbeat every 5s, gate flag 15s TTL from system_config, internal routes proxy on ENABLE_QUEUE_WORKER=true, ingest_runs tracking, assigned_ca_email profile fallback); typecheck passed; no observations
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 checkpoint: no observations

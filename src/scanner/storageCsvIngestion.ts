@@ -30,6 +30,8 @@ import {
   requestPipelineAbort,
   resetPipelineAbort,
 } from '../orchestrator/pipelineAbort.js';
+import crypto from 'crypto';
+import { upsertIngestRun } from '../db/ingestRuns.js';
 
 const log = createLogger('Storage Csv Ingestion');
 
@@ -106,7 +108,13 @@ export async function listPendingDropzoneCsvs(): Promise<{
 /**
  * Checks the `csv_uploads` storage bucket, ingests the latest CSV file, and moves it to `archive/`.
  */
-export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
+export async function ingestCsvFromStorage(options?: {
+  runId?: string;
+  triggeredBy?: string;
+}): Promise<StorageIngestionResult> {
+  const runId = options?.runId || crypto.randomUUID();
+  const triggeredBy = options?.triggeredBy;
+
   if (!isSupabaseConfigured()) {
     haltWithDevAlert(
       'Supabase',
@@ -148,6 +156,15 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
       );
     }
     log.info(`[Storage CSV Ingestion] ℹ️ No pending CSV files found in dropzone.${hint}`);
+    void upsertIngestRun({
+      id: runId,
+      status: 'completed',
+      finished_at: new Date().toISOString(),
+      processed_count: 0,
+      phase: 'Completed',
+      message: `No pending CSV files in csv_uploads storage dropzone.${hint}`,
+      triggered_by: triggeredBy,
+    });
     return {
       success: false,
       processedCount: 0,
@@ -161,6 +178,15 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     `[Storage CSV Ingestion] ingest file="${targetFile.name}" source=${source} bucket=${CSV_UPLOADS_BUCKET}`
   );
 
+  void upsertIngestRun({
+    id: runId,
+    status: 'running',
+    processed_file: targetFile.name,
+    phase: 'Phase A',
+    message: `Starting ingestion for ${targetFile.name}`,
+    triggered_by: triggeredBy,
+  });
+
   // Download from Supabase Storage
   const { data: fileData, error: downloadError } = await supabase.storage
     .from(CSV_UPLOADS_BUCKET)
@@ -168,7 +194,18 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
 
   if (downloadError || !fileData) {
     log.error(`[Storage CSV Ingestion] ❌ Download failed:`, downloadError?.message);
-    throw new Error(`Failed to download ${targetFile.name}: ${downloadError?.message}`);
+    const errMessage = `Failed to download ${targetFile.name}: ${downloadError?.message}`;
+    void upsertIngestRun({
+      id: runId,
+      status: 'failed',
+      finished_at: new Date().toISOString(),
+      processed_file: targetFile.name,
+      phase: 'Failed',
+      error: errMessage,
+      message: errMessage,
+      triggered_by: triggeredBy,
+    });
+    throw new Error(errMessage);
   }
 
   const arrayBuffer = await fileData.arrayBuffer();
@@ -183,11 +220,40 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
   }
 
   let pipelineResult: PipelineResult | undefined;
+  let currentPhase = 'Phase A';
+  const originalConsoleLog = console.log;
+
   try {
     resetPipelineAbort();
     // Run V1Pipeline with single worker concurrency for Railway stability
     const pipeline = new V1Pipeline();
     log.info(`[Storage CSV Ingestion] pipeline start file="${targetFile.name}" workers=${config.WORKER_POOL_SIZE || 1}`);
+
+    console.log = (...args: unknown[]) => {
+      try {
+        const text = args.map((a) => (typeof a === 'string' ? a : '')).join(' ');
+        const match = text.match(/(?:\[Pipeline Phase |\[Pipeline\] phase )([A-D])/i);
+        if (match) {
+          const phaseLetter = match[1].toUpperCase();
+          const phaseName = `Phase ${phaseLetter}`;
+          if (phaseName !== currentPhase) {
+            currentPhase = phaseName;
+            void upsertIngestRun({
+              id: runId,
+              status: 'running',
+              processed_file: targetFile.name,
+              phase: phaseName,
+              message: `Executing ${phaseName}`,
+              triggered_by: triggeredBy,
+            });
+          }
+        }
+      } catch {
+        // Safe fallback if formatting fails
+      }
+      return originalConsoleLog.apply(console, args);
+    };
+
     try {
       pipelineResult = await pipeline.runFullPipeline(tempFilePath, config.OUTPUT_DIR, {
         concurrency: config.WORKER_POOL_SIZE || 1,
@@ -195,6 +261,16 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
     } catch (pipelineErr) {
       if (isPipelineAbortedError(pipelineErr)) {
         log.warn(`[Storage CSV Ingestion] ⏹️ ${pipelineErr.message}`);
+        void upsertIngestRun({
+          id: runId,
+          status: 'aborted',
+          finished_at: new Date().toISOString(),
+          processed_count: 0,
+          processed_file: targetFile.name,
+          phase: 'Aborted',
+          message: pipelineErr.message,
+          triggered_by: triggeredBy,
+        });
         return {
           success: false,
           processedCount: 0,
@@ -203,6 +279,18 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
           aborted: true,
         };
       }
+      const errMessage = (pipelineErr as any)?.message || String(pipelineErr);
+      void upsertIngestRun({
+        id: runId,
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+        processed_count: 0,
+        processed_file: targetFile.name,
+        phase: 'Failed',
+        error: errMessage,
+        message: errMessage,
+        triggered_by: triggeredBy,
+      });
       throw pipelineErr;
     }
 
@@ -223,6 +311,17 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
       if (!compact) log.info(`[Storage CSV Ingestion] 📦 Archived storage file to: ${archiveDest}`);
     }
 
+    void upsertIngestRun({
+      id: runId,
+      status: 'completed',
+      finished_at: new Date().toISOString(),
+      processed_count: 1,
+      processed_file: targetFile.name,
+      phase: 'Completed',
+      message: `Successfully processed and archived ${targetFile.name}.`,
+      triggered_by: triggeredBy,
+    });
+
     return {
       success: true,
       processedCount: 1,
@@ -232,6 +331,7 @@ export async function ingestCsvFromStorage(): Promise<StorageIngestionResult> {
       message: `Successfully processed and archived ${targetFile.name}.`,
     };
   } finally {
+    console.log = originalConsoleLog;
     // Clean up temporary local file
     try {
       if (fs.existsSync(tempFilePath)) {
