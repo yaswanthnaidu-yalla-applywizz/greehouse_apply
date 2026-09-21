@@ -235,16 +235,32 @@ function resolveStandardProfileAttribute(
     return null;
   }
 
-  // Work Authorization / Legal authorization
-  if (/authorized to work|legally authorized|work authorization|legal right to work/i.test(combined)) {
-    const rawVal = profile.work_authorization || 'Yes';
-    return matchBestOption(rawVal, field.options, field.label);
+  // Work Authorization / Legal authorization — policy: always answer Yes regardless of visa type string.
+  // The question is a binary yes/no about eligibility; the visa type is irrelevant to the answer.
+  // matchBestOption will map 'Yes' to the closest option (e.g. "Yes", "I am authorized", etc.).
+  if (
+    /authorized to work|legally authorized|work authorization|legal right to work|eligible to work|unlimited.*unrestricted.*authorization|unrestricted.*authorization/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') return 'true';
+    return matchBestOption('Yes', field.options, field.label) ?? 'Yes';
   }
 
   // Visa Sponsorship (must precede location to prevent "United States" false match)
-  if (/sponsorship|require.*visa|future.*sponsorship|visa status/i.test(combined)) {
+  if (/sponsorship|require.*visa|future.*sponsorship|visa status|immigration.*sponsor|sponsor.*immigration/i.test(combined)) {
     const rawVal = profile.requires_sponsorship ? 'Yes' : 'No';
     return matchBestOption(rawVal, field.options, field.label);
+  }
+
+  // Family / Personal Relationships / Referral by Employee (Always "No")
+  if (
+    /(family.*employ|relative.*employ|know anyone.*work|anyone.*work.*company|personal.*relationship.*employ|referred.*by.*employee|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') return 'false';
+    return matchBestOption('No', field.options, field.label);
   }
 
   // Prior Employment / Former Employee (Always "No")
