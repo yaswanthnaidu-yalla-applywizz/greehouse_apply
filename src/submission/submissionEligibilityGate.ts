@@ -3,7 +3,17 @@
  */
 
 import config from '../config/env.js';
-import { getSubmissionEligibilityGateEnabled } from '../server/runtimeState.js';
+import {
+  getSubmissionEligibilityGateEnabled,
+  setSubmissionEligibilityGateEnabled,
+  refreshSubmissionEligibilityGateFromDb,
+} from '../server/runtimeState.js';
+
+export {
+  getSubmissionEligibilityGateEnabled,
+  setSubmissionEligibilityGateEnabled,
+  refreshSubmissionEligibilityGateFromDb,
+};
 
 export type SubmissionEligibilityInput = {
   csv_job_score?: number | null;
