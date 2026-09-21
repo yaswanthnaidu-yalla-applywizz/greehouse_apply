@@ -118,7 +118,7 @@
 2026-09-19 session-start scan: files=21 parsed=21
 2026-09-19 checkpoint: no observations
 2026-09-19 checkpoint: no observations
-2026-09-19 checkpoint: build crash fix — Vite dist/client collision with tsc dist/dashboard
+2026-09-19 checkpoint: build crash fix ï¿½ Vite dist/client collision with tsc dist/dashboard
 2026-09-20 deliverable flush: fixed Vite outDir back to dist/client and updated static serve path in src/server/index.ts to prevent Vite from wiping tsc-compiled dist/dashboard files (ERR_MODULE_NOT_FOUND candidateQueueFilter); pushed to main; no new observations
 2026-09-20 deliverable flush: created .github/workflows/ci.yml with typecheck, build, test jobs, PR failure comments, and added status badge to README.md; branch feature/ci-pipeline; no new observations
 2026-09-20 deliverable flush: added applywizz_dev_operator_view session signaling in DevSwitcher (dev.html) and App.tsx mount redirect guard; branch feature/ci-pipeline; no new observations
@@ -142,3 +142,4 @@
 2026-09-21 session-start scan: task-observer skill unavailable through runtime; manual protocol read; no observations
 2026-09-21 session-end: operator dashboard now shows identity and unresolved questions; no observations
 2026-09-21 session-end: manager Operators aggregation aligned with Home; Activity date-scoped; Reports Assigned period-scoped; focused dashboard tests pass; no new observations
+2026-09-21 session-end: stats now use selected Supabase ranges; operator answer edits and retryable submission statuses fixed; typecheck/build/focused tests and CI passed; no observations
