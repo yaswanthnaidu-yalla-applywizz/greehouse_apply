@@ -83,6 +83,18 @@ export function sessionRole(): string {
   return 'operator';
 }
 
+export function homePathForRole(role: string): string {
+  if (role === 'dev') return '/dev';
+  if (role === 'admin') return '/admin';
+  if (role === 'manager') return '/manager';
+  return '/';
+}
+
+export function getTodayIST(): string {
+  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
+}
+
 export function sessionCapExpired(): boolean {
   if (typeof window === 'undefined') return false;
   const raw = localStorage.getItem(EXPIRES_AT_KEY);
@@ -386,6 +398,42 @@ export function useSession(_options?: UseSessionOptions): UseSessionResult {
     loading,
     signOut,
   };
+}
+
+export interface UseRequireRoleResult {
+  token: string | null;
+  user: AuthUser | null;
+  role: string;
+  loading: boolean;
+  isAuthorized: boolean;
+  signOut: () => Promise<void>;
+}
+
+export function useRequireRole(allowedRoles: string[]): UseRequireRoleResult {
+  const { token, user, loading, signOut } = useSession();
+  const [role, setRole] = useState<string>(() => sessionRole());
+  const [isAuthorized, setIsAuthorized] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!token) {
+      setIsAuthorized(false);
+      return;
+    }
+    const currentRole = sessionRole();
+    setRole(currentRole);
+    if (currentRole === 'dev' || allowedRoles.includes(currentRole)) {
+      setIsAuthorized(true);
+      return;
+    }
+    // Unauthorized role: redirect to user's assigned role home
+    const home = homePathForRole(currentRole);
+    if (typeof window !== 'undefined' && window.location.pathname !== home) {
+      window.location.replace(home);
+    }
+  }, [loading, token, allowedRoles]);
+
+  return { token, user, role, loading, isAuthorized, signOut };
 }
 
 export default useSession;

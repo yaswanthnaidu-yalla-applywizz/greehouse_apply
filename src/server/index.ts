@@ -584,8 +584,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   const operatorIndexPath = path.join(publicDir, 'index.html');
   const distDashboardIndexPath = path.join(distDashboardDir, 'index.html');
   const managerHtmlPath = path.join(publicDir, 'manager.html');
+  const distManagerIndexPath = path.join(distDashboardDir, 'manager/index.html');
   const adminHtmlPath = path.join(publicDir, 'admin.html');
+  const distAdminIndexPath = path.join(distDashboardDir, 'admin/index.html');
   const devHtmlPath = path.join(publicDir, 'dev.html');
+  const distDevIndexPath = path.join(distDashboardDir, 'dev/index.html');
 
   const dashboardMode = (config.DASHBOARD_MODE ?? process.env.DASHBOARD_MODE ?? 'html').toLowerCase();
 
@@ -617,6 +620,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   });
 
   app.get('/admin', requireRoleIfAuthenticated('admin', 'dev'), (_req: Request, res: Response) => {
+    if (dashboardMode === 'tsx') {
+      if (fs.existsSync(distAdminIndexPath)) {
+        res.sendFile(distAdminIndexPath);
+        return;
+      }
+      log.warn('[Server] dist/client/admin/index.html not found, falling back to public/admin.html');
+    }
     if (fs.existsSync(adminHtmlPath)) {
       res.sendFile(adminHtmlPath);
       return;
@@ -624,7 +634,22 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     res.status(404).send('Admin dashboard page not found.');
   });
 
+  app.get('/admin/fallback', requireRoleIfAuthenticated('admin', 'dev'), (_req: Request, res: Response) => {
+    if (fs.existsSync(adminHtmlPath)) {
+      res.sendFile(adminHtmlPath);
+      return;
+    }
+    res.status(404).send('Fallback admin dashboard page not found.');
+  });
+
   app.get('/manager', requireRoleIfAuthenticated('manager', 'dev'), (_req: Request, res: Response) => {
+    if (dashboardMode === 'tsx') {
+      if (fs.existsSync(distManagerIndexPath)) {
+        res.sendFile(distManagerIndexPath);
+        return;
+      }
+      log.warn('[Server] dist/client/manager/index.html not found, falling back to public/manager.html');
+    }
     if (fs.existsSync(managerHtmlPath)) {
       res.sendFile(managerHtmlPath);
       return;
@@ -632,12 +657,35 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     res.status(404).send('Manager dashboard page not found.');
   });
 
+  app.get('/manager/fallback', requireRoleIfAuthenticated('manager', 'dev'), (_req: Request, res: Response) => {
+    if (fs.existsSync(managerHtmlPath)) {
+      res.sendFile(managerHtmlPath);
+      return;
+    }
+    res.status(404).send('Fallback manager dashboard page not found.');
+  });
+
   app.get('/dev', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
+    if (dashboardMode === 'tsx') {
+      if (fs.existsSync(distDevIndexPath)) {
+        res.sendFile(distDevIndexPath);
+        return;
+      }
+      log.warn('[Server] dist/client/dev/index.html not found, falling back to public/dev.html');
+    }
     if (fs.existsSync(devHtmlPath)) {
       res.sendFile(devHtmlPath);
       return;
     }
     res.status(404).send('Developer dashboard page not found.');
+  });
+
+  app.get('/dev/fallback', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
+    if (fs.existsSync(devHtmlPath)) {
+      res.sendFile(devHtmlPath);
+      return;
+    }
+    res.status(404).send('Fallback developer dashboard page not found.');
   });
 
   // Favicon / logo / other public assets. index:false so '/' stays on the guarded HTML routes.

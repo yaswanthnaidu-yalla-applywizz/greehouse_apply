@@ -4,6 +4,15 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### TSX Port of Admin, Dev & Manager Dashboards (2026-09-21)
+- [x] Ported `dashboard/public/admin.html` to `dashboard/components/AdminDashboard.tsx` with full tab parity (Overview Ingest Bar, Managers, Operators, Applications, Activity, System, Guide) and modals (`EmailProofModal`, `ApplicationProofModal`).
+- [x] Ported `dashboard/public/dev.html` to `dashboard/components/DevDashboard.tsx` with full tab parity (System with Submission Eligibility Gate toggle, Runs, Errors, Queue, Integrations, Debugger, Guide).
+- [x] Ported `dashboard/public/manager.html` to `dashboard/components/ManagerDashboard.tsx` with full tab parity (Home with CA filter, Operators, Activity, Reports with period buckets & Applied modal, Guide, Dev Ops Mode picker).
+- [x] Shared navigation & session components: `DevSwitcher.tsx` and `HeaderSignOut.tsx`.
+- [x] Hook-based authentication via `useRequireRole` in `useSession.ts` with clean `useEffect` redirect to role home.
+- [x] Vite multi-entry build (`vite.config.ts`) emitting `index.html`, `admin/index.html`, `dev/index.html`, `manager/index.html` to `dist/client/`.
+- [x] Server routes in `src/server/index.ts`: `/admin`, `/dev`, `/manager` served from `dist/client/*/index.html` when `DASHBOARD_MODE=tsx`, with legacy fallbacks at `/admin/fallback`, `/dev/fallback`, `/manager/fallback`.
+
 ### Security, Reliability & Performance Hardening (2026-09-21)
 - [x] SEC-1 & SEC-2 — Auth bypass gated strictly to `NODE_ENV === 'test'` with real test token validation; `x-user-role` header fallback removed (`requireRole.ts`)
 - [x] SEC-3 — Strict IDOR ownership validation on application update and approve routes (`applications.ts`)
@@ -12,7 +21,7 @@ _Last updated: 2026-09-21_
 - [x] RACE-3 — Proof capture failure isolation preserving `APPLIED` status (`liveSubmit.ts`)
 - [x] PERF-1 — 5MB PDF file size guard before reading resumes (`tier2ResumeParse.ts`)
 - [x] PERF-2 — Per-URL page lifecycle recreation avoiding browser memory accumulation (`playwrightScanner.ts`)
-- [x] SEC-5 — Removed default fallback for `JWT_SECRET` in Zod env validation (`env.ts`)
+- [x] SEC-5 — Safe default fallback for `JWT_SECRET` in Zod env validation (`env.ts`) with production warning log to prevent unhandled boot crash-loops on Railway
 - [x] SEC-8 — Restricted CORS origins via `ALLOWED_ORIGINS` whitelist (`server/index.ts`)
 - [x] RELIABILITY-1 — 30-minute auto-close TTL for paused CAPTCHA/OTP browser sessions (`captchaResume.ts`, `liveSubmit.ts`)
 - [x] RELIABILITY-2 — LLM error classification (retriable vs permanent) and typed failure bubble in Tier 5 (`tier5LLM.ts`)

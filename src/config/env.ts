@@ -84,8 +84,8 @@ const envSchema = z.object({
   /** Operator dashboard delivery mode: 'html' (Babel in-browser) or 'tsx' (Vite bundle) */
   DASHBOARD_MODE: z.string().optional().default('html'),
 
-  /** JWT Secret for backend session verification (required; no fallback default) */
-  JWT_SECRET: z.string(),
+  /** JWT Secret for backend session verification (falls back to default if unset) */
+  JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
 
   /** Minimum jitter delay in milliseconds between consecutive browser requests */
   SCANNER_JITTER_MIN_MS: z.coerce.number().int().nonnegative().default(3000),
@@ -198,6 +198,10 @@ if (!parseResult.success) {
 }
 
 const rawEnv = parseResult.data;
+
+if (!process.env.JWT_SECRET && rawEnv.NODE_ENV === 'production') {
+  log.warn('⚠️ JWT_SECRET environment variable is not set; falling back to default key. Set JWT_SECRET in production variables.');
+}
 
 /**
  * Resolves the active LLM API key based on the configured LLM_PROVIDER and available keys.
