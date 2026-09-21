@@ -757,6 +757,29 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   });
   app.use('/api/dev', ...devApiGuard, devDashboardRouter);
 
+  // Internal cross-service WebSocket broadcast receiver (no auth required from loopback/internal)
+  app.post('/api/internal/ws-broadcast', (req: Request, res: Response): void => {
+    const ip = req.ip || req.socket.remoteAddress || '';
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip.includes('127.0.0.1');
+    const isPublic = Boolean(req.headers['x-forwarded-for']);
+
+    if (isPublic && !isLoopback) {
+      const role = (req as any).user?.role;
+      if (role !== 'admin' && role !== 'dev') {
+        res.status(403).json({ success: false, error: 'Internal or admin access only' });
+        return;
+      }
+    }
+
+    try {
+      wsManager.broadcast(req.body);
+      res.json({ success: true });
+    } catch (err: any) {
+      log.error('[Internal] ws-broadcast error:', err);
+      res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
   if (process.env.ENABLE_QUEUE_WORKER === 'true') {
     app.post('/api/internal/applications/:id/submit-otp', async (req: Request, res: Response): Promise<void> => {
       const rawId = req.params.id;

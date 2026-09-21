@@ -149,3 +149,5 @@
 2026-09-21 session-end: multi-service shared state fixes shipped (submitterPool heartbeat every 5s, gate flag 15s TTL from system_config, internal routes proxy on ENABLE_QUEUE_WORKER=true, ingest_runs tracking, assigned_ca_email profile fallback); typecheck passed; no observations
 2026-09-21 session-start scan: files=13 parsed=13
 2026-09-21 checkpoint: no observations
+2026-09-21 session-start scan: files=13 parsed=13
+2026-09-21 session-end: 4 submission flow & cross-service fixes shipped (URL allowlist regex, proxy forwarded headers, open-captcha-session proxy, cross-service WS broadcast route & forward); typecheck and build clean; no observations

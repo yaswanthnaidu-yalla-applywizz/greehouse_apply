@@ -8,7 +8,11 @@ _Last updated: 2026-09-21_
 
 ## Current Focus
 
-### 0h. Multi-Service State Synchronization & Worker Forwarding (shipped 2026-09-21)
+### 0i. Submission Flow & Cross-Service Hardening (shipped 2026-09-21)
+- **URL Allowlist (SEC-4):** Replaced static hostname array with regex `/(^|\.)greenhouse\.io$/i` and exact `grnh.se` match in `submissions.ts`, allowing all subdomains including EU boards (`boards.eu.greenhouse.io`).
+- **Proxy Header Forwarding:** `proxyToWorker` forwards `cookie`, `x-view-as`, and `x-view-as-manager-email` (when present) to preserve operator context and session cookies across services.
+- **CAPTCHA Session Proxying:** `POST /api/applications/:id/open-captcha-session` runs SEC-4 URL check first, then proxies to `WORKER_SERVICE_URL` so Playwright browser sessions run on the worker service.
+- **Cross-Service WebSocket Broadcast:** Added `POST /api/internal/ws-broadcast` on Service 1. Service 3 (worker) forwards status changes and failure alerts via HTTP POST to Service 1 when `WEB_SERVICE_URL` is set, ensuring browser clients connected to Service 1 receive real-time updates. Added `WEB_SERVICE_URL` to `.env.example` and `src/config/env.ts`.
 - **Migration 020 (`020_multi_service_state.sql`):** Applied to remote database via Supabase. Tables `ingest_runs`, `system_worker_heartbeats`, `system_config` created with RLS. Seeded `submission_eligibility_gate_enabled = true`. Backfill executed against `gh_candidate_applications`.
 - **Worker Submissions & Dry-Run Proxying (`submissions.ts`, `env.ts`, `index.ts`):** `POST /api/applications/:id/submit`, `POST /api/applications/:id/dry-run`, `submit-otp`, and `resume-submission` proxy to `WORKER_SERVICE_URL` via `axios` with auth headers when set. Fallback to local execution if unset. Service 1 logs warning on boot if unset.
 - **Applications assigned CA fallback:** `upsertApplication()` in `src/db/applications.ts` populates `assigned_ca_email` from `profiles.ca_email` when missing.
