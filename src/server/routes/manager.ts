@@ -10,7 +10,7 @@ import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
   applyCreatedAtRangeFilter,
   getISTDateRangeUtc,
-  countCompletedApplicationsSince,
+  countSubmittedApplicationsSince,
   listApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
@@ -279,16 +279,18 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
     const operatorEmails = unrestricted
       ? undefined
       : await listOperatorEmailsForManager(managerEmail);
-    const completed = await countCompletedApplicationsSince(
-      getISTDateRangeUtc(getISTDateString()).startIso,
-      operatorEmails
+    const submitted = await countSubmittedApplicationsSince(
+      parsedRange.startIso,
+      operatorEmails,
+      parsedRange.endIso
     );
     const { waiting_for_email: _waitingForEmail, ...totalsWithoutWaiting } = payload.totals;
     res.json({
       ...payload,
       totalApplications: payload.totals.applications,
       totals: totalsWithoutWaiting,
-      completed,
+      submitted,
+      completed: submitted,
       rows: payload.rows.map((row) => ({
         ...row,
         waiting_for_email: undefined,
@@ -345,27 +347,30 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         .filter(Boolean)
     );
 
-const operators = new Map<
-       string,
-       { email: string; name: string; applications: number; completed: number; applied: number; pending: number; failed: number }
-     >();
+    const operators = new Map<
+      string,
+      { email: string; name: string; applications: number; submitted: number; completed: number; applied: number; pending: number; failed: number }
+    >();
     for (const row of dashboard.rows) {
-       const email = (row.assignedToEmail || '').trim().toLowerCase();
+      const email = (row.assignedToEmail || '').trim().toLowerCase();
       if (!email) continue;
-const current = operators.get(email) || {
-       email,
-       name: row.assignedTo,
-       applications: 0,
-       completed: 0,
-       applied: 0,
-       pending: 0,
-       failed: 0,
-     };
-current.applications += row.applications;
-       current.completed += row.completed;
-       current.applied += row.applied;
-       current.pending += row.pending;
-       current.failed += row.failed;
+      const current = operators.get(email) || {
+        email,
+        name: row.assignedTo,
+        applications: 0,
+        submitted: 0,
+        completed: 0,
+        applied: 0,
+        pending: 0,
+        failed: 0,
+      };
+      const rowSubmitted = row.submitted ?? row.completed ?? 0;
+      current.applications += row.applications;
+      current.submitted += rowSubmitted;
+      current.completed += rowSubmitted;
+      current.applied += row.applied;
+      current.pending += row.pending;
+      current.failed += row.failed;
       operators.set(email, current);
     }
 
@@ -375,49 +380,50 @@ current.applications += row.applications;
         if ((user.role || '').trim().toLowerCase() !== 'operator') continue;
         const email = user.email.trim().toLowerCase();
         if (!email || operators.has(email)) continue;
-operators.set(email, {
-           email,
-           name: user.name || email.split('@')[0],
-           applications: 0,
-           completed: 0,
-           applied: 0,
-           pending: 0,
-           failed: 0,
-         });
+        operators.set(email, {
+          email,
+          name: user.name || email.split('@')[0],
+          applications: 0,
+          submitted: 0,
+          completed: 0,
+          applied: 0,
+          pending: 0,
+          failed: 0,
+        });
       }
       for (const user of directory) {
         const email = (user.email || '').trim().toLowerCase();
         if (!email || operators.has(email)) continue;
         if (user.role !== 'operator') continue;
-operators.set(email, {
-           email,
-           name: user.displayName || email.split('@')[0],
-           applications: 0,
-           completed: 0,
-           applied: 0,
-           pending: 0,
-           failed: 0,
-         });
+        operators.set(email, {
+          email,
+          name: user.displayName || email.split('@')[0],
+          applications: 0,
+          submitted: 0,
+          completed: 0,
+          applied: 0,
+          pending: 0,
+          failed: 0,
+        });
       }
     }
 
-    
-
-const items = Array.from(operators.values()).map((operator) => {
-       const user = byEmail.get(operator.email);
-       const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
-       return {
-         email: operator.email,
-         name: operator.name,
-         status: active ? 'active' : 'inactive',
-         applications: operator.applications,
-         completed: operator.completed,
-         applied: operator.applied,
-         pending: operator.pending,
-         failed: operator.failed,
-         lastSignInAt: user?.lastSignInAt || null,
-       };
-     });
+    const items = Array.from(operators.values()).map((operator) => {
+      const user = byEmail.get(operator.email);
+      const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
+      return {
+        email: operator.email,
+        name: operator.name,
+        status: active ? 'active' : 'inactive',
+        applications: operator.applications,
+        submitted: operator.submitted,
+        completed: operator.submitted,
+        applied: operator.applied,
+        pending: operator.pending,
+        failed: operator.failed,
+        lastSignInAt: user?.lastSignInAt || null,
+      };
+    });
 
     res.json({
       date,
@@ -425,7 +431,8 @@ const items = Array.from(operators.values()).map((operator) => {
       operators: items,
       totals: {
         assigned: items.reduce((total, item) => total + item.applications, 0),
-        completed: items.reduce((total, item) => total + item.completed, 0),
+        submitted: items.reduce((total, item) => total + item.submitted, 0),
+        completed: items.reduce((total, item) => total + item.submitted, 0),
         applied: items.reduce((total, item) => total + item.applied, 0),
         active: items.filter((item) => item.status === 'active').length,
         inactive: items.filter((item) => item.status === 'inactive').length,
@@ -527,14 +534,15 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
       Array.from(operatorMap.entries())
         .sort((a, b) => b[1] - a[1])
         .map(async ([email, applications]) => {
-          const completed = await countCompletedApplicationsSince(startIso, [email]);
+          const submitted = await countSubmittedApplicationsSince(startIso, [email], endIso);
           return {
             email,
             name: names.get(email) || email.split('@')[0],
             applications,
             apps: applications,
-            completed,
-            approved: completed,
+            submitted,
+            completed: submitted,
+            approved: submitted,
           };
         })
     );

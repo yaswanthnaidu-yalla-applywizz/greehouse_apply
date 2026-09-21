@@ -116,8 +116,8 @@ export function getISTDateRangeUtc(dateStr: string): { startIso: string; endIso:
   };
 }
 
-export async function countCompletedApplicationsSince(
-  startIso: string,
+export async function countSubmittedApplicationsSince(
+  startIso?: string,
   assignedCaEmails?: string[],
   endIso?: string | null
 ): Promise<number> {
@@ -129,21 +129,24 @@ export async function countCompletedApplicationsSince(
     let query = getDbClient()
       .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
-      .in('status', [...COMPLETED_STATUSES])
-      .gte('updated_at', startIso);
+      .neq('status', 'READY_FOR_REVIEW');
+    if (startIso) query = query.gte('updated_at', startIso);
     if (endIso) query = query.lte('updated_at', endIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
-      log.warn(`[DB] submitted-today count failed: ${error.message}`);
+      log.warn(`[DB] submitted count failed: ${error.message}`);
       return 0;
     }
     return count ?? 0;
   } catch (err: any) {
-    log.warn(`[DB] submitted-today count exception: ${err?.message}`);
+    log.warn(`[DB] submitted count exception: ${err?.message}`);
     return 0;
   }
 }
+
+/** Legacy alias for backward compatibility */
+export const countCompletedApplicationsSince = countSubmittedApplicationsSince;
 
 export async function countAppliedApplicationsSince(
   since?: string,
@@ -159,8 +162,8 @@ export async function countAppliedApplicationsSince(
       .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'APPLIED');
-    if (since) query = query.gte('updated_at', since);
-    if (endIso) query = query.lte('updated_at', endIso);
+    if (since) query = query.gte('submitted_at', since);
+    if (endIso) query = query.lte('submitted_at', endIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
@@ -174,7 +177,7 @@ export async function countAppliedApplicationsSince(
   }
 }
 
-export async function countCompletedApplicationsByOperatorSince(
+export async function countSubmittedApplicationsByOperatorSince(
   startIso: string,
   assignedCaEmails?: string[]
 ): Promise<Map<string, number>> {
@@ -187,12 +190,12 @@ export async function countCompletedApplicationsByOperatorSince(
     let query = getDbClient()
       .from('gh_candidate_applications')
       .select('assigned_ca_email')
-      .in('status', [...COMPLETED_STATUSES])
+      .neq('status', 'READY_FOR_REVIEW')
       .gte('updated_at', startIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { data, error } = await query;
     if (error) {
-      log.warn(`[DB] submitted-today operator counts failed: ${error.message}`);
+      log.warn(`[DB] submitted operator counts failed: ${error.message}`);
       return result;
     }
     for (const row of data || []) {
@@ -200,10 +203,13 @@ export async function countCompletedApplicationsByOperatorSince(
       if (email) result.set(email, (result.get(email) || 0) + 1);
     }
   } catch (err: any) {
-    log.warn(`[DB] submitted-today operator counts exception: ${err?.message}`);
+    log.warn(`[DB] submitted operator counts exception: ${err?.message}`);
   }
   return result;
 }
+
+/** Legacy alias for backward compatibility */
+export const countCompletedApplicationsByOperatorSince = countSubmittedApplicationsByOperatorSince;
 
 export async function countAppliedApplicationsByOperatorSince(
   startIso: string,
@@ -219,11 +225,11 @@ export async function countAppliedApplicationsByOperatorSince(
       .from('gh_candidate_applications')
       .select('assigned_ca_email')
       .eq('status', 'APPLIED')
-      .gte('updated_at', startIso);
+      .gte('submitted_at', startIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { data, error } = await query;
     if (error) {
-      log.warn(`[DB] applied-today operator counts failed: ${error.message}`);
+      log.warn(`[DB] applied operator counts failed: ${error.message}`);
       return result;
     }
     for (const row of data || []) {
@@ -231,7 +237,7 @@ export async function countAppliedApplicationsByOperatorSince(
       if (email) result.set(email, (result.get(email) || 0) + 1);
     }
   } catch (err: any) {
-    log.warn(`[DB] applied-today operator counts exception: ${err?.message}`);
+    log.warn(`[DB] applied operator counts exception: ${err?.message}`);
   }
   return result;
 }
@@ -1327,7 +1333,7 @@ export async function getSubmissionOutcomeCounts(options?: {
       let failedQuery = supabase
         .from('gh_candidate_applications')
         .select('*', { count: 'exact', head: true })
-        .eq('status', 'FAILED');
+        .in('status', ['FAILED', 'CAPTCHA_TIMEOUT']);
 
       if (allowedSet && options?.allowedCandidateIds) {
         appliedQuery = appliedQuery.in('applywizz_id', options.allowedCandidateIds);
@@ -1367,7 +1373,7 @@ export async function getSubmissionOutcomeCounts(options?: {
     if (seen.has(key)) continue;
     seen.add(key);
     if (row.status === 'APPLIED') successfulApplications++;
-    else if (row.status === 'FAILED') failedApplications++;
+    else if (row.status === 'FAILED' || row.status === 'CAPTCHA_TIMEOUT') failedApplications++;
   }
   return { successfulApplications, failedApplications };
 }

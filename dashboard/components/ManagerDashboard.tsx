@@ -32,6 +32,7 @@ interface AppliedOperatorData {
 interface ManagerClientRow {
   client: string;
   applications: number;
+  submitted?: number;
   completed: number;
   applied?: number;
   pending: number;
@@ -39,6 +40,7 @@ interface ManagerClientRow {
   assigned_ca?: string;
   assignedTo?: string;
   assignedToEmail?: string;
+  submittedApplications?: AppliedJobDetail[];
   completedApplications?: AppliedJobDetail[];
   pendingApplications?: AppliedJobDetail[];
   failedApplications?: AppliedJobDetail[];
@@ -56,6 +58,7 @@ interface ManagerOperatorItem {
   email: string;
   status: string;
   applications: number;
+  submitted?: number;
   completed?: number;
   applied?: number;
   lastSignInAt?: string;
@@ -81,6 +84,7 @@ interface ReportPerOperator {
   name: string;
   applications: number;
   apps?: number;
+  submitted?: number;
   completed: number;
   applied?: number;
 }
@@ -93,6 +97,7 @@ interface ReportsPayload {
 interface ManagerDashboardApiResponse {
   rows?: ManagerClientRow[];
   totals?: Record<string, number>;
+  submitted?: number;
   completed?: number;
   submitClicks?: number;
   submitted_today?: number;
@@ -170,7 +175,7 @@ const EmailProofModal: React.FC<{ proof: EmailProofData | null; onClose: () => v
 
 const DetailList: React.FC<{
   items?: AppliedJobDetail[];
-  mode: 'completed' | 'pending' | 'failed';
+  mode: 'submitted' | 'completed' | 'pending' | 'failed';
   onEmailProof: (proof: EmailProofData) => void;
 }> = ({ items, mode, onEmailProof }) => {
   return (
@@ -181,7 +186,7 @@ const DetailList: React.FC<{
         ) : items.map((item, index) => (
           <div key={item.id || item.job_url || index} className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between text-xs">
             <a href={item.job_url} target="_blank" rel="noopener noreferrer" className="font-bold text-[#1E3A5F] underline break-all">{item.job_url}</a>
-            {mode === 'completed' && (
+            {(mode === 'submitted' || mode === 'completed') && (
               <span className="flex flex-wrap gap-3 shrink-0">
                 {item.proof_web_url ? <a href={item.proof_web_url} target="_blank" rel="noopener noreferrer" className="text-[#1E4620] underline font-bold">Web proof screenshot</a> : <span className="text-[#64748B]">Web proof unavailable</span>}
                 {item.proof_email_url ? (
@@ -223,22 +228,23 @@ const ClientTable: React.FC<{
     <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-xs">
         <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-          <tr>{['Client', 'Apps', 'Completed', 'Applied', 'Pending', 'Failed', 'Assigned'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+          <tr>{['Client', 'Apps', 'Submitted', 'Applied', 'Pending', 'Failed', 'Assigned'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
         </thead>
         <tbody>
           {rows.map((row) => {
+            const submittedKey = `${row.client}:submitted`;
             const completedKey = `${row.client}:completed`;
             const pendingKey = `${row.client}:pending`;
             const failedKey = `${row.client}:failed`;
             const openKey = expanded && expanded.startsWith(`${row.client}:`) ? expanded : null;
-            const mode = openKey ? (openKey.split(':')[1] as 'completed' | 'pending' | 'failed') : null;
-            const items = mode === 'completed' ? row.completedApplications : mode === 'pending' ? row.pendingApplications : mode === 'failed' ? row.failedApplications : [];
+            const mode = openKey ? (openKey.split(':')[1] as 'submitted' | 'completed' | 'pending' | 'failed') : null;
+            const items = (mode === 'submitted' || mode === 'completed') ? (row.submittedApplications || row.completedApplications) : mode === 'pending' ? row.pendingApplications : mode === 'failed' ? row.failedApplications : [];
             return (
               <React.Fragment key={row.client}>
                 <tr className="border-b border-[#1A1A2E]/20">
                   <td className="p-3 font-black">{row.client}</td>
                   <td className="p-3 font-mono">{row.applications}</td>
-                  <td className="p-3"><CountButton value={row.completed} active={expanded === completedKey} onClick={() => onToggle(completedKey)} /></td>
+                  <td className="p-3"><CountButton value={row.submitted ?? row.completed} active={expanded === submittedKey || expanded === completedKey} onClick={() => onToggle(submittedKey)} /></td>
                   <td className="p-3 font-mono">{row.applied ?? 0}</td>
                   <td className="p-3"><CountButton value={row.pending} active={expanded === pendingKey} onClick={() => onToggle(pendingKey)} /></td>
                   <td className="p-3"><CountButton value={row.failed} active={expanded === failedKey} onClick={() => onToggle(failedKey)} /></td>
@@ -256,7 +262,7 @@ const ClientTable: React.FC<{
           })}
         </tbody>
       </table>
-      {!rows.length && !loading && <p className="p-6 text-center text-[#64748B]">No rows for this date.</p>}
+      {!rows.length && !loading && <p className="p-6 text-center text-[#64748B]">No clients matched this filter.</p>}
     </div>
   );
 };
@@ -351,6 +357,7 @@ export const ManagerDashboard: React.FC = () => {
   const [rows, setRows] = useState<ManagerClientRow[]>([]);
   const [totals, setTotals] = useState<Record<string, number>>({});
   const [completed, setCompleted] = useState<number>(0);
+  const [submitted, setSubmitted] = useState<number>(0);
   const [careerAssociates, setCareerAssociates] = useState<DropdownOption[]>([]);
   const [warning, setWarning] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -360,7 +367,7 @@ export const ManagerDashboard: React.FC = () => {
   const [appliedByOperator, setAppliedByOperator] = useState<Record<string, AppliedJobDetail[]>>({});
   const [appliedOperator, setAppliedOperator] = useState<AppliedOperatorData | null>(null);
   const [operators, setOperators] = useState<ManagerOperatorItem[]>([]);
-  const [operatorTotals, setOperatorTotals] = useState<{ assigned?: number; completed?: number }>({});
+  const [operatorTotals, setOperatorTotals] = useState<{ assigned?: number; submitted?: number; completed?: number }>({});
   const [operatorError, setOperatorError] = useState<string>('');
   const [activity, setActivity] = useState<ManagerActivityItem[]>([]);
   const [activityWarning, setActivityWarning] = useState<string>('');
@@ -396,7 +403,8 @@ export const ManagerDashboard: React.FC = () => {
       const data = payload as ManagerDashboardApiResponse;
       setRows(data.rows || []);
       setTotals(data.totals || {});
-      setCompleted(data.completed ?? 0);
+      setSubmitted(data.submitted ?? data.completed ?? 0);
+      setCompleted(data.submitted ?? data.completed ?? 0);
       setWarning(data.warning || '');
 
       const cas: DropdownOption[] = [];
@@ -423,7 +431,7 @@ export const ManagerDashboard: React.FC = () => {
     const res = await apiFetch(`/api/manager/operators?${opParams}`);
     const payload: unknown = await res.json();
     if (res.ok) {
-      const data = payload as { operators?: ManagerOperatorItem[]; totals?: { assigned?: number; completed?: number } };
+      const data = payload as { operators?: ManagerOperatorItem[]; totals?: { assigned?: number; submitted?: number; completed?: number } };
       setOperators(data.operators || []);
       setOperatorTotals(data.totals || {});
       setOperatorError('');
@@ -471,7 +479,7 @@ export const ManagerDashboard: React.FC = () => {
       for (const row of data.rows || []) {
         const email = String(row.assignedToEmail || row.assigned_ca || '').trim().toLowerCase();
         if (!email) continue;
-        for (const detail of row.completedApplications || []) {
+        for (const detail of (row.submittedApplications || row.completedApplications || [])) {
           if (detail.status !== 'APPLIED') continue;
           (grouped[email] = grouped[email] || []).push(detail);
         }
@@ -687,7 +695,7 @@ export const ManagerDashboard: React.FC = () => {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
               {[
                 ['Total Applications', totals.applications],
-                ['Completed (team)', completed],
+                ['Submitted (team)', submitted ?? completed],
                 ['Applied (team)', totals.applied],
               ].map(([label, val]) => (
                 <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
@@ -711,14 +719,14 @@ export const ManagerDashboard: React.FC = () => {
             <div className="grid grid-cols-3 gap-3 p-4 border-b-2 border-[#1A1A2E]">
               {[
                 ['Assigned', operatorTotals.assigned],
-                ['Completed', operatorTotals.completed],
+                ['Submitted', operatorTotals.submitted ?? operatorTotals.completed],
               ].map(([label, val]) => (
                 <div key={label}><p className="text-[10px] font-bold uppercase text-[#64748B]">{label}</p><p className="text-xl font-black">{val ?? 0}</p></div>
               ))}
             </div>
             <table className="w-full min-w-[640px] text-left text-xs">
               <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-                <tr>{['Operator', 'Status', 'Assigned', 'Completed', 'Applied', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+                <tr>{['Operator', 'Status', 'Assigned', 'Submitted', 'Applied', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {operators.map((op) => (
@@ -729,7 +737,7 @@ export const ManagerDashboard: React.FC = () => {
                     </td>
                     <td className="p-3 uppercase font-bold">{op.status}</td>
                     <td className="p-3 font-mono">{op.applications}</td>
-                    <td className="p-3 font-mono">{op.completed ?? 0}</td>
+                    <td className="p-3 font-mono">{op.submitted ?? op.completed ?? 0}</td>
                     <td className="p-3 font-mono">{op.applied ?? 0}</td>
                     <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
                   </tr>
@@ -775,14 +783,14 @@ export const ManagerDashboard: React.FC = () => {
             </div>
             <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Operator</th><th className="p-3 font-black uppercase">Applications</th><th className="p-3 font-black uppercase">Assigned</th><th className="p-3 font-black uppercase">Completed</th><th className="p-3 font-black uppercase">Applied</th></tr></thead>
+                <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Operator</th><th className="p-3 font-black uppercase">Applications</th><th className="p-3 font-black uppercase">Assigned</th><th className="p-3 font-black uppercase">Submitted</th><th className="p-3 font-black uppercase">Applied</th></tr></thead>
                 <tbody>
                   {(reports.perOperator || []).map((row) => (
                     <tr key={row.email} className="border-b border-[#1A1A2E]/20">
                       <td className="p-3 font-black">{row.name}</td>
                       <td className="p-3 font-mono">{row.applications}</td>
                       <td className="p-3 font-mono">{row.apps ?? 0}</td>
-                      <td className="p-3 font-mono">{row.completed}</td>
+                      <td className="p-3 font-mono">{row.submitted ?? row.completed}</td>
                       <td className="p-3">
                         <CountButton
                           value={row.applied ?? 0}
@@ -815,8 +823,8 @@ export const ManagerDashboard: React.FC = () => {
             <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Home</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
-                <li>Summary cards: Applications, Completed (team), Applied (team) — scoped to your date range.</li>
-                <li>Client table: click underlined <span className="font-bold">Completed</span>, <span className="font-bold">Pending</span>, or <span className="font-bold">Failed</span> counts to expand job links, proofs, or failure reasons.</li>
+                <li>Summary cards: Applications, Submitted (team), Applied (team) — scoped to your date range.</li>
+                <li>Client table: click underlined <span className="font-bold">Submitted</span>, <span className="font-bold">Pending</span>, or <span className="font-bold">Failed</span> counts to expand job links, proofs, or failure reasons.</li>
                 <li><span className="font-bold">Filter by Career Associate</span> narrows the table to one operator.</li>
                 <li>Default date range is <span className="font-bold">Today &amp; Yesterday</span>; use Custom / Reset and Refresh in the header.</li>
               </ul>
@@ -835,7 +843,7 @@ export const ManagerDashboard: React.FC = () => {
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Important notes</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li>Yellow warnings may mean no operators are assigned yet or work history was temporarily unreachable.</li>
-                <li>Completed rows may show web or email proof links — use these for QA, not for re-submitting.</li>
+                <li>Submitted rows may show web or email proof links — use these for QA, not for re-submitting.</li>
                 <li>Skipped jobs (35+ questions, Zoho not connected, expired postings, etc.) appear with plain-language reasons — same rules as the operator dashboard.</li>
                 <li>Operator-to-manager assignment happens on operator sign-in; this UI does not reassign teams.</li>
                 <li><span className="font-bold">Ops mode</span> (header) opens the operator dashboard at <span className="font-mono">/</span> scoped to your team&apos;s clients (<span className="font-mono">profiles.ca_email</span> for your operators). Submit and review there; use <span className="font-bold">Back to manager mode</span> on that page to return here.</li>

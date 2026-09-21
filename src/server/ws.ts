@@ -81,8 +81,12 @@ class WebSocketManager {
         : undefined);
 
     if (process.env.ENABLE_QUEUE_WORKER === 'true' && webServiceUrl) {
+      const headers: Record<string, string> = {};
+      if (process.env.INTERNAL_API_SECRET) {
+        headers['x-internal-secret'] = process.env.INTERNAL_API_SECRET;
+      }
       axios
-        .post(`${webServiceUrl}/api/internal/ws-broadcast`, message, { timeout: 5000 })
+        .post(`${webServiceUrl}/api/internal/ws-broadcast`, message, { timeout: 5000, headers })
         .catch((err: any) => {
           log.warn(`[WebSocket] ⚠️ Failed to forward WS event to web service (${webServiceUrl}): ${err.message}`);
         });
