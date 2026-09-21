@@ -50,7 +50,8 @@ export interface ManagerClientRow {
   client: string;
   applywizzId: string;
   applications: number;
-  completed: number;
+  submitted: number;
+  completed?: number;
   applied: number;
   pending: number;
   failed: number;
@@ -61,11 +62,12 @@ export interface ManagerClientRow {
   ca_email: string;
   /** CA email from `profiles.ca_email` (work-history backfill) */
   assigned_ca: string;
-  completedApplications: ApplicationDetail[];
+  submittedApplications: ApplicationDetail[];
+  completedApplications?: ApplicationDetail[];
   pendingApplications: ApplicationDetail[];
   failedApplications: ApplicationDetail[];
   expanded_details: {
-    completed: ApplicationDetail[];
+    submitted: ApplicationDetail[];
     failed: ApplicationDetail[];
     pending: ApplicationDetail[];
   };
@@ -259,73 +261,75 @@ export async function loadClientDashboard(options: {
     }
 
     const name = clientName(application);
-const row = grouped.get(name) || {
-       client: name,
-       applywizzId: application.applywizz_id,
-       applications: 0,
-       completed: 0,
-       applied: 0,
-       pending: 0,
-       failed: 0,
-       waitingForEmail: 0,
-       assignedTo: assignedName,
-       assignedToEmail: email,
-       ca_email: email,
-       assigned_ca: profileCa,
-       completedApplications: [],
-       pendingApplications: [],
-       failedApplications: [],
-       expanded_details: { completed: [], failed: [], pending: [] },
-     };
+    const row = grouped.get(name) || {
+      client: name,
+      applywizzId: application.applywizz_id,
+      applications: 0,
+      submitted: 0,
+      applied: 0,
+      pending: 0,
+      failed: 0,
+      waitingForEmail: 0,
+      assignedTo: assignedName,
+      assignedToEmail: email,
+      ca_email: email,
+      assigned_ca: profileCa,
+      submittedApplications: [],
+      pendingApplications: [],
+      failedApplications: [],
+      expanded_details: { submitted: [], failed: [], pending: [] },
+    };
     row.applications += 1;
     row.assignedTo = assignedName || row.assignedTo;
     row.assignedToEmail = email || row.assignedToEmail;
     row.ca_email = email || row.ca_email;
     row.assigned_ca = profileCa || row.assigned_ca;
 
-    const isCompleted =
-      application.status === 'QUEUED' ||
-      application.status === 'APPLYING' ||
-      application.status === 'APPLIED' ||
-      application.status === 'EMAIL_PROOF_PENDING' ||
-      application.status === 'EMAIL_UNVERIFIED';
-
+    const isPending = application.status === 'READY_FOR_REVIEW';
+    const isSubmitted = application.status !== 'READY_FOR_REVIEW';
     const isApplied = application.status === 'APPLIED';
+    const isFailed = application.status === 'FAILED' || application.status === 'CAPTCHA_TIMEOUT';
 
-    if (isCompleted) {
-      row.completed += 1;
-      if (isApplied) {
-        row.applied += 1;
-      }
+    if (isApplied) {
+      row.applied += 1;
+    }
+
+    if (isSubmitted) {
+      row.submitted += 1;
       const detail = detailFor(application, true);
-      row.completedApplications.push(detail);
-      row.expanded_details.completed.push(detail);
-    } else if (application.status === 'FAILED' || application.status === 'CAPTCHA_TIMEOUT') {
+      row.submittedApplications.push(detail);
+      row.expanded_details.submitted.push(detail);
+    }
+
+    if (isFailed) {
       row.failed += 1;
       const detail = detailFor(application, false);
       row.failedApplications.push(detail);
       row.expanded_details.failed.push(detail);
-    } else {
+    } else if (isPending) {
       row.pending += 1;
       const detail = detailFor(application, false);
       row.pendingApplications.push(detail);
       row.expanded_details.pending.push(detail);
     }
     if (isWaitingForEmail(application)) row.waitingForEmail += 1;
+    row.completed = row.submitted;
+    row.completedApplications = row.submittedApplications;
     grouped.set(name, row);
   }
 
   const rows = Array.from(grouped.values());
-const totals = rows.reduce(
-  (total, row) => ({
-    applications: total.applications + row.applications,
-    applied: total.applied + row.applied,
-    failed: total.failed + row.failed,
-    pending: total.pending + row.pending,
-    waiting_for_email: total.waiting_for_email + row.waitingForEmail,
-  }),
-  { applications: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 }
-);
+  const totals = rows.reduce(
+    (total, row) => ({
+      applications: total.applications + row.applications,
+      submitted: total.submitted + row.submitted,
+      applied: total.applied + row.applied,
+      failed: total.failed + row.failed,
+      pending: total.pending + row.pending,
+      waiting_for_email: total.waiting_for_email + row.waitingForEmail,
+    }),
+    { applications: 0, submitted: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 }
+  );
 
   return {
     date,

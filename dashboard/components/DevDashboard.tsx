@@ -20,7 +20,9 @@ interface DevSubmissionGate {
 }
 
 interface DevHealthSnapshot {
+  submittedMonth?: number;
   completedMonth?: number;
+  submittedToday?: number;
   completedToday?: number;
   applied?: number;
   failed?: number;
@@ -296,13 +298,13 @@ export const DevDashboard: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-1">
               <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
-                <p className="text-xs font-bold uppercase">Completed This Month</p>
-                <p className="text-2xl font-black mt-1">{health.completedMonth ?? 0}</p>
+                <p className="text-xs font-bold uppercase">Submitted This Month</p>
+                <p className="text-2xl font-black mt-1">{health.submittedMonth ?? health.completedMonth ?? 0}</p>
                 <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
               </div>
               <div className="bg-[#F4D66B] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
-                <p className="text-xs font-bold uppercase">Completed Today</p>
-                <p className="text-2xl font-black mt-1">{health.completedToday ?? 0}</p>
+                <p className="text-xs font-bold uppercase">Submitted Today</p>
+                <p className="text-2xl font-black mt-1">{health.submittedToday ?? health.completedToday ?? 0}</p>
                 <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
               </div>
               <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">

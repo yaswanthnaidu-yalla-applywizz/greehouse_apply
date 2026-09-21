@@ -153,6 +153,9 @@ async function proxyToWorker(
     if ((req as any).user?.role) {
       headers['x-user-role'] = String((req as any).user.role);
     }
+    if (process.env.INTERNAL_API_SECRET) {
+      headers['x-internal-secret'] = process.env.INTERNAL_API_SECRET;
+    }
 
     const response = await axios({
       method: req.method as any,
@@ -275,11 +278,13 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
   }
 
   const appRow = await getApplication(appId, req.body?.jobUrl);
-  if (appRow && appRow.assigned_ca_email) {
+  if (appRow) {
     const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
     if (
       !isAdmin &&
       (req as any).user?.email &&
+      appRow.assigned_ca_email !== null &&
+      appRow.assigned_ca_email !== undefined &&
       appRow.assigned_ca_email.trim().toLowerCase() !==
         String((req as any).user.email).trim().toLowerCase()
     ) {

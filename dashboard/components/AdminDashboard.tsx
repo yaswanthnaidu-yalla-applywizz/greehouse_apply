@@ -42,10 +42,12 @@ interface ManagerClientItem {
 interface ManagerClientRow {
   client: string;
   applications: number;
+  submitted?: number;
   completed: number;
   pending: number;
   failed: number;
   assignedTo?: string;
+  submittedApplications?: ManagerClientItem[];
   completedApplications?: ManagerClientItem[];
   pendingApplications?: ManagerClientItem[];
   failedApplications?: ManagerClientItem[];
@@ -55,6 +57,7 @@ interface AdminOverview {
   operators: number;
   activeOperators: number;
   inactiveOperators: number;
+  submitted?: number;
   completed: number;
   applied: number;
   running: number;
@@ -76,6 +79,7 @@ interface AdminManager {
 }
 
 interface ManagerDashboardPayload {
+  submitted?: number;
   completed?: number;
   totals?: { applied?: number; pending?: number; failed?: number };
   rows?: ManagerClientRow[];
@@ -228,19 +232,19 @@ const ClientTable: React.FC<{
     <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
       <table className="w-full min-w-[640px] text-left text-xs">
         <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-          <tr>{['Client', 'Apps', 'Completed', 'Pending', 'Failed', 'Assigned'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+          <tr>{['Client', 'Apps', 'Submitted', 'Pending', 'Failed', 'Assigned'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
         </thead>
         <tbody>
           {rows.map((row) => {
             const openKey = expanded && expanded.startsWith(`${row.client}:`) ? expanded : null;
             const mode = openKey ? openKey.split(':')[1] : null;
-            const items = mode === 'completed' ? row.completedApplications : mode === 'pending' ? row.pendingApplications : mode === 'failed' ? row.failedApplications : [];
+            const items = (mode === 'submitted' || mode === 'completed') ? (row.submittedApplications || row.completedApplications) : mode === 'pending' ? row.pendingApplications : mode === 'failed' ? row.failedApplications : [];
             return (
               <React.Fragment key={row.client}>
                 <tr className="border-b border-[#1A1A2E]/20">
                   <td className="p-3 font-black">{row.client}</td>
                   <td className="p-3 font-mono">{row.applications}</td>
-                  <td className="p-3">{row.completed ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:completed`)}>{row.completed}</button> : <span className="font-mono">0</span>}</td>
+                  <td className="p-3">{(row.submitted ?? row.completed) ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:submitted`)}>{row.submitted ?? row.completed}</button> : <span className="font-mono">0</span>}</td>
                   <td className="p-3">{row.pending ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:pending`)}>{row.pending}</button> : <span className="font-mono">0</span>}</td>
                   <td className="p-3">{row.failed ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:failed`)}>{row.failed}</button> : <span className="font-mono">0</span>}</td>
                   <td className="p-3 text-[#64748B]">{row.assignedTo || '—'}</td>
@@ -251,7 +255,7 @@ const ClientTable: React.FC<{
                       {(items || []).map((item, i) => (
                         <div key={item.id || i} className="flex flex-col md:flex-row md:justify-between gap-1 text-xs">
                           <a href={item.job_url} target="_blank" rel="noopener noreferrer" className="font-bold underline break-all">{item.job_url}</a>
-                          {mode === 'completed' && (
+                          {(mode === 'submitted' || mode === 'completed') && (
                             <span className="flex gap-3">
                               {item.proof_web_url ? <a href={item.proof_web_url} target="_blank" rel="noopener noreferrer" className="underline font-bold">Web proof</a> : <span className="text-[#64748B]">Web proof unavailable</span>}
                               {item.proof_email_url ? <a href={item.proof_email_url} target="_blank" rel="noopener noreferrer" className="underline font-bold">Email screenshot</a> : item.proof_email_json ? <button type="button" className="underline font-bold" onClick={() => onEmailProof(item.proof_email_json as EmailProofData)}>View email proof</button> : <span className="text-[#64748B]">Email proof unavailable</span>}
@@ -532,7 +536,7 @@ export const AdminDashboard: React.FC = () => {
                 ['Operators', overview.operators],
                 ['Active operators', overview.activeOperators],
                 ['Inactive operators', overview.inactiveOperators],
-                ['Completed', overview.completed],
+                ['Submitted', overview.submitted ?? overview.completed],
                 ['Applied', overview.applied],
                 ['Running', overview.running],
                 ['Queued', overview.queued],
@@ -590,7 +594,7 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-sm font-black">{selectedManager}</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
-                ['Completed', managerDash.completed],
+                ['Submitted', managerDash.submitted ?? managerDash.completed],
                 ['Applied', managerDash.totals?.applied],
                 ['Pending', managerDash.totals?.pending],
                 ['Failed', managerDash.totals?.failed],
