@@ -244,7 +244,7 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
 
     let query = getDbClient()
       .from('gh_candidate_applications')
-      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles(client_name, ca_email)', { count: 'exact' })
+      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, proof_web_url, proof_email_url, proof_email_json, proof_captured_at, profiles(client_name, ca_email)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
     if (status) query = query.eq('status', status);
@@ -255,22 +255,34 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
     const { data, error, count } = await query;
     if (error) throw error;
 
-    let rows = (data || []).map((row: any) => ({
-      id: row.id,
-      applywizzId: row.applywizz_id,
-      client: row.profiles?.client_name || row.applywizz_id,
-      jobUrl: row.job_url,
-      companyName: row.company_name,
-      jobTitle: row.job_title,
-      status: row.status,
-      operator: row.assigned_ca_email || row.profiles?.ca_email || '',
-      assigned_ca_email: row.assigned_ca_email || row.profiles?.ca_email || '',
-      assignedCaEmail: row.assigned_ca_email || row.profiles?.ca_email || '',
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      submittedAt: row.submitted_at,
-      errorMessage: row.error_message || '',
-    }));
+    let rows = (data || []).map((row: any) => {
+      const candidateName = row.profiles?.client_name || row.applywizz_id || '';
+      const caEmail = row.assigned_ca_email || row.profiles?.ca_email || '';
+      return {
+        id: row.id,
+        applywizzId: row.applywizz_id,
+        client: candidateName,
+        client_name: candidateName,
+        candidate_name: candidateName,
+        candidateName,
+        jobUrl: row.job_url,
+        companyName: row.company_name,
+        jobTitle: row.job_title,
+        status: row.status,
+        operator: caEmail,
+        assigned_ca_email: caEmail,
+        assignedCaEmail: caEmail,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        submittedAt: row.submitted_at,
+        errorMessage: row.error_message || '',
+        error_message: row.error_message || '',
+        proof_web_url: row.proof_web_url || null,
+        proof_email_url: row.proof_email_url || null,
+        proof_email_json: row.proof_email_json || null,
+        proof_captured_at: row.proof_captured_at || null,
+      };
+    });
     if (search) {
       rows = rows.filter((row) =>
         [row.client, row.applywizzId, row.companyName, row.jobTitle, row.operator, row.jobUrl]

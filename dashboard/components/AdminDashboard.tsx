@@ -14,6 +14,8 @@ interface EmailProofData {
 interface ApplicationProofData {
   id?: string;
   client?: string;
+  client_name?: string;
+  candidate_name?: string;
   jobTitle?: string;
   jobUrl: string;
   companyName?: string;
@@ -25,7 +27,7 @@ interface ApplicationProofData {
   proof_email_url?: string;
   proof_email_json?: Record<string, unknown>;
   error_message?: string;
-  candidate_name?: string;
+  errorMessage?: string;
 }
 
 interface ManagerClientItem {
@@ -133,14 +135,20 @@ const EmailProofModal: React.FC<{ proof: EmailProofData | null; onClose: () => v
   );
 };
 
-const ApplicationProofModal: React.FC<{ application: ApplicationProofData | null; onClose: () => void }> = ({ application, onClose }) => {
+const ApplicationProofModal: React.FC<{
+  application: ApplicationProofData | null;
+  onClose: () => void;
+  onEmailProof?: (proof: EmailProofData) => void;
+}> = ({ application, onClose, onEmailProof }) => {
   if (!application) return null;
 
   const { jobTitle, companyName, operator, assigned_ca_email, status, 
-          proof_web_url, proof_email_url, proof_email_json, error_message, candidate_name } = application;
+          proof_web_url, proof_email_url, proof_email_json, error_message, errorMessage,
+          candidate_name, client_name, client } = application;
 
   const displayOperator = (operator || assigned_ca_email || '').trim() || '—';
-  const displayCandidateName = candidate_name || '—';
+  const displayCandidateName = candidate_name || client_name || client || '—';
+  const displayErrorMessage = error_message || errorMessage || '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1A1A2E]/80" onClick={onClose}>
@@ -172,15 +180,21 @@ const ApplicationProofModal: React.FC<{ application: ApplicationProofData | null
                 {proof_email_url ? (
                   <a href={proof_email_url} target="_blank" rel="noopener noreferrer" className="underline font-bold">View Email Screenshot</a>
                 ) : (
-                  <span className="text-xs text-[#64748B]">Email proof data available in application details</span>
+                  <button
+                    type="button"
+                    className="underline font-bold text-xs"
+                    onClick={() => onEmailProof && proof_email_json && onEmailProof(proof_email_json as EmailProofData)}
+                  >
+                    View Email Proof
+                  </button>
                 )}
               </div>
             )}
             
-            {status === 'FAILED' && error_message && (
+            {status === 'FAILED' && displayErrorMessage && (
               <div className="bg-[#FEE2E2] border border-[#991B1B] rounded p-3">
                 <p className="text-xs font-bold text-[#991B1B] mb-1">Error Message</p>
-                <p className="text-xs text-[#991B1B] whitespace-pre-wrap">{error_message}</p>
+                <p className="text-xs text-[#991B1B] whitespace-pre-wrap">{displayErrorMessage}</p>
               </div>
             )}
             
@@ -188,6 +202,12 @@ const ApplicationProofModal: React.FC<{ application: ApplicationProofData | null
               <div className="bg-[#FFF8D6] border border-[#1A1A2E] rounded p-3">
                 <p className="text-xs font-bold text-[#64748B] mb-1">Email Proof Status</p>
                 <p className="text-xs text-[#64748B]">Email proof pending</p>
+              </div>
+            )}
+
+            {status === 'APPLIED' && !proof_web_url && !proof_email_url && !proof_email_json && (
+              <div className="bg-white border border-[#1A1A2E]/20 rounded p-3 text-center">
+                <p className="text-xs text-[#64748B]">Application marked APPLIED. Proof capture processing or unavailable.</p>
               </div>
             )}
           </div>
@@ -451,7 +471,7 @@ export const AdminDashboard: React.FC = () => {
   return (
     <main className="min-h-screen p-4 md:p-8 font-sans bg-[#FFF5EB] text-[#1A1A2E]">
       <EmailProofModal proof={emailProof} onClose={() => setEmailProof(null)} />
-      <ApplicationProofModal application={applicationProof} onClose={() => setApplicationProof(null)} />
+      <ApplicationProofModal application={applicationProof} onClose={() => setApplicationProof(null)} onEmailProof={setEmailProof} />
       <div className="max-w-7xl mx-auto">
         <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6">
           <div className="flex items-center gap-3">
