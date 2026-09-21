@@ -127,3 +127,4 @@
 2026-09-20 session-end checkpoint: session closed; progress.md updated; all changes merged and pushed to main; no pending observations
 2026-09-21 session-start scan: files=11 parsed=11
 2026-09-21 checkpoint: no observations
+2026-09-21 checkpoint: applied SEC-3 (IDOR checks on mutation routes), SEC-4 (SSRF URL validation before page.goto), RACE-1 (queue worker TOCTOU .select('id') claim check), RACE-3 (proof capture try/catch preserving APPLIED status); no new observations

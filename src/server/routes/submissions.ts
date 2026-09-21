@@ -184,6 +184,15 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
     return;
   }
 
+  const appRow = await getApplication(appId, req.body?.jobUrl);
+  if (appRow) {
+    const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
+    if (!isAdmin && (req as any).user && appRow.assigned_ca_email !== (req as any).user.email) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+  }
+
   // Asynchronous queue insertion (default production flow - Phase V2-4c)
   if (!isSync) {
     log.info(`[API] Submit endpoint received → setting status to: QUEUED`);
@@ -381,6 +390,26 @@ submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Re
 
       page = await context.newPage();
       const targetUrl = application.job_url;
+
+      const ALLOWED_GREENHOUSE_HOSTS = [
+        'boards.greenhouse.io',
+        'job-boards.greenhouse.io',
+        'app.greenhouse.io',
+        'grnh.se',
+      ];
+      let url: URL;
+      try {
+        url = new URL(targetUrl);
+      } catch {
+        if (browser) await browser.close().catch(() => {});
+        res.status(400).json({ error: 'Invalid job URL' });
+        return;
+      }
+      if (!ALLOWED_GREENHOUSE_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith('.' + h))) {
+        if (browser) await browser.close().catch(() => {});
+        res.status(400).json({ error: 'Invalid job URL' });
+        return;
+      }
 
       log.info(
         `[Submissions Router] 🌐 Opening headful CAPTCHA browser for ${application.applywizz_id} → ${targetUrl}`
