@@ -41,8 +41,45 @@ import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
 import { applicationRowHasPersistedResolution } from '../../dashboard/candidateQueueFilter.js';
 import { requireAuth } from '../middleware/auth.js';
+import axios from 'axios';
 
 const log = createLogger('Applications');
+
+/**
+ * Broadcasts status change event cross-service or locally to dashboard WebSockets.
+ */
+export async function broadcastApplicationStatusChange(event: {
+  appId: string;
+  status: string;
+  timestamp?: string;
+  [key: string]: any;
+}): Promise<void> {
+  const { appId, status, timestamp, ...rest } = event;
+  const message = {
+    type: 'APPLICATION_STATUS_CHANGED' as const,
+    appId,
+    status,
+    timestamp: timestamp || new Date().toISOString(),
+    ...rest,
+  };
+
+  const targetServiceUrl =
+    process.env.WEB_SERVICE_URL ||
+    (process.env.WORKER_SERVICE_URL
+      ? process.env.WORKER_SERVICE_URL.replace('worker', 'main').replace('worker', 'greehouse_apply')
+      : undefined);
+
+  if (targetServiceUrl && process.env.ENABLE_QUEUE_WORKER === 'true') {
+    try {
+      await axios.post(`${targetServiceUrl}/api/internal/ws-broadcast`, message, { timeout: 5000 });
+      return;
+    } catch (err: any) {
+      log.warn(`[Applications Router] ⚠️ Failed to forward status change to ${targetServiceUrl}: ${err.message}`);
+    }
+  }
+
+  wsManager.broadcast(message);
+}
 
 export const applicationsRouter = Router();
 
@@ -352,13 +389,24 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       });
     }
 
+    if (statusChanged) {
+      broadcastApplicationStatusChange({
+        appId: targetAppId,
+        status: effectiveStatus,
+        timestamp: new Date().toISOString(),
+        jobUrl: finalJobUrl,
+        applywizzId: finalApplywizz,
+      }).catch(() => {});
+    }
+
     // Emit WebSocket event on worker failure for instant UI notification
     if (status === 'FAILED' && statusChanged) {
       const failReason = normalizeOperatorErrorMessage(
         resolvedErrorMessage || application?.error_message,
         'FAILED'
       );
-      wsManager.emitApplicationFailed({
+      const failEvent = {
+        type: 'APPLICATION_FAILED' as const,
         appId: targetAppId,
         reason: failReason,
         timestamp: new Date().toISOString(),
@@ -367,7 +415,21 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
         companyName: application?.company_name || application?.companyName,
         jobTitle: application?.job_title || application?.jobTitle,
         proofFailedUrl: resolvedProofFailedUrl || application?.proof_failed_url || application?.proofFailedUrl,
-      });
+      };
+
+      const targetServiceUrl =
+        process.env.WEB_SERVICE_URL ||
+        (process.env.WORKER_SERVICE_URL
+          ? process.env.WORKER_SERVICE_URL.replace('worker', 'main').replace('worker', 'greehouse_apply')
+          : undefined);
+
+      if (targetServiceUrl && process.env.ENABLE_QUEUE_WORKER === 'true') {
+        axios.post(`${targetServiceUrl}/api/internal/ws-broadcast`, failEvent, { timeout: 5000 }).catch((err: any) => {
+          log.warn(`[Applications Router] ⚠️ Failed to forward failure event to ${targetServiceUrl}: ${err.message}`);
+        });
+      } else {
+        wsManager.broadcast(failEvent);
+      }
     }
 
     // Fetch latest hydrated application record and return full serialized DTO
