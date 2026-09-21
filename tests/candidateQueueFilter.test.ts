@@ -22,7 +22,9 @@ describe('candidateQueueFilter', () => {
     assert.equal(isOperatorFormPanelBlocked('READY_FOR_REVIEW'), false);
     assert.equal(isOperatorFormPanelBlocked('APPLIED'), false);
     assert.equal(isOperatorFormPanelBlocked('SKIPPED'), true);
-    assert.equal(isOperatorFormPanelBlocked('FAILED'), true);
+    assert.equal(isOperatorFormPanelBlocked('FAILED'), false);
+    assert.equal(isOperatorFormPanelBlocked('DRY_RUN_COMPLETE'), false);
+    assert.equal(isOperatorFormPanelBlocked('EMAIL_UNVERIFIED'), false);
   });
 
   it('operatorFormBlockedDetailMessage normalizes stored errors', () => {

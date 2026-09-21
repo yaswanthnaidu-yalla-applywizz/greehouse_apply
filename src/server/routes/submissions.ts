@@ -187,7 +187,12 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
   const appRow = await getApplication(appId, req.body?.jobUrl);
   if (appRow) {
     const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
-    if (!isAdmin && (req as any).user && appRow.assigned_ca_email !== (req as any).user.email) {
+    if (
+      !isAdmin &&
+      (req as any).user &&
+      appRow.assigned_ca_email?.trim().toLowerCase() !==
+        String((req as any).user.email || '').trim().toLowerCase()
+    ) {
       res.status(403).json({ error: 'Access denied' });
       return;
     }

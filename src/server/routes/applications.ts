@@ -112,8 +112,10 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
       return;
     }
 
-    const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
-    if (!isAdmin && (req as any).user && application.assigned_ca_email !== (req as any).user.email) {
+    const userRole = String((req as any).user?.role || '').trim().toLowerCase();
+    const isAdmin = ['admin', 'dev'].includes(userRole);
+    const isOperator = userRole === 'operator' || userRole === 'ca';
+    if (!isAdmin && !isOperator && (req as any).user && application.assigned_ca_email?.trim().toLowerCase() !== String((req as any).user.email || '').trim().toLowerCase()) {
       res.status(403).json({ error: 'Access denied' });
       return;
     }

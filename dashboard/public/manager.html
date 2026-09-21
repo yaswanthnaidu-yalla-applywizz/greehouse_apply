@@ -294,6 +294,7 @@
       const [appliedOperator, setAppliedOperator] = useState(null);
       const [operators, setOperators] = useState([]);
       const [operatorTotals, setOperatorTotals] = useState({});
+      const [operatorError, setOperatorError] = useState('');
       const [activity, setActivity] = useState([]);
       const [activityWarning, setActivityWarning] = useState('');
       const [reports, setReports] = useState({ buckets: [], perOperator: [] });
@@ -357,23 +358,27 @@
       }, [dateFilterMode, customFrom, customTo, ca]);
 
       const loadOperators = useCallback(async () => {
-        const opParams = dateQuery ? `?${dateQuery}` : '';
-        const res = await fetch(`/api/manager/operators${opParams}`, { headers: ApplyWizzRoles.getAuthHeaders() });
+        const opParams = dateQuery || `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`;
+        const res = await fetch(`/api/manager/operators?${opParams}`, { headers: ApplyWizzRoles.getAuthHeaders() });
         const payload = await res.json();
         if (res.ok) {
           setOperators(payload.operators || []);
           setOperatorTotals(payload.totals || {});
+          setOperatorError('');
+        } else {
+          setOperatorError(payload.error || 'Unable to load manager operators.');
         }
-      }, [dateQuery]);
+      }, [dateQuery, customFrom, customTo]);
 
       const loadActivity = useCallback(async () => {
-        const res = await fetch('/api/manager/activity?limit=100', { headers: ApplyWizzRoles.getAuthHeaders() });
+        const range = dateQuery || `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`;
+        const res = await fetch(`/api/manager/activity?limit=100&${range}`, { headers: ApplyWizzRoles.getAuthHeaders() });
         const payload = await res.json();
         if (res.ok) {
           setActivity(payload.events || []);
           setActivityWarning(payload.warning || '');
         }
-      }, []);
+      }, [dateQuery, customFrom, customTo]);
 
       const loadReports = useCallback(async () => {
         const res = await fetch(`/api/manager/reports?range=${encodeURIComponent(reportRange)}`, { headers: ApplyWizzRoles.getAuthHeaders() });
@@ -595,6 +600,7 @@
               ))}
             </nav>
             {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
+            {operatorError && tab === 'operators' && <div className="mb-4 bg-[#FECACA] border-2 border-[#1A1A2E] rounded p-3 text-sm font-bold">{operatorError}</div>}
             {warning && <div className="mb-4 bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">{warning}</div>}
             {loading && <p className="text-xs font-mono font-bold mb-4">Loading…</p>}
 

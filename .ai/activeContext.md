@@ -49,6 +49,7 @@ _Last updated: 2026-09-21_
 - **`GET /api/admin/managers`** — `adminManagerStats.ts` (operators / clients / apps / 48h active), not date-scoped client rollup.
 - **Operator workload** — `countOperatorWorkloadByProfileCaEmail()` on admin + manager `GET /operators`.
 - **UI (display only)** — `admin.html` managers + operators + applications operator column; `manager.html` workload + enriched Activity lines.
+- **Manager stats fix (2026-09-21):** Operators now derives Assigned/Completed/Applied from the same scoped dashboard rollup as Home instead of separate today-only count queries; operator API errors are surfaced in both Manager UI implementations. Activity accepts the selected date range, and Reports uses period-scoped assigned counts. Typecheck/build pass; non-E2E suite still has unrelated environment-dependent failures in existing resolver/submission tests.
 - **Next:** finish remaining changes, then commit + deploy; smoke `/admin` Managers/Operators/Applications and `/manager` Operators/Activity.
 
 ### 1. Role from `users.role` (shipped — re-login to refresh JWT)
