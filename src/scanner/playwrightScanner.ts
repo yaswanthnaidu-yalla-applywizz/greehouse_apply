@@ -266,8 +266,6 @@ export class PlaywrightScanner {
             viewport: { width: 1280, height: 800 },
           });
 
-          const page = await context.newPage();
-
           try {
             while (true) {
               const jobIndex = currentIndex++;
@@ -277,37 +275,42 @@ export class PlaywrightScanner {
 
               const targetUrl = urls[jobIndex];
               throwIfPipelineAborted('Playwright scan');
-              const template = await this.scanSingleUrl(targetUrl, page, compact);
-              results[jobIndex] = template;
-              completedCount++;
-              if (template.isExpired) expiredJobs++;
-              else activeJobs++;
-              totalFields += template.fields?.length || 0;
+              const page = await context.newPage();
+              try {
+                const template = await this.scanSingleUrl(targetUrl, page, compact);
+                results[jobIndex] = template;
+                completedCount++;
+                if (template.isExpired) expiredJobs++;
+                else activeJobs++;
+                totalFields += template.fields?.length || 0;
 
-              if (this.onJobScanned) {
-                this.onJobScanned(template, completedCount, total);
-              }
+                if (this.onJobScanned) {
+                  this.onJobScanned(template, completedCount, total);
+                }
 
-              if (compact) {
-                const now = Date.now();
-                const milestone =
-                  completedCount === total ||
-                  completedCount % compactProgressEvery === 0;
-                const heartbeat = now - lastCompactProgressLogAt >= compactProgressMinIntervalMs;
-                if (milestone || heartbeat) {
-                  lastCompactProgressLogAt = now;
-                  const elapsedSec = ((now - scanStartedAt) / 1000).toFixed(0);
+                if (compact) {
+                  const now = Date.now();
+                  const milestone =
+                    completedCount === total ||
+                    completedCount % compactProgressEvery === 0;
+                  const heartbeat = now - lastCompactProgressLogAt >= compactProgressMinIntervalMs;
+                  if (milestone || heartbeat) {
+                    lastCompactProgressLogAt = now;
+                    const elapsedSec = ((now - scanStartedAt) / 1000).toFixed(0);
+                    log.info(
+                      `[Playwright Scanner] progress ${completedCount}/${total} active=${activeJobs} expired=${expiredJobs} elapsed=${elapsedSec}s`
+                    );
+                  }
+                }
+
+                if (!compact) {
+                  const statusIcon = template.isExpired ? '❌ [Expired/404]' : `✅ [${template.fields.length} fields]`;
                   log.info(
-                    `[Playwright Scanner] progress ${completedCount}/${total} active=${activeJobs} expired=${expiredJobs} elapsed=${elapsedSec}s`
+                    `[Playwright Scanner] [${completedCount}/${total}] ${statusIcon} ${template.companyName ? `${template.companyName} — ` : ''}${template.jobTitle || 'Job'} (${targetUrl})`
                   );
                 }
-              }
-
-              if (!compact) {
-                const statusIcon = template.isExpired ? '❌ [Expired/404]' : `✅ [${template.fields.length} fields]`;
-                log.info(
-                  `[Playwright Scanner] [${completedCount}/${total}] ${statusIcon} ${template.companyName ? `${template.companyName} — ` : ''}${template.jobTitle || 'Job'} (${targetUrl})`
-                );
+              } finally {
+                await page.close().catch(() => {});
               }
 
               // Apply jitter before next URL on this worker
@@ -316,7 +319,6 @@ export class PlaywrightScanner {
               }
             }
           } finally {
-            await page.close().catch(() => {});
             await context.close().catch(() => {});
           }
         })();
