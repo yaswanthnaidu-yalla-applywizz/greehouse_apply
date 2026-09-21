@@ -144,17 +144,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     }
   }, [currentStatus]);
 
-  const isDemographic = (label: string) => {
-    const l = (label || '').toLowerCase();
-    return (
-      l.includes('gender') ||
-      l.includes('race') ||
-      l.includes('ethnicity') ||
-      l.includes('veteran') ||
-      l.includes('disability')
-    );
-  };
-
   const isIdentityField = (f: ResolvedField) => {
     const name = String(f?.name || f?.fieldId || '').toLowerCase();
     const label = String(f?.label || '').toLowerCase().trim();
