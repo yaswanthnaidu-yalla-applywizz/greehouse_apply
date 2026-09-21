@@ -232,7 +232,7 @@ export async function ingestCsvFromStorage(options?: {
     console.log = (...args: unknown[]) => {
       try {
         const text = args.map((a) => (typeof a === 'string' ? a : '')).join(' ');
-        const match = text.match(/(?:\[Pipeline Phase |\[Pipeline\] phase )([A-D])/i);
+        const match = text.match(/(?:\[Pipeline Phase |\[Pipeline\] phase )([A-D](?:\.5)?)/i);
         if (match) {
           const phaseLetter = match[1].toUpperCase();
           const phaseName = `Phase ${phaseLetter}`;

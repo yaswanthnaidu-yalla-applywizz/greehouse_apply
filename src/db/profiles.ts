@@ -573,3 +573,36 @@ export async function updateParsedResume(
     } catch {}
   }
 }
+
+/**
+ * Updates profiles.ca_email if currently NULL. Never overwrites an existing value.
+ */
+export async function upsertProfileCaEmail(
+  applywizzId: string,
+  caEmail: string
+): Promise<void> {
+  const id = (applywizzId || '').trim();
+  const email = (caEmail || '').trim().toLowerCase();
+  if (!id || !email) return;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          ca_email: email,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('applywizz_id', id)
+        .is('ca_email', null);
+
+      if (error) {
+        log.warn(`[DB] upsertProfileCaEmail error (${id}): ${error.message}`);
+      }
+    } catch (err: any) {
+      log.warn(`[DB] upsertProfileCaEmail exception (${id}): ${err?.message || err}`);
+    }
+  }
+}
+
