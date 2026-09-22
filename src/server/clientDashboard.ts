@@ -82,6 +82,7 @@ export interface ClientDashboardResult {
   clients: string[];
   totals: {
     applications: number;
+    submitted: number;
     applied: number;
     failed: number;
     pending: number;
@@ -176,7 +177,7 @@ export function emptyClientDashboard(
     managerEmail,
     rows: [],
     clients: [],
-    totals: { applications: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 },
+    totals: { applications: 0, submitted: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 },
     warning,
   };
 }

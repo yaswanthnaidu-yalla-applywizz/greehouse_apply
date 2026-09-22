@@ -163,9 +163,19 @@ adminDashboardRouter.get('/managers/:email/dashboard', async (req: Request, res:
   }
   const requestedCa = typeof req.query.ca === 'string' ? req.query.ca.trim() : 'all';
   try {
+    const hasStatsRange = typeof req.query.range === 'string' || typeof req.query.from === 'string' || typeof req.query.to === 'string';
+    const parsedRange = !hasStatsRange && requestedDate
+      ? { ...getISTDateRangeUtc(requestedDate), preset: 'custom' as const, fromDate: requestedDate, toDate: requestedDate, label: requestedDate }
+      : parseDashboardStatsRange(req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
+    }
     const payload = await loadClientDashboard({
       managerEmail: email,
       date: requestedDate,
+      createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
+      dateRangeMeta: serializeDateRange(parsedRange),
       ca: requestedCa,
     });
     res.json(payload);

@@ -367,10 +367,7 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         pending: 0,
         failed: 0,
       };
-      const rowSubmitted = row.submitted ?? row.completed ?? 0;
       current.applications += row.applications;
-      current.submitted += rowSubmitted;
-      current.completed += rowSubmitted;
       current.applied += row.applied;
       current.pending += row.pending;
       current.failed += row.failed;
@@ -410,6 +407,18 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         });
       }
     }
+
+    await Promise.all(
+      Array.from(operators.values()).map(async (operator) => {
+        const submitted = await countSubmittedApplicationsSince(
+          parsedRange.startIso,
+          [operator.email],
+          parsedRange.endIso
+        );
+        operator.submitted = submitted;
+        operator.completed = submitted;
+      })
+    );
 
     const items = Array.from(operators.values()).map((operator) => {
       const user = byEmail.get(operator.email);

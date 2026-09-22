@@ -323,3 +323,6 @@
 2026-09-22 deliverable flush: unified EMAIL_PROOF_PENDING timeout behavior and updated active docs/tests; typecheck passed; full E2E suite has pre-existing Supabase/integration failures
 2026-09-22 deliverable flush: removed active manual_email_review writes and renamed operator action to get email ss; typecheck passed; no new observations
 2026-09-22 checkpoint: dashboard stats unified under IST day/week/month presets; typecheck and diff check passed; no observations
+2026-09-22 deliverable flush: added submitted total and selected range propagation to admin manager drill-down; typecheck passed; no observations
+2026-09-22 deliverable flush: manager Operators tab submitted totals now use submitted_at count helper per operator; typecheck passed; no observations
+2026-09-22 deliverable flush: operator applied and failed cards now render null-safe zero values; API queries already use submitted_at with updated_at fallback; typecheck passed; no observations

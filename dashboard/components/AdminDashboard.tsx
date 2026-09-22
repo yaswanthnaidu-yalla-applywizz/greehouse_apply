@@ -81,7 +81,7 @@ interface AdminManager {
 interface ManagerDashboardPayload {
   submitted?: number;
   completed?: number;
-  totals?: { applied?: number; pending?: number; failed?: number };
+  totals?: { submitted?: number; applied?: number; pending?: number; failed?: number };
   rows?: ManagerClientRow[];
 }
 
@@ -602,7 +602,7 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-sm font-black">{selectedManager}</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
-                ['Submitted', managerDash.submitted ?? managerDash.completed],
+                ['Submitted', managerDash.submitted ?? managerDash.totals?.submitted],
                 ['Applied', managerDash.totals?.applied],
                 ['Pending', managerDash.totals?.pending],
                 ['Failed', managerDash.totals?.failed],
