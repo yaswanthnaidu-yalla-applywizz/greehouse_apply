@@ -12,7 +12,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ApplicationStatusBadge } from './ApplicationStatusBadge.js';
 import type { ApplicationStatus } from '../../src/db/applications.js';
-import { apiFetch } from '../hooks/useSession.js';
+import { apiFetch, getAccessToken } from '../hooks/useSession.js';
 
 export interface ProofViewerProps {
   isOpen: boolean;
@@ -83,6 +83,8 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
         // Fallback to proxy stream directly
         const query = new URLSearchParams({ kind: proofKind });
         if (jobUrl) query.set('jobUrl', jobUrl);
+        const token = getAccessToken();
+        if (token) query.set('token', token);
         const proxyUrl = `${apiBaseUrl}/api/applications/${encodeURIComponent(appId)}/proof-image?${query.toString()}`;
         setCurrentUrl(proxyUrl);
         setFallbackStage(2);
@@ -166,6 +168,8 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
       // The signed URL failed to load. Fall back to backend streaming proxy.
       const query = new URLSearchParams({ kind: effectiveKind });
       if (metadata?.jobUrl) query.set('jobUrl', metadata.jobUrl);
+      const token = getAccessToken();
+      if (token) query.set('token', token);
       const proxyUrl = `${apiBaseUrl}/api/applications/${encodeURIComponent(targetAppId)}/proof-image?${query.toString()}`;
       setCurrentUrl(proxyUrl);
       setFallbackStage(2);

@@ -4,6 +4,14 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### Answer Resolver Logging Standardization (2026-09-22)
+- [x] **Standardized Per-Field Resolution Log Format (`answerResolver.ts`):** Unified all per-field logging across Tiers 1–5 in both single-field (`resolveField`) and batch (`resolveJobApplication` / `resolveFieldThroughTier2` / `resolveTier5Batch`) execution paths:
+  - Success: `[Resolver] ✅ T{tier} {question_label} → "{answer}"`
+  - Failure: `[Resolver] ❌ T{tier} {question_label} — {reason}`
+  - Standardized reasons: `no profile match` (T1), `no resume match` (T2), `below similarity threshold ({score})` (T3), `no fuzzy match` (T4), `LLM parse error` (T5), `no option match` (T5), `unresolved` (T5).
+- [x] **Stripped Redundant Telemetry & Per-Field Noise:** Removed legacy bullet previews (`• [Source] "label" ➔ "preview"`), verbose tier telemetry, raw payload mining logs, and cascade noise across `answerResolver.ts`, `tier1Supabase.ts`, `semanticSearch.ts`, `tier5LLM.ts`, and `llmSynthesizer.ts`. Preserved pipeline-level summary and progress logs.
+- [x] **Exposed Last Semantic Score (`semanticSearch.ts`):** Added `getLastSemanticScore()` tracking top candidate score even when below threshold (`match_threshold: 0.0` RPC probe) for accurate failure log scores.
+
 ### Proof Image Rendering & Viewer Resilience (2026-09-21)
 - [x] **Candidate Job Proof Hydration:** Added `hydrateApplicationProofUrls(row)` to `GET /api/candidates/:applywizzId/jobs/*` so operators always receive fresh valid signed URLs up front.
 - [x] **Dual-Lookup & Resilient Proof URL Renewal:** Updated `GET /api/applications/:id/proof-url` and `GET /api/applications/:id/proof` to support UUID and candidate ApplyWizz ID + `jobUrl` composite lookup.

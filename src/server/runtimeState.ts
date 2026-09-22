@@ -8,6 +8,8 @@ import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 
 export interface IngestRunState {
   running: boolean;
+  runId?: string;
+  status?: string;
   startedAt?: string;
   finishedAt?: string;
   processedCount?: number;

@@ -313,6 +313,9 @@ export class PlaywrightScanner {
                 await page.close().catch(() => {});
               }
 
+              // Check abort immediately after each URL completes
+              throwIfPipelineAborted('Playwright scan');
+
               // Apply jitter before next URL on this worker
               if (jobIndex + 1 < total && this.maxJitterMs > 0) {
                 await sleepRandomJitter(this.minJitterMs, this.maxJitterMs);

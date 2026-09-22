@@ -352,7 +352,7 @@ export const App: React.FC = () => {
           return;
         }
 
-        const jobsRes = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs`);
+        const jobsRes = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`);
 
         if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
           return;

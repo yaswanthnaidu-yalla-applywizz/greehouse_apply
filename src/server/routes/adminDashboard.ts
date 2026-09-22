@@ -11,8 +11,10 @@ import {
   getISTDateRangeUtc,
   type ApplicationStatus,
 } from '../../db/applications.js';
+import crypto from 'crypto';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { insertAuditEvent, listAuditEvents } from '../../db/events.js';
+import { upsertIngestRun } from '../../db/ingestRuns.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { emailsForRole, isUserAdmin, resolveRole } from './auth.js';
 import { buildManagerTeamStats } from '../adminManagerStats.js';
@@ -388,8 +390,9 @@ adminDashboardRouter.post(
     }
 
     const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
     resetPipelineAbort();
-    setIngestRun({ running: true, startedAt });
+    setIngestRun({ running: true, runId, status: 'running', startedAt });
     const actorEmail = getAuthenticatedCaEmail(authReq) || (authReq.user as { email?: string } | undefined)?.email || '';
     void insertAuditEvent({
       actorEmail,
@@ -398,20 +401,41 @@ adminDashboardRouter.post(
       targetType: 'pipeline',
       targetId: startedAt,
     });
+    void upsertIngestRun({
+      id: runId,
+      status: 'running',
+      started_at: startedAt,
+      phase: 'Starting',
+      message: 'Storage CSV ingestion started',
+      triggered_by: actorEmail,
+    });
     log.info(`[Admin] ▶️ Storage CSV ingestion started at ${startedAt}`);
-    res.status(202).json({ started: true, startedAt });
+    res.status(202).json({ started: true, startedAt, runId });
 
     try {
       const { ingestCsvFromStorage } = await import('../../scanner/storageCsvIngestion.js');
-      const result = await ingestCsvFromStorage();
+      const result = await ingestCsvFromStorage({ runId, triggeredBy: actorEmail });
       setIngestRun({
         running: false,
+        runId,
+        status: result.success ? 'completed' : result.aborted ? 'aborted' : 'failed',
         startedAt,
         finishedAt: new Date().toISOString(),
         processedCount: result.processedCount,
         processedFile: result.processedFile,
         message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
         error: result.success ? undefined : result.message,
+      });
+      void upsertIngestRun({
+        id: runId,
+        status: result.success ? 'completed' : result.aborted ? 'aborted' : 'failed',
+        finished_at: new Date().toISOString(),
+        processed_count: result.processedCount,
+        processed_file: result.processedFile,
+        phase: result.success ? 'Completed' : result.aborted ? 'Aborted' : 'Failed',
+        message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
+        error: result.success ? undefined : result.message,
+        triggered_by: actorEmail,
       });
       log.info(
         `[Admin] ${result.success ? '✅' : result.aborted ? '⏹️' : '❌'} Storage CSV ingestion finished: ${result.message}`
@@ -420,9 +444,20 @@ adminDashboardRouter.post(
       const message = err?.message || 'Storage ingestion failed';
       setIngestRun({
         running: false,
+        runId,
+        status: 'failed',
         startedAt,
         finishedAt: new Date().toISOString(),
         error: message,
+      });
+      void upsertIngestRun({
+        id: runId,
+        status: 'failed',
+        finished_at: new Date().toISOString(),
+        phase: 'Failed',
+        error: message,
+        message,
+        triggered_by: actorEmail,
       });
       log.error('[Admin] ❌ Storage CSV ingestion failed:', err);
     } finally {
@@ -488,6 +523,61 @@ adminDashboardRouter.post(
     }
     requestPipelineAbort();
     log.warn('[Admin] ⏹️ Storage CSV ingestion stop requested by operator');
+
+    const stoppedAt = new Date().toISOString();
+    const currentRun = getIngestRun();
+    const runId = currentRun.runId;
+
+    // Update in-memory state
+    setIngestRun({
+      ...currentRun,
+      running: false,
+      status: 'stopped',
+      finishedAt: stoppedAt,
+      message: 'Pipeline stopped by operator.',
+    });
+
+    // Update Supabase ingest_runs row
+    if (isSupabaseConfigured()) {
+      try {
+        const client = getDbClient();
+        if (runId) {
+          await client
+            .from('ingest_runs')
+            .update({
+              status: 'stopped',
+              finished_at: stoppedAt,
+              message: 'Pipeline stopped by operator.',
+              updated_at: stoppedAt,
+            })
+            .eq('id', runId);
+        } else {
+          // Fallback: update most recent running ingest_run
+          const { data: latest } = await client
+            .from('ingest_runs')
+            .select('id')
+            .eq('status', 'running')
+            .order('started_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (latest?.id) {
+            await client
+              .from('ingest_runs')
+              .update({
+                status: 'stopped',
+                finished_at: stoppedAt,
+                message: 'Pipeline stopped by operator.',
+                updated_at: stoppedAt,
+              })
+              .eq('id', latest.id);
+          }
+        }
+      } catch (err: any) {
+        log.warn(`[Admin] Failed updating ingest_runs row to stopped: ${err.message}`);
+      }
+    }
+
     res.json({ stopping: true, ...getIngestRun() });
   }
 );

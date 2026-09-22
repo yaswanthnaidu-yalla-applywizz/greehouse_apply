@@ -30,6 +30,12 @@ export function isSemanticEnabled(): boolean {
   return true;
 }
 
+let lastSemanticScore = 0;
+
+export function getLastSemanticScore(): number {
+  return lastSemanticScore;
+}
+
 export interface SemanticMatchResult {
   value: string;
   source: 'semantic';
@@ -55,8 +61,6 @@ export async function embedText(text: string): Promise<number[] | null> {
   }
 
   const apiKey = config.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
-  const preview = clean.length > 50 ? clean.slice(0, 50) + '...' : clean;
-  log.info(`[Semantic] Embedding text: ${preview}`);
 
   try {
     const response = await axios.post(
@@ -84,14 +88,8 @@ export async function embedText(text: string): Promise<number[] | null> {
       return embedding;
     }
 
-    log.warn(`[Semantic] OpenRouter embeddings returned unexpected payload structure for: ${preview}`);
     return null;
-  } catch (err: any) {
-    log.warn(
-      `[Semantic] OpenRouter embedding error for "${preview}": ${
-        err?.response?.data?.error?.message || err.message
-      }`
-    );
+  } catch {
     return null;
   }
 }
@@ -102,15 +100,16 @@ export async function embedText(text: string): Promise<number[] | null> {
  * @param questionLabel - The question label to match.
  * @param applywizzId - Candidate identifier.
  * @param fieldType - Question input type.
- * @param threshold - Minimum similarity threshold (default: 0.88).
+ * @param threshold - Minimum similarity threshold (default: 0.82).
  * @returns Matching answer with confidence score, or null if no match meets threshold.
  */
 export async function findSemanticMatch(
   questionLabel: string,
   applywizzId: string,
   _fieldType: string,
-  threshold: number = 0.88
+  threshold: number = 0.82
 ): Promise<SemanticMatchResult | null> {
+  lastSemanticScore = 0;
   const embedding = await embedText(questionLabel);
   if (!embedding) {
     return null;
@@ -120,33 +119,30 @@ export async function findSemanticMatch(
     const { data, error } = await supabase.rpc('match_candidate_qa', {
       query_vector: embedding,
       match_applywizz_id: applywizzId,
-      match_threshold: threshold,
+      match_threshold: 0.0,
       match_count: 1,
     });
 
     if (error) {
-      log.warn(
-        `[Semantic] Supabase RPC match_candidate_qa error for label="${questionLabel}": ${error.message}`
-      );
       return null;
     }
 
     const rows = Array.isArray(data) ? data : data ? [data] : [];
     if (rows.length > 0 && rows[0]?.value) {
       const top = rows[0];
-      const similarity = Number(top.similarity ?? threshold);
-      log.info(`[Semantic] Match found: similarity=${similarity} for label=${questionLabel}`);
-      return {
-        value: top.value,
-        source: 'semantic',
-        confidence: similarity,
-      };
+      const similarity = Number(top.similarity ?? 0);
+      lastSemanticScore = similarity;
+      if (similarity >= threshold) {
+        return {
+          value: top.value,
+          source: 'semantic',
+          confidence: similarity,
+        };
+      }
     }
 
-    log.info(`[Semantic] No semantic match for label=${questionLabel}`);
     return null;
-  } catch (err: any) {
-    log.warn(`[Semantic] Error finding semantic match for label="${questionLabel}": ${err.message}`);
+  } catch {
     return null;
   }
 }
@@ -169,23 +165,12 @@ export async function writeEmbedding(
   }
 
   try {
-    const { error } = await supabase
+    await supabase
       .from('gh_candidate_qa_bank')
       .update({ embedding })
       .eq('applywizz_id', applywizzId)
       .eq('question_fingerprint', questionFingerprint);
-
-    if (error) {
-      log.warn(
-        `[Semantic] Failed to write embedding for fingerprint=${questionFingerprint}: ${error.message}`
-      );
-      return;
-    }
-
-    log.info(`[Semantic] Wrote embedding for fingerprint=${questionFingerprint}`);
-  } catch (err: any) {
-    log.warn(
-      `[Semantic] Error writing embedding for fingerprint=${questionFingerprint}: ${err.message}`
-    );
+  } catch {
+    // Ignore write-back embedding errors
   }
 }

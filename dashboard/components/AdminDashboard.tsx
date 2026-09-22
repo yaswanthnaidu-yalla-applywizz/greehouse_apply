@@ -734,7 +734,7 @@ export const AdminDashboard: React.FC = () => {
                 </li>
               ))}
             </ul>
-            {!activity.length && <p className="p-6 text-center text-[#64748B]">No audit events yet. Apply migration 015 to start recording them.</p>}
+            {!activity.length && <p className="p-6 text-center text-[#64748B]">No audit events recorded yet.</p>}
           </div>
         )}
 

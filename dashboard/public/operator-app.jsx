@@ -1075,6 +1075,17 @@
       );
     }
 
+    function getAccessToken() {
+      if (typeof window !== 'undefined') {
+        if (typeof window.getAccessToken === 'function') return window.getAccessToken();
+        if (window.ApplyWizzRoles && typeof window.ApplyWizzRoles.getAccessToken === 'function') {
+          return window.ApplyWizzRoles.getAccessToken();
+        }
+        return sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token') || '';
+      }
+      return '';
+    }
+
     // -------------------------------------------------------------
     // Proof Viewer Modal Component
     // -------------------------------------------------------------
@@ -1117,6 +1128,8 @@
           console.warn('[ProofViewer] Signed URL fetch failed, trying proxy stream:', err);
           const query = new URLSearchParams({ kind: proofKind });
           if (jobUrl) query.set('jobUrl', jobUrl);
+          const token = getAccessToken();
+          if (token) query.set('token', token);
           const proxyUrl = `/api/applications/${encodeURIComponent(appId)}/proof-image?${query.toString()}`;
           setCurrentUrl(proxyUrl);
           setFallbackStage(2);
@@ -1171,6 +1184,8 @@
         } else if (fallbackStage === 1) {
           const query = new URLSearchParams({ kind: effectiveKind });
           if (metadata?.jobUrl) query.set('jobUrl', metadata.jobUrl);
+          const token = getAccessToken();
+          if (token) query.set('token', token);
           const proxyUrl = `/api/applications/${encodeURIComponent(targetAppId)}/proof-image?${query.toString()}`;
           setCurrentUrl(proxyUrl);
           setFallbackStage(2);
@@ -3773,8 +3788,9 @@
             const detail = await res.json();
             if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) return;
 
+            const selectedDate = (dateFilterMode === 'custom' && customTo) ? customTo : getTodayIST();
             const jobsRes = await fetch(
-              `/api/candidates/${encodeURIComponent(applywizzId)}/jobs${dateQuery}`,
+              `/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`,
               { headers: getAuthHeaders() }
             );
 

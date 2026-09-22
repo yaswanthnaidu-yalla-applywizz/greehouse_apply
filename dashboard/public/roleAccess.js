@@ -5,6 +5,7 @@
   var MANAGER_VIEW_AS_OPERATOR_KEY = 'applywizz_manager_view_as_operator';
   var VIEW_AS_MANAGER_EMAIL_KEY = 'applywizz_view_as_manager_email';
   var refreshInFlight = null;
+  var pageLoadRefreshPromise = null;
   var nativeFetch = root.fetch.bind(root);
   var ROLE_BY_EMAIL = {
     'yaswanthnaiduyalla@applywizz.ai': 'dev',
@@ -90,12 +91,12 @@
     // TODO: migrate to HttpOnly cookies (ARCH phase)
     if (data.token) {
       sessionStorage.setItem('applywizz_auth_token', data.token);
-      localStorage.removeItem('applywizz_auth_token');
+      localStorage.setItem('applywizz_auth_token', data.token);
     }
     var refresh = data.refreshToken || data.refresh_token;
     if (refresh) {
       sessionStorage.setItem('applywizz_refresh_token', refresh);
-      localStorage.removeItem('applywizz_refresh_token');
+      localStorage.setItem('applywizz_refresh_token', refresh);
     }
     if (data.user) localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
     if (renewExpiry) {
@@ -131,11 +132,15 @@
     window.location.replace('/');
   }
 
+  function redirectToLogin() {
+    clearSession();
+    if (window.location.pathname !== '/') {
+      window.location.replace('/');
+    }
+  }
+
   function sessionCapExpired() {
-    var raw = localStorage.getItem('applywizz_session_expires_at');
-    if (!raw) return false;
-    var expires = Number(raw);
-    return Number.isFinite(expires) && Date.now() > expires;
+    return false;
   }
 
   function tokenExpiryMs(token) {
@@ -153,7 +158,6 @@
   }
 
   function needsRefresh() {
-    if (sessionCapExpired()) return false;
     var refresh = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     if (!refresh) return false;
     var exp = tokenExpiryMs(sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token'));
@@ -163,10 +167,6 @@
 
   function refreshSession() {
     if (refreshInFlight) return refreshInFlight;
-    if (sessionCapExpired()) {
-      clearSession();
-      return Promise.resolve(false);
-    }
     var refreshToken = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     if (!refreshToken) return Promise.resolve(false);
 
@@ -181,7 +181,7 @@
             clearSession();
             return false;
           }
-          persistSession(data, false);
+          persistSession(data, true);
           return true;
         });
       })
@@ -197,10 +197,8 @@
   }
 
   function ensureSession() {
-    if (sessionCapExpired()) {
-      clearSession();
-      return Promise.resolve(false);
-    }
+    if (pageLoadRefreshPromise) return pageLoadRefreshPromise;
+    if (refreshInFlight) return refreshInFlight;
     if (!needsRefresh()) return Promise.resolve(true);
     return refreshSession();
   }
@@ -340,12 +338,41 @@
     return ist.getUTCFullYear() + '-' + String(ist.getUTCMonth() + 1).padStart(2, '0') + '-' + String(ist.getUTCDate()).padStart(2, '0');
   }
 
-  ensureSession();
-  setInterval(function () {
-    ensureSession();
-  }, 10 * 60 * 1000);
+  function initPageLoadRefresh() {
+    var storedRefresh = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
+    if (!storedRefresh) return Promise.resolve(true);
 
+    pageLoadRefreshPromise = refreshSession().then(function (ok) {
+      pageLoadRefreshPromise = null;
+      if (!ok) {
+        redirectToLogin();
+      }
+      return ok;
+    });
+    return pageLoadRefreshPromise;
+  }
+
+  initPageLoadRefresh();
+
+  var REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+  setInterval(function () {
+    refreshSession().then(function (ok) {
+      if (!ok) {
+        var refresh = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
+        if (!refresh) {
+          redirectToLogin();
+        }
+      }
+    });
+  }, REFRESH_INTERVAL_MS);
+
+  function getAccessToken() {
+    return sessionStorage.getItem('applywizz_auth_token') || localStorage.getItem('applywizz_auth_token') || '';
+  }
+
+  root.getAccessToken = getAccessToken;
   root.ApplyWizzRoles = {
+    getAccessToken: getAccessToken,
     homePathForRole: homePathForRole,
     sessionRole: sessionRole,
     sessionUserEmail: sessionUserEmail,

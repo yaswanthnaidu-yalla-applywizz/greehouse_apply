@@ -15,9 +15,6 @@ import { generateFingerprint } from './fingerprint.js';
 import { writeEmbedding } from './semanticSearch.js';
 import { profileRowToCandidateProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
-
-const log = createLogger('Tier5LLM');
 
 export type LlmFailureReason = 'timeout' | 'rate_limit' | 'server_error' | 'permanent';
 
@@ -161,9 +158,6 @@ export async function resolveTier5(
     const confidence = rawResult?.confidence ?? 0;
     if (rawResult && rawResult.value && rawResult.value.trim().length > 0) {
       if (confidence < LLM_MIN_CONFIDENCE) {
-        log.warn(
-          `[Tier 5] Confidence ${confidence} < ${LLM_MIN_CONFIDENCE} for ${applywizzId} [${field.label}] — leaving unresolved (no qa_bank write)`
-        );
         return null;
       }
 
@@ -190,11 +184,8 @@ export async function resolveTier5(
           confidence: resolvedField.confidence,
         });
         await writeEmbedding(applywizzId, fingerprint, field.label);
-      } catch (writeErr: unknown) {
-        const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
-        log.warn(
-          `[Tier 5] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${msg}`
-        );
+      } catch {
+        // Ignore QA bank writeback error
       }
 
       return resolvedField;
@@ -202,22 +193,13 @@ export async function resolveTier5(
   } catch (err: unknown) {
     const failure = classifyLlmError(err);
     lastLlmFailure = failure;
-    if (failure.isRetriable) {
-      log.warn(
-        `[Tier 5] Retriable LLM synthesis failure (${failure.reason}) for ${applywizzId} [${field.label}]: ${failure.message}`
-      );
-    } else {
-      log.error(
-        `[Tier 5] Permanent LLM synthesis error for ${applywizzId} [${field.label}]: ${failure.message}`
-      );
-    }
   }
 
   return null;
 }
 
 /** Max LLM fields per batch API call within one candidate×job resolution. */
-export const TIER5_BATCH_CHUNK_SIZE = 15;
+export const TIER5_BATCH_CHUNK_SIZE = 8;
 
 /**
  * Tier 5 batch path: one LLM request per chunk, with the same post-validation as single-field synthesis.
@@ -333,11 +315,8 @@ export async function resolveTier5Batch(
           confidence: resolvedField.confidence,
         });
         await writeEmbedding(applywizzId, fingerprint, field.label);
-      } catch (writeErr: unknown) {
-        const msg = writeErr instanceof Error ? writeErr.message : String(writeErr);
-        log.warn(
-          `[Tier 5 Batch] ⚠️ QA bank writeback failed for ${applywizzId} [fp: ${fingerprint}]: ${msg}`
-        );
+      } catch {
+        // Ignore QA bank writeback error
       }
 
       results[llmIndices[j]] = resolvedField;
@@ -345,15 +324,6 @@ export async function resolveTier5Batch(
   } catch (err: unknown) {
     const failure = classifyLlmError(err);
     lastLlmFailure = failure;
-    if (failure.isRetriable) {
-      log.warn(
-        `[Tier 5 Batch] Retriable LLM batch failure (${failure.reason}) for ${applywizzId}: ${failure.message}`
-      );
-    } else {
-      log.error(
-        `[Tier 5 Batch] Permanent LLM batch error for ${applywizzId}: ${failure.message}`
-      );
-    }
   }
 
   return results;
