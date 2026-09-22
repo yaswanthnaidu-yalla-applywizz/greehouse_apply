@@ -20,7 +20,7 @@ import { insertAuditEvent, listApplicationEvents, type ApplicationEventRow } fro
 import { getISTDateString } from '../../services/workHistoryClient.js';
 import { canAccessManagerDashboard, resolveRole } from './auth.js';
 import { loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
-import { listAllDashboardUsers, listOperatorEmailsForManager } from '../../db/users.js';
+import { listAllDashboardUsers, listAllOperatorEmails, listOperatorEmailsForManager } from '../../db/users.js';
 import { distinctApplywizzIdsForOperatorEmails, hasUnrestrictedDashboardAccess, resolveRequestAppRole } from '../managerTeamScope.js';
 import { parseDashboardCreatedAtRange, parseDashboardStatsRange, serializeDateRange } from '../dashboardDateRange.js';
 import { displayNameMapForEmails, isActiveWithin, listAuthDirectory } from '../authDirectory.js';
@@ -354,6 +354,23 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       string,
       { email: string; name: string; applications: number; submitted: number; completed: number; applied: number; pending: number; failed: number }
     >();
+    const teamOperatorEmails = unrestricted
+      ? await listAllOperatorEmails()
+      : await listOperatorEmailsForManager(managerEmail);
+    for (const email of teamOperatorEmails) {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail) continue;
+      operators.set(normalizedEmail, {
+        email: normalizedEmail,
+        name: normalizedEmail.split('@')[0],
+        applications: 0,
+        submitted: 0,
+        completed: 0,
+        applied: 0,
+        pending: 0,
+        failed: 0,
+      });
+    }
     for (const row of dashboard.rows) {
       const email = (row.assignedToEmail || '').trim().toLowerCase();
       if (!email) continue;

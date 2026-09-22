@@ -118,6 +118,13 @@ export async function listOperatorEmailsForManager(managerEmail: string): Promis
   return rows.map((row) => row.email);
 }
 
+export async function listAllOperatorEmails(): Promise<string[]> {
+  const rows = await listAllDashboardUsers();
+  return rows
+    .filter((row) => (row.role || '').trim().toLowerCase() === 'operator')
+    .map((row) => row.email);
+}
+
 export async function listDashboardOperatorsForManager(
   managerEmail: string
 ): Promise<DashboardUserRow[]> {
