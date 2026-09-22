@@ -499,13 +499,13 @@ class ZohoReaderService {
       timeoutMs?: number;
       sinceTimestamp?: number;
       companyName?: string;
-      /** Accepted age window measured forward from `sinceTimestamp` (default 10 min). */
+      /** Accepted age window measured forward from `sinceTimestamp` (default 15 min). */
       windowMs?: number;
     } = {}
   ): Promise<ZohoOtpResult> {
     const timeoutMs = options.timeoutMs ?? config.ZOHO_CONNECTOR_TIMEOUT_MS ?? 120000;
     const sinceTimestamp = options.sinceTimestamp ?? (Date.now() - 3 * 60 * 1000);
-    const windowMs = options.windowMs ?? 10 * 60 * 1000;
+    const windowMs = options.windowMs ?? 15 * 60 * 1000;
     const untilTimestamp = sinceTimestamp + windowMs;
     const companyName = (options.companyName || '').trim();
     const normalizedEmail = candidateEmail.trim().toLowerCase();
@@ -621,7 +621,7 @@ class ZohoReaderService {
 
         log.info('[Zoho] Step 7: Reading mail list');
         if (itemCount > 0) {
-          const checkLimit = Math.min(itemCount, 15);
+          const checkLimit = Math.min(itemCount, 20);
           log.info(`[Zoho Reader] 📬 Found ${itemCount} emails; inspecting latest ${checkLimit}`);
 
           for (let i = 0; i < checkLimit; i++) {
@@ -1039,4 +1039,3 @@ class ZohoReaderService {
 
 export const zohoReader = new ZohoReaderService();
 export default zohoReader;
-

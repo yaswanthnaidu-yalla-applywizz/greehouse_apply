@@ -638,6 +638,7 @@ export type UpdateStatusExtra =
       dry_run_screenshot_url?: string | null;
       error_message?: string | null;
       job_url?: string | null;
+      retry_count?: number | null;
     };
 
 const OPERATOR_WORKLOAD_STATUSES: ApplicationStatus[] = ['READY_FOR_REVIEW', 'APPROVED'];
@@ -702,6 +703,7 @@ export async function updateStatus(
     if (extra.email_proof_status !== undefined) updatePayload.email_proof_status = extra.email_proof_status;
     if (extra.email_proof_attempted_at !== undefined) updatePayload.email_proof_attempted_at = extra.email_proof_attempted_at;
     if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
+    if (extra.retry_count !== undefined) updatePayload.retry_count = extra.retry_count;
   }
 
   if (status === 'APPLIED') {

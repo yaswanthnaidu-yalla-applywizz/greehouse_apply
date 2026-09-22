@@ -47,6 +47,7 @@ export interface FieldFillResult {
   valuePopulated: string;
   isRequired?: boolean;
   source?: ResolvedField['source'];
+  skippedRequired?: boolean;
   success: boolean;
   error?: string;
 }
@@ -707,6 +708,7 @@ export async function fillSingleField(
     if (field.isRequired === true) {
       fillResult.success = false;
       fillResult.error = 'Required field has no value';
+      fillResult.skippedRequired = true;
     } else {
       fillResult.success = true;
     }
