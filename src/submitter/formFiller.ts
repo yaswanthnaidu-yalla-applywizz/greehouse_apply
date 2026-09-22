@@ -45,6 +45,8 @@ export interface FieldFillResult {
   type: string;
   label: string;
   valuePopulated: string;
+  isRequired?: boolean;
+  source?: ResolvedField['source'];
   success: boolean;
   error?: string;
 }
@@ -156,6 +158,12 @@ function exactOptionTextMatch(optionText: string, answerText: string): boolean {
   return opt === ans || opt.toLowerCase() === ans.toLowerCase();
 }
 
+function containsOptionTextMatch(optionText: string, answerText: string): boolean {
+  const opt = optionText.trim().toLowerCase();
+  const ans = answerText.trim().toLowerCase();
+  return Boolean(opt && ans && (opt.includes(ans) || ans.includes(opt)));
+}
+
 function fuzzyOptionTextMatch(optionText: string, answerText: string): boolean {
   if (exactOptionTextMatch(optionText, answerText)) return true;
   const opt = optionText.trim().toLowerCase();
@@ -165,6 +173,23 @@ function fuzzyOptionTextMatch(optionText: string, answerText: string): boolean {
   if (ans === 'yes' && /^yes\b/.test(opt)) return true;
   if (ans === 'no' && /^no\b/.test(opt)) return true;
   return opt.includes(ans) || ans.includes(opt);
+}
+
+function normalizeEeocRaceValue(value: string, fieldId: string, name: string, label: string): string {
+  if (!/race|ethnic/i.test(`${fieldId} ${name} ${label}`)) return value;
+
+  const normalized = value.trim().toLowerCase();
+  const variants: Record<string, string> = {
+    asian: 'Asian (not Hispanic or Latino)',
+    'black or african american': 'Black or African American (not Hispanic or Latino)',
+    'american indian or alaska native': 'American Indian or Alaska Native (not Hispanic or Latino)',
+    'native hawaiian or other pacific islander':
+      'Native Hawaiian or Other Pacific Islander (not Hispanic or Latino)',
+    white: 'White (not Hispanic or Latino)',
+    'two or more races': 'Two or More Races (not Hispanic or Latino)',
+  };
+
+  return variants[normalized] || value;
 }
 
 async function isUsableNativeSelect(locator: Locator): Promise<boolean> {
@@ -368,12 +393,18 @@ async function fillInteractiveSelectDropdown(
   const optionScope = await resolveSelectOptionScope(control);
   let clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
   if (!clicked) {
+    clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
+  }
+  if (!clicked) {
     clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
   }
   if (!clicked && searchInput) {
     await searchInput.press('ArrowDown').catch(() => {});
     await page.waitForTimeout(150);
-    clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
+    clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
+    if (!clicked) {
+      clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
+    }
   }
 
   if (!clicked && optionScope) {
@@ -383,7 +414,18 @@ async function fillInteractiveSelectDropdown(
     if ((await toggle.count()) > 0) {
       await toggle.click({ force: true }).catch(() => {});
       await page.waitForTimeout(350);
-      clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
+      clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
+      if (!clicked) {
+        clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
+      }
+      if (!clicked) {
+        clicked = await clickDropdownOptionByMatch(
+          page,
+          answerText,
+          containsOptionTextMatch,
+          page.locator('body')
+        );
+      }
       if (!clicked) {
         clicked = await clickDropdownOptionByMatch(
           page,
@@ -641,6 +683,8 @@ export async function fillSingleField(
     type: rawType,
     label,
     valuePopulated: val,
+    isRequired: field.isRequired,
+    source: field.source,
     success: false,
   };
 
@@ -660,7 +704,12 @@ export async function fillSingleField(
 
   // Skip empty non-required fields if no value provided
   if (!val && rawType !== 'file') {
-    fillResult.success = true;
+    if (field.isRequired === true) {
+      fillResult.success = false;
+      fillResult.error = 'Required field has no value';
+    } else {
+      fillResult.success = true;
+    }
     return fillResult;
   }
 
@@ -780,6 +829,7 @@ export async function fillSingleField(
       // ==========================================
       const booleanValue = normalizeBooleanValue(val);
       let selectValue = booleanValue || val;
+      selectValue = normalizeEeocRaceValue(selectValue, fieldId, name, label);
 
       // Special resolution for country code dropdown (phone country) - strictly +1 (United States)
       let targetCountryName = 'United States';

@@ -120,6 +120,21 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
         return rect.width > 0 || rect.height > 0 || el.getClientRects().length > 0 || el.type === 'file' || el.offsetParent !== null;
       }
 
+      function hasHiddenRequiredInput(el) {
+        var scopes = [];
+        var addScope = function(scope) {
+          if (scope && scopes.indexOf(scope) === -1) scopes.push(scope);
+        };
+        addScope(el.parentElement);
+        addScope(el.closest('fieldset, .field, [class*="field"], .field-wrapper, .select-shell, tr, div'));
+        for (var i = 0; i < scopes.length; i++) {
+          if (scopes[i].querySelector('input[name^="required_"], input.hidden[value="true"], input[type="hidden"][value="true"]')) {
+            return true;
+          }
+        }
+        return false;
+      }
+
       var formElements = Array.from(form.querySelectorAll('input, select, textarea'));
 
       for (var i = 0; i < formElements.length; i++) {
@@ -174,7 +189,8 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
 
           var isReq = firstRadio.hasAttribute('required') ||
                       firstRadio.getAttribute('aria-required') === 'true' ||
-                      (fieldset && fieldset.textContent && fieldset.textContent.indexOf('*') !== -1);
+                      (fieldset && fieldset.textContent && fieldset.textContent.indexOf('*') !== -1) ||
+                      hasHiddenRequiredInput(firstRadio);
 
           fields.push({
             name: groupName,
@@ -213,7 +229,8 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
 
           var isReq = selectEl.required ||
                       selectEl.getAttribute('aria-required') === 'true' ||
-                      (rawLabel && rawLabel.indexOf('*') !== -1);
+                      (rawLabel && rawLabel.indexOf('*') !== -1) ||
+                      hasHiddenRequiredInput(selectEl);
 
           fields.push({
             name: name || id,
@@ -251,7 +268,8 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
 
           var isReq = el.required ||
                       el.getAttribute('aria-required') === 'true' ||
-                      (rawLabel && rawLabel.indexOf('*') !== -1);
+                      (rawLabel && rawLabel.indexOf('*') !== -1) ||
+                      hasHiddenRequiredInput(el);
 
           var detectedType = (name.indexOf('location') !== -1 || id.indexOf('location') !== -1 || label.toLowerCase().indexOf('location') !== -1)
             ? 'location_autocomplete'
@@ -302,7 +320,8 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
 
         var isReq = el.required ||
                     el.getAttribute('aria-required') === 'true' ||
-                    (rawLabel && rawLabel.indexOf('*') !== -1);
+                    (rawLabel && rawLabel.indexOf('*') !== -1) ||
+                    hasHiddenRequiredInput(el);
 
         fields.push({
           name: name || id,

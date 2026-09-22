@@ -1284,7 +1284,11 @@ export async function requeueApplicationForRetry(
 ): Promise<{ requeued: boolean; retryCount: number }> {
   const app = await getApplication(applicationId, jobUrl);
   if (!app) return { requeued: false, retryCount: 0 };
-  const currentRetryCount = app.retry_count ?? 0;
+  const storedRetryCount = Number(app.retry_count ?? 0);
+  const currentRetryCount =
+    Number.isInteger(storedRetryCount) && storedRetryCount >= 0 && storedRetryCount <= MAX_SUBMISSION_RETRIES
+      ? storedRetryCount
+      : 0;
   if (currentRetryCount >= MAX_SUBMISSION_RETRIES) {
     return { requeued: false, retryCount: currentRetryCount };
   }
@@ -1310,8 +1314,8 @@ export async function requeueApplicationForRetry(
         query = query.eq('applywizz_id', app.applywizz_id).eq('job_url', app.job_url);
       }
       const result = await query
-        .eq('status', 'FAILED')
-        .eq('retry_count', currentRetryCount)
+        .in('status', ['FAILED', 'APPLYING'])
+        .eq('retry_count', storedRetryCount)
         .select('id');
       updated = !result.error && Array.isArray(result.data) && result.data.length > 0;
       if (result.error) log.warn(`[DB] Retry requeue failed for ${applicationId}: ${result.error.message}`);

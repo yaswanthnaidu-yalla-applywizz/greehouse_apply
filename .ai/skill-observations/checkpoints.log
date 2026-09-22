@@ -326,3 +326,22 @@
 2026-09-22 deliverable flush: added submitted total and selected range propagation to admin manager drill-down; typecheck passed; no observations
 2026-09-22 deliverable flush: manager Operators tab submitted totals now use submitted_at count helper per operator; typecheck passed; no observations
 2026-09-22 deliverable flush: operator applied and failed cards now render null-safe zero values; API queries already use submitted_at with updated_at fallback; typecheck passed; no observations
+2026-09-22 checkpoint: production /api/stats requires authentication; current source returns applied/failed and cards use null-safe rendering; no observations
+2026-09-22 session-start scan: files=14
+2026-09-22 task end: operator map seeded from team operator list; no observations
+2026-09-22 session-start scan: files=14
+2026-09-22 task end: dashboard build/serve mismatch verified; public operator JSX is legacy HTML mode, Railway tsx serves dist/client; no observations
+2026-09-22 task end: applied TSX operator stats fallbacks, built, and deployed to Railway; no observations
+2026-09-22 session-start scan: files=14
+2026-09-22 task end: traced manual edit persistence through queue and form fill; no observations
+2026-09-22 session-start scan: files=14
+2026-09-22 task end: traced required-field scanner/resolver/filler/live-submit path; no observations
+2026-09-22 session-start scan: files=14
+2026-09-22 task end: queried Railway primary, worker, ingest logs and traced Tier 3/Tier 5 error handling; no observations
+2026-09-22 OTP fetch investigation: traced automatic Zoho path and queried OTP status events/retry_count; no observations
+2026-09-22 preferred-name fieldId investigation: confirmed scanner normalization overwrites alias field IDs; resolver preserves scanner ID; no observations
+2026-09-22 session-end: no observations (required-field pre-submit gate)
+2026-09-22 session-end: no observations (hidden required-input detection)
+2026-09-22 session-end: no observations (generateFieldId preserves meaningful DOM identifiers)
+2026-09-22 session-end: no observations (EEOC custom-select matching)
+2026-09-22 session-end: no observations (OTP retry budget hardening)

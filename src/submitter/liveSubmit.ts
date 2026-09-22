@@ -33,6 +33,7 @@ import {
   getApplication,
   updateStatus,
   upsertApplication,
+  requeueApplicationForRetry,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../db/applications.js';
@@ -1425,6 +1426,33 @@ export async function runLiveSubmit(
       };
     }
 
+    const unfilledRequiredLabels = fillSummary.results
+      .filter(
+        (result) =>
+          result.isRequired === true &&
+          (result.valuePopulated === '' || result.source === 'unresolved')
+      )
+      .map((result) => result.label);
+
+    if (unfilledRequiredLabels.length > 0) {
+      const requiredFieldsError = `Required fields are unfilled: ${unfilledRequiredLabels.join(', ')}`;
+      log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
+      if (application.id) {
+        await updateStatus(application.id, 'FAILED', {
+          error_message: requiredFieldsError,
+          job_url: application.job_url,
+        }).catch(() => {});
+      }
+      return {
+        success: false,
+        status: 'FAILED',
+        applicationId,
+        errorMessage: requiredFieldsError,
+        retryReason: 'UNRESOLVED_REQUIRED_FIELD',
+        summary: fillSummary,
+      };
+    }
+
     // 5. Locate and click form submit button
     const preSubmitUrl = page.url();
 
@@ -1604,10 +1632,32 @@ export async function runLiveSubmit(
             log.error(
               `[Live Submit] ❌ ${otpErrMsg} for application ${applicationId}: ${autoOtpErr.message}`
             );
-            // User requested error out on failure
             keepSessionOpen = false;
             screenshotCaptured = true;
             const failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+            await clearPausedSession(sessionKey).catch(() => {});
+            await closeSubmissionSession(sessionKey).catch(() => {});
+
+            if (otpFetchFailed && application.id) {
+              const retry = await requeueApplicationForRetry(
+                application.id,
+                'OTP_FETCH_FAIL',
+                application.job_url
+              );
+              if (retry.requeued) {
+                return {
+                  success: false,
+                  status: 'QUEUED',
+                  applicationId,
+                  errorMessage: otpErrMsg,
+                  retryReason: 'OTP_FETCH_FAIL',
+                  summary: fillSummary,
+                  proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+                  proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+                };
+              }
+            }
+
             if (application.id) {
               await updateStatus(application.id, 'FAILED', {
                 error_message: otpErrMsg,
@@ -1616,15 +1666,13 @@ export async function runLiveSubmit(
                 job_url: application.job_url,
               }).catch(() => {});
             }
-            await clearPausedSession(sessionKey).catch(() => {});
-            await closeSubmissionSession(sessionKey).catch(() => {});
 
             return {
               success: false,
               status: 'FAILED',
               applicationId,
               errorMessage: otpErrMsg,
-              retryReason: otpFetchFailed ? 'OTP_FETCH_FAIL' : undefined,
+              retryReason: undefined,
               summary: fillSummary,
               proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
               proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,

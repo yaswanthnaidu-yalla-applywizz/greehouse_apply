@@ -228,6 +228,8 @@ export class SubmitterPool {
             await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
             this.emitFailure(application, result.errorMessage || 'Submission execution failed.', result);
           }
+        } else if (result.status === 'QUEUED') {
+          await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
