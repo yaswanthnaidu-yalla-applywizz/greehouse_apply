@@ -319,3 +319,6 @@
 2026-09-22 deliverable flush: unified answer resolver waterfall per-field logging to standard success/failure format; no new observations
 2026-09-22 session-start scan: files=14 parsed=14 suspect=0
 2026-09-22 checkpoint: push session commits to origin/main; no observations
+2026-09-22 deliverable flush: added 8000-char raw profile payload to batch LLM prompt; typecheck passed; no observations
+2026-09-22 deliverable flush: unified EMAIL_PROOF_PENDING timeout behavior and updated active docs/tests; typecheck passed; full E2E suite has pre-existing Supabase/integration failures
+2026-09-22 deliverable flush: removed active manual_email_review writes and renamed operator action to get email ss; typecheck passed; no new observations

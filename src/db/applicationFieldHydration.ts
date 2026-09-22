@@ -20,6 +20,7 @@ export function scannedFieldsToResolvedShells(fields: ScannedField[]): ResolvedF
     source: 'unresolved',
     resolvedByTier: null,
     confidence: 0,
+    isRequired: Boolean(f.isRequired),
   }));
 }
 

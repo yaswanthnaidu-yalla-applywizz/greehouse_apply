@@ -906,7 +906,6 @@ submissionsRouter.post('/:id/capture-email-proof', async (req: Request, res: Res
         proof_email_json: emailJson,
         proof_email_captured_at: emailJson.received_at || new Date().toISOString(),
         email_proof_status: 'captured',
-        manual_email_review: false,
         job_url: app.job_url,
       });
 

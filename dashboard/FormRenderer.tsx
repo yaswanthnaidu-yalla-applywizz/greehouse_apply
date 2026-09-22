@@ -139,7 +139,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       : currentStatus;
 
   useEffect(() => {
-    if (currentStatus === 'APPLIED' || currentStatus === 'FAILED' || currentStatus === 'EMAIL_UNVERIFIED') {
+    if (currentStatus === 'APPLIED' || currentStatus === 'FAILED') {
       setIsSubmitting(false);
     }
   }, [currentStatus]);

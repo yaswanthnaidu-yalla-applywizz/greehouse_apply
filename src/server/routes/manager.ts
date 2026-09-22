@@ -612,8 +612,8 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
         otpRequired: statusCounts.OTP_REQUIRED ?? 0,
       },
       outcomes: {
-        applied: statusCounts.APPLIED ?? 0,
-        failed: statusCounts.FAILED ?? 0,
+        applied: (statusCounts.APPLIED ?? 0) + (statusCounts.EMAIL_PROOF_PENDING ?? 0),
+        failed: (statusCounts.FAILED ?? 0) + (statusCounts.CAPTCHA_TIMEOUT ?? 0),
       },
       warning: scoped.warning,
       generatedAt: new Date().toISOString(),

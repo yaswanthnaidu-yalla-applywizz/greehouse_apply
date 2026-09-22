@@ -611,7 +611,7 @@ export async function fillSingleField(
   const isCountryCode = isCountryCodeField(fieldId, name, label);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
   const isWorkAuthRelocation =
-    /work.?auth|authorized.?to.?work|legally.?authorized|reloc|willing.?to.?relocat|open.?to.?(work|reloc)|able.?to.?work|eligible.?to.?work/i.test(
+    /work.?auth|authorized.?to.?work|authorization.?to.?work|legally.?authorized|right.?to.?work|permission.?to.?work|can.?you.?work|do.?you.?have.?the.?right|are.?you.?permitted|work.?permit|employment.?eligibility|reloc|willing.?to.?relocat|open.?to.?(work|reloc)|able.?to.?work|eligible.?to.?work/i.test(
       label
     );
   const isReferralSource =

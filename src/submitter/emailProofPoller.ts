@@ -5,7 +5,8 @@
  * Polls Zoho Mail every 30 seconds for up to 10 minutes (20 attempts).
  * Validates Greenhouse sender + confirmation subject, timestamp (>= submitted_at) AND company name.
  * On match: promotes application status from EMAIL_PROOF_PENDING to APPLIED with proof_email_json.
- * On 10m timeout: flags application with email_proof_status = 'manual_review_needed', manual_email_review = true.
+ * On 10m timeout: keeps status EMAIL_PROOF_PENDING and flags email_proof_status = 'manual_review_needed'
+ * so the operator can manually retry the email screenshot capture.
  */
 
 import { queryZohoConfirmationEmail } from '../services/zoho-connector.js';
@@ -61,10 +62,10 @@ export class EmailProofPoller {
         // Check if 10 minutes have elapsed
         if (Date.now() - startTime >= maxDurationMs) {
           log.warn(
-            `[Email Proof Poller] ⏱️ 10 minutes elapsed with zero email matches for ${appId}. Transitioning to EMAIL_UNVERIFIED.`
+            `[Email Proof Poller] ⏱️ 10 minutes elapsed with zero email matches for ${appId}. Keeping EMAIL_PROOF_PENDING for manual email screenshot capture.`
           );
           const targetId = currentApp.id || appId;
-          await updateStatus(targetId, 'EMAIL_UNVERIFIED', {
+          await updateStatus(targetId, 'EMAIL_PROOF_PENDING', {
             email_proof_status: 'manual_review_needed',
             error_message: 'Confirmation email not found after 10m automatic polling. Web submission succeeded with proof screenshot.',
             job_url: currentApp.job_url,

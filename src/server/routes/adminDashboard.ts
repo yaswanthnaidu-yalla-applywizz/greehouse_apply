@@ -49,7 +49,6 @@ const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
   'CAPTCHA_TIMEOUT',
   'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
-  'EMAIL_UNVERIFIED',
   'SKIPPED',
 ];
 
@@ -657,4 +656,3 @@ adminDashboardRouter.get(
     res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
   }
 );
-

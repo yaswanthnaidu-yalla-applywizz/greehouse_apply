@@ -1581,8 +1581,7 @@ export async function runLiveSubmit(
 
               if (
                 submitResult.status === 'APPLIED' ||
-                submitResult.status === 'EMAIL_PROOF_PENDING' ||
-                submitResult.status === 'EMAIL_UNVERIFIED'
+                submitResult.status === 'EMAIL_PROOF_PENDING'
               ) {
                 keepSessionOpen = false; // session was completed & closed inside submitOtpToPausedSession
                 return {

@@ -287,7 +287,7 @@ export async function loadClientDashboard(options: {
 
     const isPending = application.status === 'READY_FOR_REVIEW';
     const isSubmitted = application.status !== 'READY_FOR_REVIEW';
-    const isApplied = application.status === 'APPLIED';
+    const isApplied = application.status === 'APPLIED' || application.status === 'EMAIL_PROOF_PENDING';
     const isFailed = application.status === 'FAILED' || application.status === 'CAPTCHA_TIMEOUT';
 
     if (isApplied) {

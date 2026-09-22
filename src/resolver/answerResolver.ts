@@ -142,6 +142,7 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
@@ -161,6 +162,7 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
@@ -180,6 +182,7 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
@@ -189,7 +192,7 @@ export class AnswerResolver {
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
       log.info(`[Resolver] ✅ T1 ${field.label} → "${tier1.value}"`);
-      return tier1;
+      return { ...tier1, isRequired };
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
@@ -205,6 +208,7 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
@@ -219,7 +223,7 @@ export class AnswerResolver {
     const tier2 = await resolveTier2(applywizzId, field, parsedResume);
     if (tier2) {
       log.info(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
-      return tier2;
+      return { ...tier2, isRequired };
     }
     log.info(`[Resolver] ❌ T2 ${field.label} — no resume match`);
 
@@ -238,6 +242,7 @@ export class AnswerResolver {
         source: 'semantic',
         resolvedByTier: 3,
         confidence: semanticMatch.confidence,
+        isRequired,
       };
     }
     const t3Score = getLastSemanticScore().toFixed(2);
@@ -252,6 +257,7 @@ export class AnswerResolver {
       return {
         ...tier4,
         resolvedByTier: 4,
+        isRequired,
       };
     }
     log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
@@ -269,7 +275,7 @@ export class AnswerResolver {
       );
       if (tier5 && tier5.value && tier5.value.trim().length > 0) {
         log.info(`[Resolver] ✅ T5 ${field.label} → "${tier5.value}"`);
-        return tier5;
+        return { ...tier5, isRequired };
       }
     }
 
@@ -289,6 +295,7 @@ export class AnswerResolver {
       source: 'unresolved',
       resolvedByTier: null,
       confidence: 0,
+      isRequired: Boolean(field.isRequired),
     };
   }
 
@@ -319,6 +326,7 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
@@ -338,6 +346,7 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
@@ -357,13 +366,14 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
       log.info(`[Resolver] ✅ T1 ${field.label} → "${tier1.value}"`);
-      return tier1;
+      return { ...tier1, isRequired };
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
@@ -377,6 +387,7 @@ export class AnswerResolver {
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired,
       };
     }
 
@@ -388,7 +399,7 @@ export class AnswerResolver {
     const tier2 = await resolveTier2(applywizzId, field, parsedResume);
     if (tier2) {
       log.info(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
-      return tier2;
+      return { ...tier2, isRequired };
     }
     log.info(`[Resolver] ❌ T2 ${field.label} — no resume match`);
 
@@ -407,6 +418,7 @@ export class AnswerResolver {
         source: 'semantic',
         resolvedByTier: 3,
         confidence: semanticMatch.confidence,
+        isRequired,
       };
     }
     const t3Score = getLastSemanticScore().toFixed(2);
@@ -421,6 +433,7 @@ export class AnswerResolver {
       return {
         ...tier4,
         resolvedByTier: 4,
+        isRequired,
       };
     }
     log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);

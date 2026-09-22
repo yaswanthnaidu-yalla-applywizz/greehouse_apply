@@ -70,7 +70,6 @@ ALTER TABLE gh_candidate_applications
     'CAPTCHA_TIMEOUT',
     'CAPTCHA_REQUIRED',
     'EMAIL_PROOF_PENDING',
-    'EMAIL_UNVERIFIED',
     'SKIPPED'
   ));
 

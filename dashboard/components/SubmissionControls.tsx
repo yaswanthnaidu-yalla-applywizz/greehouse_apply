@@ -96,12 +96,11 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const isApplying =
     isSubmitting || SUBMIT_FLOW_STATUSES.has(String(applicationStatus));
   const isApplied = applicationStatus === 'APPLIED';
-  const isEmailUnverified = applicationStatus === 'EMAIL_UNVERIFIED';
   const isFailed = applicationStatus === 'FAILED';
   const isEmailProofPending = applicationStatus === 'EMAIL_PROOF_PENDING' || status === 'EMAIL_PROOF_PENDING';
   const hasProofActions =
     Boolean(dryRunScreenshotUrl) ||
-    Boolean(proofUrl || proofWebUrl || isApplied || isEmailUnverified) ||
+    Boolean(proofUrl || proofWebUrl || isApplied || isEmailProofPending) ||
     Boolean(emailProofJsonState || proofEmailJson) ||
     Boolean(emailProof || proofEmailUrl) ||
     Boolean(isEmailProofPending) ||
@@ -199,8 +198,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
     !isApplying &&
     (applicationStatus === 'READY_FOR_REVIEW' ||
       applicationStatus === 'DRY_RUN_COMPLETE' ||
-      applicationStatus === 'FAILED' ||
-      applicationStatus === 'EMAIL_UNVERIFIED');
+      applicationStatus === 'FAILED');
   const canDryRun = !isApplying && !isDryRunning;
 
   return (
@@ -300,11 +298,6 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                 <span>✅</span>
                 <span>Applied &amp; Verified</span>
               </>
-            ) : isEmailUnverified ? (
-              <>
-                <span>⚠️</span>
-                <span>Email Unverified (Resubmit)</span>
-              </>
             ) : (
               <>
                 <span>🚀</span>
@@ -329,7 +322,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                 </button>
               )}
 
-              {(proofUrl || isApplied || isEmailUnverified) && (
+              {(proofUrl || isApplied) && (
                 <button
                   type="button"
                   onClick={() => {
