@@ -7,6 +7,7 @@ import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
   countSubmittedApplicationsSince,
+  getSubmissionOutcomeCounts,
   getDashboardApplicationMetrics,
   getISTDateRangeUtc,
   type ApplicationStatus,
@@ -16,6 +17,7 @@ import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { insertAuditEvent, listAuditEvents } from '../../db/events.js';
 import { upsertIngestRun } from '../../db/ingestRuns.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
+import { parseDashboardStatsRange, serializeDateRange } from '../dashboardDateRange.js';
 import { emailsForRole, isUserAdmin, resolveRole } from './auth.js';
 import { buildManagerTeamStats } from '../adminManagerStats.js';
 import { loadClientDashboard } from '../clientDashboard.js';
@@ -60,20 +62,24 @@ function parseLimit(value: unknown, fallback = 100): number {
 
 adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const todayStart = getISTDateRangeUtc(getISTDateString()).startIso;
+    const parsedRange = parseDashboardStatsRange(_req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
+    }
+    const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
+    const submittedStart = parsedRange.startIso;
 
     const directory = await listAuthDirectory();
     const operators = directory.filter((user) => user.role === 'operator');
     const activeOperators = operators.filter((user) => isActiveWithin(user.lastSignInAt));
 
-    const [applied, queued, applying, failedCount, timeoutCount, submitted, metrics, audit] = await Promise.all([
-      countApplicationsByStatus('APPLIED'),
-      countApplicationsByStatus('QUEUED'),
-      countApplicationsByStatus('APPLYING'),
-      countApplicationsByStatus('FAILED'),
-      countApplicationsByStatus('CAPTCHA_TIMEOUT'),
-      countSubmittedApplicationsSince(todayStart),
-      getDashboardApplicationMetrics(),
+    const [outcomes, queued, applying, submitted, metrics, audit] = await Promise.all([
+      getSubmissionOutcomeCounts({ createdAtRange }),
+      countApplicationsByStatus('QUEUED', createdAtRange),
+      countApplicationsByStatus('APPLYING', createdAtRange),
+      countSubmittedApplicationsSince(submittedStart, undefined, parsedRange.endIso),
+      getDashboardApplicationMetrics({ createdAtRange }),
       listAuditEvents({ limit: 15 }),
     ]);
 
@@ -84,10 +90,10 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       activeOperators: activeOperators.length,
       inactiveOperators: Math.max(0, operators.length - activeOperators.length),
       submitted,
-      applied,
+      applied: outcomes.successfulApplications,
       running: applying,
       queued,
-      failed: failedCount + timeoutCount,
+      failed: outcomes.failedApplications,
       supabasePercent: totalFields > 0
         ? Math.round((metrics.supabaseTaggedCount / totalFields) * 100)
         : 0,
@@ -99,6 +105,7 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
         : 0,
       recentActivity: audit.events,
       warning: audit.warning,
+      dateRange: serializeDateRange(parsedRange),
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

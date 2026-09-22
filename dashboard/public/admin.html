@@ -204,6 +204,7 @@
       const token = localStorage.getItem('applywizz_auth_token');
       const [tab, setTab] = useState('overview');
       const [date, setDate] = useState(ApplyWizzRoles.getTodayIST);
+      const [statsRange, setStatsRange] = useState('day');
       const [overview, setOverview] = useState(null);
       const [managers, setManagers] = useState([]);
       const [selectedManager, setSelectedManager] = useState(null);
@@ -237,7 +238,7 @@
         setLoading(true);
         setError('');
         try {
-          if (tab === 'overview') setOverview(await loadJson(`/api/admin/overview?date=${encodeURIComponent(date)}`));
+          if (tab === 'overview') setOverview(await loadJson(`/api/admin/overview?range=${encodeURIComponent(statsRange)}`));
           if (tab === 'managers') {
             const payload = await loadJson(`/api/admin/managers?date=${encodeURIComponent(date)}`);
             setManagers(payload.managers || []);
@@ -274,7 +275,7 @@
         } finally {
           setLoading(false);
         }
-      }, [tab, date, token, opSearch, opStatus, opManager, appSearch, appStatus]);
+      }, [tab, date, statsRange, token, opSearch, opStatus, opManager, appSearch, appStatus]);
 
       useEffect(() => { refresh(); }, [refresh]);
       useEffect(() => {
@@ -368,6 +369,13 @@
                 <label className="text-xs font-bold uppercase">Date
                   <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
                 </label>
+                <div className="text-xs font-bold uppercase">Stats
+                  <div className="mt-1 flex gap-1">
+                    {['day', 'week', 'month'].map((range) => (
+                      <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
+                    ))}
+                  </div>
+                </div>
                 <button type="button" onClick={refresh} className="bg-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
                 <HeaderSignOut />
               </div>

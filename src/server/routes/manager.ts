@@ -9,7 +9,6 @@ import { Router, type Request, type Response } from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
   applyCreatedAtRangeFilter,
-  getISTDateRangeUtc,
   countSubmittedApplicationsSince,
   listApplications,
   rowCreatedAtInRange,
@@ -23,7 +22,7 @@ import { canAccessManagerDashboard, resolveRole } from './auth.js';
 import { loadClientDashboard, MANAGER_TEAM_SCOPE_ENABLED } from '../clientDashboard.js';
 import { listAllDashboardUsers, listOperatorEmailsForManager } from '../../db/users.js';
 import { distinctApplywizzIdsForOperatorEmails, hasUnrestrictedDashboardAccess, resolveRequestAppRole } from '../managerTeamScope.js';
-import { parseDashboardCreatedAtRange, serializeDateRange } from '../dashboardDateRange.js';
+import { parseDashboardCreatedAtRange, parseDashboardStatsRange, serializeDateRange } from '../dashboardDateRange.js';
 import { displayNameMapForEmails, isActiveWithin, listAuthDirectory } from '../authDirectory.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -258,7 +257,9 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
     return;
   }
 
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const parsedRange = typeof req.query.range === 'string'
+    ? parseDashboardStatsRange(req.query as Record<string, unknown>)
+    : parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;
@@ -305,7 +306,9 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
 
 managerRouter.get('/operators', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const parsedRange = typeof req.query.range === 'string'
+    ? parseDashboardStatsRange(req.query as Record<string, unknown>)
+    : parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;
@@ -478,9 +481,9 @@ managerRouter.get('/activity', async (req: Request, res: Response): Promise<void
 
 managerRouter.get('/reports', async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
-  const range = typeof req.query.range === 'string' ? req.query.range.trim().toLowerCase() : 'daily';
-  if (!['daily', 'weekly', 'monthly'].includes(range)) {
-    res.status(400).json({ error: 'range must be daily, weekly, or monthly.' });
+  const range = typeof req.query.range === 'string' ? req.query.range.trim().toLowerCase() : 'day';
+  if (!['day', 'week', 'month'].includes(range)) {
+    res.status(400).json({ error: 'range must be day, week, or month.' });
     return;
   }
 
@@ -491,19 +494,21 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const dayCount = range === 'monthly' ? 180 : range === 'weekly' ? 56 : 14;
-    const end = getISTDateString();
-    const startDate = new Date(`${end}T00:00:00+05:30`);
-    startDate.setDate(startDate.getDate() - (dayCount - 1));
-    const start = startDate.toISOString().slice(0, 10);
-    const { startIso } = getISTDateRangeUtc(start);
-    const { endIso } = getISTDateRangeUtc(end);
+    const reportRange = parseDashboardStatsRange({ range });
+    if ('error' in reportRange) {
+      res.status(400).json({ error: reportRange.error });
+      return;
+    }
+    const start = reportRange.fromDate!;
+    const end = reportRange.toDate!;
+    const { startIso, endIso } = reportRange;
 
     let query = getDbClient()
       .from('gh_candidate_applications')
-      .select('created_at, assigned_ca_email, applywizz_id')
-      .gte('created_at', startIso)
-      .lte('created_at', endIso);
+      .select('submitted_at, assigned_ca_email, applywizz_id, status')
+      .neq('status', 'READY_FOR_REVIEW')
+      .gte('submitted_at', startIso)
+      .lte('submitted_at', endIso);
     if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
     const { data, error } = await query;
     if (error) throw error;
@@ -511,22 +516,28 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
     const rows = data || [];
     const bucketMap = new Map<string, number>();
     const operatorMap = new Map<string, number>();
+    const appliedMap = new Map<string, number>();
     for (const row of rows) {
-      const created = row.created_at ? new Date(row.created_at) : null;
+      const created = row.submitted_at ? new Date(row.submitted_at) : null;
       if (!created) continue;
       const ist = new Date(created.getTime() + 5.5 * 60 * 60 * 1000);
       let key = ist.toISOString().slice(0, 10);
-      if (range === 'weekly') {
+      if (range === 'week') {
         const week = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
         const day = week.getUTCDay() || 7;
         week.setUTCDate(week.getUTCDate() - day + 1);
         key = week.toISOString().slice(0, 10);
-      } else if (range === 'monthly') {
+      } else if (range === 'month') {
         key = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
       }
       bucketMap.set(key, (bucketMap.get(key) || 0) + 1);
       const email = String(row.assigned_ca_email || '').trim().toLowerCase();
-      if (email) operatorMap.set(email, (operatorMap.get(email) || 0) + 1);
+      if (email) {
+        operatorMap.set(email, (operatorMap.get(email) || 0) + 1);
+        if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') {
+          appliedMap.set(email, (appliedMap.get(email) || 0) + 1);
+        }
+      }
     }
 
     const names = await displayNameMapForEmails(Array.from(operatorMap.keys()));
@@ -543,6 +554,7 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
             submitted,
             completed: submitted,
             approved: submitted,
+            applied: appliedMap.get(email) || 0,
           };
         })
     );
@@ -554,6 +566,7 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([date, applications]) => ({ date, applications })),
       perOperator,
+      dateRange: serializeDateRange(reportRange),
       warning: scoped.warning,
     });
   } catch (error) {
@@ -565,7 +578,7 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
 managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): Promise<void> => {
   if (!requireManager(req, res)) return;
 
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;

@@ -92,6 +92,8 @@ interface ReportPerOperator {
 interface ReportsPayload {
   buckets: ReportBucket[];
   perOperator: ReportPerOperator[];
+  start?: string;
+  end?: string;
 }
 
 interface ManagerDashboardApiResponse {
@@ -335,7 +337,7 @@ export const ManagerDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['manager']);
 
   const [tab, setTab] = useState<'home' | 'operators' | 'activity' | 'reports' | 'guide'>('home');
-  const [dateFilterMode, setDateFilterMode] = useState<'default' | 'custom'>('default');
+  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'week' | 'month' | 'custom'>('day');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const today = getTodayIST();
     const d = new Date(`${today}T00:00:00+05:30`);
@@ -347,11 +349,11 @@ export const ManagerDashboard: React.FC = () => {
   const dateRangeLabel =
     dateFilterMode === 'custom' && customFrom && customTo
       ? (customFrom === customTo ? customFrom : `${customFrom} – ${customTo}`)
-      : 'Today & Yesterday';
+      : dateFilterMode === 'week' ? 'This Week' : dateFilterMode === 'month' ? 'This Month' : 'Today';
   const dateQuery =
     dateFilterMode === 'custom' && customFrom && customTo
       ? `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`
-      : '';
+      : `range=${dateFilterMode}`;
 
   const [ca, setCa] = useState<string>('all');
   const [rows, setRows] = useState<ManagerClientRow[]>([]);
@@ -372,7 +374,7 @@ export const ManagerDashboard: React.FC = () => {
   const [activity, setActivity] = useState<ManagerActivityItem[]>([]);
   const [activityWarning, setActivityWarning] = useState<string>('');
   const [reports, setReports] = useState<ReportsPayload>({ buckets: [], perOperator: [] });
-  const [reportRange, setReportRange] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [reportRange, setReportRange] = useState<'day' | 'week' | 'month'>('day');
   const [opsPickerOpen, setOpsPickerOpen] = useState<boolean>(false);
   const [opsManagers, setOpsManagers] = useState<Array<{ email: string; name?: string }>>([]);
   const [opsManagerPick, setOpsManagerPick] = useState<string>('');
@@ -458,18 +460,15 @@ export const ManagerDashboard: React.FC = () => {
     if (!token || !isAuthorized) return;
     const res = await apiFetch(`/api/manager/reports?range=${encodeURIComponent(reportRange)}`);
     const payload: unknown = await res.json();
+    const reportData = payload as ReportsPayload;
     if (res.ok) {
-      setReports(payload as ReportsPayload);
+      setReports(reportData);
     }
     setAppliedOperator(null);
 
-    const dayCount = reportRange === 'monthly' ? 180 : reportRange === 'weekly' ? 56 : 14;
-    const today = getTodayIST();
-    const start = (() => {
-      const d = new Date(`${today}T00:00:00+05:30`);
-      d.setDate(d.getDate() - (dayCount - 1));
-      return d.toISOString().slice(0, 10);
-    })();
+    const start = reportData.start;
+    const today = reportData.end;
+    if (!start || !today) return;
     try {
       const appliedRes = await apiFetch(`/api/manager/dashboard?from=${encodeURIComponent(start)}&to=${encodeURIComponent(today)}`);
       const appliedPayload: unknown = await appliedRes.json();
@@ -480,14 +479,17 @@ export const ManagerDashboard: React.FC = () => {
         const email = String(row.assignedToEmail || row.assigned_ca || '').trim().toLowerCase();
         if (!email) continue;
         for (const detail of (row.submittedApplications || row.completedApplications || [])) {
-          if (detail.status !== 'APPLIED') continue;
+          if (detail.status !== 'APPLIED' && detail.status !== 'EMAIL_PROOF_PENDING') continue;
           (grouped[email] = grouped[email] || []).push(detail);
         }
       }
       setAppliedByOperator(grouped);
       setReports((prev) => ({
         ...prev,
-        perOperator: (prev.perOperator || []).map((row) => ({ ...row, applied: (grouped[row.email] || []).length })),
+        perOperator: (prev.perOperator || []).map((row) => ({
+          ...row,
+          applied: grouped[row.email] ? grouped[row.email].length : row.applied,
+        })),
       }));
     } catch {
       // Applied column falls back to 0 if the dashboard fetch fails.
@@ -656,13 +658,18 @@ export const ManagerDashboard: React.FC = () => {
               <div className="mt-1 flex flex-wrap items-center gap-2 font-mono normal-case">
                 <span className="text-sm font-black">{dateRangeLabel}</span>
                 {dateFilterMode !== 'custom' ? (
-                  <button type="button" className="underline text-[#64748B]" onClick={() => setDateFilterMode('custom')}>Custom</button>
+                  <>
+                    {(['day', 'week', 'month'] as const).map((range) => (
+                      <button key={range} type="button" className={`uppercase ${dateFilterMode === range ? 'text-[#E88474]' : 'underline text-[#64748B]'}`} onClick={() => setDateFilterMode(range)}>{range}</button>
+                    ))}
+                    <button type="button" className="underline text-[#64748B]" onClick={() => setDateFilterMode('custom')}>Custom</button>
+                  </>
                 ) : (
                   <>
                     <input type="date" value={customFrom} onChange={(e) => e.target.value && setCustomFrom(e.target.value)} className="border-2 border-[#1A1A2E] rounded px-2 py-1 text-sm bg-white" />
                     <span>–</span>
                     <input type="date" value={customTo} onChange={(e) => e.target.value && setCustomTo(e.target.value)} className="border-2 border-[#1A1A2E] rounded px-2 py-1 text-sm bg-white" />
-                    <button type="button" className="underline text-[#64748B]" onClick={() => setDateFilterMode('default')}>Reset</button>
+                    <button type="button" className="underline text-[#64748B]" onClick={() => setDateFilterMode('day')}>Reset</button>
                   </>
                 )}
               </div>
@@ -767,7 +774,7 @@ export const ManagerDashboard: React.FC = () => {
         {tab === 'reports' && (
           <div className="space-y-4">
             <div className="flex gap-2">
-              {(['daily', 'weekly', 'monthly'] as const).map((range) => (
+              {(['day', 'week', 'month'] as const).map((range) => (
                 <button key={range} type="button" onClick={() => setReportRange(range)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${reportRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
               ))}
             </div>
@@ -835,7 +842,7 @@ export const ManagerDashboard: React.FC = () => {
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li><span className="font-bold">Operators</span> — roster with status, apps, workload, last sign-in. Click an operator name to open Home filtered to that CA.</li>
                 <li><span className="font-bold">Activity</span> — recent application status changes for your team.</li>
-                <li><span className="font-bold">Reports</span> — daily, weekly, or monthly application totals by period and per operator.</li>
+                <li><span className="font-bold">Reports</span> — day, week, or month application totals by period and per operator.</li>
               </ul>
             </section>
 

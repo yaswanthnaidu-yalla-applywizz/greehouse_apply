@@ -8,6 +8,11 @@ _Last updated: 2026-09-22_
 
 ## Current Focus
 
+### 0r. Dashboard Stats Range Unification (in progress 2026-09-22)
+- Replacing mixed all-time, rolling Today & Yesterday, and 14/56/180-day dashboard statistics with shared IST `day`, `week`, and `month` presets.
+- Summary APIs now accept `range=day|week|month` and use bounded date ranges; manager reports use `submitted_at` and include `EMAIL_PROOF_PENDING` in applied results.
+- Typecheck passes. Do not push until the final dashboard diff and production stats behavior are reviewed.
+
 ### 0q. Answer Resolver Logging Standardization (shipped 2026-09-22)
 - **Standardized Per-Field Resolution Log Format (`answerResolver.ts`):** Unified all per-field logging across Tiers 1–5 in both single-field (`resolveField`) and batch (`resolveJobApplication` / `resolveFieldThroughTier2` / `resolveTier5Batch`) execution paths:
   - Success: `[Resolver] ✅ T{tier} {question_label} → "{answer}"`
