@@ -4,6 +4,21 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### OTP retry budget hardening (2026-09-22)
+- [x] OTP fetch failures now requeue through the bounded retry budget before becoming `FAILED`.
+- [x] Retry counts are normalized to integer values in the 0–3 range; timestamp-like corrupted values no longer bypass or exhaust the retry budget incorrectly.
+
+### EEOC custom-select option matching (2026-09-22)
+- [x] Searchable selects now try case-insensitive contains matching after exact matching.
+- [x] Common short EEOC race answers are normalized to Greenhouse variants such as `Asian (not Hispanic or Latino)`.
+
+### Hidden required-input detection (2026-09-22)
+- [x] Scanner and cascade detection now recognize Greenhouse hidden `required_*` and `input.hidden[value="true"]` validation inputs near a field wrapper.
+
+### Required-field pre-submit gate (2026-09-22)
+- [x] Live submission now fails before clicking submit when a required field is empty or unresolved, listing the affected labels in `error_message`.
+- [x] Required fields without a resolved value are reported as failed by `formFiller.ts` instead of silently succeeding.
+
 ### Dashboard Stats Range Unification (2026-09-22)
 - [x] Added shared IST day/week/month stats-range parsing with day as the default.
 - [x] Scoped admin overview, dev health, manager reports, and operator `/api/stats` to the selected period.

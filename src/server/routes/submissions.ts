@@ -381,6 +381,18 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         message: 'CAPTCHA or OTP challenge detected after submit. Please solve manually in the browser and call /resume-submission.',
         summary: result.summary,
       });
+    } else if (result.status === 'QUEUED') {
+      const retryCount = result.retryReason === 'OTP_FETCH_FAIL'
+        ? (await getApplication(appId, req.body?.jobUrl))?.retry_count ?? 0
+        : undefined;
+      res.status(202).json({
+        success: false,
+        status: 'QUEUED',
+        applicationId: result.applicationId,
+        retryCount,
+        message: retryCount ? `Retrying submission (${retryCount}/3).` : 'Submission queued for retry.',
+        summary: result.summary,
+      });
     } else {
       const failReason = result.errorMessage || 'Submission failed.';
       const retryReason = getRetryReason(result);

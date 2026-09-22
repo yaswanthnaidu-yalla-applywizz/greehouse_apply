@@ -122,6 +122,23 @@ function generateFieldId(name: string, id: string, label: string): string {
   const lowerName = (name || '').toLowerCase();
   const lowerId = (id || '').toLowerCase();
   const lowerLabel = (label || '').toLowerCase();
+  const normalizeIdentifier = (value: string): string =>
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  const isMeaningfulIdentifier = (value: string): boolean =>
+    value !== '' && !/^(custom_field|field|input|select|textarea|question)$/i.test(value);
+  const normalizedName = normalizeIdentifier(name || '');
+  const normalizedId = normalizeIdentifier(id || '');
+  const normalizedIdentifier = isMeaningfulIdentifier(normalizedName)
+    ? normalizedName
+    : isMeaningfulIdentifier(normalizedId)
+      ? normalizedId
+      : '';
+
+  if (normalizedIdentifier) return normalizedIdentifier;
 
   // Standard field mappings
   if (
@@ -173,6 +190,38 @@ function generateFieldId(name: string, id: string, label: string): string {
     .replace(/^_+|_+$/g, '');
 
   return fallback || 'custom_field';
+}
+
+async function markHiddenRequiredFields(page: Page, fields: ScannedField[]): Promise<ScannedField[]> {
+  const hiddenRequiredFlags = await page.evaluate((fieldDescriptors) => {
+    const hasHiddenRequiredInput = (element: Element): boolean => {
+      const scopes: Element[] = [];
+      const addScope = (scope: Element | null) => {
+        if (scope && !scopes.includes(scope)) scopes.push(scope);
+      };
+      addScope(element.parentElement);
+      addScope(element.closest('fieldset, .field, [class*="field"], .field-wrapper, .select-shell, tr, div'));
+
+      return scopes.some((scope) =>
+        Boolean(scope.querySelector('input[name^="required_"], input.hidden[value="true"], input[type="hidden"][value="true"]'))
+      );
+    };
+
+    return fieldDescriptors.map((field) => {
+      const escapedName = field.name ? CSS.escape(field.name) : '';
+      const escapedId = field.fieldId ? CSS.escape(field.fieldId) : '';
+      const element =
+        (escapedName && document.querySelector(`input[name="${escapedName}"], select[name="${escapedName}"], textarea[name="${escapedName}"]`)) ||
+        (field.name && document.getElementById(field.name)) ||
+        (escapedId && document.querySelector(`#${escapedId}`));
+      return element ? hasHiddenRequiredInput(element) : false;
+    });
+  }, fields.map((field) => ({ name: field.name, fieldId: field.fieldId })));
+
+  return fields.map((field, index) => ({
+    ...field,
+    isRequired: field.isRequired || hiddenRequiredFlags[index],
+  }));
 }
 
 /**
@@ -519,7 +568,8 @@ export class PlaywrightScanner {
         }
 
         if (fields.length > 0) {
-          template.fields = await this.exploreCascadingFields(page, fields);
+          const fieldsWithRequiredState = await markHiddenRequiredFields(page, fields);
+          template.fields = await this.exploreCascadingFields(page, fieldsWithRequiredState);
           return template;
         }
       }
