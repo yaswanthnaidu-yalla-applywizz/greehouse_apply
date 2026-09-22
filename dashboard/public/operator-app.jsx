@@ -4619,7 +4619,7 @@
                       Successfully Applied
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.applied}
+                      {stats.applied ?? 0}
                     </div>
                     <div className="text-[11px] font-mono text-[#065F46] mt-1">
                       Confirmed by Greenhouse
@@ -4631,7 +4631,7 @@
                       Failed
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.failed}
+                      {stats.failed ?? 0}
                     </div>
                     <div className="text-[11px] font-mono text-[#991B1B] mt-1">
                       Submission errors

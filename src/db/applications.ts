@@ -127,8 +127,8 @@ export async function countSubmittedApplicationsSince(
       .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
       .neq('status', 'READY_FOR_REVIEW');
-    if (startIso) query = query.gte('submitted_at', startIso);
-    if (endIso) query = query.lte('submitted_at', endIso);
+    if (startIso) query = query.or(`submitted_at.gte.${startIso},and(submitted_at.is.null,updated_at.gte.${startIso})`);
+    if (endIso) query = query.or(`submitted_at.lte.${endIso},and(submitted_at.is.null,updated_at.lte.${endIso})`);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
@@ -159,8 +159,8 @@ export async function countAppliedApplicationsSince(
       .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
       .in('status', ['APPLIED', 'EMAIL_PROOF_PENDING']);
-    if (since) query = query.gte('submitted_at', since);
-    if (endIso) query = query.lte('submitted_at', endIso);
+    if (since) query = query.or(`submitted_at.gte.${since},and(submitted_at.is.null,updated_at.gte.${since})`);
+    if (endIso) query = query.or(`submitted_at.lte.${endIso},and(submitted_at.is.null,updated_at.lte.${endIso})`);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
@@ -1370,8 +1370,12 @@ export async function getSubmissionOutcomeCounts(options?: {
       }
 
       if (createdAtRange) {
-        appliedQuery = appliedQuery.gte('submitted_at', createdAtRange.startIso).lte('submitted_at', createdAtRange.endIso);
-        failedQuery = failedQuery.gte('submitted_at', createdAtRange.startIso).lte('submitted_at', createdAtRange.endIso);
+        appliedQuery = appliedQuery
+          .or(`submitted_at.gte.${createdAtRange.startIso},and(submitted_at.is.null,updated_at.gte.${createdAtRange.startIso})`)
+          .or(`submitted_at.lte.${createdAtRange.endIso},and(submitted_at.is.null,updated_at.lte.${createdAtRange.endIso})`);
+        failedQuery = failedQuery
+          .or(`submitted_at.gte.${createdAtRange.startIso},and(submitted_at.is.null,updated_at.gte.${createdAtRange.startIso})`)
+          .or(`submitted_at.lte.${createdAtRange.endIso},and(submitted_at.is.null,updated_at.lte.${createdAtRange.endIso})`);
       }
 
       const [appliedRes, failedRes] = await Promise.all([appliedQuery, failedQuery]);
