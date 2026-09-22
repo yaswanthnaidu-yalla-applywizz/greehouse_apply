@@ -624,7 +624,10 @@ ${resumeText.slice(0, 12000)}
 Job description:
 ${jobDescription.slice(0, 12000)}
 
-${candidateContext}Questions:
+${candidateContext}${profile ? `Candidate Profile Data:
+${JSON.stringify((profile as ApplyWizzCandidateProfile & { raw_api_payload: unknown }).raw_api_payload, null, 2).slice(0, 8000)}
+
+` : ''}Questions:
 ${questions
       .map((question, index) => {
         const opts =

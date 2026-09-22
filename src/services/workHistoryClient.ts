@@ -426,7 +426,7 @@ export async function fetchAllowedCandidates(caEmail: string): Promise<WorkHisto
   let unreachableCount = 0;
 
   for (let daysBack = 1; daysBack <= 7; daysBack++) {
-    const dateStr = daysBack === 1 ? getISTDateString(0) : getISTDateString(daysBack);
+    const dateStr = getISTDateString(daysBack);
     const records = await fetchRecordsForDate(caEmail, dateStr);
 
     if (records === null) {

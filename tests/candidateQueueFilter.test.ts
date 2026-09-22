@@ -24,7 +24,7 @@ describe('candidateQueueFilter', () => {
     assert.equal(isOperatorFormPanelBlocked('SKIPPED'), true);
     assert.equal(isOperatorFormPanelBlocked('FAILED'), false);
     assert.equal(isOperatorFormPanelBlocked('DRY_RUN_COMPLETE'), false);
-    assert.equal(isOperatorFormPanelBlocked('EMAIL_UNVERIFIED'), false);
+    assert.equal(isOperatorFormPanelBlocked('EMAIL_PROOF_PENDING'), false);
   });
 
   it('operatorFormBlockedDetailMessage normalizes stored errors', () => {

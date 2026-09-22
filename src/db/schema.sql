@@ -104,7 +104,6 @@ CREATE TABLE IF NOT EXISTS gh_candidate_applications (
             'OTP_REQUIRED',
             'CAPTCHA_TIMEOUT',
             'EMAIL_PROOF_PENDING',
-            'EMAIL_UNVERIFIED',
             'SKIPPED'
         )),
     submission_order INTEGER,                            -- Global FIFO sequence number for daemon queue
@@ -121,7 +120,6 @@ CREATE TABLE IF NOT EXISTS gh_candidate_applications (
     proof_email_json JSONB,                              -- Parsed confirmation email { from, subject, received_at, body_text }
     proof_email_captured_at TIMESTAMPTZ,
     email_proof_status TEXT CHECK (email_proof_status IN ('pending', 'captured', 'timed_out', 'manual_review_needed')),
-    manual_email_review BOOLEAN DEFAULT false,          -- True if 10m auto-polling completed without email match
     email_proof_attempted_at TIMESTAMPTZ,
     error_message TEXT,                                 -- Populated on FAILED status
     dry_run_screenshot_url TEXT,                        -- Supabase Storage URL of dry-run form screenshot
@@ -201,4 +199,3 @@ CREATE POLICY "Allow storage access to proofs_mail" ON storage.objects
     FOR ALL
     USING (bucket_id = 'proofs_mail')
     WITH CHECK (bucket_id = 'proofs_mail');
-

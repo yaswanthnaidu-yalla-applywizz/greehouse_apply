@@ -232,7 +232,7 @@ function resolveStandardProfileAttribute(
   // The question is a binary yes/no about eligibility; the visa type is irrelevant to the answer.
   // matchBestOption will map 'Yes' to the closest option (e.g. "Yes", "I am authorized", etc.).
   if (
-    /authorized to work|legally authorized|work authorization|legal right to work|eligible to work|unlimited.*unrestricted.*authorization|unrestricted.*authorization/i.test(
+    /authorized to work|authorization to work|legally authorized|work authorization|legal right to work|right to work|permission to work|can you work|do you have the right|are you permitted|work permit|employment eligibility|eligible to work|unlimited.*unrestricted.*authorization|unrestricted.*authorization/i.test(
       combined
     )
   ) {
@@ -508,6 +508,7 @@ export async function resolveTier1(
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired: Boolean(field.isRequired),
       };
     }
   }
@@ -525,6 +526,7 @@ export async function resolveTier1(
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 0.95,
+        isRequired: Boolean(field.isRequired),
       };
     }
   }
@@ -552,6 +554,7 @@ export async function resolveTier1(
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired: Boolean(field.isRequired),
       };
     }
     return null;
@@ -591,6 +594,7 @@ export async function resolveTier1(
         source: 'supabase',
         resolvedByTier: 1,
         confidence: cachedQA.confidence ? Number(cachedQA.confidence) : 1.0,
+        isRequired: Boolean(field.isRequired),
       };
     }
   } catch {

@@ -180,6 +180,7 @@ export interface DashboardStats {
   totalCandidates: number;
   totalApplications: number;
   submitted: number;
+  submittedCount: number;
   applied: number;
   failed: number;
   dateRange?: {
@@ -979,6 +980,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       totalCandidates: metrics.totalCandidates,
       totalApplications: metrics.totalApplications,
       submitted,
+      submittedCount: submitted,
       applied,
       failed: outcomes.failedApplications,
       dateRange: serializeDateRange(parsedRange),

@@ -286,7 +286,6 @@ export type ApplicationStatus =
   | 'CAPTCHA_TIMEOUT'
   | 'CAPTCHA_REQUIRED'
   | 'EMAIL_PROOF_PENDING'
-  | 'EMAIL_UNVERIFIED'
   | 'SKIPPED';
 
 /**

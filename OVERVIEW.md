@@ -214,13 +214,12 @@ stateDiagram-v2
   APPLYING --> APPLIED: confirmation + web proof
   APPLYING --> EMAIL_PROOF_PENDING: web proof, waiting for mail
   EMAIL_PROOF_PENDING --> APPLIED: Zoho confirmation
-  EMAIL_PROOF_PENDING --> EMAIL_UNVERIFIED: 10 min timeout
+  EMAIL_PROOF_PENDING --> EMAIL_PROOF_PENDING: 10 min timeout; manual email screenshot retry
   APPLYING --> OTP_REQUIRED: security code
   APPLYING --> CAPTCHA_REQUIRED: captcha iframe
   APPLYING --> FAILED: fill/submit error
   OTP_REQUIRED --> APPLYING: operator OTP
   CAPTCHA_REQUIRED --> APPLYING: operator resume
-  EMAIL_UNVERIFIED --> QUEUED: operator resubmit
   [*] --> SKIPPED: field_count >= 35
   [*] --> EXPIRED: 404 / closed posting
 ```
@@ -510,7 +509,7 @@ flowchart LR
   K --> I
   J -->|none| L[Web proof]
   L --> M[Email proof poll 10 min]
-  M --> N[APPLIED or EMAIL_UNVERIFIED]
+  M --> N[APPLIED or EMAIL_PROOF_PENDING]
 ```
 
 **Admin — ingest**
@@ -575,7 +574,7 @@ flowchart LR
 
 - Web screenshot on confirmation
 - Zoho confirmation email JSON
-- `EMAIL_UNVERIFIED` after 10 minutes (resubmittable, not a hard fail)
+- `EMAIL_PROOF_PENDING` after 10 minutes when automatic email proof is missing; operator can use Get email screenshot
 - `audit_events` + `application_events`
 - Sign-up gated by CA emails API + OTP + authenticator MFA
 
@@ -593,7 +592,6 @@ flowchart LR
 
 - Dry-run vs submit is easy to confuse; the in-page guide exists because this already happened.
 - OTP/CAPTCHA still require a human sitting on the dashboard — throughput dies on challenged boards.
-- `EMAIL_UNVERIFIED` looks like failure even though web proof may be valid.
 - Eligibility gate (score 20–60) can hide “why can’t I submit?” unless the badge/copy is read.
 - Admin System tab still shows a **one-line** ingest state; long Playwright runs feel idle (planned ingest status bar, not shipped).
 
@@ -738,7 +736,7 @@ From `.ai/activeContext.md` and this review:
 
 1. Ship the ingest status bar (no new backend required).
 2. Verify manager team mapping in prod after login.
-3. Make eligibility / SKIPPED / EMAIL_UNVERIFIED copy unmistakable.
+3. Make eligibility / SKIPPED / email-proof-pending copy unmistakable.
 4. Decide whether Dry-Run stays on the primary button row.
 5. Confirm Railway `ENABLE_QUEUE_WORKER=true` and Storage `service_role` JWT — these are product outages when wrong, not “infra nits”.
 
@@ -757,7 +755,7 @@ Use these to steer the next planning conversation. They are questions, not a com
 
 ### Product
 
-5. What is the **target applies per operator per day**, and which status (`EMAIL_UNVERIFIED` vs `APPLIED`) counts?
+5. What is the **target applies per operator per day**, and how should email-proof-pending applications be reported?
 6. Should jobs outside score 20–60 be **hidden**, shown-but-blocked (current), or shown with a manager override?
 7. Is the 10-minute email-proof window aligned with how Greenhouse actually sends mail, or do we systematically under-count proofs?
 8. Do managers need **assignment** (`PATCH /api/manager/applications/:id/assignment`) as a daily tool, or is work-history enough?
@@ -847,7 +845,7 @@ Full list: `.ai/techContext.md` and `src/config/env.ts`.
 | `OTP_REQUIRED` / `CAPTCHA_REQUIRED` / `CAPTCHA_TIMEOUT` | Human needed |
 | `EMAIL_PROOF_PENDING` | Web proof taken; waiting for mail |
 | `APPLIED` | Confirmed |
-| `EMAIL_UNVERIFIED` | 10 min, no matching mail; web proof kept |
+| `EMAIL_PROOF_PENDING` | Web proof kept; automatic polling timed out, manual email screenshot remains available |
 | `FAILED` | Submit error |
 | `EXPIRED` | Job gone |
 | `SKIPPED` | Over question cap |

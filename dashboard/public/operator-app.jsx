@@ -170,16 +170,6 @@
               <span>Email Pending...</span>
             </span>
           );
-        case 'EMAIL_UNVERIFIED':
-          return (
-            <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
-              title="Email Unverified: Form submitted on website with proof screenshot; thank-you email was not verified"
-            >
-              <span className="w-2 h-2 rounded-full bg-[#D97706]"></span>
-              <span>Email Unverified</span>
-            </span>
-          );
         case 'APPLIED':
           if (proofWebUrl && !proofEmailUrl && !proofEmailJson) {
             return (
@@ -308,14 +298,13 @@
       const hasUnresolved = unresolvedFieldsCount > 0;
       const isApplying = isSubmitting || SUBMIT_FLOW_STATUSES.has(String(applicationStatus));
       const isApplied = applicationStatus === 'APPLIED';
-      const isEmailUnverified = applicationStatus === 'EMAIL_UNVERIFIED';
       const isFailed = applicationStatus === 'FAILED';
       const hasProofActions =
         Boolean(dryRunScreenshotUrl) ||
-        Boolean(proofUrl || proofWebUrl || isApplied || isEmailUnverified) ||
+        Boolean(proofUrl || proofWebUrl || isApplied || isEmailUnverified || isEmailProofPending) ||
         Boolean(emailProofJsonState || proofEmailJson) ||
         Boolean(emailProof || proofEmailUrl) ||
-        Boolean((proofUrl || proofWebUrl) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl)) ||
+        Boolean((proofUrl || proofWebUrl || isEmailProofPending) && !(emailProofJsonState || proofEmailJson || emailProof || proofEmailUrl)) ||
         Boolean(isFailed && proofFailedUrl);
 
       const pollStatusUpdate = async () => {
@@ -400,9 +389,7 @@
       );
       const canDryRun = !isApplying && !isDryRunning && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'APPROVED');
       const hideSubmissionActions = applicationStatus === 'APPLIED' ||
-        applicationStatus === 'EMAIL_UNVERIFIED' ||
-        applicationStatus === 'FAILED' ||
-        applicationStatus === 'EMAIL_PROOF_PENDING';
+        applicationStatus === 'FAILED';
 
       return (
         <>
@@ -439,6 +426,7 @@
 
           {!hideSubmissionActions && (
           <div className="flex items-center gap-2.5 flex-wrap justify-end">
+          {!isEmailProofPending && (
           <button
             type="button"
             onClick={onTriggerDryRun}
@@ -461,6 +449,7 @@
               </>
             )}
           </button>
+          )}
 
           <button
             type="button"
@@ -525,7 +514,7 @@
             </div>
           )}
 
-          {(proofUrl || isApplied || isEmailUnverified) && (
+          {(proofUrl || proofWebUrl || isApplied || isEmailUnverified || isEmailProofPending) && (
             <button
               type="button"
               onClick={() => {
@@ -554,12 +543,12 @@
               {isCapturingEmailProof ? (
                 <>
                   <span className="w-2.5 h-2.5 border-2 border-[#1E3A8A] border-t-transparent rounded-full animate-spin"></span>
-                  <span>Fetching Email SS...</span>
+                  <span>getting email ss...</span>
                 </>
               ) : (
                 <>
                   <span>📥</span>
-                  <span>Get email screenshot</span>
+                  <span>get email ss</span>
                 </>
               )}
             </button>
@@ -1502,7 +1491,7 @@
       'CAPTCHA_REQUIRED',
       'EMAIL_PROOF_PENDING',
     ]);
-    const CARD_SUBMITTED_STATUSES = new Set(['APPLIED', 'DRY_RUN_COMPLETE', 'EMAIL_UNVERIFIED']);
+    const CARD_SUBMITTED_STATUSES = new Set(['APPLIED', 'DRY_RUN_COMPLETE', 'EMAIL_PROOF_PENDING']);
     const CARD_RESET_OK_STATUSES = new Set(['READY_FOR_REVIEW', 'APPROVED', 'PENDING']);
 
     function jobCardStatusKeys(jobOrApp) {
@@ -1884,8 +1873,8 @@
       const isFullFormStatus =
         currentStatus === 'APPLIED' ||
         currentStatus === 'DRY_RUN_COMPLETE' ||
-        currentStatus === 'EMAIL_UNVERIFIED' ||
-        currentStatus === 'FAILED';
+        currentStatus === 'FAILED' ||
+        currentStatus === 'EMAIL_PROOF_PENDING';
       const submitFlowActive =
         isSubmitting ||
         currentStatus === 'APPLYING' ||
@@ -1896,7 +1885,7 @@
       const badgeStatus = currentStatus;
 
       useEffect(() => {
-        if (currentStatus === 'APPLIED' || currentStatus === 'FAILED' || currentStatus === 'EMAIL_UNVERIFIED') {
+        if (currentStatus === 'APPLIED' || currentStatus === 'FAILED') {
           setIsSubmitting(false);
         }
       }, [currentStatus]);
@@ -1933,8 +1922,9 @@
         if (isIdentityProfileField(field)) return true;
         const isReq = field?.isRequired || field?.required;
         const isUnresolved = (field?.source || '').toLowerCase() === 'unresolved';
-        // Show required fields and all unresolved fields — drop non-required resolved fields
-        return Boolean(isReq) || isUnresolved;
+        const isAi = (field?.source || '').toLowerCase() === 'ai';
+        // Show required, required-unresolved, and AI-resolved fields.
+        return Boolean(isReq) || (isUnresolved && Boolean(isReq)) || isAi;
       };
 
       // Display-only: underlying `fields` stays complete for approve/submit payloads.
@@ -1946,7 +1936,9 @@
         ? fields.filter((f) => {
             if (isIdentityProfileField(f)) return true;
             const isReq = f?.isRequired || f?.required;
-            return Boolean(isReq);
+            const isUnresolved = (f?.source || '').toLowerCase() === 'unresolved';
+            const isAi = (f?.source || '').toLowerCase() === 'ai';
+            return Boolean(isReq) || (isUnresolved && Boolean(isReq)) || isAi;
           })
         : visuallyRenderedFields;
       const baseFields = fieldsForDisplay;
@@ -1961,6 +1953,12 @@
         const existing = fieldsByFingerprint.get(fingerprint);
         if (existing) {
           existing.jobCount = (existing.jobCount || 1) + 1;
+          const existingRequired = Boolean(existing.isRequired || existing.required);
+          const fieldRequired = Boolean(field.isRequired || field.required);
+          if (fieldRequired && !existingRequired) {
+            field.jobCount = existing.jobCount;
+            fieldsByFingerprint.set(fingerprint, field);
+          }
         } else {
           field.jobCount = 1;
           fieldsByFingerprint.set(fingerprint, field);
@@ -1983,7 +1981,7 @@
         if (fingerprint) seenAiFingerprints.add(fingerprint);
         aiResolvedFields.push(field);
       });
-      const [aiResolvedOpen, setAiResolvedOpen] = useState(false);
+      const [aiResolvedOpen, setAiResolvedOpen] = useState(true);
 
       useEffect(() => {
         setAiResolvedOpen(false);
@@ -2236,7 +2234,7 @@
             </div>
           )}
 
-          {currentStatus === 'APPLIED' || currentStatus === 'DRY_RUN_COMPLETE' || currentStatus === 'EMAIL_UNVERIFIED' ? (
+          {currentStatus === 'APPLIED' || currentStatus === 'DRY_RUN_COMPLETE' ? (
             <div className="mb-3 bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#1A1A2E] text-[#065F46]">
               <p className="text-lg font-black">✓ Already Submitted</p>
             </div>
@@ -2640,10 +2638,11 @@
       'APPROVED',
       'DRY_RUN_COMPLETE',
       'FAILED',
-      'EMAIL_UNVERIFIED',
+      'EMAIL_PROOF_PENDING',
       'QUEUED',
       'APPLYING',
       'APPLIED',
+      'EMAIL_PROOF_PENDING',
     ]);
 
     function isOperatorFormPanelBlocked(status) {
@@ -4608,7 +4607,7 @@
                       Submitted Today
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.submitted ?? stats.completed}
+                      {stats.submittedCount ?? stats.submitted ?? stats.completed}
                     </div>
                     <div className="text-[11px] font-mono text-[#065F46] mt-1">
                       Applications sent to queue today

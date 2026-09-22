@@ -149,17 +149,6 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         </span>
       );
 
-    case 'EMAIL_UNVERIFIED':
-      return (
-        <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
-          title="Email Unverified: Form submitted on website with proof screenshot; thank-you email was not verified"
-        >
-          <span className="w-2 h-2 rounded-full bg-[#D97706]"></span>
-          <span>Email Unverified</span>
-        </span>
-      );
-
     case 'APPLIED':
       if (proofWebUrl && !proofEmailUrl && !proofEmailJson) {
         return (

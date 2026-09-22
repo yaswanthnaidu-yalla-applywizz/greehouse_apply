@@ -666,7 +666,6 @@ export const AdminDashboard: React.FC = () => {
                 <option value="OTP_REQUIRED">OTP Required</option>
                 <option value="CAPTCHA_REQUIRED">CAPTCHA Required</option>
                 <option value="EMAIL_PROOF_PENDING">Email Proof Pending</option>
-                <option value="EMAIL_UNVERIFIED">Email Unverified</option>
                 <option value="DRY_RUN_COMPLETE">Dry Run Complete</option>
               </select>
             </div>

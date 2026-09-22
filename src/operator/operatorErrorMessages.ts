@@ -26,8 +26,6 @@ export const OperatorErrors = {
     "We couldn't verify the one-time code for this application. Please try again or contact support.",
   EMAIL_PROOF_PENDING:
     "We're waiting for a confirmation email for this application. Please check back shortly.",
-  EMAIL_NOT_VERIFIED:
-    "We couldn't verify the confirmation email for this application. Please contact support if the job was submitted.",
   EXPIRED_JOB: 'This job posting is no longer accepting applications.',
   GENERIC_SUPPORT: 'Please contact support for assistance with this application.',
   RESOLUTION_PENDING:
@@ -86,7 +84,6 @@ export function normalizeOperatorErrorMessage(
   }
 
   if (!msg) {
-    if (normalizedStatus === 'EMAIL_UNVERIFIED') return OperatorErrors.EMAIL_NOT_VERIFIED;
     if (normalizedStatus === 'EXPIRED') return OperatorErrors.EXPIRED_JOB;
     if (normalizedStatus === 'EMAIL_PROOF_PENDING') return OperatorErrors.EMAIL_PROOF_PENDING;
     return OperatorErrors.GENERIC_SUPPORT;
@@ -117,7 +114,7 @@ export function normalizeOperatorErrorMessage(
     return OperatorErrors.OTP_FAILED;
   }
   if (/confirmation email not found after 10m/i.test(msg)) {
-    return OperatorErrors.EMAIL_NOT_VERIFIED;
+    return OperatorErrors.EMAIL_PROOF_PENDING;
   }
   if (/submission execution failed|submission failed|submit request failed|unexpected submit route|enqueue error/i.test(
     lower
@@ -136,7 +133,7 @@ export function statusShouldPersistOperatorError(status?: ApplicationStatus | st
   return (
     s === 'SKIPPED' ||
     s === 'FAILED' ||
-    s === 'EMAIL_UNVERIFIED' ||
+    s === 'EMAIL_PROOF_PENDING' ||
     s === 'EXPIRED' ||
     s === 'DRY_RUN_COMPLETE'
   );

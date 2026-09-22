@@ -48,7 +48,6 @@ export type ApplicationStatus =
   | 'CAPTCHA_TIMEOUT'
   | 'CAPTCHA_REQUIRED'
   | 'EMAIL_PROOF_PENDING'
-  | 'EMAIL_UNVERIFIED'
   | 'SKIPPED';
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
@@ -58,7 +57,6 @@ export const COMPLETED_STATUSES: readonly ApplicationStatus[] = [
   'APPLYING',
   'APPLIED',
   'EMAIL_PROOF_PENDING',
-  'EMAIL_UNVERIFIED',
 ];
 
 export interface EmailProofJson {
@@ -89,7 +87,6 @@ export interface ApplicationRow {
   proof_email_json?: EmailProofJson | null;
   proof_email_captured_at?: string | null;
   email_proof_status?: EmailProofStatus | null;
-  manual_email_review?: boolean;
   email_proof_attempted_at?: string | null;
   error_message?: string | null;
   dry_run_screenshot_url?: string | null;
@@ -130,8 +127,8 @@ export async function countSubmittedApplicationsSince(
       .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
       .neq('status', 'READY_FOR_REVIEW');
-    if (startIso) query = query.gte('updated_at', startIso);
-    if (endIso) query = query.lte('updated_at', endIso);
+    if (startIso) query = query.gte('submitted_at', startIso);
+    if (endIso) query = query.lte('submitted_at', endIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
@@ -161,7 +158,7 @@ export async function countAppliedApplicationsSince(
     let query = getDbClient()
       .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'APPLIED');
+      .in('status', ['APPLIED', 'EMAIL_PROOF_PENDING']);
     if (since) query = query.gte('submitted_at', since);
     if (endIso) query = query.lte('submitted_at', endIso);
     if (emails) query = query.in('assigned_ca_email', emails);
@@ -191,7 +188,7 @@ export async function countSubmittedApplicationsByOperatorSince(
       .from('gh_candidate_applications')
       .select('assigned_ca_email')
       .neq('status', 'READY_FOR_REVIEW')
-      .gte('updated_at', startIso);
+      .gte('submitted_at', startIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { data, error } = await query;
     if (error) {
@@ -224,7 +221,7 @@ export async function countAppliedApplicationsByOperatorSince(
     let query = getDbClient()
       .from('gh_candidate_applications')
       .select('assigned_ca_email')
-      .eq('status', 'APPLIED')
+      .in('status', ['APPLIED', 'EMAIL_PROOF_PENDING'])
       .gte('submitted_at', startIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { data, error } = await query;
@@ -637,7 +634,6 @@ export type UpdateStatusExtra =
       proof_email_captured_at?: string | null;
       proof_email_json?: EmailProofJson | null;
       email_proof_status?: EmailProofStatus | null;
-      manual_email_review?: boolean;
       email_proof_attempted_at?: string | null;
       dry_run_screenshot_url?: string | null;
       error_message?: string | null;
@@ -704,7 +700,6 @@ export async function updateStatus(
     if (extra.proof_email_json !== undefined) updatePayload.proof_email_json = extra.proof_email_json;
     if (extra.proof_email_captured_at !== undefined) updatePayload.proof_email_captured_at = extra.proof_email_captured_at;
     if (extra.email_proof_status !== undefined) updatePayload.email_proof_status = extra.email_proof_status;
-    if (extra.manual_email_review !== undefined) updatePayload.manual_email_review = extra.manual_email_review;
     if (extra.email_proof_attempted_at !== undefined) updatePayload.email_proof_attempted_at = extra.email_proof_attempted_at;
     if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
   }
@@ -1362,7 +1357,7 @@ export async function getSubmissionOutcomeCounts(options?: {
       let appliedQuery = supabase
         .from('gh_candidate_applications')
         .select('*', { count: 'exact', head: true })
-        .eq('status', 'APPLIED');
+        .in('status', ['APPLIED', 'EMAIL_PROOF_PENDING']);
 
       let failedQuery = supabase
         .from('gh_candidate_applications')
@@ -1375,8 +1370,8 @@ export async function getSubmissionOutcomeCounts(options?: {
       }
 
       if (createdAtRange) {
-        appliedQuery = applyCreatedAtRangeFilter(appliedQuery, createdAtRange);
-        failedQuery = applyCreatedAtRangeFilter(failedQuery, createdAtRange);
+        appliedQuery = appliedQuery.gte('submitted_at', createdAtRange.startIso).lte('submitted_at', createdAtRange.endIso);
+        failedQuery = failedQuery.gte('submitted_at', createdAtRange.startIso).lte('submitted_at', createdAtRange.endIso);
       }
 
       const [appliedRes, failedRes] = await Promise.all([appliedQuery, failedQuery]);
@@ -1406,7 +1401,7 @@ export async function getSubmissionOutcomeCounts(options?: {
     const key = `${row.applywizz_id}::${row.job_url}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (row.status === 'APPLIED') successfulApplications++;
+    if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') successfulApplications++;
     else if (row.status === 'FAILED' || row.status === 'CAPTCHA_TIMEOUT') failedApplications++;
   }
   return { successfulApplications, failedApplications };
@@ -1612,7 +1607,6 @@ const QUEUE_STATUS_DONE: ReadonlySet<ApplicationStatus> = new Set([
   'CAPTCHA_TIMEOUT',
   'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
-  'EMAIL_UNVERIFIED',
   'SKIPPED',
 ]);
 

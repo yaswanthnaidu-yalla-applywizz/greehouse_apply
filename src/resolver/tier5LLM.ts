@@ -131,6 +131,7 @@ export async function resolveTier5(
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
+        isRequired: Boolean(field.isRequired),
       };
     }
     return null;
@@ -170,6 +171,7 @@ export async function resolveTier5(
         source: 'ai',
         resolvedByTier: 5,
         confidence,
+        isRequired: Boolean(field.isRequired),
       };
 
       // Write-back to persistent candidate QA bank
@@ -243,6 +245,7 @@ export async function resolveTier5Batch(
           source: 'supabase',
           resolvedByTier: 1,
           confidence: 1.0,
+          isRequired: Boolean(field.isRequired),
         };
       }
       continue;
@@ -302,6 +305,7 @@ export async function resolveTier5Batch(
         source: 'ai',
         resolvedByTier: 5,
         confidence,
+        isRequired: Boolean(field.isRequired),
       };
 
       try {
