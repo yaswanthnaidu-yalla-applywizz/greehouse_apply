@@ -5,8 +5,13 @@ _Last updated: 2026-09-21_
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
 ### OTP retry budget hardening (2026-09-22)
-- [x] OTP fetch failures now requeue through the bounded retry budget before becoming `FAILED`.
+- [x] OTP fetch failures now remain `OTP_REQUIRED` through the bounded retry budget before becoming `FAILED`.
 - [x] Retry counts are normalized to integer values in the 0–3 range; timestamp-like corrupted values no longer bypass or exhaust the retry budget incorrectly.
+- [x] Zoho OTP lookup scans 20 messages across a 15-minute window.
+
+### Resume pre-submit availability guard (2026-09-22)
+- [x] Required resume fields are checked before form filling; missing storage objects are re-downloaded from ApplyWizz and re-uploaded.
+- [x] Submission fails before browser form submission when the resume cannot be recovered.
 
 ### EEOC custom-select option matching (2026-09-22)
 - [x] Searchable selects now try case-insensitive contains matching after exact matching.

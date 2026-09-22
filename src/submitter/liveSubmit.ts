@@ -12,6 +12,8 @@
  * 7. On timeout / failure: captures error details, sets status FAILED
  */
 
+import fs from 'fs';
+import path from 'path';
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
 import { fillForm, type FormFillSummary, type FormFillerOptions } from './formFiller.js';
 import {
@@ -33,11 +35,13 @@ import {
   getApplication,
   updateStatus,
   upsertApplication,
-  requeueApplicationForRetry,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../db/applications.js';
-import { getProfile, getCompanyEmail } from '../db/profiles.js';
+import { getProfile, getCompanyEmail, updateResumeStoragePath } from '../db/profiles.js';
+import { getDbClient, isSupabaseConfigured } from '../db/client.js';
+import { uploadResume } from '../db/storage.js';
+import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { zohoReader } from '../services/zohoReader.js';
 import { config } from '../config/env.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
@@ -45,6 +49,59 @@ import { assertEligibleForSubmission } from '../submission/submissionEligibility
 import type { SubmissionRetryReason } from './submissionRetry.js';
 
 const log = createLogger('Live Submit');
+const RESUMES_BUCKET = 'resumes';
+
+function applicationRequiresResume(application: ApplicationRow): boolean {
+  return (application.resolved_fields || []).some((field: any) =>
+    String(field?.type || '').toLowerCase() === 'file' ||
+    /resume|curriculum vitae|\bcv\b/i.test(`${field?.fieldId || ''} ${field?.name || ''} ${field?.label || ''}`)
+  );
+}
+
+async function isResumeStorageObjectAvailable(storagePath: string | null | undefined): Promise<boolean> {
+  if (!storagePath) return false;
+  if (!isSupabaseConfigured()) {
+    const localPath = path.resolve(process.cwd(), 'resumes', path.basename(storagePath));
+    return fs.existsSync(localPath) && fs.statSync(localPath).size > 100;
+  }
+
+  try {
+    const objectPath = path.basename(storagePath);
+    const { data, error } = await getDbClient().storage.from(RESUMES_BUCKET).download(objectPath);
+    if (error || !data) return false;
+    return (await data.arrayBuffer()).byteLength > 100;
+  } catch (err: any) {
+    log.warn(`[Live Submit] ⚠️ Resume storage probe failed: ${err.message}`);
+    return false;
+  }
+}
+
+async function ensureResumeAvailable(application: ApplicationRow): Promise<boolean> {
+  if (!applicationRequiresResume(application)) return true;
+
+  try {
+    const profile = await getProfile(application.applywizz_id);
+    if (await isResumeStorageObjectAvailable(profile?.resume_storage_path)) return true;
+
+    const client = new ApplyWizzClient();
+    const refreshed = await client.fetchCandidateProfile(application.applywizz_id, true);
+    if (!refreshed.resumeUrl) return false;
+
+    const localPath = await client.downloadResume(application.applywizz_id, refreshed.resumeUrl);
+    if (!fs.existsSync(localPath) || fs.statSync(localPath).size <= 100) return false;
+
+    const storagePath = await uploadResume(application.applywizz_id, await fs.promises.readFile(localPath), 'application/pdf', {
+      firstName: refreshed.firstName,
+      lastName: refreshed.lastName,
+      workExperience: refreshed.workExperience,
+    });
+    await updateResumeStoragePath(application.applywizz_id, storagePath);
+    return isResumeStorageObjectAvailable(storagePath);
+  } catch (err: any) {
+    log.warn(`[Live Submit] ⚠️ Resume re-download failed for ${application.applywizz_id}: ${err.message}`);
+    return false;
+  }
+}
 
 export interface LiveSubmitOptions extends FormFillerOptions {
   /** Launch in headless mode (default: true) */
@@ -1323,6 +1380,22 @@ export async function runLiveSubmit(
     throw new Error(`Application ${applicationId} has no job_url specified.`);
   }
 
+  if (!(await ensureResumeAvailable(application))) {
+    const errorMessage = 'Resume unavailable — could not fetch from ApplyWizz';
+    if (application.id) {
+      await updateStatus(application.id, 'FAILED', {
+        error_message: errorMessage,
+        job_url: application.job_url,
+      }).catch(() => {});
+    }
+    return {
+      success: false,
+      status: 'FAILED',
+      applicationId,
+      errorMessage,
+    };
+  }
+
   log.info(
     `[Live Submit] 🚀 Initiating live submission for ${application.applywizz_id} [${targetUrl}] (headless: true)...`
   );
@@ -1430,12 +1503,12 @@ export async function runLiveSubmit(
       .filter(
         (result) =>
           result.isRequired === true &&
-          (result.valuePopulated === '' || result.source === 'unresolved')
+          (!result.valuePopulated || result.source === 'unresolved')
       )
       .map((result) => result.label);
 
     if (unfilledRequiredLabels.length > 0) {
-      const requiredFieldsError = `Required fields are unfilled: ${unfilledRequiredLabels.join(', ')}`;
+      const requiredFieldsError = `Required fields not filled: ${unfilledRequiredLabels.join(', ')}`;
       log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
       if (application.id) {
         await updateStatus(application.id, 'FAILED', {
@@ -1639,15 +1712,23 @@ export async function runLiveSubmit(
             await closeSubmissionSession(sessionKey).catch(() => {});
 
             if (otpFetchFailed && application.id) {
-              const retry = await requeueApplicationForRetry(
-                application.id,
-                'OTP_FETCH_FAIL',
-                application.job_url
-              );
-              if (retry.requeued) {
+              const currentApplication = await getApplication(application.id, application.job_url);
+              const storedRetryCount = Number(currentApplication?.retry_count ?? application.retry_count ?? 0);
+              const retryCount =
+                Number.isInteger(storedRetryCount) && storedRetryCount >= 0 && storedRetryCount < 3
+                  ? storedRetryCount + 1
+                  : 3;
+
+              if (storedRetryCount < 3) {
+                await updateStatus(application.id, 'OTP_REQUIRED', {
+                  retry_count: retryCount,
+                  error_message: `OTP fetch failed; retry ${retryCount}/3`,
+                  job_url: application.job_url,
+                }).catch(() => {});
+                log.warn(`[OTP] Retry ${retryCount}/3 — Zoho fetch failed, will retry`);
                 return {
                   success: false,
-                  status: 'QUEUED',
+                  status: 'OTP_REQUIRED',
                   applicationId,
                   errorMessage: otpErrMsg,
                   retryReason: 'OTP_FETCH_FAIL',
@@ -1672,7 +1753,7 @@ export async function runLiveSubmit(
               status: 'FAILED',
               applicationId,
               errorMessage: otpErrMsg,
-              retryReason: undefined,
+              retryReason: 'OTP_FETCH_FAIL',
               summary: fillSummary,
               proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
               proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
