@@ -20,6 +20,9 @@ interface DevSubmissionGate {
 }
 
 interface DevHealthSnapshot {
+  submitted?: number;
+  submittedCount?: number;
+  dateRange?: { label?: string };
   submittedMonth?: number;
   completedMonth?: number;
   submittedToday?: number;
@@ -131,6 +134,7 @@ export const DevDashboard: React.FC = () => {
 
   const [tab, setTab] = useState<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'guide'>('system');
   const [date, setDate] = useState<string>(getTodayIST);
+  const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month'>('day');
   const [health, setHealth] = useState<DevHealthSnapshot | null>(null);
   const [runs, setRuns] = useState<DevRunItem[]>([]);
   const [runStatus, setRunStatus] = useState<string>('');
@@ -162,7 +166,7 @@ export const DevDashboard: React.FC = () => {
     setError('');
     try {
       if (tab === 'system') {
-        const healthPayload = await loadJson<DevHealthSnapshot>(`/api/dev/health?date=${encodeURIComponent(date)}`);
+        const healthPayload = await loadJson<DevHealthSnapshot>(`/api/dev/health?range=${statsRange}`);
         setHealth(healthPayload);
         setSubmissionGate(healthPayload.submissionGate || null);
       }
@@ -189,7 +193,7 @@ export const DevDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, date, token, isAuthorized, runStatus, loadJson]);
+  }, [tab, date, statsRange, token, isAuthorized, runStatus, loadJson]);
 
   useEffect(() => {
     void refresh();
@@ -282,6 +286,13 @@ export const DevDashboard: React.FC = () => {
             <label className="text-xs font-bold uppercase">Date
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
             </label>
+            <div className="text-xs font-bold uppercase">Stats
+              <div className="mt-1 flex gap-1">
+                {(['day', 'week', 'month'] as const).map((range) => (
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
+                ))}
+              </div>
+            </div>
             <button type="button" onClick={() => void refresh()} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
             <HeaderSignOut onSignOut={signOut} />
           </div>
@@ -298,13 +309,13 @@ export const DevDashboard: React.FC = () => {
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-1">
               <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
-                <p className="text-xs font-bold uppercase">Submitted This Month</p>
-                <p className="text-2xl font-black mt-1">{health.submittedMonth ?? health.completedMonth ?? 0}</p>
+                <p className="text-xs font-bold uppercase">Submitted</p>
+                <p className="text-2xl font-black mt-1">{health.submitted ?? health.submittedCount ?? 0}</p>
                 <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
               </div>
               <div className="bg-[#F4D66B] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
-                <p className="text-xs font-bold uppercase">Submitted Today</p>
-                <p className="text-2xl font-black mt-1">{health.submittedToday ?? health.completedToday ?? 0}</p>
+                <p className="text-xs font-bold uppercase">Selected period</p>
+                <p className="text-2xl font-black mt-1">{health.dateRange?.label || 'Today'}</p>
                 <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
               </div>
               <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
@@ -331,6 +342,7 @@ export const DevDashboard: React.FC = () => {
               ))}
             </div>
             <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 text-xs space-y-1">
+              <p className="font-black uppercase">Live operational health</p>
               <p>Queued {health.queue.queued} · Applying {health.queue.applying} · Stuck {health.queue.stuck} · Applied {health.queue.applied}</p>
               <p>Workers running: {String(health.workers.running)} · in flight {health.workers.inFlightCount} · idle {health.workers.idleCount}</p>
               <p>Ingest: {health.ingest?.running ? 'running' : health.ingest?.error || health.ingest?.message || 'idle'}</p>

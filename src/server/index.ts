@@ -74,6 +74,7 @@ import {
 import {
   istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
+  parseDashboardStatsRange,
   serializeDateRange,
 } from './dashboardDateRange.js';
 import { sanitizeHttpHeaderValue } from './httpHeaders.js';
@@ -907,7 +908,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * Returns aggregated dashboard metrics.
    */
   app.get('/api/stats', ...candidateListApiGuard, async (req: Request, res: Response) => {
-    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
     if ('error' in parsedRange) {
       res.status(400).json({ error: parsedRange.error });
       return;

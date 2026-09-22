@@ -3,7 +3,7 @@ import { getISTDateString } from '../services/workHistoryClient.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export type DashboardCreatedAtPreset = 'default' | 'custom' | 'legacy_day';
+export type DashboardCreatedAtPreset = 'default' | 'day' | 'week' | 'month' | 'custom' | 'legacy_day';
 
 export interface DashboardCreatedAtRange {
   startIso: string;
@@ -12,6 +12,49 @@ export interface DashboardCreatedAtRange {
   fromDate?: string;
   toDate?: string;
   label: string;
+}
+
+export function parseDashboardStatsRange(
+  query: Record<string, unknown>
+): DashboardCreatedAtRange | { error: string } {
+  const explicitRange = typeof query.range === 'string' ? query.range.trim().toLowerCase() : '';
+  const hasCustomDates = typeof query.from === 'string' || typeof query.to === 'string';
+  const range = explicitRange || (hasCustomDates ? 'custom' : 'day');
+  const today = getISTDateString();
+  let fromDate = today;
+  if (range === 'week') {
+    const date = new Date(`${today}T00:00:00+05:30`);
+    const day = date.getDay() || 7;
+    date.setDate(date.getDate() - day + 1);
+    fromDate = date.toISOString().slice(0, 10);
+  } else if (range === 'month') {
+    fromDate = `${today.slice(0, 7)}-01`;
+  } else if (range !== 'day' && range !== 'custom') {
+    return { error: 'range must be day, week, month, or custom.' };
+  }
+
+  if (range === 'custom') {
+    const from = typeof query.from === 'string' ? query.from.trim() : '';
+    const to = typeof query.to === 'string' ? query.to.trim() : '';
+    if (!ISO_DATE.test(from) || !ISO_DATE.test(to) || from > to) {
+      return { error: 'custom stats ranges require valid from and to dates.' };
+    }
+    fromDate = from;
+    const { startIso } = getISTDateRangeUtc(from);
+    const { endIso } = getISTDateRangeUtc(to);
+    return { startIso, endIso, preset: 'custom', fromDate: from, toDate: to, label: `${from} - ${to}` };
+  }
+
+  const { startIso } = getISTDateRangeUtc(fromDate);
+  const { endIso } = getISTDateRangeUtc(today);
+  return {
+    startIso,
+    endIso,
+    preset: range,
+    fromDate,
+    toDate: today,
+    label: range === 'day' ? 'Today' : range === 'week' ? 'This Week' : 'This Month',
+  };
 }
 
 export function defaultDashboardCreatedAtRange(): DashboardCreatedAtRange {
@@ -60,7 +103,6 @@ export function parseDashboardCreatedAtRange(
   const from = typeof query.from === 'string' ? query.from.trim() : '';
   const to = typeof query.to === 'string' ? query.to.trim() : '';
   const legacyDate = typeof query.date === 'string' ? query.date.trim() : '';
-
   if (from || to) {
     if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) {
       return { error: 'from and to must use YYYY-MM-DD format.' };
@@ -79,7 +121,6 @@ export function parseDashboardCreatedAtRange(
       label: `${from} - ${to}`,
     };
   }
-
   if (legacyDate) {
     if (!ISO_DATE.test(legacyDate)) {
       return { error: 'date must use YYYY-MM-DD format.' };
@@ -111,4 +152,3 @@ export function serializeDateRange(range: DashboardCreatedAtRange): {
     label: range.label,
   };
 }
-

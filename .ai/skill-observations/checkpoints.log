@@ -322,3 +322,4 @@
 2026-09-22 deliverable flush: added 8000-char raw profile payload to batch LLM prompt; typecheck passed; no observations
 2026-09-22 deliverable flush: unified EMAIL_PROOF_PENDING timeout behavior and updated active docs/tests; typecheck passed; full E2E suite has pre-existing Supabase/integration failures
 2026-09-22 deliverable flush: removed active manual_email_review writes and renamed operator action to get email ss; typecheck passed; no new observations
+2026-09-22 checkpoint: dashboard stats unified under IST day/week/month presets; typecheck and diff check passed; no observations

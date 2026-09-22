@@ -4,6 +4,13 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### Dashboard Stats Range Unification (2026-09-22)
+- [x] Added shared IST day/week/month stats-range parsing with day as the default.
+- [x] Scoped admin overview, dev health, manager reports, and operator `/api/stats` to the selected period.
+- [x] Replaced manager’s 14/56/180-day report meanings with calendar day/week/month periods.
+- [x] Added Day / Week / Month selectors to the Admin, Dev, and Manager dashboard stats surfaces.
+- [x] Preserved live queue/worker health as operational snapshots rather than silently mixing it into period statistics.
+
 ### Answer Resolver Logging Standardization (2026-09-22)
 - [x] **Standardized Per-Field Resolution Log Format (`answerResolver.ts`):** Unified all per-field logging across Tiers 1–5 in both single-field (`resolveField`) and batch (`resolveJobApplication` / `resolveFieldThroughTier2` / `resolveTier5Batch`) execution paths:
   - Success: `[Resolver] ✅ T{tier} {question_label} → "{answer}"`

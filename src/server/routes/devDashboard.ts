@@ -9,12 +9,13 @@ import {
   hydrateApplicationProofUrls,
   listApplications,
   countSubmittedApplicationsSince,
-  countAppliedApplicationsSince,
   countApplicationsByStatus,
+  getSubmissionOutcomeCounts,
 } from '../../db/applications.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { listApplicationEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
+import { parseDashboardStatsRange, serializeDateRange } from '../dashboardDateRange.js';
 import { collectHealthSnapshot } from '../healthSnapshot.js';
 import { displayNameMapForEmails } from '../authDirectory.js';
 import { emailsForRole } from './auth.js';
@@ -93,41 +94,32 @@ devDashboardRouter.patch('/submission-gate', async (req: Request, res: Response)
 
 devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<void> => {
   try {
-    const dateParam = typeof req.query.date === 'string' ? req.query.date.trim() : '';
-    const date =
-      dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : getISTDateString();
-    const { startIso, endIso } = getISTDateRangeUtc(date);
-    const today = getISTDateString();
-    const todayStart = getISTDateRangeUtc(today).startIso;
-    const [year, month] = today.split('-').map(Number);
-    const monthStart = getISTDateRangeUtc(
-      `${year}-${String(month).padStart(2, '0')}-01`
-    ).startIso;
+    const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
+    if ('error' in parsedRange) {
+      res.status(400).json({ error: parsedRange.error });
+      return;
+    }
+    const { startIso, endIso } = parsedRange;
     const submitClicks = await countAuditEventsByActionInRange({
       action: SUBMIT_CLICK_AUDIT_ACTION,
       startIso,
       endIso,
     });
-    const [submittedMonth, submittedToday, applied, failedCount, timeoutCount, queued, pending] = await Promise.all([
-      countSubmittedApplicationsSince(monthStart),
-      countSubmittedApplicationsSince(todayStart),
-      countAppliedApplicationsSince(startIso, undefined, endIso),
-      countApplicationsByStatus('FAILED'),
-      countApplicationsByStatus('CAPTCHA_TIMEOUT'),
-      countApplicationsByStatus('QUEUED'),
-      countApplicationsByStatus('READY_FOR_REVIEW'),
+    const [submitted, outcomes, queued] = await Promise.all([
+      countSubmittedApplicationsSince(startIso, undefined, endIso),
+      getSubmissionOutcomeCounts({ createdAtRange: { startIso, endIso } }),
+      countApplicationsByStatus('QUEUED', { startIso, endIso }),
     ]);
     res.json({
       ...(await collectHealthSnapshot()),
       submitClicks,
-      submitClicksDate: date,
-      submitted_today: submittedToday,
-      submittedMonth,
-      submittedToday,
-      applied,
-      failed: failedCount + timeoutCount,
+      submitClicksDate: parsedRange.toDate,
+      submitted,
+      submittedCount: submitted,
+      applied: outcomes.successfulApplications,
+      failed: outcomes.failedApplications,
       queued,
-      pending,
+      dateRange: serializeDateRange(parsedRange),
     });
   } catch (error) {
     log.error('[Dev] health failed:', error);

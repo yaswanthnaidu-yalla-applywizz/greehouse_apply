@@ -1394,7 +1394,13 @@ export async function getSubmissionOutcomeCounts(options?: {
       continue;
     }
 
-    if (createdAtRange && !rowCreatedAtInRange(row, createdAtRange)) {
+    if (
+      createdAtRange &&
+      (!row.submitted_at ||
+        new Date(row.submitted_at).getTime() < new Date(createdAtRange.startIso).getTime() ||
+        (createdAtRange.endIso &&
+          new Date(row.submitted_at).getTime() > new Date(createdAtRange.endIso).getTime()))
+    ) {
       continue;
     }
 
@@ -1780,14 +1786,18 @@ export async function countNonSkippedApplicationsByApplywizzIds(
 }
 
 /** Count applications in a given status (Supabase head count, memory fallback). */
-export async function countApplicationsByStatus(status: ApplicationStatus): Promise<number> {
+export async function countApplicationsByStatus(
+  status: ApplicationStatus,
+  createdAtRange?: CreatedAtRangeFilter
+): Promise<number> {
   if (isSupabaseConfigured()) {
     try {
-      const supabase = getDbClient();
-      const { count, error } = await supabase
+      let query = getDbClient()
         .from('gh_candidate_applications')
         .select('*', { count: 'exact', head: true })
         .eq('status', status);
+      if (createdAtRange) query = applyCreatedAtRangeFilter(query, createdAtRange);
+      const { count, error } = await query;
       if (!error && typeof count === 'number') {
         return count;
       }
@@ -1795,7 +1805,9 @@ export async function countApplicationsByStatus(status: ApplicationStatus): Prom
       // fall through
     }
   }
-  return Array.from(memoryApplications.values()).filter((a) => a.status === status).length;
+  return Array.from(memoryApplications.values()).filter((a) =>
+    a.status === status && (!createdAtRange || rowCreatedAtInRange(a, createdAtRange))
+  ).length;
 }
 
 /**

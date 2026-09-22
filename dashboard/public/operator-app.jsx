@@ -4604,13 +4604,13 @@
 
                   <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
                     <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
-                      Submitted Today
+                      Submitted
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
                       {stats.submittedCount ?? stats.submitted ?? stats.completed}
                     </div>
                     <div className="text-[11px] font-mono text-[#065F46] mt-1">
-                      Applications sent to queue today
+                      Applications sent to queue in the selected period
                     </div>
                   </div>
 

@@ -282,6 +282,7 @@ export const AdminDashboard: React.FC = () => {
 
   const [tab, setTab] = useState<'overview' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'>('overview');
   const [date, setDate] = useState<string>(getTodayIST);
+  const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month'>('day');
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [managers, setManagers] = useState<AdminManager[]>([]);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
@@ -321,7 +322,7 @@ export const AdminDashboard: React.FC = () => {
     setError('');
     try {
       if (tab === 'overview') {
-        const payload = await loadJson<AdminOverview>(`/api/admin/overview?date=${encodeURIComponent(date)}`);
+        const payload = await loadJson<AdminOverview>(`/api/admin/overview?range=${statsRange}`);
         setOverview(payload);
       }
       if (tab === 'managers') {
@@ -362,7 +363,7 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, date, token, isAuthorized, opSearch, opStatus, opManager, appSearch, appStatus, loadJson]);
+  }, [tab, date, statsRange, token, isAuthorized, opSearch, opStatus, opManager, appSearch, appStatus, loadJson]);
 
   useEffect(() => {
     void refresh();
@@ -490,6 +491,13 @@ export const AdminDashboard: React.FC = () => {
             <label className="text-xs font-bold uppercase">Date
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
             </label>
+            <div className="text-xs font-bold uppercase">Stats
+              <div className="mt-1 flex gap-1">
+                {(['day', 'week', 'month'] as const).map((range) => (
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
+                ))}
+              </div>
+            </div>
             <button type="button" onClick={() => void refresh()} className="bg-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
             <HeaderSignOut onSignOut={signOut} />
           </div>
