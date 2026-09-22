@@ -8,14 +8,11 @@ import { getProfile, type ProfileRow, getCompanyEmail } from '../db/profiles.js'
 import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
-
-const log = createLogger('Tier1Supabase');
-
+ 
 /**
  * Matches target value to the closest matching option in dropdown or radio group.
  */
-function matchBestOption(targetValue: string, options?: string[], label = targetValue): string | null {
+function matchBestOption(targetValue: string, options?: string[], _label = targetValue): string | null {
   if (!options || options.length === 0) {
     return targetValue;
   }
@@ -63,10 +60,6 @@ function matchBestOption(targetValue: string, options?: string[], label = target
   if (results.length > 0) {
     return results[0].item;
   }
-
-  log.warn(
-    `matchBestOption: no option matched for label=${label}, value=${targetValue} — marking unresolved`
-  );
   return null;
 }
 
@@ -358,10 +351,127 @@ function resolveStandardProfileAttribute(
   return null;
 }
 
+interface ExtractedPayloadEntry {
+  key: string;
+  path: string;
+  value: string;
+  normalizedKey: string;
+}
+
+/**
+ * Recursively extracts all primitive key-value pairs from raw_api_payload,
+ * keeping track of their keys and paths.
+ */
+function extractKeyValuePairsFromPayload(
+  obj: any,
+  prefix = '',
+  depth = 0
+): ExtractedPayloadEntry[] {
+  if (depth > 6 || !obj || typeof obj !== 'object') {
+    return [];
+  }
+
+  const entries: ExtractedPayloadEntry[] = [];
+
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined) continue;
+
+    const fullPath = prefix ? `${prefix}.${k}` : k;
+    const humanizedKey = k.replace(/[_-]+/g, ' ').trim();
+
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      const strVal = String(v).trim();
+      if (strVal.length > 0 && strVal !== '[object Object]') {
+        entries.push({
+          key: humanizedKey,
+          path: fullPath,
+          value: strVal,
+          normalizedKey: normalizeText(humanizedKey),
+        });
+      }
+    } else if (Array.isArray(v)) {
+      // Check array of strings/primitives
+      if (v.length > 0 && typeof v[0] !== 'object') {
+        const joined = v.map((item) => String(item).trim()).filter(Boolean).join(', ');
+        if (joined) {
+          entries.push({
+            key: humanizedKey,
+            path: fullPath,
+            value: joined,
+            normalizedKey: normalizeText(humanizedKey),
+          });
+        }
+      } else {
+        // Traverse elements
+        for (let i = 0; i < Math.min(v.length, 10); i++) {
+          entries.push(...extractKeyValuePairsFromPayload(v[i], `${fullPath}[${i}]`, depth + 1));
+        }
+      }
+    } else if (typeof v === 'object') {
+      entries.push(...extractKeyValuePairsFromPayload(v, fullPath, depth + 1));
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * Mines raw_api_payload by fuzzy-matching extracted top-level and nested keys against the question label.
+ */
+function resolveFromRawApiPayload(
+  field: ScannedField,
+  rawPayload?: Record<string, any> | null
+): string | null {
+  if (!rawPayload || typeof rawPayload !== 'object') {
+    return null;
+  }
+
+  const entries = extractKeyValuePairsFromPayload(rawPayload);
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const normLabel = normalizeText(field.label);
+
+  // 1. Direct normalized key exact match
+  const exact = entries.find((e) => e.normalizedKey === normLabel);
+  if (exact) {
+    const matched = matchBestOption(exact.value, field.options, field.label);
+    if (matched) return matched;
+  }
+
+  // 2. Substring containment match (word boundary check or mutual inclusion)
+  for (const entry of entries) {
+    if (entry.normalizedKey.length >= 4 && normLabel.length >= 4) {
+      if (normLabel.includes(entry.normalizedKey) || entry.normalizedKey.includes(normLabel)) {
+        const matched = matchBestOption(entry.value, field.options, field.label);
+        if (matched) return matched;
+      }
+    }
+  }
+
+  // 3. Fuzzy match against extracted keys using Fuse.js (threshold <= 0.3 for high precision)
+  const fuse = new Fuse(entries, {
+    keys: ['key', 'normalizedKey'],
+    threshold: 0.3,
+    ignoreLocation: true,
+  });
+
+  const results = fuse.search(field.label);
+  if (results.length > 0 && results[0].item) {
+    const matched = matchBestOption(results[0].item.value, field.options, field.label);
+    if (matched) return matched;
+  }
+
+  return null;
+}
+
 /**
  * Attempts Tier 1 answer resolution.
- * 1. Standard profile column matching & deterministic policy rules (ground truth)
- * 2. Exact lookup in `candidate_qa_bank` by (applywizzId, fingerprint)
+ * Checks in strict order:
+ * 1. Profiles columns directly & deterministic policy rules (ground truth)
+ * 2. Profiles.raw_api_payload JSONB for any matching key (fuzzy matched against question label)
+ * 3. Candidate_qa_bank by fingerprint
  *
  * @returns ResolvedField with source: 'supabase', resolvedByTier: 1, or null if miss.
  */
@@ -372,7 +482,8 @@ export async function resolveTier1(
 ): Promise<ResolvedField | null> {
   const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
   const isAkshitha = applywizzId.trim().toUpperCase() === 'AWL-31428' || applywizzId.trim().toLowerCase().includes('akshitha');
-  // 1. Profile Column & Deterministic Policy Match (Ground Truth)
+
+  // 1. Check profiles columns directly & standard attributes
   const candidateProfile = profile || (await getProfile(applywizzId));
   if (candidateProfile && isYaswanth) {
     candidateProfile.country = 'India';
@@ -384,6 +495,7 @@ export async function resolveTier1(
     if (!candidateProfile.phone) candidateProfile.phone = '940-222-8193';
     if (!candidateProfile.location) candidateProfile.location = 'Dallas, Texas, United States';
   }
+
   if (candidateProfile) {
     const matchedVal = resolveStandardProfileAttribute(field, candidateProfile);
     if (matchedVal !== null && matchedVal !== undefined && matchedVal.trim().length > 0) {
@@ -400,7 +512,24 @@ export async function resolveTier1(
     }
   }
 
-  // 2. Direct QA Bank Lookup
+  // 2. Check profiles.raw_api_payload JSONB for any matching key
+  if (candidateProfile?.raw_api_payload) {
+    const payloadVal = resolveFromRawApiPayload(field, candidateProfile.raw_api_payload);
+    if (payloadVal !== null && payloadVal !== undefined && payloadVal.trim().length > 0) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: payloadVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 0.95,
+      };
+    }
+  }
+
+  // 3. candidate_qa_bank by fingerprint
   const fingerprint = generateFingerprint(field.label, field.type);
   const normLabel = normalizeText(field.label);
   const normName = normalizeText(field.name);
@@ -431,11 +560,15 @@ export async function resolveTier1(
   try {
     const cachedQA = await getAnswer(applywizzId, fingerprint);
     if (cachedQA && cachedQA.value && cachedQA.value.trim().length > 0) {
-      const rawVal = cachedQA.value.trim();
+      let rawVal = cachedQA.value.trim();
 
-      // Reject non-URL values for URL fields
+      // Reject non-URL values for URL fields, or normalize domain-only URLs
       if (isUrlField && !/^https?:\/\//i.test(rawVal)) {
-        return null;
+        if (/linkedin\.com|github\.com|portfolio/i.test(rawVal)) {
+          rawVal = `https://${rawVal.replace(/^\/+/, '')}`;
+        } else {
+          return null;
+        }
       }
 
       // Reject generic fallback sentences from QA bank
@@ -460,8 +593,8 @@ export async function resolveTier1(
         confidence: cachedQA.confidence ? Number(cachedQA.confidence) : 1.0,
       };
     }
-  } catch (err: any) {
-    log.warn(`[Tier 1] QA Bank lookup error for ${applywizzId}: ${err.message}`);
+  } catch {
+    // Ignore QA bank lookup error
   }
 
   return null;

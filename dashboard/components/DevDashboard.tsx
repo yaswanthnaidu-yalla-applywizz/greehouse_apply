@@ -472,7 +472,7 @@ export const DevDashboard: React.FC = () => {
                   <pre className="bg-[#FAF4EB] border border-[#1A1A2E] p-3 overflow-auto max-h-48 whitespace-pre-wrap">{JSON.stringify(app.proof_email_json, null, 2)}</pre>
                 )}
                 <h3 className="font-black uppercase pt-2">Timeline</h3>
-                {(!debug?.events || debug.events.length === 0) && <p className="text-[#64748B]">{debug?.warning || 'No application_events yet. Status changes will appear after migration 015.'}</p>}
+                {(!debug?.events || debug.events.length === 0) && <p className="text-[#64748B]">{debug?.warning || 'No status changes recorded for this application yet.'}</p>}
                 {(debug?.events || []).map((event) => (
                   <p key={event.id} className="font-mono">{event.from_status || '—'} → {event.to_status} · {new Date(event.created_at).toLocaleString()}</p>
                 ))}

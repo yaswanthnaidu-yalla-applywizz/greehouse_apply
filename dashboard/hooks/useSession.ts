@@ -247,9 +247,20 @@ export function getOpsModeManagerEmail(): string {
   }
 }
 
+export function getAccessToken(): string {
+  if (typeof window === 'undefined') return '';
+  if ((window as any).ApplyWizzRoles && typeof (window as any).ApplyWizzRoles.getAccessToken === 'function') {
+    return (window as any).ApplyWizzRoles.getAccessToken();
+  }
+  if (typeof (window as any).getAccessToken === 'function') {
+    return (window as any).getAccessToken();
+  }
+  return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || '';
+}
+
 export function getAuthHeaders(token?: string | null): Record<string, string> {
   if (typeof window === 'undefined') return {};
-  const authToken = token ?? localStorage.getItem(TOKEN_KEY);
+  const authToken = token ?? getAccessToken();
   if (!authToken) return {};
   const headers: Record<string, string> = { Authorization: `Bearer ${authToken}` };
   if (isOpsMode()) {

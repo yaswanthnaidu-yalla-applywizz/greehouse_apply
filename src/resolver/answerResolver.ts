@@ -18,9 +18,10 @@ import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
 import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
-import { findSemanticMatch } from './semanticSearch.js';
+import { findSemanticMatch, getLastSemanticScore } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
-import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE } from './tier5LLM.js';
+import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getLastLlmFailure } from './tier5LLM.js';
+import { getEffectiveFieldOptions } from './llmSynthesizer.js';
 import { upsertApplication } from '../db/applications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
 import type {
@@ -97,6 +98,17 @@ export interface ResolutionTelemetry {
   unresolvedCount: number;
 }
 
+function getTier5FailureReason(field: ScannedField): string {
+  const options = getEffectiveFieldOptions(field);
+  if (options && options.length > 0) {
+    return 'no option match';
+  }
+  if (getLastLlmFailure()) {
+    return 'LLM parse error';
+  }
+  return 'unresolved';
+}
+
 /**
  * Orchestrator running the 3-tier Supabase-only waterfall resolution engine.
  */
@@ -120,6 +132,7 @@ export class AnswerResolver {
 
     // Never fill cover letters under any circumstances
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
+      log.info(`[Resolver] ✅ T1 ${field.label} → ""`);
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -132,13 +145,53 @@ export class AnswerResolver {
       };
     }
 
+    // Hardcoded rule: Work authorization questions always resolve to "Yes" with source 'supabase'
+    if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
+      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
+      const finalVal = field.options && field.options.length > 0
+        ? (field.options.find((o) => /^(yes|agree|i agree|accept|i accept|true|authorized)/i.test(o.trim())) || field.options[0])
+        : targetVal;
+      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: finalVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
+
+    // Hardcoded rule: Country questions always resolve to "United States" with source 'supabase'
+    if (/country/i.test(field.label)) {
+      const targetVal = 'United States';
+      const finalVal = field.options && field.options.length > 0
+        ? (field.options.find((o) => /united states|usa|u\.s\./i.test(o.trim())) || field.options[0])
+        : targetVal;
+      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: finalVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
+
     // ------------------------------------------------------------------------
     // Tier 1: Supabase Profile & Exact QA Bank
     // ------------------------------------------------------------------------
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
+      log.info(`[Resolver] ✅ T1 ${field.label} → "${tier1.value}"`);
       return tier1;
     }
+    log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
     // If the field is NOT mandatory and wasn't found in Supabase/Profile, do NOT spend time
     // running Tier 2 (resume parse) or Tier 5 (LLM). Leave it clean and empty.
@@ -165,15 +218,17 @@ export class AnswerResolver {
 
     const tier2 = await resolveTier2(applywizzId, field, parsedResume);
     if (tier2) {
+      log.info(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
       return tier2;
     }
+    log.info(`[Resolver] ❌ T2 ${field.label} — no resume match`);
 
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
     const semanticMatch = await findSemanticMatch(field.label, applywizzId, field.type);
     if (semanticMatch) {
-      log.info(`[Resolver] Tier 3 semantic hit for ${field.label}`);
+      log.info(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -185,17 +240,21 @@ export class AnswerResolver {
         confidence: semanticMatch.confidence,
       };
     }
+    const t3Score = getLastSemanticScore().toFixed(2);
+    log.info(`[Resolver] ❌ T3 ${field.label} — below similarity threshold (${t3Score})`);
 
     // ------------------------------------------------------------------------
     // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
     // ------------------------------------------------------------------------
     const tier4 = await resolveTier3(applywizzId, field, context?.qaEntries);
     if (tier4) {
+      log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
       return {
         ...tier4,
         resolvedByTier: 4,
       };
     }
+    log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
 
     // ------------------------------------------------------------------------
     // Tier 5: Multi-provider LLM Synthesis
@@ -208,10 +267,14 @@ export class AnswerResolver {
         jobContext,
         parsedResume?.raw_text || ''
       );
-      if (tier5) {
+      if (tier5 && tier5.value && tier5.value.trim().length > 0) {
+        log.info(`[Resolver] ✅ T5 ${field.label} → "${tier5.value}"`);
         return tier5;
       }
     }
+
+    const t5Reason = getTier5FailureReason(field);
+    log.info(`[Resolver] ❌ T5 ${field.label} — ${t5Reason}`);
 
     return this.unresolvedField(field);
   }
@@ -246,6 +309,7 @@ export class AnswerResolver {
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
 
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
+      log.info(`[Resolver] ✅ T1 ${field.label} → ""`);
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -258,10 +322,50 @@ export class AnswerResolver {
       };
     }
 
+    // Hardcoded rule: Work authorization questions always resolve to "Yes" with source 'supabase'
+    if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
+      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
+      const finalVal = field.options && field.options.length > 0
+        ? (field.options.find((o) => /^(yes|agree|i agree|accept|i accept|true|authorized)/i.test(o.trim())) || field.options[0])
+        : targetVal;
+      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: finalVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
+
+    // Hardcoded rule: Country questions always resolve to "United States" with source 'supabase'
+    if (/country/i.test(field.label)) {
+      const targetVal = 'United States';
+      const finalVal = field.options && field.options.length > 0
+        ? (field.options.find((o) => /united states|usa|u\.s\./i.test(o.trim())) || field.options[0])
+        : targetVal;
+      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: finalVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+      };
+    }
+
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
+      log.info(`[Resolver] ✅ T1 ${field.label} → "${tier1.value}"`);
       return tier1;
     }
+    log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
     if (!isRequired) {
       return {
@@ -283,15 +387,17 @@ export class AnswerResolver {
 
     const tier2 = await resolveTier2(applywizzId, field, parsedResume);
     if (tier2) {
+      log.info(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
       return tier2;
     }
+    log.info(`[Resolver] ❌ T2 ${field.label} — no resume match`);
 
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
     const semanticMatch = await findSemanticMatch(field.label, applywizzId, field.type);
     if (semanticMatch) {
-      log.info(`[Resolver] Tier 3 semantic hit for ${field.label}`);
+      log.info(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -303,17 +409,21 @@ export class AnswerResolver {
         confidence: semanticMatch.confidence,
       };
     }
+    const t3Score = getLastSemanticScore().toFixed(2);
+    log.info(`[Resolver] ❌ T3 ${field.label} — below similarity threshold (${t3Score})`);
 
     // ------------------------------------------------------------------------
     // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
     // ------------------------------------------------------------------------
     const tier4 = await resolveTier3(applywizzId, field, context.qaEntries);
     if (tier4) {
+      log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
       return {
         ...tier4,
         resolvedByTier: 4,
       };
     }
+    log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
 
     return this.unresolvedField(field);
   }
@@ -368,18 +478,13 @@ export class AnswerResolver {
       });
       resolvedFields.push(resolved);
 
-      if (resolved.source === 'unresolved' && profile) {
-        tier5Slots.push(resolvedFields.length - 1);
-        tier5Pending.push(field);
-      }
-
-      if (verbose) {
-        const preview = resolved.value
-          ? resolved.value.length > 35
-            ? resolved.value.slice(0, 32) + '...'
-            : resolved.value
-          : '<blank>';
-        log.info(`  • [${formatResolutionSource(resolved)}] "${field.label}" ➔ "${preview}"`);
+      if (resolved.source === 'unresolved') {
+        if (profile) {
+          tier5Slots.push(resolvedFields.length - 1);
+          tier5Pending.push(field);
+        } else {
+          log.info(`[Resolver] ❌ T5 ${field.label} — unresolved`);
+        }
       }
     }
 
@@ -403,13 +508,12 @@ export class AnswerResolver {
 
       for (let i = 0; i < chunkFields.length; i++) {
         const tier5 = batchResults[i];
-        if (tier5) {
+        if (tier5 && tier5.value && tier5.value.trim().length > 0) {
           resolvedFields[chunkSlots[i]] = tier5;
-          if (verbose) {
-            const preview =
-              tier5.value.length > 35 ? tier5.value.slice(0, 32) + '...' : tier5.value;
-            log.info(`  • [${formatResolutionSource(tier5)}] "${chunkFields[i].label}" ➔ "${preview}"`);
-          }
+          log.info(`[Resolver] ✅ T5 ${chunkFields[i].label} → "${tier5.value}"`);
+        } else {
+          const reason = getTier5FailureReason(chunkFields[i]);
+          log.info(`[Resolver] ❌ T5 ${chunkFields[i].label} — ${reason}`);
         }
       }
     }

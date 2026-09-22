@@ -474,7 +474,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       const startedAt = new Date().toISOString();
       const runId = crypto.randomUUID();
       resetPipelineAbort();
-      setIngestRun({ running: true, startedAt });
+      setIngestRun({ running: true, runId, status: 'running', startedAt });
       const actorEmail = getAuthenticatedCaEmail(req) || (req.user as { email?: string } | undefined)?.email || '';
       void insertAuditEvent({
         actorEmail,
@@ -564,6 +564,29 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
       requestPipelineAbort();
       log.warn('[Admin] ⏹️ Storage CSV ingestion stop requested by operator');
+
+      const stoppedAt = new Date().toISOString();
+      const currentRun = getIngestRun();
+      const runId = currentRun.runId;
+
+      setIngestRun({
+        ...currentRun,
+        running: false,
+        status: 'stopped',
+        finishedAt: stoppedAt,
+        message: 'Pipeline stopped by operator.',
+      });
+
+      if (runId) {
+        void upsertIngestRun({
+          id: runId,
+          status: 'stopped',
+          finished_at: stoppedAt,
+          phase: 'Aborted',
+          message: 'Pipeline stopped by operator.',
+        });
+      }
+
       res.json({ stopping: true, ...getIngestRun() });
     });
 
@@ -1513,6 +1536,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           ? application.resolved_fields.length
           : 0;
         jobs.push({
+          id: application.id,
           rawUrl: application.job_url,
           canonicalUrl: application.job_url,
           companyName: application.company_name || 'Greenhouse Company',

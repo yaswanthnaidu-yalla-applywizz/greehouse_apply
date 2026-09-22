@@ -31,7 +31,7 @@ import type {
 } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
-import { resetPipelineAbort, throwIfPipelineAborted } from './pipelineAbort.js';
+import { isPipelineAbortedError, resetPipelineAbort, throwIfPipelineAborted } from './pipelineAbort.js';
 
 const log = createLogger('Pipeline');
 
@@ -194,6 +194,9 @@ export class V1Pipeline {
           log.info(`[Pipeline Phase B] ✅ Successfully scanned ${scannedTemplates.length} job form schemas.\n`);
         }
       } catch (err: any) {
+        if (isPipelineAbortedError(err)) {
+          throw err;
+        }
         log.warn(`[Pipeline Phase B] ⚠️ Playwright scan encountered non-fatal error: ${err.message}. Continuing.`);
       }
     }

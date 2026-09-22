@@ -53,6 +53,7 @@ import {
 } from '../../db/storage.js';
 import { createLogger } from '../../utils/logger.js';
 import { insertAuditEvent, SUBMIT_CLICK_AUDIT_ACTION } from '../../db/events.js';
+import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { resolveRole } from './auth.js';
 
 const log = createLogger('Submissions');
@@ -1032,6 +1033,17 @@ submissionsRouter.get('/:id/proof-image', async (req: Request, res: Response): P
     (typeof req.query.jobUrl === 'string' ? req.query.jobUrl : '') ||
     (typeof req.query.job_url === 'string' ? req.query.job_url : '');
   const kind = String(req.query.kind || 'web').toLowerCase();
+  const queryToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+
+  if (!(req as any).user && queryToken && isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase.auth.getUser(queryToken);
+      if (!error && data?.user) {
+        (req as any).user = data.user;
+      }
+    } catch {}
+  }
 
   try {
     let app = await getApplication(appId, jobUrl);

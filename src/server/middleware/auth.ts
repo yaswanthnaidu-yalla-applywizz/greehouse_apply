@@ -44,14 +44,16 @@ export async function requireAuth(
   }
 
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header.' });
-    return;
+  let token: string | undefined;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (typeof req.query.token === 'string' && req.query.token.trim().length > 0) {
+    token = req.query.token.trim();
+    req.headers.authorization = `Bearer ${token}`;
   }
 
-  const token = authHeader.split(' ')[1];
   if (!token || token.trim().length === 0) {
-    res.status(401).json({ error: 'Unauthorized: Empty token provided.' });
+    res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header.' });
     return;
   }
 

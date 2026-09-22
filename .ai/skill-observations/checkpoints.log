@@ -309,3 +309,13 @@
 2026-09-21 checkpoint: observation 0024 logged and actioned
 2026-09-22 session-start scan: files=14 parsed=14 suspect=0
 2026-09-22 deliverable flush: chunked exportScannedJobs upsert into 50-row batches with 30s AbortSignal timeout and [Scanner] progress logging; no new observations
+2026-09-22 deliverable flush: appended date query to candidate jobs fetch in App.tsx and operator-app.jsx; no new observations
+2026-09-22 deliverable flush: updated roleAccess.js for immediate page-load token refresh and 60m rotation interval; no new observations
+2026-09-22 checkpoint: pipeline stop mid-scan abort and ingest_runs stopped update shipped
+2026-09-22 deliverable flush: lowered semantic match threshold to 0.82; reduced TIER5_BATCH_CHUNK_SIZE to 8; no new observations
+2026-09-22 deliverable flush: URL field validation in tier1 accepts linkedin.com, github.com, portfolio and auto-prepends https://; no new observations
+2026-09-22 deliverable flush: resilient batch response parsing in llmSynthesizer (object-to-array, pad/truncate length mismatch); no new observations
+2026-09-22 session-start scan: files=14 parsed=14 suspect=0
+2026-09-22 deliverable flush: unified answer resolver waterfall per-field logging to standard success/failure format; no new observations
+2026-09-22 session-start scan: files=14 parsed=14 suspect=0
+2026-09-22 checkpoint: push session commits to origin/main; no observations

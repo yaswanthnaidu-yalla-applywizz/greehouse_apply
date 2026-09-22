@@ -19,9 +19,7 @@ import type {
   ResolvedField,
   ScannedField,
 } from '../types/index.js';
-import { createLogger, haltWithDevAlert } from '../utils/logger.js';
-
-const log = createLogger('Llm Synthesizer');
+import { haltWithDevAlert } from '../utils/logger.js';
 
 let firstProviderCallChecked = false;
 
@@ -434,9 +432,6 @@ export class LLMSynthesizer {
       if (choiceOptions && choiceOptions.length > 0) {
         const exact = matchExactOption(profileYesNo, choiceOptions);
         if (!exact) {
-          log.warn(
-            `[LLM Synthesizer] Profile Yes/No "${profileYesNo}" is not an exact option for "${field.label}" — leaving unresolved`
-          );
           return unresolvedField(field);
         }
         return aiField(field, exact, 0.95);
@@ -490,7 +485,7 @@ export class LLMSynthesizer {
               }
 
             } catch (modelErr: any) {
-              log.warn(`[LLM Synthesizer] ⚠️ Model "${modelId}" error (${modelErr.status || modelErr.message}). Trying fallback...`);
+              // Try fallback model
             }
           }
 
@@ -518,7 +513,6 @@ export class LLMSynthesizer {
         }
       } catch (err: any) {
         haltIfFirstProviderCallFailed(false);
-        log.warn(`[LLM Synthesizer] ⚠️ LLM inference error for "${field.label}": ${err.message}. Falling back to heuristic answer.`);
       }
     }
 
@@ -575,21 +569,10 @@ export class LLMSynthesizer {
     if (choiceOptions && choiceOptions.length > 0) {
       let matched = matchExactOption(answer, choiceOptions);
       if (!matched) {
-        log.warn(
-          `[LLM Synthesizer] Exact match failed for '${answer}' — trying fuzzy fallback for '${field.label}'`
-        );
         matched = matchFuzzyOption(answer, choiceOptions);
-        if (matched) {
-          log.info(
-            `[LLM Synthesizer] Fuzzy matched '${answer}' → '${matched}' for '${field.label}'`
-          );
-        }
       }
 
       if (!matched) {
-        log.warn(
-          `[LLM Synthesizer] "${answer}" is not an exact option for "${field.label}" — leaving unresolved`
-        );
         return unresolvedField(field);
       }
       answer = matched;
@@ -603,9 +586,6 @@ export class LLMSynthesizer {
       confidence = opts.defaultConfidenceIfMissing;
     }
     if (confidence == null || confidence < LLM_MIN_CONFIDENCE) {
-      log.warn(
-        `[LLM Synthesizer] Confidence ${confidence ?? 'missing'} below ${LLM_MIN_CONFIDENCE} for "${field.label}" — leaving unresolved`
-      );
       return unresolvedField(field);
     }
 
@@ -686,11 +666,38 @@ ${questions
       throw err;
     }
 
-    const parsed: unknown = JSON.parse(cleanLLMOutput(raw));
-    if (!Array.isArray(parsed) || parsed.length !== questions.length || parsed.some((answer) => typeof answer !== 'string')) {
-      throw new Error('Batch LLM response did not contain one string answer per question.');
+    let parsed: unknown = JSON.parse(cleanLLMOutput(raw));
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>;
+      const keys = Object.keys(obj);
+      const allNumeric = keys.length > 0 && keys.every((k) => !isNaN(Number(k)));
+      if (allNumeric) {
+        keys.sort((a, b) => Number(a) - Number(b));
+        parsed = keys.map((k) => obj[k]);
+      } else {
+        parsed = Object.values(obj);
+      }
     }
-    return parsed.map((answer) => cleanLLMOutput(answer));
+
+    if (!Array.isArray(parsed)) {
+      throw new Error('Batch LLM response did not contain an array of answers.');
+    }
+
+    let answers: string[] = parsed.map((item) => {
+      if (typeof item === 'string') return item;
+      return item === null || item === undefined ? '' : String(item);
+    });
+
+    if (answers.length < questions.length) {
+      while (answers.length < questions.length) {
+        answers.push('');
+      }
+    } else if (answers.length > questions.length) {
+      answers = answers.slice(0, questions.length);
+    }
+
+    return answers.map((answer) => cleanLLMOutput(answer));
   }
 
   /**

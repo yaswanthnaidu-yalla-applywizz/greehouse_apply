@@ -34,6 +34,11 @@ export function isPipelineAbortRequested(): boolean {
   return abortRequested;
 }
 
+/** Alias for isPipelineAbortRequested */
+export function isPipelineStopRequested(): boolean {
+  return abortRequested;
+}
+
 export function throwIfPipelineAborted(phase?: string): void {
   if (!abortRequested) return;
   const suffix = phase ? ` (${phase})` : '';

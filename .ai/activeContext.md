@@ -8,6 +8,36 @@ _Last updated: 2026-09-22_
 
 ## Current Focus
 
+### 0q. Answer Resolver Logging Standardization (shipped 2026-09-22)
+- **Standardized Per-Field Resolution Log Format (`answerResolver.ts`):** Unified all per-field logging across Tiers 1–5 in both single-field (`resolveField`) and batch (`resolveJobApplication` / `resolveFieldThroughTier2` / `resolveTier5Batch`) execution paths:
+  - Success: `[Resolver] ✅ T{tier} {question_label} → "{answer}"`
+  - Failure: `[Resolver] ❌ T{tier} {question_label} — {reason}`
+  - Standardized reasons: `no profile match` (T1), `no resume match` (T2), `below similarity threshold ({score})` (T3), `no fuzzy match` (T4), `LLM parse error` (T5), `no option match` (T5), `unresolved` (T5).
+- **Stripped Redundant Telemetry & Per-Field Noise:** Removed legacy bullet previews (`• [Source] "label" ➔ "preview"`), verbose tier telemetry, raw payload mining logs, and cascade noise across `answerResolver.ts`, `tier1Supabase.ts`, `semanticSearch.ts`, `tier5LLM.ts`, and `llmSynthesizer.ts`. Preserved pipeline-level summary and progress logs.
+- **Exposed Last Semantic Score (`semanticSearch.ts`):** Added `getLastSemanticScore()` tracking top candidate score even when below threshold (`match_threshold: 0.0` RPC probe) for accurate failure log scores.
+
+### 0p. Semantic Search Threshold & Tier 5 Chunk Size Tuning (shipped 2026-09-22)
+- **Cosine Similarity Threshold (`semanticSearch.ts`):** Lowered the default threshold in `findSemanticMatch` from `0.88` to `0.82` for broader matching against candidate QA bank entries.
+- **Tier 5 Batch Chunk Size (`tier5LLM.ts`):** Reduced `TIER5_BATCH_CHUNK_SIZE` from `15` to `8` fields per LLM call to reduce context length, improve instruction compliance, and avoid output token truncation.
+
+### 0o. Pipeline Stop & Mid-Scan Abort Handling (shipped 2026-09-22)
+- **Playwright Scanner Mid-Scan Polling (`playwrightScanner.ts`):** Added `throwIfPipelineAborted('Playwright scan')` immediately after each individual URL completes and page closes, before jitter/next URL.
+- **Pipeline Phase B Error Propagation (`pipeline.ts`):** Made Phase B try/catch check `isPipelineAbortedError(err)` and re-throw immediately rather than treating abort as a non-fatal warning. Added `isPipelineStopRequested()` alias to `pipelineAbort.ts`.
+- **Stop Endpoint State Synchronization (`adminDashboard.ts`, `server/index.ts`):** `POST /api/admin/stop-ingest` now marks the in-memory run state as `{ running: false, status: 'stopped', finishedAt: ... }` and updates the `ingest_runs` row in Supabase to `status = 'stopped'`, preventing restarted servers or subsequent status polls from reporting stopped runs as still running.
+
+### 0n. Persistent Session Token Refresh Strategy (shipped 2026-09-22)
+- **Immediate Page-Load Refresh (`roleAccess.js`):** On page load, `initPageLoadRefresh()` immediately calls `POST /api/auth/refresh` using the stored `applywizz_refresh_token` before any API call fires. All `window.fetch` calls await this refresh before sending requests. If refresh succeeds, rotated tokens are saved to both `sessionStorage` and `localStorage`. If it fails with an invalid/revoked token, `clearSession()` runs and redirects to `/`.
+- **60-Minute Periodic Token Rotation (`roleAccess.js`):** Replaced near-expiry checks and 10-minute intervals with an unconditional 60-minute interval (`REFRESH_INTERVAL_MS = 60 * 60 * 1000`) that calls `refreshSession()`, ensuring refresh tokens rotate and never go stale while tabs stay open. Disabled client-side local session expiry cap (`sessionCapExpired() => false`).
+
+### 0m. Tier 1 Resolution Sequence & Pre-Tier Rules (shipped 2026-09-22)
+- **Hardcoded Pre-Tier Rules (`answerResolver.ts`):** Fired BEFORE any tier checks (both in `resolveField` and `resolveFieldThroughTier2`):
+  - Question label matching `/work\.auth|authorized\.to\.work|eligible\.to\.work/i` resolves directly to `"Yes"` (or `"true"` for checkbox) with source `'supabase'` and confidence `1.0`.
+  - Question label matching `/country/i` resolves directly to `"United States"` with source `'supabase'` and confidence `1.0`.
+- **Tier 1 Resolution Sequence (`tier1Supabase.ts`):**
+  - Order 1: `profiles` columns directly & deterministic policy rules (`resolveStandardProfileAttribute`).
+  - Order 2: `profiles.raw_api_payload` JSONB recursive key-value mining (`extractKeyValuePairsFromPayload` + `resolveFromRawApiPayload`). Recursively extracts all top-level and nested primitive keys, normalizing and fuzzy matching with Fuse.js (threshold `<= 0.3`) against the question label before falling through.
+  - Order 3: `candidate_qa_bank` by fingerprint.
+
 ### 0l. Scanned Job Templates Bulk Upsert Chunking (shipped 2026-09-22)
 - **Batched Template Upsert & Timeout (`exportScannedJobs.ts`):** Chunked bulk template upsert into batches of 50 rows with `AbortSignal.timeout(30000)` per batch. Replaced 1-by-1 sequential writes that caused silent stalls during Phase B export. Added per-batch logging: `[Scanner] upserted batch N/total`.
 
