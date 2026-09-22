@@ -1,12 +1,15 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-21_
+_Last updated: 2026-09-22_
 
 ## Docs
 
 - **`OVERVIEW.md`** (repo root, 2026-09-17) — four-perspective analysis (architect / developer / product / critique) with Mermaid diagrams. Not a sprint tracker; use this file for current focus.
 
 ## Current Focus
+
+### 0l. Scanned Job Templates Bulk Upsert Chunking (shipped 2026-09-22)
+- **Batched Template Upsert & Timeout (`exportScannedJobs.ts`):** Chunked bulk template upsert into batches of 50 rows with `AbortSignal.timeout(30000)` per batch. Replaced 1-by-1 sequential writes that caused silent stalls during Phase B export. Added per-batch logging: `[Scanner] upserted batch N/total`.
 
 ### 0k. Proof Image Rendering & Viewer Resilience (shipped 2026-09-21)
 - **Candidate Job Proof Hydration:** Added `hydrateApplicationProofUrls(row)` to `GET /api/candidates/:applywizzId/jobs/*` so operators always receive fresh valid signed URLs up front.

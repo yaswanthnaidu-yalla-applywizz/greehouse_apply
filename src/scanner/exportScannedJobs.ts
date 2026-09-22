@@ -14,8 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import * as fastCsv from 'fast-csv';
 import { config } from '../config/env.js';
-import { upsertTemplate } from '../db/templates.js';
-import { isSupabaseConfigured } from '../db/client.js';
+import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import type { ScannedJobTemplate } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
@@ -91,21 +90,41 @@ export async function exportScannedJobs(
 
   let dbTemplatesPersisted = 0;
   if (isSupabaseConfigured() && templates.length > 0) {
+    const BATCH_SIZE = 50;
+    const totalBatches = Math.ceil(templates.length / BATCH_SIZE);
+    const supabase = getDbClient();
     let persisted = 0;
-    for (const template of templates) {
+
+    for (let i = 0; i < templates.length; i += BATCH_SIZE) {
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      const chunk = templates.slice(i, i + BATCH_SIZE);
+      const rows = chunk.map((template) => ({
+        job_url: template.jobUrl,
+        company_name: template.companyName || null,
+        job_title: template.jobTitle || null,
+        fields_schema: template.fields || [],
+        is_expired: Boolean(template.isExpired),
+        scanned_at: template.scannedAt || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+
       try {
-        await upsertTemplate({
-          job_url: template.jobUrl,
-          company_name: template.companyName || null,
-          job_title: template.jobTitle || null,
-          fields_schema: template.fields || [],
-          is_expired: Boolean(template.isExpired),
-          scanned_at: template.scannedAt || new Date().toISOString(),
-        });
-        persisted++;
+        const { error } = await supabase
+          .from('gh_scanned_job_templates')
+          .upsert(rows, { onConflict: 'job_url' })
+          .abortSignal(AbortSignal.timeout(30000));
+
+        if (error) {
+          log.warn(
+            `[Export Scanned Jobs] ⚠️ Could not upsert batch ${batchNum}/${totalBatches} to scanned_job_templates: ${error.message}`
+          );
+        } else {
+          persisted += chunk.length;
+          log.info(`[Scanner] upserted batch ${batchNum}/${totalBatches}`);
+        }
       } catch (err: any) {
         log.warn(
-          `[Export Scanned Jobs] ⚠️ Could not upsert scanned_job_templates for ${template.jobUrl}: ${err?.message || err}`
+          `[Export Scanned Jobs] ⚠️ Could not upsert batch ${batchNum}/${totalBatches} to scanned_job_templates: ${err?.message || err}`
         );
       }
     }
