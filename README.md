@@ -9,4 +9,4 @@ Internal ApplyWizz Greenhouse application automation (V2+). Operators ingest CSV
 Production: https://gh.applywizz.ai · `npm run dashboard` locally · see `.ai/techContext.md` for env and commands.
 
 
-using this to re-push github edirs
+using this to re-push github edits
