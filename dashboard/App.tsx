@@ -1118,7 +1118,7 @@ export const App: React.FC = () => {
                 Successful Applications
               </span>
               <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                {stats.applied ?? 0}
+                {stats.successfulApplications ?? 0}
               </div>
               <div className="text-[11px] font-mono text-[#065F46] mt-1">
                 Submitted with APPLIED status
@@ -1130,7 +1130,7 @@ export const App: React.FC = () => {
                 Failed Applications
               </span>
               <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                {stats.failed ?? 0}
+                {stats.failedApplications ?? 0}
               </div>
               <div className="text-[11px] font-mono text-[#991B1B] mt-1">
                 Terminal FAILED submissions

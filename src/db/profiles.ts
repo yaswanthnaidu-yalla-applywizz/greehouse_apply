@@ -123,6 +123,7 @@ export function profileRowToCandidateProfile(row: ProfileRow): ApplyWizzCandidat
     demographics: row.raw_api_payload?.demographics,
     resumeText: row.resume_text || undefined,
     resumeFacts: row.resume_facts || undefined,
+    raw_api_payload: row.raw_api_payload || undefined,
   };
 }
 
@@ -605,4 +606,3 @@ export async function upsertProfileCaEmail(
     }
   }
 }
-

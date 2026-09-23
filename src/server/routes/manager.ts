@@ -277,26 +277,22 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
       ca: requestedCa,
       teamScopeUnrestricted: unrestricted,
     });
-    const operatorEmails = unrestricted
-      ? undefined
-      : await listOperatorEmailsForManager(managerEmail);
-    const submitted = await countSubmittedApplicationsSince(
-      parsedRange.startIso,
-      operatorEmails,
-      parsedRange.endIso
-    );
+    
     const { waiting_for_email: _waitingForEmail, ...totalsWithoutWaiting } = payload.totals;
+    
     res.json({
       ...payload,
       totalApplications: payload.totals.applications,
-      totals: totalsWithoutWaiting,
-      submitted,
-      completed: submitted,
-      rows: payload.rows.map((row) => ({
-        ...row,
-        waiting_for_email: undefined,
-        assigned_ca: (row.assigned_ca || '').trim(),
-      })),
+      totals: {
+        ...totalsWithoutWaiting,
+        applications: payload.totals.applications,
+        submitted: payload.totals.submitted,
+        applied: payload.totals.applied,
+        failed: payload.totals.failed,
+      },
+      submitted: payload.totals.submitted,
+      completed: payload.totals.submitted,
+      applied: payload.totals.applied,
     });
   } catch (error) {
     log.error('[Manager Router] Failed to load dashboard:', error);
@@ -385,6 +381,8 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         failed: 0,
       };
       current.applications += row.applications;
+      current.submitted += row.submitted;
+      current.completed += row.submitted;
       current.applied += row.applied;
       current.pending += row.pending;
       current.failed += row.failed;
@@ -425,18 +423,6 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       }
     }
 
-    await Promise.all(
-      Array.from(operators.values()).map(async (operator) => {
-        const submitted = await countSubmittedApplicationsSince(
-          parsedRange.startIso,
-          [operator.email],
-          parsedRange.endIso
-        );
-        operator.submitted = submitted;
-        operator.completed = submitted;
-      })
-    );
-
     const items = Array.from(operators.values()).map((operator) => {
       const user = byEmail.get(operator.email);
       const active = isActiveWithin(user?.lastSignInAt) || inFlight.has(operator.email);
@@ -459,10 +445,10 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       dateRange: serializeDateRange(parsedRange),
       operators: items,
       totals: {
+        totalApplications: dashboard.totals.applications,
+        submitted: dashboard.totals.submitted,
+        applied: dashboard.totals.applied,
         assigned: items.reduce((total, item) => total + item.applications, 0),
-        submitted: items.reduce((total, item) => total + item.submitted, 0),
-        completed: items.reduce((total, item) => total + item.submitted, 0),
-        applied: items.reduce((total, item) => total + item.applied, 0),
         active: items.filter((item) => item.status === 'active').length,
         inactive: items.filter((item) => item.status === 'inactive').length,
       },

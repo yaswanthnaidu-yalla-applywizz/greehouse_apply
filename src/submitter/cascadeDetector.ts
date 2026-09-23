@@ -128,8 +128,12 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
         addScope(el.parentElement);
         addScope(el.closest('fieldset, .field, [class*="field"], .field-wrapper, .select-shell, tr, div'));
         for (var i = 0; i < scopes.length; i++) {
-          if (scopes[i].querySelector('input[name^="required_"], input.hidden[value="true"], input[type="hidden"][value="true"]')) {
-            return true;
+          var hiddenInputs = scopes[i].querySelectorAll('input[name^="required_"], input[class*="required"], input[id*="required"], input.hidden[value="true"], input[type="hidden"][value="true"]');
+          for (var h = 0; h < hiddenInputs.length; h++) {
+            var val = (hiddenInputs[h].value || '').trim().toLowerCase();
+            if (val === '' || val === 'true' || val === '1' || val === 'required') {
+              return true;
+            }
           }
         }
         return false;

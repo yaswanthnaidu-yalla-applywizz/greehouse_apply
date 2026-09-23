@@ -1464,6 +1464,10 @@ export async function runLiveSubmit(
 
     // 4. Fill all form fields
     try {
+      const freshApplication = await getApplication(applicationId, options.jobUrl || targetUrl);
+      if (freshApplication) {
+        application = freshApplication;
+      }
       fillSummary = await fillForm(page, application, {
         minJitterMs: options.minJitterMs ?? 300,
         maxJitterMs: options.maxJitterMs ?? 800,

@@ -186,6 +186,26 @@ export class AnswerResolver {
       };
     }
 
+    // Hardcoded rule: Consent/acknowledgment questions always resolve to affirmative with source 'supabase'
+    if (/agree|certify|confirm|acknowledge|consent|above info|above information|true and correct|i hereby/i.test(field.label)) {
+      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
+      const finalVal = field.options && field.options.length > 0
+        ? (field.options.find((o) => /^(yes|agree|i agree|true|i do)/i.test(o.trim())) || field.options[0])
+        : targetVal;
+      log.info(`[Resolver] ✅ PRE-TIER consent field "${field.label}" → "${finalVal}"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: finalVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+        isRequired,
+      };
+    }
+
     // ------------------------------------------------------------------------
     // Tier 1: Supabase Profile & Exact QA Bank
     // ------------------------------------------------------------------------
@@ -357,6 +377,26 @@ export class AnswerResolver {
         ? (field.options.find((o) => /united states|usa|u\.s\./i.test(o.trim())) || field.options[0])
         : targetVal;
       log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: finalVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+        isRequired,
+      };
+    }
+
+    // Hardcoded rule: Consent/acknowledgment questions always resolve to affirmative with source 'supabase'
+    if (/agree|certify|confirm|acknowledge|consent|above info|above information|true and correct|i hereby/i.test(field.label)) {
+      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
+      const finalVal = field.options && field.options.length > 0
+        ? (field.options.find((o) => /^(yes|agree|i agree|true|i do)/i.test(o.trim())) || field.options[0])
+        : targetVal;
+      log.info(`[Resolver] ✅ PRE-TIER consent field "${field.label}" → "${finalVal}"`);
       return {
         fieldId: field.fieldId,
         name: field.name,
