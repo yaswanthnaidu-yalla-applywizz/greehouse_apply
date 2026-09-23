@@ -87,7 +87,10 @@ function getSynthesizer(): LLMSynthesizer {
  * Transforms ProfileRow into ApplyWizzCandidateProfile for LLMSynthesizer compatibility.
  */
 function toCandidateProfile(profile: ProfileRow) {
-  return profileRowToCandidateProfile(profile);
+  return {
+    ...profileRowToCandidateProfile(profile),
+    raw_api_payload: profile.raw_api_payload ?? undefined,
+  };
 }
 
 /**

@@ -533,11 +533,11 @@ export function resolveFromPayloadStructured(
     (match(/years of experience|total experience|how many years|experience level/, additional.experience) !== null
       ? `${formatPayloadValue(additional.experience, fieldType)} years`
       : null) ??
-    match(/highest (level of )?education|highest degree|education level|degree (earned|obtained|completed)/, additional.highest_education) ??
-    match(/university|college|institution|school name|where did you (attend|study)/, additional.university_name) ??
+    match(/highest (level of )?education|highest degree|education level|^degree$|degree (earned|obtained|completed|type)/, additional.highest_education) ??
+    match(/university|college|institution|^school$|school name|where did you (attend|study)/, additional.university_name) ??
     match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa) ??
     match(/graduation year|year of graduation|when did you graduate|expected graduation/, additional.graduation_year) ??
-    match(/field of study|major|degree (in|subject)|main subject/, additional.main_subject) ??
+    match(/^discipline$|field of study|major|area of study|degree (in|subject)|main subject/, additional.main_subject) ??
     match(/start date|available to start|when can you start|earliest start|desired start/, additional.desired_start_date, true) ??
     matchBoolean(/willing to relocate|open to relocation|relocate/, additional.willing_to_relocate) ??
     matchBoolean(/work (in|from) office|hybrid|in.?office days|3 days/, additional.can_work_3_days_in_office) ??
@@ -554,10 +554,10 @@ export function resolveFromPayloadStructured(
     matchBoolean(/substance|impair|affect.*duties|drug.*affect/, additional.uses_substances_affecting_duties) ??
     matchBoolean(/essential functions|perform.*functions|physical.*requirements/, additional.can_perform_essential_functions) ??
     match(/^gender$|gender identity|what is your gender/, additional.gender) ??
-    match(/hispanic|latino/, additional.is_hispanic_latino) ??
-    match(/^race$|^ethnicity$|race.*ethnicity|racial/, additional.race_ethnicity) ??
-    match(/veteran|military status|protected veteran/, additional.veteran_status) ??
-    match(/disability|disabled|ada|accommodation/, additional.disability_status) ??
+    match(/^hispanic|^latino|hispanic or latino/, additional.is_hispanic_latino) ??
+    match(/^race$|^race and ethnicity$|^ethnicity$|race.*ethnicity|racial|racial background/, additional.race_ethnicity) ??
+    match(/^veteran|military status|protected veteran/, additional.veteran_status) ??
+    match(/^disability|disabled status|disabled|ada|accommodation/, additional.disability_status) ??
     match(/address|street address|home address|mailing address/, additional.full_address) ??
     match(/state of residence|current state|which state/, additional.state_of_residence) ??
     match(/date of birth|dob|birth date/, additional.date_of_birth, true) ??

@@ -1,5 +1,8 @@
 import type { ApplyWizzCandidateProfile } from '../types/index.js';
 import type { ProfileRow } from '../db/profiles.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Profile Adapter');
 
 export interface PayloadContext {
   personal: Record<string, unknown>;
@@ -26,7 +29,7 @@ export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext
   const rawValue = (raw: unknown, stored: unknown): unknown =>
     raw !== undefined && raw !== null && raw !== '' ? raw : stored;
 
-  return {
+  const payloadContext = {
     personal: {
       name: rawValue(client.full_name, 'client_name' in profile ? profile.client_name : profile.clientName),
       personal_email: rawValue(client.personal_email, profile.email),
@@ -90,4 +93,12 @@ export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext
       linked_in_url: additional.linked_in_url,
     },
   };
+
+  if (profile.raw_api_payload) {
+    log.debug(
+      `[T5] payloadContext built: gender=${additional.gender} race=${additional.race_ethnicity} salary=${client.salary_range}`
+    );
+  }
+
+  return payloadContext;
 }

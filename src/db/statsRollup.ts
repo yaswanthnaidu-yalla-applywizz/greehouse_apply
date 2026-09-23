@@ -233,7 +233,7 @@ export async function runStatsRollup(): Promise<void> {
   const { data: delTpl, error: delTplErr } = await supabase
     .from('gh_scanned_job_templates')
     .delete()
-    .lt('created_at', yesterdayStart)
+    .lt('updated_at', yesterdayStart)
     .select('id');
 
   if (delAppErr) log.error('Failed to prune old applications:', delAppErr);

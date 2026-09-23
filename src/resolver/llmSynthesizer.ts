@@ -576,6 +576,10 @@ export class LLMSynthesizer {
     let answer = parsed.answer;
     let confidence = parsed.confidence;
 
+    if (/does not contain|no information|cannot determine|not (found|available|mentioned|provided|specified)|unable to (find|determine)|resume does not/i.test(answer)) {
+      return unresolvedField(field);
+    }
+
     if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
       if (!/^https?:\/\//i.test(answer) && !/linkedin\.com|github\.com/i.test(answer)) {
         answer = this.generateFallbackAnswer(field, profile, jobContext);
@@ -621,6 +625,9 @@ export class LLMSynthesizer {
     if (questions.length === 0) return [];
 
     const payloadContext = profile ? buildPayloadContext(profile) : null;
+    if (payloadContext) {
+      log.info(`[T5] payloadContext: ${JSON.stringify(payloadContext).slice(0, 200)}`);
+    }
     const candidateContext = profile
       ? `Candidate Information:
 - Full Name: ${profile.clientName}
@@ -657,8 +664,17 @@ ${questions
         return `${index}. [${question.type}] ${question.label}${opts}${question.value ? ` (existing value: ${question.value})` : ''}`;
       })
       .join('\n')}`;
-    const systemMessage =
-      'You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order. Example: ["answer 1", "answer 2"]. NEVER return markdown or explanatory text.';
+    const systemMessage = `You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order. Example: ["answer 1", "answer 2"]. NEVER return markdown or explanatory text.
+
+PROFILE DATA RULE: The Candidate Profile section below contains factual data about the candidate. For any question whose answer exists in the profile (gender, race, ethnicity, veteran status, disability status, salary, education, experience, location, authorization), use the EXACT value from the profile. Never answer "No" or "N/A" for demographic fields — the candidate has already provided these values.
+
+EEOC RULE: For gender, race/ethnicity, veteran status, and disability status fields: find the value in the Candidate Profile and return it. These are always present. Do not guess or default to "No".
+
+CREATIVE RULE: For open-ended text questions (why do you want this role, describe your experience, tell us about yourself, cover letter style fields): write a professional, specific, 2-4 sentence answer using the candidate's actual work experience, skills, education, and job role from the profile. Do not say the resume does not contain information — synthesize a real answer.
+
+OPTION RULE: For select/radio/checkbox fields, your answer MUST be one of the exact option strings provided.
+
+US LOCATION RULE: If asked whether the candidate is currently located in the US, and the profile shows state_of_residence or zip_or_country containing a US state or "United States", answer Yes.`;
 
     if (!(this.apiKey || this.provider === 'ollama')) {
       throw new Error('No LLM provider credentials configured.');
