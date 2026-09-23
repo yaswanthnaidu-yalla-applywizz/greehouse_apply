@@ -16,12 +16,13 @@ import config from '../config/env.js';
 import { getProfile, type ProfileRow } from '../db/profiles.js';
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
-import { resolveTier1 } from './tier1Supabase.js';
+import { resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { findSemanticMatch, getLastSemanticScore } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getLastLlmFailure } from './tier5LLM.js';
 import { getEffectiveFieldOptions } from './llmSynthesizer.js';
+import { normalizeText } from './fingerprint.js';
 import { upsertApplication } from '../db/applications.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
 import type {
@@ -43,6 +44,35 @@ function parseScoreFromJob(score: string | number | undefined): number | null {
 }
 
 const log = createLogger('Answer Resolver');
+
+function resolveStructuredEeocField(
+  field: ScannedField,
+  profile: ProfileRow | null,
+  isRequired: boolean
+): ResolvedField | null {
+  const normalizedLabel = normalizeText(field.label);
+  if (!/^gender$|^race$|^race and ethnicity$|^ethnicity$|^veteran|^disability/.test(normalizedLabel)) {
+    return null;
+  }
+
+  const value = profile?.raw_api_payload
+    ? resolveFromPayloadStructured(normalizedLabel, field.type, profile.raw_api_payload)
+    : null;
+  if (!value) return null;
+
+  log.info(`[Resolver] ✅ T1-STRUCT ${field.label} → "${value}"`);
+  return {
+    fieldId: field.fieldId,
+    name: field.name,
+    type: field.type,
+    label: field.label,
+    value,
+    source: 'supabase',
+    resolvedByTier: 1,
+    confidence: 1.0,
+    isRequired,
+  };
+}
 
 /**
  * Returns a human-readable resolution source label for logging.
@@ -205,6 +235,9 @@ export class AnswerResolver {
         isRequired,
       };
     }
+
+    const structuredEeoc = resolveStructuredEeocField(field, profile, isRequired);
+    if (structuredEeoc) return structuredEeoc;
 
     // ------------------------------------------------------------------------
     // Tier 1: Supabase Profile & Exact QA Bank
@@ -409,6 +442,9 @@ export class AnswerResolver {
         isRequired,
       };
     }
+
+    const structuredEeoc = resolveStructuredEeocField(field, profile, isRequired);
+    if (structuredEeoc) return structuredEeoc;
 
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
