@@ -12,7 +12,6 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
-import Fuse from 'fuse.js';
 import { config } from '../config/env.js';
 import type {
   ApplyWizzCandidateProfile,
@@ -21,6 +20,7 @@ import type {
 } from '../types/index.js';
 import { haltWithDevAlert, createLogger } from '../utils/logger.js';
 import { buildPayloadContext } from './profileAdapter.js';
+import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 const log = createLogger('LLM Synthesizer');
 
@@ -307,15 +307,18 @@ export function matchExactOption(text: string, options?: string[]): string | nul
 }
 
 /**
- * Fuzzy option match fallback when exact match fails:
- * 1. Normalized comparison (strip punctuation, lowercase, trim)
- * 2. Substring / contains comparison (< 10 chars)
- * 3. Fuse.js match (threshold: 0.85)
+ * Safe option match fallback when exact match fails:
+ * 1. Semantic aliases (yes/no and known demographic values)
+ * 2. Normalized comparison (strip punctuation, lowercase, trim)
+ * 3. Unique prefix matching
  */
 export function matchFuzzyOption(text: string, options?: string[]): string | null {
   if (!options || options.length === 0) return null;
   const rawAnswer = text.trim();
   if (!rawAnswer) return null;
+
+  const semanticMatch = matchChoiceOption(rawAnswer, options);
+  if (semanticMatch) return semanticMatch;
 
   // 1. Try normalized comparison: strip punctuation, lowercase, trim both answer and each option
   const stripPunctuation = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').trim();
@@ -328,45 +331,15 @@ export function matchFuzzyOption(text: string, options?: string[]): string | nul
     }
   }
 
-  // 2. Try contains check: if answer.toLowerCase() includes option.toLowerCase() or vice versa for short options (< 10 chars)
-  const lowerAnswer = rawAnswer.toLowerCase();
-  for (const opt of options) {
-    const lowerOpt = opt.toLowerCase().trim();
-    if (!lowerOpt) continue;
-    if (lowerAnswer.includes(lowerOpt)) {
-      return opt;
-    }
-    if (lowerOpt.length < 10 && lowerOpt.includes(lowerAnswer)) {
-      return opt;
-    }
+  // 2. Accept a prefix only when it identifies exactly one option.
+  const prefixMatches = options.filter((option) => {
+    const normalizedOption = stripPunctuation(option);
+    return normalizedOption.startsWith(normAnswer) || normAnswer.startsWith(normalizedOption);
+  });
+  if (prefixMatches.length === 1) {
+    return prefixMatches[0];
   }
 
-  // 3. Try Fuse.js match with threshold 0.85 against choiceOptions
-  try {
-    const fuse = new Fuse(options, { threshold: 0.85 });
-    const results = fuse.search(rawAnswer);
-    if (results.length > 0 && results[0]?.item) {
-      return results[0].item;
-    }
-  } catch {
-    // ignore search error
-  }
-
-  // 4. Prefix match
-  if (lowerAnswer === 'yes' || lowerAnswer === 'no') {
-    const matchingOpts = options.filter(opt => opt.toLowerCase().trim().startsWith(lowerAnswer));
-    if (matchingOpts.length === 1) {
-      return matchingOpts[0];
-    }
-  } else {
-    for (const opt of options) {
-      if (opt.toLowerCase().trim().startsWith(lowerAnswer)) {
-        return opt;
-      }
-    }
-  }
-
-  // 5. Only if all fail
   return null;
 }
 

@@ -1723,7 +1723,27 @@ export async function runLiveSubmit(
                   ? storedRetryCount + 1
                   : 3;
 
-              if (storedRetryCount < 3) {
+              const currentStatus = currentApplication?.status;
+              if (currentStatus === 'EMAIL_PROOF_PENDING' || currentStatus === 'APPLIED') {
+                log.warn(
+                  `[Live Submit] ⚠️ Zoho OTP fetch failed but application already at ${currentStatus} — not overwriting with OTP_REQUIRED.`
+                );
+                return {
+                  success: currentStatus === 'APPLIED',
+                  status: currentStatus,
+                  applicationId,
+                  errorMessage: otpErrMsg,
+                  retryReason: 'OTP_FETCH_FAIL',
+                  summary: fillSummary,
+                  proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+                  proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+                };
+              }
+
+              if (
+                storedRetryCount < 3 &&
+                (currentStatus === 'APPLYING' || currentStatus === 'OTP_REQUIRED')
+              ) {
                 await updateStatus(application.id, 'OTP_REQUIRED', {
                   retry_count: retryCount,
                   error_message: `OTP fetch failed; retry ${retryCount}/3`,

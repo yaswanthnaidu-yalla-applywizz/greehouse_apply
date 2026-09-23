@@ -7,6 +7,16 @@ _Last updated: 2026-09-21_
 - [x] Replaced millisecond timestamps in retry `submission_order` payloads with bounded retry counts.
 - [x] Added DOM value assignment for `input[type="number"]` and explicit date-year aria-label selectors.
 
+### Profile Backfill Utility (2026-09-23)
+- [x] Added `npm run backfill:profiles` to refresh every Supabase profile from ApplyWizz in concurrent batches of 10.
+- [x] Added progress and completion counters plus `scripts/backfill_failed.json` output for failed IDs.
+
+### Choice Resolution and React Dropdown Reliability (2026-09-23)
+- [x] Added shared fail-closed semantic option alignment for pre-tier, structured, and Tier 5 choice answers.
+- [x] Added canonical aliases for work authorization, country, race/ethnicity, gender, veteran, disability, and yes/no prose.
+- [x] Hardened searchable Greenhouse controls to click live options, verify committed state, and retry once when a click does not commit.
+- [x] Added regression coverage for semantic mappings, ambiguity rejection, and Greenhouse searchable-select fixtures.
+
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
 ### Dev Debugger Enhancements (2026-09-23)
@@ -41,6 +51,7 @@ _Last updated: 2026-09-21_
 
 ### OTP retry budget hardening (2026-09-22)
 - [x] OTP fetch failures now remain `OTP_REQUIRED` through the bounded retry budget before becoming `FAILED`.
+- [x] Zoho OTP-fetch failures preserve `EMAIL_PROOF_PENDING` and `APPLIED` when a confirmed-submission status has already been persisted.
 - [x] Retry counts are normalized to integer values in the 0–3 range; timestamp-like corrupted values no longer bypass or exhaust the retry budget incorrectly.
 - [x] Zoho OTP lookup scans 20 messages across a 15-minute window.
 
