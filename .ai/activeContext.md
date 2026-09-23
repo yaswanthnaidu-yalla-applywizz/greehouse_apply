@@ -5,6 +5,8 @@ _Last updated: 2026-09-22_
 ## Current Session Update (2026-09-23)
 
 - Form submission hardening completed: visible failed fields are re-attempted after cascade expansion, number inputs use DOM value assignment, date-year inputs accept explicit aria-label selectors, and retry queue `submission_order` no longer receives millisecond timestamps.
+- OTP retry status hardening completed: Zoho OTP-fetch failures no longer overwrite `EMAIL_PROOF_PENDING` or `APPLIED` statuses.
+- Choice-answer hardening completed: resolver outputs are fail-closed and aligned to scanned option labels, while Greenhouse searchable selects click and verify live options instead of treating typed filter text as a selection.
 
 ## Docs
 

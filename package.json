@@ -22,6 +22,7 @@
     "submit": "tsx src/submitter/runLiveSubmitCli.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:backfill-company-email": "tsx src/db/backfillCompanyEmail.ts",
+    "backfill:profiles": "tsx scripts/backfillProfiles.ts",
     "db:clear": "tsx src/db/clearAnswers.ts",
     "test": "tsx tests/e2eIntegration.test.ts",
     "test:e2e": "tsx tests/e2eIntegration.test.ts",

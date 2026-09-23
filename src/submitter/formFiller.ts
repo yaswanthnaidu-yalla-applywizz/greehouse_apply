@@ -23,6 +23,7 @@ import type {
 } from '../types/index.js';
 import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
+import { choiceOptionTextMatches } from '../utils/choiceOptions.js';
 
 const log = createLogger('Form Filler');
 
@@ -354,8 +355,27 @@ async function comboboxDisplaysAnswer(
     const single = (await controlRoot.locator('.select__single-value').innerText().catch(() => '')).trim();
     if (single && matchOption(single, answerText)) return true;
   }
-  const inputVal = (await control.inputValue().catch(() => '')).trim();
-  return Boolean(inputVal && matchOption(inputVal, answerText));
+  const tagName = await control.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
+  if (tagName === 'INPUT') {
+    const inputVal = (await control.inputValue().catch(() => '')).trim();
+    const expanded = await control.getAttribute('aria-expanded').catch(() => null);
+    if (!inputVal || !matchOption(inputVal, answerText)) return false;
+    if (expanded !== 'true') return true;
+
+    // Some Greenhouse controls leave aria-expanded stale after committing a choice.
+    // A matching value with no visible menu options is still a committed selection.
+    const visibleOptions = control
+      .locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select_input-container")][1]')
+      .first()
+      .locator(CUSTOM_SELECT_OPTION_LOCATOR);
+    const optionCount = await visibleOptions.count().catch(() => 0);
+    for (let i = 0; i < optionCount; i++) {
+      if (await visibleOptions.nth(i).isVisible().catch(() => false)) return false;
+    }
+    return true;
+  }
+  const controlText = (await control.innerText().catch(() => '')).trim();
+  return Boolean(controlText && matchOption(controlText, answerText));
 }
 
 async function resolveSelectOptionScope(control: Locator): Promise<Locator | null> {
@@ -406,7 +426,8 @@ async function fillInteractiveSelectDropdown(
   page: Page,
   control: Locator,
   answerText: string,
-  matchOption: OptionTextMatcher = exactOptionTextMatch
+  matchOption: OptionTextMatcher = exactOptionTextMatch,
+  retryCount = 0
 ): Promise<boolean> {
   await control.scrollIntoViewIfNeeded().catch(() => {});
   const { searchInput, openTrigger } = await resolveComboboxControls(control);
@@ -426,7 +447,10 @@ async function fillInteractiveSelectDropdown(
   }
 
   const optionScope = await resolveSelectOptionScope(control);
-  let clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
+  let clicked = await clickDropdownOptionByMatch(page, answerText, choiceOptionTextMatches, optionScope);
+  if (!clicked) {
+    clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
+  }
   if (!clicked) {
     clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
   }
@@ -472,12 +496,10 @@ async function fillInteractiveSelectDropdown(
     }
   }
 
-  if (clicked && searchInput) {
-    const inputTag = await searchInput
-      .evaluate((el: HTMLElement) => el.tagName.toUpperCase())
-      .catch(() => '');
-    if (inputTag === 'INPUT') {
-      clicked = await comboboxDisplaysAnswer(searchInput, answerText, matchOption);
+  if (clicked) {
+    clicked = await comboboxDisplaysAnswer(searchInput || control, answerText, choiceOptionTextMatches);
+    if (!clicked && retryCount === 0) {
+      return fillInteractiveSelectDropdown(page, control, answerText, matchOption, 1);
     }
   }
 

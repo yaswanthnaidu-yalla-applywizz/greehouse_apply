@@ -38,6 +38,7 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import { parseCsvJobScore } from '../submission/submissionEligibilityGate.js';
+import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 function parseScoreFromJob(score: string | number | undefined): number | null {
   return parseCsvJobScore(score);
@@ -76,6 +77,29 @@ function profileIndicatesUsLocation(profile: ProfileRow | null): boolean {
   );
 }
 
+function alignResolvedChoice(field: ScannedField, resolved: ResolvedField): ResolvedField {
+  if (resolved.source === 'unresolved' || !resolved.value.trim()) return resolved;
+  if (field.type === 'checkbox') return resolved;
+  if (field.type !== 'select' && field.type !== 'radio') return resolved;
+
+  const matched = matchChoiceOption(resolved.value, field.options);
+  if (matched) return { ...resolved, value: matched };
+
+  return {
+    ...resolved,
+    value: '',
+    source: 'unresolved',
+    resolvedByTier: null,
+    confidence: 0,
+  };
+}
+
+function alignResolvedChoiceOrNull(field: ScannedField, value: string): string | null {
+  if (field.type === 'checkbox') return value;
+  if (field.type !== 'select' && field.type !== 'radio') return value;
+  return matchChoiceOption(value, field.options);
+}
+
 export function resolvePreTierField(
   field: ScannedField,
   profile: ProfileRow | null,
@@ -94,33 +118,33 @@ export function resolvePreTierField(
 
   if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
     const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
-    const finalVal = field.options && field.options.length > 0
-      ? (field.options.find((o) => /^(yes|agree|i agree|accept|i accept|true|authorized)/i.test(o.trim())) || field.options[0])
-      : targetVal;
+    const finalVal = alignResolvedChoiceOrNull(field, targetVal);
+    if (!finalVal) return null;
     log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
     return { ...base, value: finalVal };
   }
 
   if (/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us|currently located in the us/i.test(field.label) &&
     profileIndicatesUsLocation(profile)) {
-    log.info(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "Yes"`);
-    return { ...base, value: 'Yes' };
+    const finalVal = alignResolvedChoiceOrNull(field, 'Yes');
+    if (!finalVal) return null;
+    log.info(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "${finalVal}"`);
+    return { ...base, value: finalVal };
   }
 
   if (/country/i.test(field.label)) {
     const targetVal = 'United States';
-    const finalVal = field.options && field.options.length > 0
-      ? (field.options.find((o) => /united states|usa|u\.s\./i.test(o.trim())) || field.options[0])
-      : targetVal;
-    log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
-    return { ...base, value: finalVal };
+    const finalVal = alignResolvedChoiceOrNull(field, targetVal);
+    if (!finalVal && (field.type === 'select' || field.type === 'radio')) return null;
+    const resolvedVal = finalVal || targetVal;
+    log.info(`[Resolver] ✅ T1 ${field.label} → "${resolvedVal}"`);
+    return { ...base, value: resolvedVal };
   }
 
   if (/agree|certify|confirm|acknowledge|consent|above info|above information|true and correct|i hereby/i.test(field.label)) {
     const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
-    const finalVal = field.options && field.options.length > 0
-      ? (field.options.find((o) => /^(yes|agree|i agree|true|i do)/i.test(o.trim())) || field.options[0])
-      : targetVal;
+    const finalVal = alignResolvedChoiceOrNull(field, targetVal);
+    if (!finalVal) return null;
     log.info(`[Resolver] ✅ PRE-TIER consent field "${field.label}" → "${finalVal}"`);
     return { ...base, value: finalVal };
   }
@@ -230,6 +254,20 @@ export class AnswerResolver {
    * Resolves a single scanned form field through the 3-tier waterfall.
    */
   public async resolveField(
+    applywizzId: string,
+    field: ScannedField,
+    context?: {
+      profile?: ProfileRow | null;
+      parsedResume?: ResumeParsedRow | null;
+      qaEntries?: QABankRow[];
+      jobContext?: { companyName: string; jobTitle: string };
+    }
+  ): Promise<ResolvedField> {
+    const resolved = await this.resolveFieldRaw(applywizzId, field, context);
+    return alignResolvedChoice(field, resolved);
+  }
+
+  private async resolveFieldRaw(
     applywizzId: string,
     field: ScannedField,
     context?: {
@@ -381,6 +419,20 @@ export class AnswerResolver {
    * Pre-LLM waterfall (Tiers 1–4) used before batched Tier 5 within resolveJobApplication.
    */
   private async resolveFieldThroughTier2(
+    applywizzId: string,
+    field: ScannedField,
+    context: {
+      profile?: ProfileRow | null;
+      parsedResume?: ResumeParsedRow | null;
+      qaEntries?: QABankRow[];
+      jobContext?: { companyName: string; jobTitle: string };
+    }
+  ): Promise<ResolvedField> {
+    const resolved = await this.resolveFieldThroughTier2Raw(applywizzId, field, context);
+    return alignResolvedChoice(field, resolved);
+  }
+
+  private async resolveFieldThroughTier2Raw(
     applywizzId: string,
     field: ScannedField,
     context: {
@@ -565,8 +617,13 @@ export class AnswerResolver {
       for (let i = 0; i < chunkFields.length; i++) {
         const tier5 = batchResults[i];
         if (tier5 && tier5.value && tier5.value.trim().length > 0) {
-          resolvedFields[chunkSlots[i]] = tier5;
-          log.info(`[Resolver] ✅ T5 ${chunkFields[i].label} → "${tier5.value}"`);
+          const alignedTier5 = alignResolvedChoice(chunkFields[i], tier5);
+          resolvedFields[chunkSlots[i]] = alignedTier5;
+          if (alignedTier5.source === 'unresolved') {
+            log.info(`[Resolver] ❌ T5 ${chunkFields[i].label} — no option match`);
+          } else {
+            log.info(`[Resolver] ✅ T5 ${chunkFields[i].label} → "${alignedTier5.value}"`);
+          }
         } else {
           const reason = getTier5FailureReason(chunkFields[i]);
           log.info(`[Resolver] ❌ T5 ${chunkFields[i].label} — ${reason}`);
