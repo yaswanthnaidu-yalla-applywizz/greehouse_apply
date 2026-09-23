@@ -1242,11 +1242,12 @@ export const MAX_SUBMISSION_RETRIES = 3;
 export async function retryFailedApplication(
   application: ApplicationRow
 ): Promise<boolean> {
+  const nextRetryCount = 0;
   const payload = {
     status: 'QUEUED' as const,
-    retry_count: 0,
+    retry_count: nextRetryCount,
     error_message: null,
-    submission_order: Date.now(),
+    submission_order: nextRetryCount,
     updated_at: new Date().toISOString(),
   };
   let updated = false;
@@ -1296,11 +1297,10 @@ export async function requeueApplicationForRetry(
   }
 
   const nextRetryCount = currentRetryCount + 1;
-  const nextOrder = Date.now();
   const payload = {
     status: 'QUEUED' as const,
     retry_count: nextRetryCount,
-    submission_order: nextOrder,
+    submission_order: nextRetryCount,
     error_message: reason,
     updated_at: new Date().toISOString(),
   };
