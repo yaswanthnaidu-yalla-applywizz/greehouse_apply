@@ -71,6 +71,7 @@ import {
   type ApplicationRow,
   type CandidateQueueStatus,
 } from '../db/applications.js';
+import { queryRollupStats } from '../db/statsRollup.js';
 import {
   istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
@@ -956,22 +957,37 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     }
 
-    const [outcomes, submitted, applied] = await Promise.all([
-      getSubmissionOutcomeCounts({
-        createdAtRange,
-        allowedCandidateIds,
-      }),
-      countSubmittedApplicationsSince(
-        createdAtRange.startIso,
-        unrestricted ? undefined : submittedOperatorEmails,
-        createdAtRange.endIso
-      ),
-      countAppliedApplicationsSince(
-        createdAtRange.startIso,
-        unrestricted ? undefined : submittedOperatorEmails,
-        createdAtRange.endIso
-      ),
-    ]);
+    let outcomes = { failedApplications: 0 };
+    let submitted = 0;
+    let applied = 0;
+
+    if (unrestricted) {
+      const rollup = await queryRollupStats(createdAtRange.startIso, createdAtRange.endIso!);
+      outcomes.failedApplications = rollup.failed_count;
+      submitted = rollup.submitted_count;
+      applied = rollup.applied_count;
+    } else {
+      const [resOutcomes, resSubmitted, resApplied] = await Promise.all([
+        getSubmissionOutcomeCounts({
+          createdAtRange,
+          allowedCandidateIds,
+        }),
+        countSubmittedApplicationsSince(
+          createdAtRange.startIso,
+          submittedOperatorEmails,
+          createdAtRange.endIso
+        ),
+        countAppliedApplicationsSince(
+          createdAtRange.startIso,
+          submittedOperatorEmails,
+          createdAtRange.endIso
+        ),
+      ]);
+      outcomes = resOutcomes;
+      submitted = resSubmitted;
+      applied = resApplied;
+    }
+
     const metrics = await getDashboardApplicationMetrics({
       createdAtRange,
       allowedCandidateIds,

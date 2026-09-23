@@ -101,6 +101,9 @@ interface ManagerDashboardApiResponse {
   totals?: Record<string, number>;
   submitted?: number;
   completed?: number;
+  applied?: number;
+  failed?: number;
+  totalApplications?: number;
   submitClicks?: number;
   submitted_today?: number;
   warning?: string;
@@ -358,8 +361,8 @@ export const ManagerDashboard: React.FC = () => {
   const [ca, setCa] = useState<string>('all');
   const [rows, setRows] = useState<ManagerClientRow[]>([]);
   const [totals, setTotals] = useState<Record<string, number>>({});
-  const [completed, setCompleted] = useState<number>(0);
   const [submitted, setSubmitted] = useState<number>(0);
+  const [applied, setApplied] = useState<number>(0);
   const [careerAssociates, setCareerAssociates] = useState<DropdownOption[]>([]);
   const [warning, setWarning] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -369,7 +372,6 @@ export const ManagerDashboard: React.FC = () => {
   const [appliedByOperator, setAppliedByOperator] = useState<Record<string, AppliedJobDetail[]>>({});
   const [appliedOperator, setAppliedOperator] = useState<AppliedOperatorData | null>(null);
   const [operators, setOperators] = useState<ManagerOperatorItem[]>([]);
-  const [operatorTotals, setOperatorTotals] = useState<{ assigned?: number; submitted?: number; completed?: number }>({});
   const [operatorError, setOperatorError] = useState<string>('');
   const [activity, setActivity] = useState<ManagerActivityItem[]>([]);
   const [activityWarning, setActivityWarning] = useState<string>('');
@@ -390,11 +392,7 @@ export const ManagerDashboard: React.FC = () => {
     setError('');
     try {
       const params = new URLSearchParams({ ca });
-      if (dateQuery) {
-        params.set('from', customFrom);
-        params.set('to', customTo);
-      }
-      const res = await apiFetch(`/api/manager/dashboard?${params}`);
+      const res = await apiFetch(`/api/manager/dashboard?${params}&${dateQuery}`);
       const payload: unknown = await res.json();
       if (!res.ok) {
         const err = payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
@@ -405,8 +403,8 @@ export const ManagerDashboard: React.FC = () => {
       const data = payload as ManagerDashboardApiResponse;
       setRows(data.rows || []);
       setTotals(data.totals || {});
-      setSubmitted(data.submitted ?? data.completed ?? 0);
-      setCompleted(data.submitted ?? data.completed ?? 0);
+      setSubmitted(data.submitted ?? 0);
+      setApplied(data.applied ?? 0);
       setWarning(data.warning || '');
 
       const cas: DropdownOption[] = [];
@@ -433,9 +431,8 @@ export const ManagerDashboard: React.FC = () => {
     const res = await apiFetch(`/api/manager/operators?${opParams}`);
     const payload: unknown = await res.json();
     if (res.ok) {
-      const data = payload as { operators?: ManagerOperatorItem[]; totals?: { assigned?: number; submitted?: number; completed?: number } };
+      const data = payload as { operators?: ManagerOperatorItem[] };
       setOperators(data.operators || []);
-      setOperatorTotals(data.totals || {});
       setOperatorError('');
     } else {
       setOperatorError(payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
@@ -702,8 +699,8 @@ export const ManagerDashboard: React.FC = () => {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
               {[
                 ['Total Applications', totals.applications],
-                ['Submitted (team)', submitted ?? completed],
-                ['Applied (team)', totals.applied],
+                ['Submitted (team)', submitted],
+                ['Applied (team)', applied],
               ].map(([label, val]) => (
                 <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
                   <p className="text-xs font-bold uppercase">{label}</p>
@@ -725,8 +722,9 @@ export const ManagerDashboard: React.FC = () => {
           <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
             <div className="grid grid-cols-3 gap-3 p-4 border-b-2 border-[#1A1A2E]">
               {[
-                ['Assigned', operatorTotals.assigned],
-                ['Submitted', operatorTotals.submitted ?? operatorTotals.completed],
+                ['Total Applications', totals.applications],
+                ['Submitted (team)', submitted],
+                ['Applied (team)', applied],
               ].map(([label, val]) => (
                 <div key={label}><p className="text-[10px] font-bold uppercase text-[#64748B]">{label}</p><p className="text-xl font-black">{val ?? 0}</p></div>
               ))}

@@ -6,12 +6,13 @@ import { Router, type Request, type Response } from 'express';
 import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
-  countSubmittedApplicationsSince,
-  getSubmissionOutcomeCounts,
+  
+  
   getDashboardApplicationMetrics,
   getISTDateRangeUtc,
   type ApplicationStatus,
 } from '../../db/applications.js';
+import { queryRollupStats } from '../../db/statsRollup.js';
 import crypto from 'crypto';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { insertAuditEvent, listAuditEvents } from '../../db/events.js';
@@ -68,17 +69,16 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       return;
     }
     const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
-    const submittedStart = parsedRange.startIso;
+    
 
     const directory = await listAuthDirectory();
     const operators = directory.filter((user) => user.role === 'operator');
     const activeOperators = operators.filter((user) => isActiveWithin(user.lastSignInAt));
 
-    const [outcomes, queued, applying, submitted, metrics, audit] = await Promise.all([
-      getSubmissionOutcomeCounts({ createdAtRange }),
+    const [rollup, queued, applying, metrics, audit] = await Promise.all([
+      queryRollupStats(parsedRange.startIso, parsedRange.endIso!),
       countApplicationsByStatus('QUEUED', createdAtRange),
       countApplicationsByStatus('APPLYING', createdAtRange),
-      countSubmittedApplicationsSince(submittedStart, undefined, parsedRange.endIso),
       getDashboardApplicationMetrics({ createdAtRange }),
       listAuditEvents({ limit: 15 }),
     ]);
@@ -89,11 +89,11 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       operators: operators.length,
       activeOperators: activeOperators.length,
       inactiveOperators: Math.max(0, operators.length - activeOperators.length),
-      submitted,
-      applied: outcomes.successfulApplications,
+      submitted: rollup.submitted_count,
+      applied: rollup.applied_count,
       running: applying,
       queued,
-      failed: outcomes.failedApplications,
+      failed: rollup.failed_count,
       supabasePercent: totalFields > 0
         ? Math.round((metrics.supabaseTaggedCount / totalFields) * 100)
         : 0,

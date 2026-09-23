@@ -8,7 +8,10 @@ import { getProfile, type ProfileRow, getCompanyEmail } from '../db/profiles.js'
 import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
  
+const log = createLogger('Tier 1 Supabase');
+
 /**
  * Matches target value to the closest matching option in dropdown or radio group.
  */
@@ -466,6 +469,106 @@ function resolveFromRawApiPayload(
   return null;
 }
 
+function formatPayloadDate(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) {
+    const [month, day, year] = raw.split('/');
+    return `${month.padStart(2, '0')}/${day.padStart(2, '0')}/${year}`;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return `${String(parsed.getUTCMonth() + 1).padStart(2, '0')}/${String(parsed.getUTCDate()).padStart(2, '0')}/${parsed.getUTCFullYear()}`;
+}
+
+function formatPayloadValue(value: unknown, fieldType: string, formatDate = false): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (formatDate) return formatPayloadDate(value);
+  if (Array.isArray(value)) {
+    const joined = value.map((item) => String(item).trim()).filter(Boolean).join(', ');
+    return joined || null;
+  }
+  const result = String(value).trim();
+  if (!result) return null;
+  if (fieldType === 'checkbox' && (result === 'true' || result === 'false')) {
+    return result === 'true' ? 'Yes' : 'No';
+  }
+  return result;
+}
+
+function formatPayloadBoolean(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (value === null) return 'No';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  const result = String(value).trim();
+  if (/^true$/i.test(result)) return 'Yes';
+  if (/^false$/i.test(result)) return 'No';
+  return result || null;
+}
+
+/**
+ * Resolves stable ApplyWizz payload fields before generic payload key extraction.
+ */
+export function resolveFromPayloadStructured(
+  normalizedLabel: string,
+  fieldType: string,
+  rawPayload: unknown
+): string | null {
+  if (!rawPayload || typeof rawPayload !== 'object') return null;
+  const payload = rawPayload as {
+    client?: Record<string, unknown>;
+    additional_information?: Record<string, unknown>;
+  };
+  const client = payload.client || {};
+  const additional = payload.additional_information || {};
+  const match = (pattern: RegExp, value: unknown, formatDate = false): string | null =>
+    pattern.test(normalizedLabel) ? formatPayloadValue(value, fieldType, formatDate) : null;
+  const matchBoolean = (pattern: RegExp, value: unknown): string | null =>
+    pattern.test(normalizedLabel) ? formatPayloadBoolean(value) : null;
+
+  return (
+    match(/salary|compensation|ctc|pay rate|desired pay|expected pay|desired compensation/, client.salary_range) ??
+    (match(/years of experience|total experience|how many years|experience level/, additional.experience) !== null
+      ? `${formatPayloadValue(additional.experience, fieldType)} years`
+      : null) ??
+    match(/highest (level of )?education|highest degree|education level|degree (earned|obtained|completed)/, additional.highest_education) ??
+    match(/university|college|institution|school name|where did you (attend|study)/, additional.university_name) ??
+    match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa) ??
+    match(/graduation year|year of graduation|when did you graduate|expected graduation/, additional.graduation_year) ??
+    match(/field of study|major|degree (in|subject)|main subject/, additional.main_subject) ??
+    match(/start date|available to start|when can you start|earliest start|desired start/, additional.desired_start_date, true) ??
+    matchBoolean(/willing to relocate|open to relocation|relocate/, additional.willing_to_relocate) ??
+    matchBoolean(/work (in|from) office|hybrid|in.?office days|3 days/, additional.can_work_3_days_in_office) ??
+    matchBoolean(/background (check|screening|investigation consent)/, additional.willing_background_check) ??
+    matchBoolean(/drug (screen|test|testing)/, additional.willing_drug_screen) ??
+    matchBoolean(/failed.*drug|refused.*drug|positive.*drug/, additional.failed_or_refused_drug_test) ??
+    matchBoolean(/convicted|felony|criminal (history|record|background)/, additional.convicted_of_felony) ??
+    matchBoolean(/pending (investigation|charge|criminal)/, additional.pending_investigation) ??
+    matchBoolean(/referred by.*(agency|staffing|recruiter)|staffing agency|recruiting agency/, additional.referred_by_agency) ??
+    matchBoolean(/worked (here|for us|for this company|at this company) before|previously employed (here|by us)/, additional.worked_for_company_before) ??
+    matchBoolean(/discharged|terminated for (cause|violation|policy)/, additional.discharged_for_policy_violation) ??
+    matchBoolean(/relatives|family member.*(employ|work)|know (anyone|employees) (at|in)/, additional.has_relatives_in_company) ??
+    matchBoolean(/legal (documents|authorization)|i-?9|prove.*eligibility|provide.*documentation/, additional.can_provide_legal_docs) ??
+    matchBoolean(/substance|impair|affect.*duties|drug.*affect/, additional.uses_substances_affecting_duties) ??
+    matchBoolean(/essential functions|perform.*functions|physical.*requirements/, additional.can_perform_essential_functions) ??
+    match(/^gender$|gender identity|what is your gender/, additional.gender) ??
+    match(/hispanic|latino/, additional.is_hispanic_latino) ??
+    match(/^race$|^ethnicity$|race.*ethnicity|racial/, additional.race_ethnicity) ??
+    match(/veteran|military status|protected veteran/, additional.veteran_status) ??
+    match(/disability|disabled|ada|accommodation/, additional.disability_status) ??
+    match(/address|street address|home address|mailing address/, additional.full_address) ??
+    match(/state of residence|current state|which state/, additional.state_of_residence) ??
+    match(/date of birth|dob|birth date/, additional.date_of_birth, true) ??
+    match(/desired (role|position|job title)|job preference|what role/, Array.isArray(client.job_role_preferences) ? client.job_role_preferences[0] : client.job_role_preferences) ??
+    match(/preferred (location|city)|where.*prefer to work|work location preference/, client.location_preferences) ??
+    match(/visa type|type of visa|current visa/, client.visa_type) ??
+    match(/linkedin/, additional.linked_in_url) ??
+    match(/github/, additional.github_url)
+  );
+}
+
 /**
  * Attempts Tier 1 answer resolution.
  * Checks in strict order:
@@ -513,7 +616,30 @@ export async function resolveTier1(
     }
   }
 
-  // 2. Check profiles.raw_api_payload JSONB for any matching key
+  // 2a. Check stable profiles.raw_api_payload paths
+  if (candidateProfile?.raw_api_payload) {
+    const payloadVal = resolveFromPayloadStructured(
+      normalizeText(field.label),
+      field.type,
+      candidateProfile.raw_api_payload
+    );
+    if (payloadVal !== null && payloadVal.trim().length > 0) {
+      log.info(`[Resolver] ✅ T1-STRUCT ${field.label} → "${payloadVal}"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: payloadVal,
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+        isRequired: Boolean(field.isRequired),
+      };
+    }
+  }
+
+  // 2b. Check profiles.raw_api_payload JSONB for any matching key
   if (candidateProfile?.raw_api_payload) {
     const payloadVal = resolveFromRawApiPayload(field, candidateProfile.raw_api_payload);
     if (payloadVal !== null && payloadVal !== undefined && payloadVal.trim().length > 0) {

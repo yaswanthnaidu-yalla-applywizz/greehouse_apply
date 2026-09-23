@@ -19,7 +19,10 @@ import type {
   ResolvedField,
   ScannedField,
 } from '../types/index.js';
-import { haltWithDevAlert } from '../utils/logger.js';
+import { haltWithDevAlert, createLogger } from '../utils/logger.js';
+import { buildPayloadContext } from './profileAdapter.js';
+
+const log = createLogger('LLM Synthesizer');
 
 let firstProviderCallChecked = false;
 
@@ -280,7 +283,7 @@ export function cleanLLMOutput(raw: string): string {
   }
 
   // 4. Strip markdown code fences
-  text = text.replace(/^```[a-z]*\n([\s\S]*?)\n```$/i, '$1').trim();
+  text = text.replace(/```(?:json)?\s*([\s\S]*?)\s*```/ig, '$1').trim();
 
   // 5. Strip surrounding quotes
   text = text.replace(/^["']|["']$/g, '').trim();
@@ -349,7 +352,21 @@ export function matchFuzzyOption(text: string, options?: string[]): string | nul
     // ignore search error
   }
 
-  // 4. Only if all three fail
+  // 4. Prefix match
+  if (lowerAnswer === 'yes' || lowerAnswer === 'no') {
+    const matchingOpts = options.filter(opt => opt.toLowerCase().trim().startsWith(lowerAnswer));
+    if (matchingOpts.length === 1) {
+      return matchingOpts[0];
+    }
+  } else {
+    for (const opt of options) {
+      if (opt.toLowerCase().trim().startsWith(lowerAnswer)) {
+        return opt;
+      }
+    }
+  }
+
+  // 5. Only if all fail
   return null;
 }
 
@@ -442,7 +459,7 @@ export class LLMSynthesizer {
     const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
     const systemMessage = isChoiceField
       ? 'You are an automated job application assistant. You MUST respond with exactly one of the provided options, copied verbatim, and no other text.'
-      : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}.';
+      : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
 
     // If API key is configured or provider is ollama, execute real LLM call
     if (this.apiKey || this.provider === 'ollama') {
@@ -603,6 +620,7 @@ export class LLMSynthesizer {
   ): Promise<string[]> {
     if (questions.length === 0) return [];
 
+    const payloadContext = profile ? buildPayloadContext(profile) : null;
     const candidateContext = profile
       ? `Candidate Information:
 - Full Name: ${profile.clientName}
@@ -618,14 +636,16 @@ export class LLMSynthesizer {
     const prompt = `Resolve every numbered job application question using only the candidate resume and job description.
 Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
 
+For any question with Options provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate.
+
 Candidate resume:
 ${resumeText.slice(0, 12000)}
 
 Job description:
 ${jobDescription.slice(0, 12000)}
 
-${candidateContext}${profile ? `Candidate Profile Data:
-${JSON.stringify((profile as ApplyWizzCandidateProfile & { raw_api_payload: unknown }).raw_api_payload, null, 2).slice(0, 8000)}
+${candidateContext}${payloadContext ? `Candidate Profile:
+${JSON.stringify(payloadContext, null, 2)}
 
 ` : ''}Questions:
 ${questions
@@ -638,7 +658,7 @@ ${questions
       })
       .join('\n')}`;
     const systemMessage =
-      'You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order.';
+      'You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order. Example: ["answer 1", "answer 2"]. NEVER return markdown or explanatory text.';
 
     if (!(this.apiKey || this.provider === 'ollama')) {
       throw new Error('No LLM provider credentials configured.');
@@ -669,7 +689,13 @@ ${questions
       throw err;
     }
 
-    let parsed: unknown = JSON.parse(cleanLLMOutput(raw));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(cleanLLMOutput(raw));
+    } catch (parseErr) {
+      log.error(`[Resolver] LLM Parse Error: failed to parse batch response. Raw output:\n${raw}`);
+      return questions.map(() => '');
+    }
 
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
@@ -684,7 +710,8 @@ ${questions
     }
 
     if (!Array.isArray(parsed)) {
-      throw new Error('Batch LLM response did not contain an array of answers.');
+      log.error(`[Resolver] LLM Parse Error: batch response is not an array. Raw output:\n${raw}`);
+      return questions.map(() => '');
     }
 
     let answers: string[] = parsed.map((item) => {

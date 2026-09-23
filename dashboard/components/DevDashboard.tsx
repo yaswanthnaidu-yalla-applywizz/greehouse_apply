@@ -99,27 +99,47 @@ interface DevDebugApplication {
   applywizz_id: string;
   operatorName?: string;
   assigned_ca_email?: string;
+  manager_email?: string;
   managerEmail?: string;
   job_url: string;
   job_title?: string;
   company_name?: string;
   error_message?: string;
   proof_web_url?: string;
+  proof_failed_url?: string;
   proof_email_url?: string;
   proof_email_json?: Record<string, unknown>;
+}
+
+interface DevDebugTimelineRow {
+  previous_status: string | null;
+  new_status: string;
+  actor_email: string | null;
+  created_at: string;
 }
 
 interface DevDebugTimelineEvent {
   id: string;
   from_status?: string;
   to_status: string;
+  actor_email?: string | null;
   created_at: string;
 }
 
 interface DevDebugPayload {
   application?: DevDebugApplication;
+  timeline?: DevDebugTimelineRow[];
   events?: DevDebugTimelineEvent[];
   warning?: string;
+}
+
+function formatIst(iso?: string | null): string {
+  if (!iso) return '—';
+  try {
+    return `${new Date(iso).toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} IST`;
+  } catch {
+    return iso;
+  }
 }
 
 function lightClass(status?: string): string {
@@ -269,6 +289,14 @@ export const DevDashboard: React.FC = () => {
   const tabs: Array<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'guide'> =
     ['system', 'runs', 'errors', 'queue', 'integrations', 'debugger', 'guide'];
   const app = debug?.application;
+  const timeline = (debug?.timeline && debug.timeline.length > 0)
+    ? debug.timeline
+    : (debug?.events || []).map((e) => ({
+        previous_status: e.from_status ?? null,
+        new_status: e.to_status,
+        actor_email: e.actor_email ?? null,
+        created_at: e.created_at,
+      }));
 
   return (
     <main className="min-h-screen p-4 md:p-8 font-sans bg-[#FFF5EB] text-[#1A1A2E]">
@@ -472,21 +500,24 @@ export const DevDashboard: React.FC = () => {
                 <p><span className="font-black">Status</span> {app.status}</p>
                 <p><span className="font-black">Client</span> {app.applywizz_id}</p>
                 <p><span className="font-black">Operator</span> {app.operatorName || app.assigned_ca_email || '—'}</p>
-                <p><span className="font-black">Manager</span> {app.managerEmail || '—'}</p>
+                <p><span className="font-black">Manager</span> {app.manager_email || app.managerEmail || '—'}</p>
                 <p><span className="font-black">Job</span> <a className="underline break-all" href={app.job_url} target="_blank" rel="noopener noreferrer">{app.job_title || app.job_url}</a></p>
                 <p><span className="font-black">Company</span> {app.company_name || '—'}</p>
                 {app.error_message && <p className="text-[#991B1B]"><span className="font-black">Error</span> {app.error_message}</p>}
                 <p>
                   {app.proof_web_url ? <a className="underline font-bold mr-3" href={app.proof_web_url} target="_blank" rel="noopener noreferrer">Web proof</a> : <span className="text-[#64748B] mr-3">Web proof unavailable</span>}
-                  {app.proof_email_url ? <a className="underline font-bold" href={app.proof_email_url} target="_blank" rel="noopener noreferrer">Email screenshot</a> : <span className="text-[#64748B]">Email screenshot unavailable</span>}
+                  {app.proof_email_url ? <a className="underline font-bold mr-3" href={app.proof_email_url} target="_blank" rel="noopener noreferrer">Email screenshot</a> : <span className="text-[#64748B] mr-3">Email screenshot unavailable</span>}
+                  {app.proof_failed_url && (
+                    <span>Failed screenshot: <a className="underline font-bold" href={app.proof_failed_url} target="_blank" rel="noopener noreferrer">View</a></span>
+                  )}
                 </p>
                 {app.proof_email_json && (
                   <pre className="bg-[#FAF4EB] border border-[#1A1A2E] p-3 overflow-auto max-h-48 whitespace-pre-wrap">{JSON.stringify(app.proof_email_json, null, 2)}</pre>
                 )}
                 <h3 className="font-black uppercase pt-2">Timeline</h3>
-                {(!debug?.events || debug.events.length === 0) && <p className="text-[#64748B]">{debug?.warning || 'No status changes recorded for this application yet.'}</p>}
-                {(debug?.events || []).map((event) => (
-                  <p key={event.id} className="font-mono">{event.from_status || '—'} → {event.to_status} · {new Date(event.created_at).toLocaleString()}</p>
+                {timeline.length === 0 && <p className="text-[#64748B]">{debug?.warning || 'No status changes recorded for this application yet.'}</p>}
+                {timeline.map((row, idx) => (
+                  <p key={idx} className="font-mono">{formatIst(row.created_at)} — {row.previous_status || '—'} → {row.new_status} (by {row.actor_email || 'system'})</p>
                 ))}
               </div>
             )}

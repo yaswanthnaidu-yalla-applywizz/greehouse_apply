@@ -172,8 +172,11 @@ Status-change timeline written from `updateStatus()`. Used by manager Activity a
 ### `gh_users` (migration 017)
 Dashboard operator and manager profiles, mapping, and roles.
 
-### DB Migrations (18 files, applied via `src/db/migrate.ts`)
-`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on gh_candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` gh_audit_events + gh_application_events + service_role RLS | `016` profiles.country + country_code | `017` gh_users | `018` disable gh_users rls | `latest` combined
+### `gh_stats_rollups` (migration 024)
+Periodic rollups (day, week, month) of total, submitted, applied, and failed counts along with pruning of historical candidate applications and scanned job templates.
+
+### DB Migrations (25 files, applied via `src/db/migrate.ts`)
+`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on gh_candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` gh_audit_events + gh_application_events + service_role RLS | `016` profiles.country + country_code | `017` gh_users | `018` disable gh_users rls | `019` application_submission_metadata | `020` multi_service_state / retry_count | `021` pgvector_semantic_search | `022` unify_email_proof_pending_status | `023` backfill_submitted_at | `024` stats_rollups | `latest` combined
 
 ## Dashboard roles (email map — no DB)
 

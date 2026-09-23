@@ -32,6 +32,7 @@ import {
 } from '../orchestrator/pipelineAbort.js';
 import crypto from 'crypto';
 import { upsertIngestRun } from '../db/ingestRuns.js';
+import { runStatsRollup } from '../db/statsRollup.js';
 
 const log = createLogger('Storage Csv Ingestion');
 
@@ -225,6 +226,11 @@ export async function ingestCsvFromStorage(options?: {
 
   try {
     resetPipelineAbort();
+    
+    // Stats Rollup Execution
+    await runStatsRollup();
+    log.info('[Pipeline] stats rollup complete');
+
     // Run V1Pipeline with single worker concurrency for Railway stability
     const pipeline = new V1Pipeline();
     log.info(`[Storage CSV Ingestion] pipeline start file="${targetFile.name}" workers=${config.WORKER_POOL_SIZE || 1}`);

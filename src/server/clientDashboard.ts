@@ -3,7 +3,7 @@
  */
 
 import {
-  applyCreatedAtRangeFilter,
+  rowCreatedAtInRange,
   getISTDateRangeUtc,
   hydrateApplicationProofUrls,
   type ApplicationRow,
@@ -215,7 +215,17 @@ export async function loadClientDashboard(options: {
   let query = getDbClient()
     .from('gh_candidate_applications')
     .select('*, profiles!inner(applywizz_id, client_name, ca_email)');
-  query = applyCreatedAtRangeFilter(query, createdAtRange);
+  if (createdAtRange) {
+    if (createdAtRange.endIso) {
+      query = query.or(
+        `and(created_at.gte.${createdAtRange.startIso},created_at.lte.${createdAtRange.endIso}),and(submitted_at.gte.${createdAtRange.startIso},submitted_at.lte.${createdAtRange.endIso})`
+      );
+    } else {
+      query = query.or(
+        `created_at.gte.${createdAtRange.startIso},submitted_at.gte.${createdAtRange.startIso}`
+      );
+    }
+  }
 
   let warning: string | undefined;
   const applyManagerTeamScope = MANAGER_TEAM_SCOPE_ENABLED && !options.teamScopeUnrestricted;
@@ -253,12 +263,28 @@ export async function loadClientDashboard(options: {
   const grouped = new Map<string, ManagerClientRow>();
 
   for (const application of hydrated) {
+    if (application.status === 'SKIPPED') {
+      continue;
+    }
+
     const email = assignedCaEmail(application);
     const profileCa = profileCaEmail(application);
     const assignedName = nameMap.get(email) || email.split('@')[0];
     if (requestedCa.toLowerCase() !== 'all') {
       const needle = requestedCa.toLowerCase();
       if (email !== needle && assignedName.toLowerCase() !== needle) continue;
+    }
+
+    const isCreatedInRange = rowCreatedAtInRange(application, createdAtRange);
+    const submittedAt = application.submitted_at || (application.status === 'APPLIED' ? (application.proof_captured_at || application.reviewed_at || application.updated_at) : null);
+    const isSubmittedAtInRange = Boolean(
+      submittedAt &&
+      submittedAt >= createdAtRange.startIso &&
+      (!createdAtRange.endIso || submittedAt <= createdAtRange.endIso)
+    );
+
+    if (!isCreatedInRange && !isSubmittedAtInRange) {
+      continue;
     }
 
     const name = clientName(application);
@@ -288,7 +314,7 @@ export async function loadClientDashboard(options: {
 
     const isPending = application.status === 'READY_FOR_REVIEW';
     const isSubmitted = application.status !== 'READY_FOR_REVIEW';
-    const isApplied = application.status === 'APPLIED' || application.status === 'EMAIL_PROOF_PENDING';
+    const isApplied = application.status === 'APPLIED' && isSubmittedAtInRange;
     const isFailed = application.status === 'FAILED' || application.status === 'CAPTCHA_TIMEOUT';
 
     if (isApplied) {

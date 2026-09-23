@@ -175,6 +175,7 @@ export interface ApplyWizzProfile {
   /** Assigned Career Associate email address */
   ca_email?: string | null;
   caEmail?: string | null;
+  raw_api_payload?: Record<string, any> | null;
 }
 
 /**

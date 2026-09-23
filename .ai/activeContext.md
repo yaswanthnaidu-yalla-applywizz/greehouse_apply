@@ -8,6 +8,39 @@ _Last updated: 2026-09-22_
 
 ## Current Focus
 
+### 0x. Dev Debugger Enhancements (shipped 2026-09-23)
+- **Proof Failed Link:** Included `proof_failed_url` in `/api/dev/applications/:id` response. Rendered "Failed screenshot: View" directly after email screenshot links when present in both `dashboard/components/DevDashboard.tsx` and `dashboard/public/dev.html`.
+- **Manager Field:** Resolved `manager_email` by querying `gh_users` for the assigned operator (`app.assigned_ca_email`) with fallback to manager linked candidate IDs. Rendered manager email instead of "—" in the Debugger tab.
+- **Timeline:** Queried `gh_application_events` for `previous_status, new_status, actor_email, created_at` ordered ascending by `created_at`. Rendered each entry as `"{created_at IST} — {previous_status} → {new_status} (by {actor_email})"`, preserving the fallback message when empty.
+
+### 0w. Manager Home & Operators Metrics Unification (shipped 2026-09-23)
+- Unified Home and Operators tabs on the Manager dashboard to pull the same 3 top metrics cards directly from `/api/manager/dashboard`:
+  - Total: all non-SKIPPED applications (`status !== 'SKIPPED'`).
+  - Submitted: non-SKIPPED applications with `status !== 'READY_FOR_REVIEW'`.
+  - Applied: applications with `status === 'APPLIED'` using `submitted_at` falling within the selected date range.
+- Removed disparate rollup overrides and separate count queries in `/api/manager/operators`; operators table metrics now aggregate directly from client applications.
+- Parity enforced across both TSX (`dashboard/components/ManagerDashboard.tsx`) and legacy HTML (`dashboard/public/manager.html`).
+
+### 0u. Stats Rollup System (shipped 2026-09-23)
+- Implemented `runStatsRollup` (`src/db/statsRollup.ts`) and `024_stats_rollups.sql` migration.
+- Automatically calculates daily, weekly, and monthly aggregate counts (Total, Submitted, Applied, Failed) and prunes previous days' historical `gh_candidate_applications` and `gh_scanned_job_templates`.
+- Wired into ingestion pipeline step before Phase A.
+- `/api/admin/overview`, `/api/manager/dashboard`, and `/api/stats` were updated to read aggregated results via `queryRollupStats` combined with unrolled live rows for blazing fast UI analytics.
+
+### 0t. Answer Resolution Quality Fixes (shipped 2026-09-23)
+- **Pre-tier Consent Rule (`answerResolver.ts`):** Added a pre-tier regex match for consent, acknowledge, certify, and agree fields, immediately resolving to the affirmative dropdown/radio option or "Yes" with confidence 1.0.
+- **LLM Parse Error Recovery (`llmSynthesizer.ts`, `tier5LLM.ts`):** Wrapped batch JSON parsing in a try/catch block. On failure, the raw output is logged and an array of empty strings is returned instead of crashing the batch. Improved `cleanLLMOutput` with a non-anchored regex to properly strip markdown fences.
+- **Option Prefix Matching (`llmSynthesizer.ts`):** Added a 4th fallback mechanism to fuzzy matching. Accepts LLM outputs that strictly match the prefix of exactly one option, heavily increasing resilience for verbose options (e.g. LLM says "Yes" for "Yes, I agree...").
+- **Prompt Precision:** Updated batch and single-field system messages to strictly forbid markdown, provide JSON examples, and explicitly command the model to choose exact options.
+
+### 0v. Structured Payload Resolution Context (shipped 2026-09-23)
+- Added stable-path T1 payload resolution for compensation, experience, education, preferences, authorization-adjacent form fields, demographics, address, and profile links.
+- Tier 5 batch prompts now receive a bounded structured payload context instead of the full raw API payload.
+
+### 0s. Fresh DB Read at Submit Time (shipped 2026-09-22)
+- Added fresh `getApplication(applicationId, options.jobUrl || targetUrl)` read in `runLiveSubmit()` (`src/submitter/liveSubmit.ts`) immediately before `fillForm()` is invoked.
+- Eliminates the race window where manual edits saved by operators between worker dequeue time and browser form fill were bypassed by the stale in-memory application object.
+
 ### 0r. Dashboard Stats Range Unification (in progress 2026-09-22)
 - Replacing mixed all-time, rolling Today & Yesterday, and 14/56/180-day dashboard statistics with shared IST `day`, `week`, and `month` presets.
 - Summary APIs now accept `range=day|week|month` and use bounded date ranges; manager reports use `submitted_at` and include `EMAIL_PROOF_PENDING` in applied results.

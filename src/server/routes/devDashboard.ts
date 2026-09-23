@@ -327,20 +327,77 @@ devDashboardRouter.get('/applications/:id', async (req: Request, res: Response):
     const events = app.id ? await listApplicationEvents({ applicationId: app.id, limit: 200 }) : { events: [] };
     const names = await displayNameMapForEmails([app.assigned_ca_email || '']);
     let managerEmail: string | null = null;
-    for (const email of emailsForRole('manager')) {
-      const linked = await fetchLinkedCaIds(email);
-      if (linked.ids.some((candidateId) => candidateId.toUpperCase() === app!.applywizz_id.toUpperCase())) {
-        managerEmail = email;
-        break;
+    if (app.assigned_ca_email && isSupabaseConfigured()) {
+      try {
+        const { data: userRow } = await getDbClient()
+          .from('gh_users')
+          .select('manager_email')
+          .eq('email', app.assigned_ca_email.trim().toLowerCase())
+          .maybeSingle();
+        if (userRow?.manager_email) {
+          managerEmail = userRow.manager_email;
+        }
+      } catch (err: any) {
+        log.warn(`[Dev] failed to get manager_email for ${app.assigned_ca_email}: ${err?.message}`);
+      }
+    }
+    if (!managerEmail) {
+      for (const email of emailsForRole('manager')) {
+        const linked = await fetchLinkedCaIds(email);
+        if (linked.ids.some((candidateId) => candidateId.toUpperCase() === app!.applywizz_id.toUpperCase())) {
+          managerEmail = email;
+          break;
+        }
+      }
+    }
+
+    let timeline: Array<{
+      previous_status: string | null;
+      new_status: string;
+      actor_email: string | null;
+      created_at: string;
+    }> = [];
+
+    const targetAppId = app.id || id;
+    if (targetAppId && isSupabaseConfigured()) {
+      try {
+        const { data: eventRows, error: timelineError } = await getDbClient()
+          .from('gh_application_events')
+          .select('previous_status:from_status, new_status:to_status, actor_email, created_at')
+          .eq('application_id', targetAppId)
+          .order('created_at', { ascending: true });
+
+        if (!timelineError && eventRows) {
+          timeline = eventRows as any;
+        } else if (timelineError) {
+          const { data: rawRows } = await getDbClient()
+            .from('gh_application_events')
+            .select('from_status, to_status, actor_email, created_at')
+            .eq('application_id', targetAppId)
+            .order('created_at', { ascending: true });
+          if (rawRows) {
+            timeline = rawRows.map((r: any) => ({
+              previous_status: r.from_status ?? null,
+              new_status: r.to_status,
+              actor_email: r.actor_email ?? null,
+              created_at: r.created_at,
+            }));
+          }
+        }
+      } catch (err: any) {
+        log.warn(`[Dev] timeline query failed: ${err?.message}`);
       }
     }
 
     res.json({
       application: {
         ...app,
+        proof_failed_url: app.proof_failed_url || null,
         operatorName: names.get((app.assigned_ca_email || '').trim().toLowerCase()) || app.assigned_ca_email || '',
+        manager_email: managerEmail,
         managerEmail,
       },
+      timeline,
       events: events.events,
       warning: events.warning,
     });

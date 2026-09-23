@@ -202,9 +202,18 @@ async function markHiddenRequiredFields(page: Page, fields: ScannedField[]): Pro
       addScope(element.parentElement);
       addScope(element.closest('fieldset, .field, [class*="field"], .field-wrapper, .select-shell, tr, div'));
 
-      return scopes.some((scope) =>
-        Boolean(scope.querySelector('input[name^="required_"], input.hidden[value="true"], input[type="hidden"][value="true"]'))
-      );
+      return scopes.some((scope) => {
+        const hiddenInputs = scope.querySelectorAll(
+          'input[name^="required_"], input[class*="required"], input[id*="required"], input.hidden[value="true"], input[type="hidden"][value="true"]'
+        );
+        for (let i = 0; i < hiddenInputs.length; i++) {
+          const val = ((hiddenInputs[i] as HTMLInputElement).value || '').trim().toLowerCase();
+          if (val === '' || val === 'true' || val === '1' || val === 'required') {
+            return true;
+          }
+        }
+        return false;
+      });
     };
 
     return fieldDescriptors.map((field) => {

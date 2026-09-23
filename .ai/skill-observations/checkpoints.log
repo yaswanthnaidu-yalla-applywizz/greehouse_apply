@@ -346,3 +346,13 @@
 2026-09-22 session-end: no observations (EEOC custom-select matching)
 2026-09-22 session-end: no observations (OTP retry budget hardening)
 2026-09-22 session-end: no observations (FIX-9A/9B/9C audit and completion)
+2026-09-22 session-start scan: loaded task-observer
+2026-09-22 checkpoint: fresh DB read at submit time implemented and verified; no observations
+2026-09-22 checkpoint: hidden required input detection enhanced in cascadeDetector and playwrightScanner; no observations
+2026-09-23 checkpoint: no observations (read-only query on applications, templates, and qa bank)
+2026-09-23 Answer resolution fixes (consent pre-tier, LLM parse catch, prefix matching, strict prompts) complete.
+2026-09-23 Stats rollup system implemented (migration 024, db/statsRollup.ts, ingest wire-in, dashboard API integration).
+2026-09-23 session-start scan: files=14 parsed=14
+2026-09-23 session-end: structured T1 payload resolver and bounded Tier 5 payload context implemented; no observations
+2026-09-23 checkpoint: no observations
+2026-09-23 session-end: debugger tab enhancements (proof_failed_url, manager_email, IST timeline) shipped and verified; docs updated; no new observations

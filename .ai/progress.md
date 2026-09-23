@@ -4,6 +4,36 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### Dev Debugger Enhancements (2026-09-23)
+- [x] Sourced and hydrated `proof_failed_url` in dev dashboard debugger endpoint (`/api/dev/applications/:id`).
+- [x] Rendered `Failed screenshot: View` link in `DevDashboard.tsx` and `dev.html` after web/email proof links.
+- [x] Sourced `manager_email` from `gh_users` for assigned operator email and rendered in Debugger view.
+- [x] Queried `gh_application_events` chronologically (`ORDER BY created_at ASC`) and rendered formatted timeline with IST timestamps: `"{created_at IST} — {previous_status} → {new_status} (by {actor_email})"`.
+- [x] Kept existing empty timeline fallback when no events exist.
+
+### Manager Home & Operators Metrics Unification (2026-09-23)
+- [x] Unified Manager Home and Operators tabs to display the identical three metrics: Total (all non-SKIPPED applications), Submitted (`status != 'READY_FOR_REVIEW'`), Applied (`status = 'APPLIED'`, using `submitted_at`).
+- [x] Sourced all 3 metrics on both tabs from the single `/api/manager/dashboard` response without separate count queries.
+- [x] Removed separate rollup query overrides in `/api/manager/dashboard` and `/api/manager/operators`.
+- [x] Maintained full parity across `dashboard/components/ManagerDashboard.tsx` and `dashboard/public/manager.html`.
+
+### Stats Rollup System (2026-09-23)
+- [x] Implemented database migration `024_stats_rollups` to securely store `total_applications`, `submitted_count`, `applied_count`, and `failed_count`.
+- [x] Created `runStatsRollup` service that safely calculates daily, weekly, and monthly metric aggregations using IST date boundaries, while strictly pruning old ingest rows to ensure database speed.
+- [x] Automatically wired rollup trigger prior to Phase A of the storage ingestion pipeline.
+- [x] Refactored Admin `/api/admin/overview`, Manager `/api/manager/dashboard`, and unified `/api/stats` to source root analytics reliably from `queryRollupStats`.
+
+### Answer Resolution Quality Fixes (2026-09-23)
+- [x] Added pre-tier rule to detect consent/acknowledgment fields before Tier 1 matching, automatically answering them with the affirmative option (or "Yes").
+- [x] Added try/catch block to `synthesizeBatchAnswers` to prevent LLM parse errors from crashing the batch, instead gracefully returning unresolved.
+- [x] Improved `cleanLLMOutput` to strip markdown fences using a more resilient non-anchored regex.
+- [x] Added 4th option matching fallback (prefix matching) for when LLM answer is a prefix of an option.
+- [x] Upgraded LLM prompts for both single and batch synthesis to strictly enforce exact option matching and forbid markdown output.
+
+### Structured Payload Resolution Context (2026-09-23)
+- [x] Added deterministic T1 resolution from the stable `client` and `additional_information` payload objects, including boolean and date formatting.
+- [x] Replaced Tier 5 batch raw payload serialization with a bounded structured candidate context.
+
 ### OTP retry budget hardening (2026-09-22)
 - [x] OTP fetch failures now remain `OTP_REQUIRED` through the bounded retry budget before becoming `FAILED`.
 - [x] Retry counts are normalized to integer values in the 0–3 range; timestamp-like corrupted values no longer bypass or exhaust the retry budget incorrectly.
