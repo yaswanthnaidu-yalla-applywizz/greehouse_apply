@@ -11,6 +11,7 @@ import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveBatchLlmFields, type UnresolvedFieldGroup } from './batchLlmResolver.js';
+import { resolvePreTierField } from './answerResolver.js';
 import type { ResolvedField, ScannedField, ScannedFieldType } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
@@ -111,6 +112,11 @@ export class ResolverWorkerPool {
     const pending: ScannedField[] = [];
 
     for (const field of fields) {
+      const preTier = resolvePreTierField(field, profile, Boolean(field.isRequired));
+      if (preTier) {
+        resolved.push(preTier);
+        continue;
+      }
       const tier1 = await resolveTier1(application.applywizz_id, field, profile);
       const tier2 = tier1 || await resolveTier2(application.applywizz_id, field, parsedResume);
       const tier3 = tier2 || await resolveTier3(application.applywizz_id, field, qaEntries);

@@ -76,6 +76,58 @@ function profileIndicatesUsLocation(profile: ProfileRow | null): boolean {
   );
 }
 
+export function resolvePreTierField(
+  field: ScannedField,
+  profile: ProfileRow | null,
+  isRequired: boolean
+): ResolvedField | null {
+  const base = {
+    fieldId: field.fieldId,
+    name: field.name,
+    type: field.type,
+    label: field.label,
+    source: 'supabase' as const,
+    resolvedByTier: 1 as const,
+    confidence: 1.0,
+    isRequired,
+  };
+
+  if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
+    const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
+    const finalVal = field.options && field.options.length > 0
+      ? (field.options.find((o) => /^(yes|agree|i agree|accept|i accept|true|authorized)/i.test(o.trim())) || field.options[0])
+      : targetVal;
+    log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
+    return { ...base, value: finalVal };
+  }
+
+  if (/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us|currently located in the us/i.test(field.label) &&
+    profileIndicatesUsLocation(profile)) {
+    log.info(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "Yes"`);
+    return { ...base, value: 'Yes' };
+  }
+
+  if (/country/i.test(field.label)) {
+    const targetVal = 'United States';
+    const finalVal = field.options && field.options.length > 0
+      ? (field.options.find((o) => /united states|usa|u\.s\./i.test(o.trim())) || field.options[0])
+      : targetVal;
+    log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
+    return { ...base, value: finalVal };
+  }
+
+  if (/agree|certify|confirm|acknowledge|consent|above info|above information|true and correct|i hereby/i.test(field.label)) {
+    const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
+    const finalVal = field.options && field.options.length > 0
+      ? (field.options.find((o) => /^(yes|agree|i agree|true|i do)/i.test(o.trim())) || field.options[0])
+      : targetVal;
+    log.info(`[Resolver] ✅ PRE-TIER consent field "${field.label}" → "${finalVal}"`);
+    return { ...base, value: finalVal };
+  }
+
+  return null;
+}
+
 function resolveStructuredEeocField(
   field: ScannedField,
   profile: ProfileRow | null,
@@ -191,6 +243,9 @@ export class AnswerResolver {
     const jobContext = context?.jobContext || { companyName: 'Company', jobTitle: 'Position' };
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
 
+    const preTier = resolvePreTierField(field, profile, isRequired);
+    if (preTier) return preTier;
+
     // Never fill cover letters under any circumstances
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
       log.info(`[Resolver] ✅ T1 ${field.label} → ""`);
@@ -200,82 +255,6 @@ export class AnswerResolver {
         type: field.type,
         label: field.label,
         value: '',
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    // Hardcoded rule: Work authorization questions always resolve to "Yes" with source 'supabase'
-    if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
-      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
-      const finalVal = field.options && field.options.length > 0
-        ? (field.options.find((o) => /^(yes|agree|i agree|accept|i accept|true|authorized)/i.test(o.trim())) || field.options[0])
-        : targetVal;
-      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: finalVal,
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    if (/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us|currently located in the us/i.test(field.label) &&
-      profileIndicatesUsLocation(profile)) {
-      log.info(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "Yes"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: 'Yes',
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    // Hardcoded rule: Country questions always resolve to "United States" with source 'supabase'
-    if (/country/i.test(field.label)) {
-      const targetVal = 'United States';
-      const finalVal = field.options && field.options.length > 0
-        ? (field.options.find((o) => /united states|usa|u\.s\./i.test(o.trim())) || field.options[0])
-        : targetVal;
-      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: finalVal,
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    // Hardcoded rule: Consent/acknowledgment questions always resolve to affirmative with source 'supabase'
-    if (/agree|certify|confirm|acknowledge|consent|above info|above information|true and correct|i hereby/i.test(field.label)) {
-      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
-      const finalVal = field.options && field.options.length > 0
-        ? (field.options.find((o) => /^(yes|agree|i agree|true|i do)/i.test(o.trim())) || field.options[0])
-        : targetVal;
-      log.info(`[Resolver] ✅ PRE-TIER consent field "${field.label}" → "${finalVal}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: finalVal,
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,
@@ -414,6 +393,9 @@ export class AnswerResolver {
     const profile = context.profile || (await getProfile(applywizzId));
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
 
+    const preTier = resolvePreTierField(field, profile, isRequired);
+    if (preTier) return preTier;
+
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
       log.info(`[Resolver] ✅ T1 ${field.label} → ""`);
       return {
@@ -422,82 +404,6 @@ export class AnswerResolver {
         type: field.type,
         label: field.label,
         value: '',
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    // Hardcoded rule: Work authorization questions always resolve to "Yes" with source 'supabase'
-    if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
-      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
-      const finalVal = field.options && field.options.length > 0
-        ? (field.options.find((o) => /^(yes|agree|i agree|accept|i accept|true|authorized)/i.test(o.trim())) || field.options[0])
-        : targetVal;
-      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: finalVal,
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    if (/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us|currently located in the us/i.test(field.label) &&
-      profileIndicatesUsLocation(profile)) {
-      log.info(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "Yes"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: 'Yes',
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    // Hardcoded rule: Country questions always resolve to "United States" with source 'supabase'
-    if (/country/i.test(field.label)) {
-      const targetVal = 'United States';
-      const finalVal = field.options && field.options.length > 0
-        ? (field.options.find((o) => /united states|usa|u\.s\./i.test(o.trim())) || field.options[0])
-        : targetVal;
-      log.info(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: finalVal,
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
-    // Hardcoded rule: Consent/acknowledgment questions always resolve to affirmative with source 'supabase'
-    if (/agree|certify|confirm|acknowledge|consent|above info|above information|true and correct|i hereby/i.test(field.label)) {
-      const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
-      const finalVal = field.options && field.options.length > 0
-        ? (field.options.find((o) => /^(yes|agree|i agree|true|i do)/i.test(o.trim())) || field.options[0])
-        : targetVal;
-      log.info(`[Resolver] ✅ PRE-TIER consent field "${field.label}" → "${finalVal}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: finalVal,
         source: 'supabase',
         resolvedByTier: 1,
         confidence: 1.0,

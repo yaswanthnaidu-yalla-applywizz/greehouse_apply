@@ -392,10 +392,7 @@ function normalizeAlias(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-function matchEeocAliasOption(answer: string, options: string[], field: ScannedField): string | null {
-  if (!/gender|race|ethnicity|hispanic|latino|veteran|disability|eeoc/i.test(field.label)) {
-    return null;
-  }
+function matchEeocAliasOption(answer: string, options: string[]): string | null {
   const normalizedAnswer = normalizeAlias(answer);
   for (const aliases of Object.values(EEOC_ALIASES)) {
     if (!aliases.some((alias) => normalizeAlias(alias) === normalizedAnswer)) continue;
@@ -625,12 +622,17 @@ export class LLMSynthesizer {
     }
 
     if (choiceOptions && choiceOptions.length > 0) {
+      if (/gender|race|ethnicity|hispanic|latino|veteran|disability|eeoc/i.test(field.label)) {
+        log.debug(
+          `[T5 EEOC] label="${field.label}" llmAnswer="${answer}" options=${JSON.stringify(choiceOptions)}`
+        );
+      }
       let matched = matchExactOption(answer, choiceOptions);
       if (!matched) {
         matched = matchFuzzyOption(answer, choiceOptions);
       }
       if (!matched) {
-        matched = matchEeocAliasOption(answer, choiceOptions, field);
+        matched = matchEeocAliasOption(answer, choiceOptions);
       }
 
       if (!matched) {
