@@ -444,6 +444,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               proofFailedUrl={
                 application.proof_failed_url || application.proofFailedUrl
               }
+              retryCount={application.retry_count ?? application.retryCount ?? 0}
+              submissionGateBlocked={application.submissionGateBlocked === true}
               isSubmitting={isSubmitting}
               isDryRunning={isDryRunning}
               apiBaseUrl={apiBaseUrl}

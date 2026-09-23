@@ -22,6 +22,8 @@ import { createLogger } from '../utils/logger.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import {
   assertEligibleForSubmission,
+  computeEligibleForSubmissionDisplay,
+  isEligibleForSubmission,
   SubmissionEligibilityBlockedError,
 } from '../submission/submissionEligibilityGate.js';
 
@@ -1114,6 +1116,12 @@ export interface ApplicationDto {
   updatedAt?: string;
   retry_count?: number | null;
   retryCount?: number | null;
+  csv_job_score?: number | null;
+  csvJobScore?: number | null;
+  field_count?: number | null;
+  fieldCount?: number | null;
+  eligibleForSubmission?: boolean;
+  submissionGateBlocked?: boolean;
 }
 
 /**
@@ -1180,6 +1188,8 @@ export function serializeApplicationDto(
   const createdAt = merged.created_at || merged.createdAt;
   const updatedAt = merged.updated_at || merged.updatedAt;
   const retryCount = Number(merged.retry_count ?? merged.retryCount ?? 0);
+  const fieldCount = merged.field_count ?? merged.fieldCount ?? null;
+  const csvJobScore = merged.csv_job_score ?? merged.csvJobScore ?? null;
 
   return {
     id: merged.id,
@@ -1234,6 +1244,18 @@ export function serializeApplicationDto(
     updatedAt,
     retry_count: Number.isFinite(retryCount) ? retryCount : 0,
     retryCount: Number.isFinite(retryCount) ? retryCount : 0,
+    csv_job_score: csvJobScore,
+    csvJobScore,
+    field_count: fieldCount,
+    fieldCount,
+    eligibleForSubmission: computeEligibleForSubmissionDisplay({
+      csv_job_score: csvJobScore,
+      field_count: fieldCount,
+    }),
+    submissionGateBlocked: !isEligibleForSubmission({
+      csv_job_score: csvJobScore,
+      field_count: fieldCount,
+    }).eligible,
   };
 }
 
@@ -1316,7 +1338,7 @@ export async function requeueApplicationForRetry(
         query = query.eq('applywizz_id', app.applywizz_id).eq('job_url', app.job_url);
       }
       const result = await query
-        .in('status', ['FAILED', 'APPLYING'])
+        .in('status', ['FAILED', 'APPLYING', 'OTP_REQUIRED'])
         .eq('retry_count', storedRetryCount)
         .select('id');
       updated = !result.error && Array.isArray(result.data) && result.data.length > 0;

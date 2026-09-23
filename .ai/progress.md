@@ -17,6 +17,12 @@ _Last updated: 2026-09-21_
 - [x] Hardened searchable Greenhouse controls to click live options, verify committed state, and retry once when a click does not commit.
 - [x] Added regression coverage for semantic mappings, ambiguity rejection, and Greenhouse searchable-select fixtures.
 
+### OTP Retry and Submission-Gate Failure UI (2026-09-23)
+- [x] Requeued OTP-fetch failures returned as `OTP_REQUIRED` through the submitter pool and accepted `OTP_REQUIRED` in the guarded retry transition.
+- [x] Prevented double incrementing of `retry_count` by making the queue retry owner apply the increment once per attempt.
+- [x] Added authoritative `submissionGateBlocked` metadata to application DTOs and job rows.
+- [x] Limited the requirements panel to gate-blocked failures and exposed retry for ordinary failed applications.
+
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
 ### Dev Debugger Enhancements (2026-09-23)

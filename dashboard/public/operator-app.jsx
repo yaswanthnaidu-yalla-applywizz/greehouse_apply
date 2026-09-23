@@ -1,6 +1,5 @@
     const { useState, useEffect, useCallback, useMemo, useRef } = React;
     const API_BASE_URL = window.location.origin;
-    const RETRYABLE_FAILURE_PATTERN = /otp|one.?time|security.?code|unresolved.?required/i;
 
     function getAuthHeaders() {
       return ApplyWizzRoles.getAuthHeaders();
@@ -1643,7 +1642,7 @@
               const retryableFailure =
                 failed &&
                 retryCount < 3 &&
-                RETRYABLE_FAILURE_PATTERN.test(job.errorMessage || job.error_message || '');
+                job.submissionGateBlocked !== true;
               const expiredOrSkipped = cardStatus === 'EXPIRED' || cardStatus === 'SKIPPED';
               let cardChrome = isSelected
                 ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
@@ -1867,9 +1866,11 @@
       ).trim();
       const retryCount = Number(application?.retry_count ?? application?.retryCount ?? 0);
       const isRetryableFailure =
-        currentStatus === 'FAILED' && RETRYABLE_FAILURE_PATTERN.test(applicationError);
+        currentStatus === 'FAILED' &&
+        retryCount < 3 &&
+        application?.submissionGateBlocked !== true;
       const isGateBlockedFailure =
-        currentStatus === 'FAILED' && /does not meet|requirements|gate|score|eligibility/i.test(applicationError);
+        currentStatus === 'FAILED' && application?.submissionGateBlocked === true;
       const isFullFormStatus =
         currentStatus === 'APPLIED' ||
         currentStatus === 'DRY_RUN_COMPLETE' ||

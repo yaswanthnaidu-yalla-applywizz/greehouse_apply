@@ -20,6 +20,8 @@ export interface SubmissionControlsProps {
   emailProofStatus?: 'pending' | 'captured' | 'timed_out' | null;
   dryRunScreenshotUrl?: string | null;
   proofFailedUrl?: string | null;
+  retryCount?: number | null;
+  submissionGateBlocked?: boolean;
   isSubmitting?: boolean;
   isDryRunning?: boolean;
   apiBaseUrl?: string;
@@ -49,6 +51,8 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   emailProofStatus,
   dryRunScreenshotUrl,
   proofFailedUrl,
+  retryCount = 0,
+  submissionGateBlocked = false,
   isSubmitting = false,
   isDryRunning = false,
   apiBaseUrl = '',
@@ -69,6 +73,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const [showProofViewer, setShowProofViewer] = useState(false);
   const [isCapturingEmailProof, setIsCapturingEmailProof] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
     setApplicationStatus(status);
@@ -200,6 +205,31 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       applicationStatus === 'DRY_RUN_COMPLETE' ||
       applicationStatus === 'FAILED');
   const canDryRun = !isApplying && !isDryRunning;
+  const canRetry = isFailed && !submissionGateBlocked && Number(retryCount || 0) < 3;
+
+  const retrySubmission = async () => {
+    if (!canRetry || isRetrying) return;
+    setIsRetrying(true);
+    try {
+      const res = await apiFetch(`${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToastMessage(data.error || 'Retry request failed.');
+        setTimeout(() => setToastMessage(null), 6000);
+        return;
+      }
+      onStatusChange?.('QUEUED', { status: 'QUEUED', error_message: null }, { persist: false });
+    } catch (err: any) {
+      setToastMessage(err.message || 'Retry request failed.');
+      setTimeout(() => setToastMessage(null), 6000);
+    } finally {
+      setIsRetrying(false);
+    }
+  };
 
   return (
     <>
@@ -261,6 +291,17 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
               </>
             )}
           </button>
+
+          {canRetry && (
+            <button
+              type="button"
+              onClick={retrySubmission}
+              disabled={isRetrying}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold font-mono text-[#9A3412] bg-[#FED7AA] hover:bg-[#FDBA74] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isRetrying ? 'Retrying...' : '↺ Retry Submission'}
+            </button>
+          )}
 
           <button
             type="button"

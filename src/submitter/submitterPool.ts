@@ -214,6 +214,19 @@ export class SubmitterPool {
         if (result.status === 'APPLIED') {
           log.info(`[API] Status → APPLIED (application ${applicationId})`);
           await logQueueStatusChange(applicationId, 'APPLYING', 'APPLIED');
+        } else if (result.status === 'OTP_REQUIRED' && getRetryReason(result)) {
+          const reason = getRetryReason(result);
+          const retry = await requeueApplicationForRetry(applicationId, reason!, application.job_url);
+          if (retry.requeued) {
+            await logQueueStatusChange(applicationId, 'OTP_REQUIRED', 'QUEUED');
+          } else {
+            await updateStatus(applicationId, 'FAILED', {
+              error_message: result.errorMessage || 'OTP fetch retry limit reached.',
+              job_url: application.job_url,
+            });
+            await logQueueStatusChange(applicationId, 'OTP_REQUIRED', 'FAILED');
+            this.emitFailure(application, result.errorMessage || reason!, result);
+          }
         } else if (result.status === 'FAILED') {
           const reason = getRetryReason(result);
           if (reason) {
