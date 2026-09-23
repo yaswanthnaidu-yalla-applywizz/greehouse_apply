@@ -12,7 +12,7 @@ export interface PayloadContext {
   education: Record<string, unknown>;
   experience: Record<string, unknown>;
   background: Record<string, unknown>;
-  eeoc: Record<string, unknown>;
+  eeoc: Record<string, unknown> | null;
   other: Record<string, unknown>;
 }
 
@@ -23,7 +23,10 @@ type ProfileWithPayload = (ProfileRow | ApplyWizzCandidateProfile) & {
 export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext {
   const payload = profile.raw_api_payload || {};
   const client = payload.client || {};
-  const additional = payload.additional_information || {};
+  const hasAdditionalInformation =
+    payload.additional_information !== null &&
+    typeof payload.additional_information === 'object';
+  const additional = hasAdditionalInformation ? payload.additional_information : {};
   const value = (stored: unknown, raw: unknown): unknown =>
     stored !== undefined && stored !== null && stored !== '' ? stored : raw;
   const rawValue = (raw: unknown, stored: unknown): unknown =>
@@ -78,13 +81,15 @@ export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext
       referred_by_agency: additional.referred_by_agency,
       worked_for_company_before: additional.worked_for_company_before,
     },
-    eeoc: {
-      gender: additional.gender,
-      is_hispanic_latino: additional.is_hispanic_latino,
-      race_ethnicity: additional.race_ethnicity,
-      veteran_status: additional.veteran_status,
-      disability_status: additional.disability_status,
-    },
+    eeoc: hasAdditionalInformation
+      ? {
+          gender: additional.gender,
+          is_hispanic_latino: additional.is_hispanic_latino,
+          race_ethnicity: additional.race_ethnicity,
+          veteran_status: additional.veteran_status,
+          disability_status: additional.disability_status,
+        }
+      : null,
     other: {
       has_relatives_in_company: additional.has_relatives_in_company,
       can_perform_essential_functions: additional.can_perform_essential_functions,
@@ -98,6 +103,10 @@ export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext
     log.debug(
       `[T5] payloadContext built: gender=${additional.gender} race=${additional.race_ethnicity} salary=${client.salary_range}`
     );
+    if (!hasAdditionalInformation) {
+      const applywizzId = 'applywizz_id' in profile ? profile.applywizz_id : profile.applywizzId;
+      log.warn(`[T5] WARN: raw_api_payload.additional_information missing for ${applywizzId} — EEOC fields will be unresolved.`);
+    }
   }
 
   return payloadContext;
