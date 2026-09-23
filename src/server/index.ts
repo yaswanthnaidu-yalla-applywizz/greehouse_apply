@@ -51,6 +51,7 @@ import { insertAuditEvent } from '../db/events.js';
 import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
 import {
   ADMIN_WORK_HISTORY_CACHE_KEY,
+  getISTDateString,
   type WorkHistoryCandidateRecord,
 } from '../services/workHistoryClient.js';
 import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHydrate.js';
@@ -1073,7 +1074,16 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(req);
     const unrestricted = hasUnrestrictedDashboardAccess(role) && !viewAsManagerEmail;
 
-    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    const query = req.query as Record<string, unknown>;
+    const hasExplicitDateRange =
+      query.from !== undefined ||
+      query.to !== undefined ||
+      query.date !== undefined ||
+      query.range !== undefined;
+    const rangeQuery = hasExplicitDateRange
+      ? query
+      : { ...query, from: getISTDateString(1), to: getISTDateString(1) };
+    const parsedRange = parseDashboardCreatedAtRange(rangeQuery);
     if ('error' in parsedRange) {
       res.status(400).json({ error: parsedRange.error });
       return;
