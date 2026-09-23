@@ -2,6 +2,10 @@
 
 _Last updated: 2026-09-22_
 
+## Current Session Update (2026-09-23)
+
+- Form submission hardening completed: visible failed fields are re-attempted after cascade expansion, number inputs use DOM value assignment, date-year inputs accept explicit aria-label selectors, and retry queue `submission_order` no longer receives millisecond timestamps.
+
 ## Docs
 
 - **`OVERVIEW.md`** (repo root, 2026-09-17) — four-perspective analysis (architect / developer / product / critique) with Mermaid diagrams. Not a sprint tracker; use this file for current focus.

@@ -144,6 +144,40 @@ async function findElementLocator(
   return null;
 }
 
+async function isResolvedFieldVisible(page: Page, field: ResolvedField): Promise<boolean> {
+  const name = field.name || field.fieldId || '';
+  const fieldId = field.fieldId || field.name || '';
+  const label = field.label || name;
+  const selectors = [
+    (field as any).metadata?.selector,
+    `#${escapeId(name)}`,
+    `#${escapeId(fieldId)}`,
+    `input[name="${escapeAttr(name)}"]`,
+    `input[name="${escapeAttr(fieldId)}"]`,
+    `select[name="${escapeAttr(name)}"]`,
+    `select[name="${escapeAttr(fieldId)}"]`,
+    `input[aria-label="${escapeAttr(label)}"]`,
+    `select[aria-label="${escapeAttr(label)}"]`,
+  ].filter(Boolean) as string[];
+
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if ((await locator.count().catch(() => 0)) > 0 && await locator.isVisible().catch(() => false)) {
+      return true;
+    }
+  }
+
+  const labelLocator = page.locator(`label:has-text("${label}")`).first();
+  if ((await labelLocator.count().catch(() => 0)) > 0) {
+    const control = labelLocator.locator('..').locator(
+      'input, select, textarea, input[role="combobox"], [aria-combobox="true"], .select__input'
+    ).first();
+    return (await control.count().catch(() => 0)) > 0 && await control.isVisible().catch(() => false);
+  }
+
+  return false;
+}
+
 const CUSTOM_SELECT_OPTION_LOCATOR =
   '.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country), .select2-results__option:not(.iti__country), [role="listbox"] [role="option"]:not(.iti__country), [class*="menu"] [role="option"]:not(.iti__country)';
 
@@ -1457,6 +1491,16 @@ export async function fillSingleField(
       const validSelectors = textSelectors.filter(Boolean) as string[];
       let found = await findElementLocator(page, validSelectors, timeoutMs);
 
+      const ariaLabelSelectors = /start date year|end date year/i.test(label)
+        ? [
+            'input[aria-label="Start date year"]',
+            'input[aria-label="End date year"]',
+          ]
+        : [];
+      if (!found && ariaLabelSelectors.length > 0) {
+        found = await findElementLocator(page, ariaLabelSelectors, timeoutMs);
+      }
+
       // Label fallback if not found by selector
       if (!found) {
         const labelLoc = page.locator(`label:has-text("${label}")`).first();
@@ -1502,11 +1546,20 @@ export async function fillSingleField(
           // Standard text input
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
           await found.locator.click().catch(() => {});
-          await found.locator.fill(val, { timeout: timeoutMs });
-          await found.locator.evaluate((el: HTMLInputElement) => {
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-          }).catch(() => {});
+          const inputType = await found.locator.getAttribute('type').catch(() => null);
+          if (inputType === 'number') {
+            await found.locator.evaluate((el, v) => {
+              (el as HTMLInputElement).value = v;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }, val);
+          } else {
+            await found.locator.fill(val, { timeout: timeoutMs });
+            await found.locator.evaluate((el: HTMLInputElement) => {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }).catch(() => {});
+          }
           fillResult.success = true;
 
           const isEmailField =
@@ -1809,6 +1862,32 @@ export async function fillForm(
           await sleepRandomJitter(minJitterMs, maxJitterMs);
         }
       }
+    }
+
+    const failedInitialFields = results
+      .slice(0, fields.length)
+      .map((result, index) => ({ result, index }))
+      .filter(({ result }) => !result.success);
+    const visibleFailedFields: Array<{ result: FieldFillResult; index: number; field: ResolvedField }> = [];
+    for (const { result, index } of failedInitialFields) {
+      const field = fields[index];
+      if (field && await isResolvedFieldVisible(page, field)) {
+        visibleFailedFields.push({ result, index, field });
+      }
+    }
+    log.info(`[Form Filler] ↩️ Re-attempting ${visibleFailedFields.length} previously hidden fields after cascade.`);
+    for (const { index, field } of visibleFailedFields) {
+      const retryField = isConsentSmsMarketingField(field.label || '')
+        ? applyConsentSmsMarketingNo(field)
+        : field;
+      results[index] = await fillSingleField(
+        page,
+        retryField,
+        applywizzId,
+        tempFilesToClean,
+        options,
+        resumeFilename
+      );
     }
 
     // 4. Standard Fields Safety Sweep (Ensure First Name, Last Name, Email, Phone are populated)

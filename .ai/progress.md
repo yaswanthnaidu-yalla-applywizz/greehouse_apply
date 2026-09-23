@@ -2,6 +2,11 @@
 
 _Last updated: 2026-09-21_
 
+### Form Submission Reliability Fixes (2026-09-23)
+- [x] Re-attempted initially failed fields that become visible after cascade expansion, while leaving still-hidden fields failed.
+- [x] Replaced millisecond timestamps in retry `submission_order` payloads with bounded retry counts.
+- [x] Added DOM value assignment for `input[type="number"]` and explicit date-year aria-label selectors.
+
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
 ### Dev Debugger Enhancements (2026-09-23)
