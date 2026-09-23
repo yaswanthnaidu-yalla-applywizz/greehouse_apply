@@ -508,6 +508,40 @@ function formatPayloadBoolean(value: unknown): string | null {
   return result || null;
 }
 
+const US_STATE_NAMES = [
+  'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut',
+  'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa',
+  'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan',
+  'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska', 'nevada', 'new hampshire',
+  'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio',
+  'oklahoma', 'oregon', 'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+  'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia',
+  'wisconsin', 'wyoming',
+];
+
+function resolveUsLocation(additional: Record<string, unknown>): string | null {
+  const locationValues = [additional.zip_or_country, additional.state_of_residence]
+    .map((value) => String(value ?? '').trim().toLowerCase())
+    .filter(Boolean);
+  if (locationValues.length === 0) return null;
+
+  const combined = locationValues.join(' ');
+  if (
+    /\bunited states(?: of america)?\b|\busa\b|\bu\.s\.a?\b/.test(combined) ||
+    US_STATE_NAMES.some((state) => new RegExp(`\\b${state}\\b`).test(combined))
+  ) {
+    return 'Yes';
+  }
+
+  if (
+    /\bindia\b|\bcanada\b|\bmexico\b|\buk\b|\bunited kingdom\b|\baustralia\b|\bsingapore\b|\bgermany\b|\bfrance\b|\bchina\b|\bjapan\b|\buae\b|\bunited arab emirates\b/.test(combined)
+  ) {
+    return 'No';
+  }
+
+  return null;
+}
+
 /**
  * Resolves stable ApplyWizz payload fields before generic payload key extraction.
  */
@@ -527,8 +561,11 @@ export function resolveFromPayloadStructured(
     pattern.test(normalizedLabel) ? formatPayloadValue(value, fieldType, formatDate) : null;
   const matchBoolean = (pattern: RegExp, value: unknown): string | null =>
     pattern.test(normalizedLabel) ? formatPayloadBoolean(value) : null;
+  const matchUsLocation = (pattern: RegExp): string | null =>
+    pattern.test(normalizedLabel) ? resolveUsLocation(additional) : null;
 
   return (
+    matchUsLocation(/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us/i) ??
     match(/salary|compensation|ctc|pay rate|desired pay|expected pay|desired compensation/, client.salary_range) ??
     (match(/years of experience|total experience|how many years|experience level/, additional.experience) !== null
       ? `${formatPayloadValue(additional.experience, fieldType)} years`

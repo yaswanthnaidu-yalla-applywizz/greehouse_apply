@@ -668,7 +668,7 @@ ${questions
 
 PROFILE DATA RULE: The Candidate Profile section below contains factual data about the candidate. For any question whose answer exists in the profile (gender, race, ethnicity, veteran status, disability status, salary, education, experience, location, authorization), use the EXACT value from the profile. Never answer "No" or "N/A" for demographic fields — the candidate has already provided these values.
 
-EEOC RULE: For gender, race/ethnicity, veteran status, and disability status fields: find the value in the Candidate Profile and return it. These are always present. Do not guess or default to "No".
+EEOC RULE: For gender, race/ethnicity, veteran status, and disability status fields: find the value in the Candidate Profile and return it. These are always present. Do not guess or default to "No". If the candidate's gender, race/ethnicity, veteran status, or disability status is NOT present in the Candidate Profile section, return exactly: "Decline to self-identify" for that field. Never return "No" for an EEOC demographic field.
 
 CREATIVE RULE: For open-ended text questions (why do you want this role, describe your experience, tell us about yourself, cover letter style fields): write a professional, specific, 2-4 sentence answer using the candidate's actual work experience, skills, education, and job role from the profile. Do not say the resume does not contain information — synthesize a real answer.
 
