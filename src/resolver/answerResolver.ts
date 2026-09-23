@@ -45,6 +45,37 @@ function parseScoreFromJob(score: string | number | undefined): number | null {
 
 const log = createLogger('Answer Resolver');
 
+const US_STATE_CODES = new Set([
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL',
+  'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT',
+  'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI',
+  'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+]);
+
+const US_STATE_NAMES = new Set([
+  'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut',
+  'delaware', 'florida', 'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa',
+  'kansas', 'kentucky', 'louisiana', 'maine', 'maryland', 'massachusetts', 'michigan',
+  'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska', 'nevada', 'new hampshire',
+  'new jersey', 'new mexico', 'new york', 'north carolina', 'north dakota', 'ohio',
+  'oklahoma', 'oregon', 'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+  'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington', 'west virginia',
+  'wisconsin', 'wyoming',
+]);
+
+function profileIndicatesUsLocation(profile: ProfileRow | null): boolean {
+  const additional = profile?.raw_api_payload?.additional_information;
+  if (!additional || typeof additional !== 'object') return false;
+  const values = [additional.zip_or_country, additional.state_of_residence]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+  return values.some((value) =>
+    /\bunited states(?: of america)?\b|\busa\b|\bu\.s\.a?\b/i.test(value) ||
+    value.split(/[\s,/-]+/).some((part) => US_STATE_CODES.has(part.toUpperCase())) ||
+    value.toLowerCase().split(/[,/]+/).some((part) => US_STATE_NAMES.has(part.trim()))
+  );
+}
+
 function resolveStructuredEeocField(
   field: ScannedField,
   profile: ProfileRow | null,
@@ -196,6 +227,22 @@ export class AnswerResolver {
       };
     }
 
+    if (/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us|currently located in the us/i.test(field.label) &&
+      profileIndicatesUsLocation(profile)) {
+      log.info(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "Yes"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: 'Yes',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+        isRequired,
+      };
+    }
+
     // Hardcoded rule: Country questions always resolve to "United States" with source 'supabase'
     if (/country/i.test(field.label)) {
       const targetVal = 'United States';
@@ -244,7 +291,6 @@ export class AnswerResolver {
     // ------------------------------------------------------------------------
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
-      log.info(`[Resolver] ✅ T1 ${field.label} → "${tier1.value}"`);
       return { ...tier1, isRequired };
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
@@ -403,6 +449,22 @@ export class AnswerResolver {
       };
     }
 
+    if (/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us|currently located in the us/i.test(field.label) &&
+      profileIndicatesUsLocation(profile)) {
+      log.info(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "Yes"`);
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: 'Yes',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 1.0,
+        isRequired,
+      };
+    }
+
     // Hardcoded rule: Country questions always resolve to "United States" with source 'supabase'
     if (/country/i.test(field.label)) {
       const targetVal = 'United States';
@@ -448,7 +510,6 @@ export class AnswerResolver {
 
     const tier1 = await resolveTier1(applywizzId, field, profile);
     if (tier1) {
-      log.info(`[Resolver] ✅ T1 ${field.label} → "${tier1.value}"`);
       return { ...tier1, isRequired };
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);

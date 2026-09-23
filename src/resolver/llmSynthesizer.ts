@@ -370,6 +370,43 @@ export function matchFuzzyOption(text: string, options?: string[]): string | nul
   return null;
 }
 
+const EEOC_ALIASES: Record<string, string[]> = {
+  female: ['female', 'woman', 'she/her', 'she / her'],
+  male: ['male', 'man', 'he/him', 'he / him'],
+  asian: ['asian', 'asian (not hispanic or latino)', 'asian or pacific islander'],
+  black: ['black', 'black or african american', 'black (not hispanic or latino)'],
+  white: ['white', 'white (not hispanic or latino)', 'caucasian'],
+  hispanic: ['hispanic', 'hispanic or latino', 'hispanic/latino'],
+  'two or more': ['two or more races', 'multiracial', 'two or more'],
+  'i am not a protected veteran': ['i am not a protected veteran', 'not a veteran', 'none of the above'],
+  'no, i do not have a disability': [
+    'no, i do not have a disability',
+    'no disability',
+    "i don't have a disability",
+    'no, i do not have a disability and have not had one in the past',
+  ],
+  decline: ['decline to self-identify', "i don't wish to answer", 'prefer not to say', 'prefer not to answer', 'choose not to disclose'],
+};
+
+function normalizeAlias(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function matchEeocAliasOption(answer: string, options: string[], field: ScannedField): string | null {
+  if (!/gender|race|ethnicity|hispanic|latino|veteran|disability|eeoc/i.test(field.label)) {
+    return null;
+  }
+  const normalizedAnswer = normalizeAlias(answer);
+  for (const aliases of Object.values(EEOC_ALIASES)) {
+    if (!aliases.some((alias) => normalizeAlias(alias) === normalizedAnswer)) continue;
+    const matched = options.find((option) =>
+      aliases.some((alias) => normalizeAlias(alias) === normalizeAlias(option))
+    );
+    if (matched) return matched;
+  }
+  return null;
+}
+
 /**
  * Tier 2 Answer Synthesizer invoking OpenRouter, Google Gemini, or OpenAI.
  */
@@ -576,7 +613,7 @@ export class LLMSynthesizer {
     let answer = parsed.answer;
     let confidence = parsed.confidence;
 
-    if (/does not contain|no information|cannot determine|not (found|available|mentioned|provided|specified)|unable to (find|determine)|resume does not/i.test(answer)) {
+    if (/does not contain|no information|cannot determine|not (found|available|mentioned|provided|specified)|unable to (find|determine)|resume does not|i do not have (specific|direct|relevant|detailed)|i cannot provide|i don't have (specific|direct)|no specific (experience|information|detail)|not (explicitly|directly) mentioned|not specified in/i.test(answer)) {
       return unresolvedField(field);
     }
 
@@ -591,6 +628,9 @@ export class LLMSynthesizer {
       let matched = matchExactOption(answer, choiceOptions);
       if (!matched) {
         matched = matchFuzzyOption(answer, choiceOptions);
+      }
+      if (!matched) {
+        matched = matchEeocAliasOption(answer, choiceOptions, field);
       }
 
       if (!matched) {
