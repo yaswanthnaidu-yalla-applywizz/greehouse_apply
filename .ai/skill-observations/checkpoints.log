@@ -361,3 +361,4 @@
 2026-09-23 session-end: OTP_REQUIRED overwrite guard shipped; typecheck passed; no observations
 2026-09-23 no observations
 2026-09-23 session-end: choice option alignment and React dropdown verification validated; no new observations
+2026-09-23 session-end: OTP retry queue/session lifecycle and gate-specific failure UI implemented and typechecked; no new observations

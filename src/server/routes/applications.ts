@@ -7,6 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { isEligibleForSubmission } from '../../submission/submissionEligibilityGate.js';
 import {
   applyCreatedAtRangeFilter,
   getApplication,
@@ -587,14 +588,12 @@ applicationsRouter.post('/:id/retry', requireAuth, async (req: Request, res: Res
   const rawAppId = req.params.id;
   const appId = Array.isArray(rawAppId) ? rawAppId[0] : String(rawAppId || '');
   const jobUrl = (req.body?.jobUrl as string) || (req.query?.jobUrl as string) || (req.query?.job_url as string);
-  const retryableError = /otp|one.?time|security.?code|unresolved.?required/i;
-
   try {
     const application = await getApplication(appId, jobUrl);
     if (
       !application ||
       application.status !== 'FAILED' ||
-      !retryableError.test(application.error_message || '')
+      !isEligibleForSubmission(application).eligible
     ) {
       res.status(400).json({ error: 'This failure cannot be retried' });
       return;

@@ -372,6 +372,20 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         summary: result.summary,
       });
     } else if (result.status === 'OTP_REQUIRED') {
+      if (result.retryReason === 'OTP_FETCH_FAIL') {
+        const retry = await requeueApplicationForRetry(appId, result.retryReason, req.body?.jobUrl);
+        if (retry.requeued) {
+          res.status(202).json({
+            success: false,
+            status: 'QUEUED',
+            applicationId: result.applicationId,
+            retryCount: retry.retryCount,
+            message: `Retrying submission (${retry.retryCount}/3).`,
+            summary: result.summary,
+          });
+          return;
+        }
+      }
       res.status(202).json({
         success: false,
         status: result.status,

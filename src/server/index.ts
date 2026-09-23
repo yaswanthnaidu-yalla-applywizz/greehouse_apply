@@ -92,6 +92,7 @@ import {
 } from './managerTeamScope.js';
 import {
   computeEligibleForSubmissionDisplay,
+  isEligibleForSubmission,
   parseCsvJobScore,
 } from '../submission/submissionEligibilityGate.js';
 import { usersRouter } from './routes/users.js';
@@ -1579,6 +1580,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
             csv_job_score: application.csv_job_score,
             field_count: application.field_count ?? fieldsCount,
           }),
+          submissionGateBlocked: !isEligibleForSubmission({
+            csv_job_score: application.csv_job_score,
+            field_count: application.field_count ?? fieldsCount,
+          }).eligible,
         });
       }
     }

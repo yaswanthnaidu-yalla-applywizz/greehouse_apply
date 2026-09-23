@@ -1745,7 +1745,6 @@ export async function runLiveSubmit(
                 (currentStatus === 'APPLYING' || currentStatus === 'OTP_REQUIRED')
               ) {
                 await updateStatus(application.id, 'OTP_REQUIRED', {
-                  retry_count: retryCount,
                   error_message: `OTP fetch failed; retry ${retryCount}/3`,
                   job_url: application.job_url,
                 }).catch(() => {});
