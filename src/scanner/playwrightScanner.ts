@@ -390,7 +390,7 @@ export class PlaywrightScanner {
       await Promise.all(workerTasks);
     } finally {
       if (browser) {
-        await browser.close().catch(() => {});
+        await Promise.race([browser.close(), new Promise(r => setTimeout(r, 5000))]).catch(() => {});
       }
     }
 
