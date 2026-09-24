@@ -8,6 +8,8 @@ _Last updated: 2026-09-22_
 - OTP retry status hardening completed: Zoho OTP-fetch failures no longer overwrite `EMAIL_PROOF_PENDING` or `APPLIED` statuses.
 - Choice-answer hardening completed: resolver outputs are fail-closed and aligned to scanned option labels, while Greenhouse searchable selects click and verify live options instead of treating typed filter text as a selection.
 - OTP retry and failure UI hardening implemented: `OTP_REQUIRED` fetch failures now requeue through the submitter pool up to three attempts, and only authoritative submission-gate failures show the requirements panel; ordinary failures expose retry.
+- Added `[OTP TRACE]` and `[Gate TRACE]` production logs to make pause, Zoho fetch result, retry decision, session cleanup, queue requeue, retry exhaustion, and gate decisions observable.
+- Added `[Resolver Choice]` logs showing Tier 1 raw answers, scanned options, and canonical semantic match results (including fail-closed `match=NONE`).
 
 ## Docs
 

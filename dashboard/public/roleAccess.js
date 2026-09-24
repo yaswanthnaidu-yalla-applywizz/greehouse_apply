@@ -1,5 +1,5 @@
 (function (root) {
-  var WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  var SESSION_TTL_MS = 6 * 60 * 60 * 1000;
   var REFRESH_SKEW_MS = 2 * 60 * 1000;
   var AUTH_SKIP = /\/api\/auth\/(login|refresh|send-signup-otp|verify-signup-otp|register|verify-email)(?:\?|$)/;
   var MANAGER_VIEW_AS_OPERATOR_KEY = 'applywizz_manager_view_as_operator';
@@ -100,7 +100,7 @@
     }
     if (data.user) localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
     if (renewExpiry) {
-      var ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : WEEK_MS;
+      var ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : SESSION_TTL_MS;
       localStorage.setItem('applywizz_session_expires_at', String(Date.now() + ttlMs));
     }
     var email = (data.user && data.user.email) || data.email || sessionUserEmail();
@@ -140,7 +140,8 @@
   }
 
   function sessionCapExpired() {
-    return false;
+    var expiresAt = Number(localStorage.getItem('applywizz_session_expires_at') || 0);
+    return expiresAt > 0 && Date.now() >= expiresAt;
   }
 
   function tokenExpiryMs(token) {
@@ -167,6 +168,10 @@
 
   function refreshSession() {
     if (refreshInFlight) return refreshInFlight;
+    if (sessionCapExpired()) {
+      clearSession();
+      return Promise.resolve(false);
+    }
     var refreshToken = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     if (!refreshToken) return Promise.resolve(false);
 
@@ -181,7 +186,7 @@
             clearSession();
             return false;
           }
-          persistSession(data, true);
+          persistSession(data, false);
           return true;
         });
       })
@@ -199,6 +204,10 @@
   function ensureSession() {
     if (pageLoadRefreshPromise) return pageLoadRefreshPromise;
     if (refreshInFlight) return refreshInFlight;
+    if (sessionCapExpired()) {
+      redirectToLogin();
+      return Promise.resolve(false);
+    }
     if (!needsRefresh()) return Promise.resolve(true);
     return refreshSession();
   }
@@ -354,14 +363,11 @@
 
   initPageLoadRefresh();
 
-  var REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+  var REFRESH_INTERVAL_MS = 30 * 60 * 1000;
   setInterval(function () {
     refreshSession().then(function (ok) {
       if (!ok) {
-        var refresh = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
-        if (!refresh) {
-          redirectToLogin();
-        }
+        redirectToLogin();
       }
     });
   }, REFRESH_INTERVAL_MS);

@@ -1039,3 +1039,42 @@ class ZohoReaderService {
 
 export const zohoReader = new ZohoReaderService();
 export default zohoReader;
+
+export class ZohoReaderPool {
+  private readers: ZohoReaderService[] = [];
+  private available: ZohoReaderService[] = [];
+  private waiters: Array<(reader: ZohoReaderService) => void> = [];
+
+  public async init(): Promise<void> {
+    if (this.readers.length > 0) return;
+    const size = config.ZOHO_OTP_WORKER_POOL_SIZE;
+    this.readers = Array.from({ length: size }, () => new ZohoReaderService());
+    await Promise.all(this.readers.map((reader) => reader.init()));
+    this.available = [...this.readers];
+  }
+
+  public acquireReader(): Promise<ZohoReaderService> {
+    const reader = this.available.shift();
+    if (reader) return Promise.resolve(reader);
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  public releaseReader(reader: ZohoReaderService): void {
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter(reader);
+    } else if (this.readers.includes(reader)) {
+      this.available.push(reader);
+    }
+  }
+
+  public async stop(): Promise<void> {
+    const readers = this.readers;
+    this.readers = [];
+    this.available = [];
+    this.waiters = [];
+    await Promise.all(readers.map((reader) => reader.cleanup()));
+  }
+}
+
+export const zohoReaderPool = new ZohoReaderPool();

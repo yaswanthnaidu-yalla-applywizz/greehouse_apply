@@ -45,6 +45,7 @@ export type ApplicationStatus =
   | 'APPLYING'
   | 'APPLIED'
   | 'FAILED'
+  | 'RETRY'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
   | 'CAPTCHA_TIMEOUT'
@@ -54,12 +55,41 @@ export type ApplicationStatus =
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
 
-export const COMPLETED_STATUSES: readonly ApplicationStatus[] = [
+export const SUBMITTED_STATUSES: ApplicationStatus[] = [
   'QUEUED',
   'APPLYING',
   'APPLIED',
+  'FAILED',
+  'RETRY',
+  'OTP_REQUIRED',
+  'CAPTCHA_TIMEOUT',
+  'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
 ];
+
+export const FAILED_EQUIVALENT_STATUSES: ApplicationStatus[] = ['FAILED', 'RETRY', 'CAPTCHA_TIMEOUT'];
+
+export const IN_FLIGHT_STATUSES: ApplicationStatus[] = [
+  'QUEUED',
+  'APPLYING',
+  'OTP_REQUIRED',
+  'CAPTCHA_REQUIRED',
+  'EMAIL_PROOF_PENDING',
+];
+
+export const QUEUE_DONE_STATUSES: ApplicationStatus[] = [
+  'APPLIED',
+  'FAILED',
+  'RETRY',
+  'EXPIRED',
+  'OTP_REQUIRED',
+  'CAPTCHA_TIMEOUT',
+  'CAPTCHA_REQUIRED',
+  'EMAIL_PROOF_PENDING',
+  'SKIPPED',
+];
+
+export const COMPLETED_STATUSES = IN_FLIGHT_STATUSES;
 
 export interface EmailProofJson {
   from: string;
@@ -128,7 +158,7 @@ export async function countSubmittedApplicationsSince(
     let query = getDbClient()
       .from('gh_candidate_applications')
       .select('id', { count: 'exact', head: true })
-      .neq('status', 'READY_FOR_REVIEW');
+      .in('status', SUBMITTED_STATUSES);
     if (startIso) query = query.or(`submitted_at.gte.${startIso},and(submitted_at.is.null,updated_at.gte.${startIso})`);
     if (endIso) query = query.or(`submitted_at.lte.${endIso},and(submitted_at.is.null,updated_at.lte.${endIso})`);
     if (emails) query = query.in('assigned_ca_email', emails);
@@ -189,7 +219,7 @@ export async function countSubmittedApplicationsByOperatorSince(
     let query = getDbClient()
       .from('gh_candidate_applications')
       .select('assigned_ca_email')
-      .neq('status', 'READY_FOR_REVIEW')
+      .in('status', SUBMITTED_STATUSES)
       .gte('submitted_at', startIso);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { data, error } = await query;
@@ -674,6 +704,45 @@ export async function countOperatorWorkloadByProfileCaEmail(
     counts.set(caEmail, (counts.get(caEmail) || 0) + 1);
   }
   return counts;
+}
+
+export interface RequiredFieldFailuresByCA {
+  ca_email: string;
+  failure_count: number;
+  application_ids: string[];
+}
+
+export async function getRequiredFieldFailuresByCA(): Promise<RequiredFieldFailuresByCA[]> {
+  if (!isSupabaseConfigured()) return [];
+
+  const { data, error } = await getDbClient()
+    .from('gh_candidate_applications')
+    .select('id, assigned_ca_email')
+    .not('assigned_ca_email', 'is', null)
+    .or('error_message.ilike.%required%,error_message.ilike.%unresolved%');
+
+  if (error) {
+    log.warn(`[DB] getRequiredFieldFailuresByCA failed: ${error.message}`);
+    return [];
+  }
+
+  const grouped = new Map<string, string[]>();
+  for (const row of data || []) {
+    const caEmail = String(row.assigned_ca_email || '').trim().toLowerCase();
+    if (!caEmail) continue;
+    const applicationId = String(row.id || '').trim();
+    const ids = grouped.get(caEmail) || [];
+    if (applicationId) ids.push(applicationId);
+    grouped.set(caEmail, ids);
+  }
+
+  return Array.from(grouped.entries())
+    .map(([ca_email, application_ids]) => ({
+      ca_email,
+      failure_count: application_ids.length,
+      application_ids,
+    }))
+    .sort((a, b) => b.failure_count - a.failure_count);
 }
 
 /**
@@ -1295,7 +1364,7 @@ export async function retryFailedApplication(
           .eq('applywizz_id', application.applywizz_id)
           .eq('job_url', application.job_url);
       }
-      const result = await query.eq('status', 'FAILED').select('id');
+      const result = await query.eq('status', 'RETRY').select('id');
       updated = !result.error && Array.isArray(result.data) && result.data.length > 0;
       if (result.error) {
         log.warn(`[DB] Operator retry failed for ${application.id || application.applywizz_id}: ${result.error.message}`);
@@ -1333,7 +1402,7 @@ export async function requeueApplicationForRetry(
 
   const nextRetryCount = currentRetryCount + 1;
   const payload = {
-    status: 'QUEUED' as const,
+    status: 'RETRY' as const,
     retry_count: nextRetryCount,
     submission_order: nextRetryCount,
     error_message: reason,
@@ -1456,7 +1525,7 @@ export async function getSubmissionOutcomeCounts(options?: {
     if (seen.has(key)) continue;
     seen.add(key);
     if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') successfulApplications++;
-    else if (row.status === 'FAILED' || row.status === 'CAPTCHA_TIMEOUT') failedApplications++;
+    else if (FAILED_EQUIVALENT_STATUSES.includes(row.status)) failedApplications++;
   }
   return { successfulApplications, failedApplications };
 }
@@ -1647,22 +1716,9 @@ export type CandidateQueueStatus =
   | 'IN_PROGRESS'
   | 'DONE';
 
-const QUEUE_STATUS_IN_PROGRESS: ReadonlySet<ApplicationStatus> = new Set([
-  'APPROVED',
-  'QUEUED',
-  'APPLYING',
-]);
+const QUEUE_STATUS_IN_PROGRESS: ReadonlySet<ApplicationStatus> = new Set(['APPROVED', ...IN_FLIGHT_STATUSES]);
 
-const QUEUE_STATUS_DONE: ReadonlySet<ApplicationStatus> = new Set([
-  'APPLIED',
-  'FAILED',
-  'EXPIRED',
-  'OTP_REQUIRED',
-  'CAPTCHA_TIMEOUT',
-  'CAPTCHA_REQUIRED',
-  'EMAIL_PROOF_PENDING',
-  'SKIPPED',
-]);
+const QUEUE_STATUS_DONE: ReadonlySet<ApplicationStatus> = new Set(QUEUE_DONE_STATUSES);
 
 /**
  * Derives dashboard queue_status for one candidate from all candidate_applications statuses.
@@ -1890,6 +1946,9 @@ export async function enqueueApplication(
   assertEligibleForSubmission(app);
 
   const previousStatus = app.status || 'READY_FOR_REVIEW';
+  if (previousStatus === 'RETRY') {
+    throw new Error('Application is awaiting explicit operator retry and cannot be submitted again.');
+  }
 
   // 1. Calculate next global submission_order
   let maxOrder = 0;
@@ -1900,7 +1959,7 @@ export async function enqueueApplication(
       const { data, error } = await supabase
         .from('gh_candidate_applications')
         .select('submission_order')
-        .in('status', ['QUEUED', 'APPLYING', 'APPLIED', 'FAILED'])
+        .in('status', ['QUEUED', 'APPLYING', 'APPLIED', 'FAILED', 'RETRY'])
         .not('submission_order', 'is', null)
         .order('submission_order', { ascending: false })
         .limit(1);
@@ -2088,7 +2147,7 @@ export interface NotificationItem {
   companyName: string;
   jobTitle: string;
   jobUrl: string;
-  status: 'APPLYING' | 'APPLIED' | 'FAILED';
+  status: 'APPLYING' | 'APPLIED' | 'FAILED' | 'RETRY';
   reason?: string | null;
   proofWebUrl?: string | null;
   proofFailedUrl?: string | null;
@@ -2179,7 +2238,7 @@ export async function getRecentNotifications(
       let query = supabase
         .from('gh_candidate_applications')
         .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, proof_web_url, proof_failed_url, updated_at, submitted_at, created_at')
-        .in('status', ['APPLYING', 'APPLIED', 'FAILED'])
+        .in('status', ['APPLYING', 'APPLIED', 'FAILED', 'RETRY'])
         .neq('applywizz_id', 'AWL-YASWANTH');
 
       if (allowedSet && filter?.allowedCandidateIds) {
@@ -2208,7 +2267,7 @@ export async function getRecentNotifications(
             companyName: row.company_name || 'Greenhouse Company',
             jobTitle: row.job_title || 'Job Opening',
             jobUrl: row.job_url,
-            status: row.status as 'APPLYING' | 'APPLIED' | 'FAILED',
+            status: row.status as 'APPLYING' | 'APPLIED' | 'FAILED' | 'RETRY',
             reason: row.error_message || null,
             proofWebUrl: row.proof_web_url || null,
             proofFailedUrl: row.proof_failed_url || null,
@@ -2224,7 +2283,7 @@ export async function getRecentNotifications(
   // Incorporate in-memory applications
   for (const app of memoryApplications.values()) {
     if (
-      (app.status === 'APPLYING' || app.status === 'APPLIED' || app.status === 'FAILED') &&
+      (app.status === 'APPLYING' || app.status === 'APPLIED' || app.status === 'FAILED' || app.status === 'RETRY') &&
       app.applywizz_id !== 'AWL-YASWANTH'
     ) {
       if (allowedSet && !allowedSet.has(app.applywizz_id.toUpperCase())) {
@@ -2251,7 +2310,7 @@ export async function getRecentNotifications(
           companyName: app.company_name || 'Greenhouse Company',
           jobTitle: app.job_title || 'Job Opening',
           jobUrl: app.job_url,
-          status: app.status as 'APPLYING' | 'APPLIED' | 'FAILED',
+          status: app.status as 'APPLYING' | 'APPLIED' | 'FAILED' | 'RETRY',
           reason: app.error_message || null,
           proofWebUrl: app.proof_web_url || null,
           proofFailedUrl: app.proof_failed_url || null,

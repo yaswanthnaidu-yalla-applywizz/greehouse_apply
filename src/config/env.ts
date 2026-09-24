@@ -141,6 +141,15 @@ const envSchema = z.object({
   /** Zoho Mail Reader polling interval in milliseconds (default: 5000) */
   ZOHO_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
 
+  /** Parallel Zoho Reader browser instances reserved for OTP lookup */
+  ZOHO_OTP_WORKER_POOL_SIZE: z.coerce.number().int().positive().default(15),
+
+  /** OTP resolution service poll interval in milliseconds */
+  OTP_RESOLUTION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(10000),
+
+  /** Per-attempt OTP lookup timeout in milliseconds */
+  OTP_ATTEMPT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+
   /** Azure Communication / Microsoft 365 Client ID */
   AZURE_CLIENT_ID: z.string().optional(),
 

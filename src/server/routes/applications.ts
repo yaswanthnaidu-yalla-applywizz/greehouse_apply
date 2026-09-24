@@ -19,6 +19,7 @@ import {
   serializeApplicationDto,
   hydrateAndPersistApplicationFields,
   retryFailedApplication,
+  IN_FLIGHT_STATUSES,
   type ApplicationRow,
   type ApplicationStatus,
 } from '../../db/applications.js';
@@ -85,14 +86,6 @@ export async function broadcastApplicationStatusChange(event: {
 export const applicationsRouter = Router();
 
 /** Statuses where a worker already owns the application; requeueing would duplicate the submission. */
-const IN_FLIGHT_STATUSES = new Set<ApplicationStatus>([
-  'QUEUED',
-  'APPLYING',
-  'OTP_REQUIRED',
-  'CAPTCHA_REQUIRED',
-  'EMAIL_PROOF_PENDING',
-]);
-
 /**
  * PATCH /api/applications/:id/fields/:fieldId
  * Modifies an individual form field answer.
@@ -347,7 +340,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     let effectiveStatus = status as ApplicationStatus;
     const currentStatus = (application?.status || '') as ApplicationStatus;
     if (status === 'QUEUED' || status === 'APPLYING') {
-      if (IN_FLIGHT_STATUSES.has(currentStatus)) {
+      if (IN_FLIGHT_STATUSES.includes(currentStatus)) {
         // The dashboard echoes the status it polled, which would otherwise requeue a
         // submission a worker is still running (duplicate submissions).
         log.info(
@@ -592,7 +585,7 @@ applicationsRouter.post('/:id/retry', requireAuth, async (req: Request, res: Res
     const application = await getApplication(appId, jobUrl);
     if (
       !application ||
-      application.status !== 'FAILED' ||
+      application.status !== 'RETRY' ||
       !isEligibleForSubmission(application).eligible
     ) {
       res.status(400).json({ error: 'This failure cannot be retried' });

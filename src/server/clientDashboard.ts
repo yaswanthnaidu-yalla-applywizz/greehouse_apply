@@ -6,6 +6,7 @@ import {
   rowCreatedAtInRange,
   getISTDateRangeUtc,
   hydrateApplicationProofUrls,
+  SUBMITTED_STATUSES,
   type ApplicationRow,
   type CreatedAtRangeFilter,
 } from '../db/applications.js';
@@ -313,7 +314,7 @@ export async function loadClientDashboard(options: {
     row.assigned_ca = profileCa || row.assigned_ca;
 
     const isPending = application.status === 'READY_FOR_REVIEW';
-    const isSubmitted = application.status !== 'READY_FOR_REVIEW';
+    const isSubmitted = SUBMITTED_STATUSES.includes(application.status);
     const isApplied = application.status === 'APPLIED' && isSubmittedAtInRange;
     const isFailed = application.status === 'FAILED' || application.status === 'CAPTCHA_TIMEOUT';
 

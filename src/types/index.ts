@@ -259,6 +259,8 @@ export interface ResolvedField {
   label: string;
   /** The populated answer value (or selected option) */
   value: string;
+  /** Scanned form options for choice controls */
+  options?: string[];
   /** Granular source attribution tag */
   source: SourceTag;
   /** Tier that resolved the answer (1-5), or null if unresolved */
@@ -282,6 +284,7 @@ export type ApplicationStatus =
   | 'APPLYING'
   | 'APPLIED'
   | 'FAILED'
+  | 'RETRY'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
   | 'CAPTCHA_TIMEOUT'

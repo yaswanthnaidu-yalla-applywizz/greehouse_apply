@@ -1,4 +1,5 @@
 import { getDbClient } from './client.js';
+import { FAILED_EQUIVALENT_STATUSES, SUBMITTED_STATUSES } from './applications.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Stats Rollup');
@@ -56,13 +57,13 @@ export async function runStatsRollup(): Promise<void> {
     if (row.status === 'SKIPPED') continue; // Do not count SKIPPED in total
     total_applications++;
 
-    if (row.status !== 'READY_FOR_REVIEW') {
+    if (SUBMITTED_STATUSES.includes(row.status)) {
       submitted_count++;
     }
     if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') {
       applied_count++;
     }
-    if (row.status === 'FAILED' || row.status === 'CAPTCHA_TIMEOUT') {
+    if (FAILED_EQUIVALENT_STATUSES.includes(row.status)) {
       failed_count++;
     }
   }
@@ -298,9 +299,9 @@ export async function queryRollupStats(startIso: string, endIso: string): Promis
     for (const row of liveRows || []) {
       if (row.status === 'SKIPPED') continue;
       stats.total_applications++;
-      if (row.status !== 'READY_FOR_REVIEW') stats.submitted_count++;
+      if (SUBMITTED_STATUSES.includes(row.status)) stats.submitted_count++;
       if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') stats.applied_count++;
-      if (row.status === 'FAILED' || row.status === 'CAPTCHA_TIMEOUT') stats.failed_count++;
+      if (FAILED_EQUIVALENT_STATUSES.includes(row.status)) stats.failed_count++;
     }
   }
 

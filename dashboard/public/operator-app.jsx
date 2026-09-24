@@ -721,6 +721,9 @@
       const isUnresolved = field.source === 'unresolved';
       const fieldType = String(field.field_type || field.type || '').toLowerCase();
       const fieldOptions = field.options && field.options.length > 0 ? field.options : null;
+      const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions;
+      const isCheckbox = fieldType === 'checkbox';
+      const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
       // Derive quick-pick options for unresolved fields: use field.options, or Yes/No for boolean-type labels
       const quickPickOptions = (() => {
         if (!isUnresolved) return null;
@@ -826,7 +829,50 @@
 
           {isEditing ? (
             <div className="relative mt-1">
-              {isTextarea ? (
+              {isChoiceField ? (
+                <select
+                  ref={inputRef}
+                  value={value}
+                  onChange={(e) => {
+                    setShowHint(false);
+                    setValue(e.target.value);
+                  }}
+                  disabled={isSaving || isConfirming}
+                  className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
+                >
+                  <option value="">Select an option...</option>
+                  {fieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              ) : isCheckbox ? (
+                fieldOptions ? (
+                  <div className="space-y-1.5">
+                    {fieldOptions.map((option) => (
+                      <label key={option} className="flex items-center gap-2 text-xs font-mono">
+                        <input
+                          type="checkbox"
+                          checked={checkboxValues.includes(option)}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...checkboxValues, option]
+                              : checkboxValues.filter((selected) => selected !== option);
+                            setValue(next.join(', '));
+                          }}
+                          disabled={isSaving || isConfirming}
+                        />
+                        {option}
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <input
+                    ref={inputRef}
+                    type="checkbox"
+                    checked={['true', 'yes', 'on', '1'].includes(value.toLowerCase())}
+                    onChange={(e) => setValue(e.target.checked ? 'true' : 'false')}
+                    disabled={isSaving || isConfirming}
+                  />
+                )
+              ) : isTextarea ? (
                 <textarea
                   ref={inputRef}
                   value={value}
@@ -1637,10 +1683,10 @@
               const initial = cardCompany ? cardCompany[0].toUpperCase() : 'G';
               const inProgress = CARD_IN_FLIGHT_STATUSES.has(cardStatus);
               const submitted = CARD_SUBMITTED_STATUSES.has(cardStatus);
-              const failed = cardStatus === 'FAILED';
+              const failed = cardStatus === 'FAILED' || cardStatus === 'RETRY';
               const retryCount = Number(job.retryCount ?? job.retry_count ?? 0);
               const retryableFailure =
-                failed &&
+                cardStatus === 'FAILED' &&
                 retryCount < 3 &&
                 job.submissionGateBlocked !== true;
               const expiredOrSkipped = cardStatus === 'EXPIRED' || cardStatus === 'SKIPPED';
@@ -1702,9 +1748,14 @@
                           Submitted
                         </span>
                       )}
-                      {failed && (
+                      {cardStatus === 'FAILED' && (
                         <span className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
                           ❌ Failed
+                        </span>
+                      )}
+                      {cardStatus === 'RETRY' && (
+                        <span className="text-[10px] font-mono text-[#9A3412] font-bold bg-[#FED7AA] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                          Retry
                         </span>
                       )}
                       {retryableFailure && (
@@ -1866,7 +1917,7 @@
       ).trim();
       const retryCount = Number(application?.retry_count ?? application?.retryCount ?? 0);
       const isRetryableFailure =
-        currentStatus === 'FAILED' &&
+        (currentStatus === 'FAILED' || currentStatus === 'RETRY') &&
         retryCount < 3 &&
         application?.submissionGateBlocked !== true;
       const isGateBlockedFailure =
@@ -2245,7 +2296,7 @@
                 This application does not fall within our requirements to apply today
               </p>
             </div>
-          ) : currentStatus === 'FAILED' ? (
+          ) : currentStatus === 'FAILED' || currentStatus === 'RETRY' ? (
             <div className="mb-3 bg-[#FEE2E2] border-2 border-[#991B1B] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#991B1B] text-[#991B1B]">
               <p className="text-sm font-bold font-mono break-words">
                 {applicationError || 'Submission failed.'}

@@ -121,6 +121,12 @@ interface IngestStatus {
   stopEnabled?: boolean;
 }
 
+interface CAFailureStat {
+  ca_email: string;
+  failure_count: number;
+  application_ids: string[];
+}
+
 const EmailProofModal: React.FC<{ proof: EmailProofData | null; onClose: () => void }> = ({ proof, onClose }) => {
   if (!proof) return null;
   return (
@@ -300,6 +306,7 @@ export const AdminDashboard: React.FC = () => {
   const [activity, setActivity] = useState<AdminActivityEvent[]>([]);
   const [activityWarning, setActivityWarning] = useState<string>('');
   const [system, setSystem] = useState<AdminSystemStatus | null>(null);
+  const [caFailureStats, setCaFailureStats] = useState<CAFailureStat[]>([]);
   const [ingestRun, setIngestRun] = useState<IngestStatus | null>(null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
@@ -351,6 +358,7 @@ export const AdminDashboard: React.FC = () => {
       if (tab === 'system') {
         const payload = await loadJson<AdminSystemStatus>('/api/admin/system-status');
         setSystem(payload);
+        setCaFailureStats(await loadJson<CAFailureStat[]>('/api/admin/ca-failure-stats'));
       }
       try {
         const status = await loadJson<IngestStatus>('/api/admin/ingest-status');
@@ -759,6 +767,30 @@ export const AdminDashboard: React.FC = () => {
               <p>Queue: {system.queue?.queued ?? 0} queued · {system.queue?.applying ?? 0} applying · {system.queue?.stuck ?? 0} stuck</p>
               <p className="mt-1">Ingest: {ingestRun?.running ? 'running' : ingestRun?.error ? `failed — ${ingestRun.error}` : ingestRun?.message || 'idle'}</p>
               <p className="mt-1">Workers: {system.workersRunning ? 'running' : 'stopped'}</p>
+            </div>
+            <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
+              <div className="p-3 border-b-2 border-[#1A1A2E]">
+                <p className="font-black">Required Field Failures by CA</p>
+                <p className="text-[#64748B]">Click a row to filter failed applications.</p>
+              </div>
+              <table className="w-full text-left text-xs">
+                <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
+                  <tr><th className="p-3 font-black uppercase">CA Email</th><th className="p-3 font-black uppercase">Failure Count</th></tr>
+                </thead>
+                <tbody>
+                  {caFailureStats.map((row) => (
+                    <tr
+                      key={row.ca_email}
+                      className="border-b border-[#1A1A2E]/20 hover:bg-[#FFF5EB] cursor-pointer"
+                      onClick={() => { setAppSearch(row.ca_email); setAppStatus('FAILED'); setTab('applications'); }}
+                    >
+                      <td className="p-3 font-mono">{row.ca_email}</td>
+                      <td className="p-3 font-mono font-black">{row.failure_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!caFailureStats.length && <p className="p-4 text-center text-[#64748B]">No required-field failures found.</p>}
             </div>
           </div>
         )}

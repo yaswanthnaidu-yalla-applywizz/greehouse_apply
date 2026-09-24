@@ -191,6 +191,10 @@ export class SubmitterPool {
         const eligibility = isEligibleForSubmission(application);
         if (!eligibility.eligible) {
           const message = eligibility.reason || 'Submission gate blocked this application.';
+          log.warn(
+            `[Gate TRACE] application=${applicationId} blocked=true score=${application.csv_job_score ?? 'missing'} ` +
+              `field_count=${application.field_count ?? 'missing'} reason="${message}"`
+          );
           await updateStatus(applicationId, 'READY_FOR_REVIEW', {
             error_message: message,
             job_url: application.job_url,
@@ -198,6 +202,10 @@ export class SubmitterPool {
           work.reject(new SubmissionEligibilityBlockedError(message));
           continue;
         }
+        log.info(
+          `[Gate TRACE] application=${applicationId} blocked=false score=${application.csv_job_score ?? 'missing'} ` +
+            `field_count=${application.field_count ?? 'missing'}`
+        );
 
         await updateStatus(applicationId, 'APPLYING', {
           job_url: application.job_url,
@@ -214,25 +222,16 @@ export class SubmitterPool {
         if (result.status === 'APPLIED') {
           log.info(`[API] Status → APPLIED (application ${applicationId})`);
           await logQueueStatusChange(applicationId, 'APPLYING', 'APPLIED');
-        } else if (result.status === 'OTP_REQUIRED' && getRetryReason(result)) {
-          const reason = getRetryReason(result);
-          const retry = await requeueApplicationForRetry(applicationId, reason!, application.job_url);
-          if (retry.requeued) {
-            await logQueueStatusChange(applicationId, 'OTP_REQUIRED', 'QUEUED');
-          } else {
-            await updateStatus(applicationId, 'FAILED', {
-              error_message: result.errorMessage || 'OTP fetch retry limit reached.',
-              job_url: application.job_url,
-            });
-            await logQueueStatusChange(applicationId, 'OTP_REQUIRED', 'FAILED');
-            this.emitFailure(application, result.errorMessage || reason!, result);
-          }
+        } else if (result.status === 'OTP_REQUIRED') {
+          log.info(
+            `[OTP] handed to resolution service (application ${applicationId})`
+          );
         } else if (result.status === 'FAILED') {
           const reason = getRetryReason(result);
           if (reason) {
             const retry = await requeueApplicationForRetry(applicationId, reason, application.job_url);
             if (retry.requeued) {
-              await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
+              await logQueueStatusChange(applicationId, 'APPLYING', 'RETRY');
             } else {
               await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
               this.emitFailure(application, result.errorMessage || reason, result);
