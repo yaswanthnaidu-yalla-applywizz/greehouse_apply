@@ -388,14 +388,7 @@ export class PlaywrightScanner {
           }
         })();
 
-        workerTasks.push(
-          Promise.race([
-            task,
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error(`Worker ${workerId} timed out after 30000ms`)), 30000)
-            ),
-          ])
-        );
+        workerTasks.push(task);
       }
 
       await Promise.all(workerTasks);
