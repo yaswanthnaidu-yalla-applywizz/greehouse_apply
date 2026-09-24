@@ -369,7 +369,17 @@ export class PlaywrightScanner {
                 }
               } finally {
                 log.info(`[Playwright Scanner] worker=${workerId} page.close start job=${jobIndex}`);
-                await page.close().catch(() => {});
+                await Promise.race([
+                  page.close(),
+                  new Promise<void>((_, reject) =>
+                    setTimeout(() => reject(new Error('page.close timed out after 5000ms')), 5000)
+                  ),
+                ]).catch((err) => {
+                  log.error(
+                    `[Playwright Scanner] worker=${workerId} page.close failed job=${jobIndex}`,
+                    err
+                  );
+                });
                 log.info(`[Playwright Scanner] worker=${workerId} page.close complete job=${jobIndex}`);
               }
 
