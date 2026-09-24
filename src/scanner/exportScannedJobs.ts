@@ -109,25 +109,21 @@ export async function exportScannedJobs(
         updated_at: new Date().toISOString(),
       }));
 
-      try {
-        const { error } = await supabase
-          .from('gh_scanned_job_templates')
-          .upsert(rows, { onConflict: 'job_url' })
-          .abortSignal(AbortSignal.timeout(30000));
+      const { error } = await supabase
+        .from('gh_scanned_job_templates')
+        .upsert(rows, { onConflict: 'job_url' })
+        .abortSignal(AbortSignal.timeout(30000));
 
-        if (error) {
-          log.error(
-            `[Export Scanned Jobs] ⚠️ Could not upsert batch ${batchNum}/${totalBatches} to scanned_job_templates: ${error.message}`
-          );
-        } else {
-          persisted += chunk.length;
-          log.info(`[Scanner] upserted batch ${batchNum}/${totalBatches}`);
-        }
-      } catch (err: any) {
+      if (error) {
         log.error(
-          `[Export Scanned Jobs] ⚠️ Could not upsert batch ${batchNum}/${totalBatches} to scanned_job_templates: ${err?.message || err}`
+          `[Export Scanned Jobs] ⚠️ Could not upsert batch ${batchNum}/${totalBatches} to scanned_job_templates`,
+          error
         );
+        throw error;
       }
+
+      persisted += chunk.length;
+      log.info(`[Scanner] upserted batch ${batchNum}/${totalBatches}`);
     }
     if (persisted === 0) {
       throw new Error(

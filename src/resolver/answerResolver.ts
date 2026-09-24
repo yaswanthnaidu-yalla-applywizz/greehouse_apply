@@ -717,6 +717,7 @@ export class AnswerResolver {
     let resolvedCount = 0;
     let totalSuccessful = 0;
     let totalUnsuccessful = 0;
+    const noTemplateLoggedUrls = new Set<string>();
 
     const processResolveTask = async (): Promise<void> => {
       while (true) {
@@ -744,9 +745,12 @@ export class AnswerResolver {
 
         if (!template) {
           stats.noTemplate++;
-          log.info(
-            `[Resolver] ⏭️ Skipping candidate_applications upsert for ${seg.applywizzId} ${persistJobUrl} — no scan template`
-          );
+          if (!noTemplateLoggedUrls.has(persistJobUrl)) {
+            noTemplateLoggedUrls.add(persistJobUrl);
+            log.info(
+              `[Resolver] ⏭️ Skipping candidate_applications upsert for ${seg.applywizzId} ${persistJobUrl} — no scan template`
+            );
+          }
           continue;
         }
 
