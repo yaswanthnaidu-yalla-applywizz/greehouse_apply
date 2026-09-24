@@ -6,6 +6,7 @@ import { Router, type Request, type Response } from 'express';
 import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
+  getRequiredFieldFailuresByCA,
   
   
   getDashboardApplicationMetrics,
@@ -341,9 +342,19 @@ adminDashboardRouter.get('/system-status', async (_req: Request, res: Response):
       ingest: snapshot.ingest,
       workersRunning: snapshot.workers.running,
     });
+
   } catch (error) {
     log.error('[Admin] system-status failed:', error);
     res.status(500).json({ error: 'Unable to load system status.' });
+  }
+});
+
+adminDashboardRouter.get('/ca-failure-stats', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    res.json(await getRequiredFieldFailuresByCA());
+  } catch (error) {
+    log.error('[Admin] CA failure stats failed:', error);
+    res.status(500).json({ error: 'Unable to load CA failure stats.' });
   }
 });
 

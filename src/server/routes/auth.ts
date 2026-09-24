@@ -115,8 +115,8 @@ export function emailsForRole(role: Exclude<AppRole, 'operator'>): string[] {
     .map(([email]) => email);
 }
 
-/** Dashboard session stays valid for 7 days via refresh_token rotation. */
-export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
+/** Dashboard session stays valid for 6 hours via refresh_token rotation. */
+export const SESSION_TTL_SECONDS = 60 * 60 * 6;
 
 function tokensFromAuthPayload(
   payload: {
@@ -1003,7 +1003,7 @@ authRouter.post('/hydrate-admin', async (req: Request, res: Response): Promise<v
 
 /**
  * POST /api/auth/refresh
- * Rotates a Supabase refresh_token into a new access token. Session cap is 7 days (client).
+ * Rotates a Supabase refresh_token into a new access token. Session cap is 6 hours (client).
  */
 authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> => {
   const refreshToken =

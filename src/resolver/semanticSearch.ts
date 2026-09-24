@@ -7,6 +7,7 @@ import { LRUCache } from 'lru-cache';
 import config from '../config/env.js';
 import { supabase } from '../db/client.js';
 import { createLogger } from '../utils/logger.js';
+import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 const log = createLogger('Semantic');
 
@@ -100,6 +101,7 @@ export async function embedText(text: string): Promise<number[] | null> {
  * @param questionLabel - The question label to match.
  * @param applywizzId - Candidate identifier.
  * @param fieldType - Question input type.
+ * @param options - Current scanned options for choice fields.
  * @param threshold - Minimum similarity threshold (default: 0.82).
  * @returns Matching answer with confidence score, or null if no match meets threshold.
  */
@@ -107,6 +109,7 @@ export async function findSemanticMatch(
   questionLabel: string,
   applywizzId: string,
   _fieldType: string,
+  options?: string[],
   threshold: number = 0.82
 ): Promise<SemanticMatchResult | null> {
   lastSemanticScore = 0;
@@ -133,6 +136,19 @@ export async function findSemanticMatch(
       const similarity = Number(top.similarity ?? 0);
       lastSemanticScore = similarity;
       if (similarity >= threshold) {
+        if (
+          options &&
+          options.length > 0 &&
+          ['select', 'radio', 'checkbox'].includes(_fieldType)
+        ) {
+          const aligned = matchChoiceOption(String(top.value), options);
+          if (!aligned) return null;
+          return {
+            value: aligned,
+            source: 'semantic',
+            confidence: similarity,
+          };
+        }
         return {
           value: top.value,
           source: 'semantic',

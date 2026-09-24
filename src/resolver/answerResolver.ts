@@ -135,7 +135,9 @@ export function resolvePreTierField(
   if (/country/i.test(field.label)) {
     const targetVal = 'United States';
     const finalVal = alignResolvedChoiceOrNull(field, targetVal);
-    if (!finalVal && (field.type === 'select' || field.type === 'radio')) return null;
+    if (!finalVal && (field.type === 'select' || field.type === 'radio')) {
+      return null;
+    }
     const resolvedVal = finalVal || targetVal;
     log.info(`[Resolver] ✅ T1 ${field.label} → "${resolvedVal}"`);
     return { ...base, value: resolvedVal };
@@ -346,7 +348,12 @@ export class AnswerResolver {
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
-    const semanticMatch = await findSemanticMatch(field.label, applywizzId, field.type);
+    const semanticMatch = await findSemanticMatch(
+      field.label,
+      applywizzId,
+      field.type,
+      field.options
+    );
     if (semanticMatch) {
       log.info(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
       return {
@@ -501,7 +508,12 @@ export class AnswerResolver {
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
-    const semanticMatch = await findSemanticMatch(field.label, applywizzId, field.type);
+    const semanticMatch = await findSemanticMatch(
+      field.label,
+      applywizzId,
+      field.type,
+      field.options
+    );
     if (semanticMatch) {
       log.info(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
       return {
@@ -833,15 +845,6 @@ export class AnswerResolver {
           }
         }
 
-        if (!compact) {
-          const counts = { supabase: 0, resume: 0, semantic: 0, fuzzy: 0, llm: 0, unresolved: 0, other: 0 };
-          for (const f of app.resolvedFields) {
-            counts[resolutionSourceKey(f)]++;
-          }
-          log.info(
-            `[Answer Resolver] [${resolvedCount}] ✅ ${app.candidateName} -> ${app.companyName} [Supabase:${counts.supabase} Resume:${counts.resume} Semantic:${counts.semantic} Fuzzy:${counts.fuzzy} LLM:${counts.llm} Unresolved:${counts.unresolved}]`
-          );
-        }
       }
     };
 
@@ -849,11 +852,26 @@ export class AnswerResolver {
 
     for (const seg of segments) {
       const stats = segStats.get(seg.applywizzId)!;
-      if (compact && stats.total > 0) {
-        log.info(
-          `[Answer Resolver] ${seg.applywizzId} resolved successful=${stats.successful} unsuccessful=${stats.unsuccessful} no_template=${stats.noTemplate} failed=${stats.failed}`
-        );
-      }
+      const candidateApps = applications.filter((app) => app.applywizzId === seg.applywizzId);
+      const tierCounts = [1, 2, 3, 4, 5].map((tier) =>
+        candidateApps.reduce(
+          (count, app) =>
+            count + app.resolvedFields.filter((field) => field.resolvedByTier === tier).length,
+          0
+        )
+      );
+      const fields = candidateApps.reduce((count, app) => count + app.resolvedFields.length, 0);
+      const resolved = candidateApps.reduce(
+        (count, app) =>
+          count +
+          app.resolvedFields.filter(
+            (field) => field.resolvedByTier !== null && field.source !== 'unresolved'
+          ).length,
+        0
+      );
+      log.info(
+        `[Resolver] candidate=${seg.applywizzId} jobs=${stats.total} fields=${fields} resolved=${resolved} unresolved=${fields - resolved} t1=${tierCounts[0]} t2=${tierCounts[1]} t3=${tierCounts[2]} t4=${tierCounts[3]} t5=${tierCounts[4]}`
+      );
     }
 
     if (compact) {

@@ -22,6 +22,7 @@ _Last updated: 2026-09-21_
 - [x] Prevented double incrementing of `retry_count` by making the queue retry owner apply the increment once per attempt.
 - [x] Added authoritative `submissionGateBlocked` metadata to application DTOs and job rows.
 - [x] Limited the requirements panel to gate-blocked failures and exposed retry for ordinary failed applications.
+- [x] Added `[OTP TRACE]` and `[Gate TRACE]` logs for production verification of the retry/session lifecycle and gate decisions.
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 

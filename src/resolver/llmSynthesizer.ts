@@ -465,7 +465,7 @@ export class LLMSynthesizer {
 
     const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
     const systemMessage = isChoiceField
-      ? 'You are an automated job application assistant. You MUST respond with exactly one of the provided options, copied verbatim, and no other text.'
+      ? 'You are an automated job application assistant. You MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.'
       : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
 
     // If API key is configured or provider is ollama, execute real LLM call
@@ -609,6 +609,9 @@ export class LLMSynthesizer {
       }
 
       if (!matched) {
+        log.warn(
+          `[Resolver] ❌ T5 no option match raw="${answer}" options=${JSON.stringify(choiceOptions)}`
+        );
         return unresolvedField(field);
       }
       answer = matched;
@@ -640,9 +643,6 @@ export class LLMSynthesizer {
     if (questions.length === 0) return [];
 
     const payloadContext = profile ? buildPayloadContext(profile) : null;
-    if (payloadContext) {
-      log.info(`[T5] payloadContext: ${JSON.stringify(payloadContext).slice(0, 200)}`);
-    }
     const candidateContext = profile
       ? `Candidate Information:
 - Full Name: ${profile.clientName}
@@ -687,7 +687,7 @@ EEOC RULE: For gender, race/ethnicity, veteran status, and disability status fie
 
 CREATIVE RULE: For open-ended text questions (why do you want this role, describe your experience, tell us about yourself, cover letter style fields): write a professional, specific, 2-4 sentence answer using the candidate's actual work experience, skills, education, and job role from the profile. Do not say the resume does not contain information — synthesize a real answer.
 
-OPTION RULE: For select/radio/checkbox fields, your answer MUST be one of the exact option strings provided.
+OPTION RULE: For select/radio/checkbox fields, you MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.
 
 US LOCATION RULE: If asked whether the candidate is currently located in the US, and the profile shows state_of_residence or zip_or_country containing a US state or "United States", answer Yes.`;
 

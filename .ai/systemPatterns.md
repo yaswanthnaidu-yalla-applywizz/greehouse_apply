@@ -49,6 +49,7 @@ Short-circuits on first hit. Each tier feeds the next as fallback.
 **SMS / recruiting opt-in (`formFiller.ts` `isConsentSmsMarketingField`):** at fill time these questions are always answered **No** (not sent through the resolver).
 
 **Choice-option alignment (`src/utils/choiceOptions.ts`):** all select, radio, and checkbox answers are aligned against the scanned option labels before persistence. Exact labels win; known semantic aliases cover yes/no polarity, U.S. country names, EEOC race/gender/veteran/disability values, and work-authorization prose. Ambiguous or unmatched values remain unresolved rather than falling back to the first option. At submission time searchable Greenhouse/React controls must click a live option and verify the committed value; typed filter text alone is not success.
+Resolver observability: `[Resolver Choice]` logs include the Tier 1 source, raw answer, scanned options, and canonical match (or `match=NONE`) so semantic alignment can be verified from ingest logs.
 
 ## Question Fingerprinting
 `SHA-256(label|type)` → 16-char hex prefix = `question_fingerprint`  

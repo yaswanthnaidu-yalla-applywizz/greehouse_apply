@@ -31,7 +31,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHint, setShowHint] = useState(true);
-  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -140,6 +140,11 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   };
 
   const isTextarea = field.type === 'textarea';
+  const fieldType = String(field.type || '').toLowerCase();
+  const fieldOptions = Array.isArray(field.options) && field.options.length > 0 ? field.options : null;
+  const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions;
+  const isCheckbox = fieldType === 'checkbox';
+  const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
   const isUnresolved = field.source === 'unresolved';
 
   return (
@@ -197,7 +202,47 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               </button>
             </div>
           )}
-          {isTextarea ? (
+          {isChoiceField ? (
+            <select
+              ref={inputRef as React.RefObject<HTMLSelectElement>}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              disabled={isSaving || isConfirming}
+              className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
+            >
+              <option value="">Select an option...</option>
+              {fieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          ) : isCheckbox ? (
+            fieldOptions ? (
+              <div className="space-y-1.5">
+                {fieldOptions.map((option) => (
+                  <label key={option} className="flex items-center gap-2 text-xs font-mono">
+                    <input
+                      type="checkbox"
+                      checked={checkboxValues.includes(option)}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...checkboxValues, option]
+                          : checkboxValues.filter((selected) => selected !== option);
+                        setValue(next.join(', '));
+                      }}
+                      disabled={isSaving || isConfirming}
+                    />
+                    {option}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <input
+                ref={inputRef as React.RefObject<HTMLInputElement>}
+                type="checkbox"
+                checked={['true', 'yes', 'on', '1'].includes(value.toLowerCase())}
+                onChange={(e) => setValue(e.target.checked ? 'true' : 'false')}
+                disabled={isSaving || isConfirming}
+              />
+            )
+          ) : isTextarea ? (
             <textarea
               ref={inputRef as React.RefObject<HTMLTextAreaElement>}
               value={value}

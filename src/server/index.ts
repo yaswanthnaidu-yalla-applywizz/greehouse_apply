@@ -119,7 +119,8 @@ import {
   loadSecondaryDemoArtifacts,
   inMemoryDemoJobRowsForDashboard,
 } from '../dashboard/demoFixtures.js';
-import { zohoReader } from '../services/zohoReader.js';
+import { zohoReader, zohoReaderPool } from '../services/zohoReader.js';
+import { otpResolutionService } from '../services/otpResolutionService.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -299,6 +300,34 @@ export const artifactCache: ArtifactCache = {
 const candidatesMap = new Map<string, CandidateSegment>();
 const templatesMap = new Map<string, ScannedJobTemplate>();
 const applicationsMap = new Map<string, CandidateJobApplication>();
+
+function enrichResolvedFieldsWithTemplateOptions(
+  fields: unknown,
+  template?: ScannedJobTemplate
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(fields)) return [];
+  const scannedFields = template?.fields || [];
+  return fields.map((field) => {
+    if (!field || typeof field !== 'object') return field as Record<string, unknown>;
+    const current = field as Record<string, unknown>;
+    const type = String(current.type || current.field_type || '').toLowerCase();
+    if (!['select', 'radio', 'checkbox'].includes(type)) return current;
+    const scanned = scannedFields.find(
+      (candidate) =>
+        candidate.fieldId === current.fieldId ||
+        candidate.name === current.name ||
+        candidate.label === current.label
+    );
+    return {
+      ...current,
+      options: Array.isArray(scanned?.options)
+        ? scanned.options
+        : Array.isArray(current.options)
+          ? current.options
+          : [],
+    };
+  });
+}
 
 function rebuildLookupMaps(): void {
   candidatesMap.clear();
@@ -1545,6 +1574,26 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         return;
       }
       dbRowCount = (data || []).length;
+      const jobUrls = Array.from(
+        new Set((data || []).map((application) => String(application.job_url || '').trim()).filter(Boolean))
+      );
+      const templatesByJobUrl = new Map<string, ScannedJobTemplate>();
+      if (jobUrls.length > 0) {
+        const { data: templates, error: templatesError } = await getDbClient()
+          .from('gh_scanned_job_templates')
+          .select('job_url, fields_schema')
+          .in('job_url', jobUrls);
+        if (templatesError) {
+          log.warn(`[API] Failed to fetch field options for ${applywizzId}: ${templatesError.message}`);
+        } else {
+          for (const template of templates || []) {
+            templatesByJobUrl.set(String(template.job_url), {
+              jobUrl: String(template.job_url),
+              fields: Array.isArray(template.fields_schema) ? template.fields_schema : [],
+            } as ScannedJobTemplate);
+          }
+        }
+      }
       for (const application of data || []) {
         if (
           !applicationAssignedCaAllowedForRequest(
@@ -1565,6 +1614,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         const fieldsCount = Array.isArray(application.resolved_fields)
           ? application.resolved_fields.length
           : 0;
+        const template = templatesByJobUrl.get(String(application.job_url || ''));
         jobs.push({
           id: application.id,
           rawUrl: application.job_url,
@@ -1574,7 +1624,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           status: jobStatus,
           error_message: application.error_message ?? null,
           fieldsCount,
-          resolved_fields: Array.isArray(application.resolved_fields) ? application.resolved_fields : [],
+          resolved_fields: enrichResolvedFieldsWithTemplateOptions(application.resolved_fields, template),
           hasManualEdits: Boolean(application.has_manual_edits),
           eligibleForSubmission: computeEligibleForSubmissionDisplay({
             csv_job_score: application.csv_job_score,
@@ -1801,6 +1851,28 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       } catch {}
     }
 
+    let resolvedTemplate =
+      templatesMap.get(decodedUrl) ||
+      templatesMap.get(lookupUrl) ||
+      Array.from(templatesMap.values()).find(
+        (t) => t.jobUrl.includes(decodedUrl) || decodedUrl.includes(t.jobUrl)
+      );
+    if (!resolvedTemplate && isSupabaseConfigured()) {
+      const templateUrls = Array.from(new Set([decodedUrl, lookupUrl, rawJobUrl].filter(Boolean)));
+      const { data: templateRows, error: templateError } = await getDbClient()
+        .from('gh_scanned_job_templates')
+        .select('job_url, fields_schema')
+        .in('job_url', templateUrls);
+      if (templateError) {
+        log.warn(`[API] Failed to fetch field options for ${applywizzId}: ${templateError.message}`);
+      } else if (templateRows?.[0]) {
+        resolvedTemplate = {
+          jobUrl: String(templateRows[0].job_url),
+          fields: Array.isArray(templateRows[0].fields_schema) ? templateRows[0].fields_schema : [],
+        } as ScannedJobTemplate;
+      }
+    }
+
     // If Supabase record exists, return it immediately as source of truth
     if (supabaseRecord) {
       if (
@@ -1829,9 +1901,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       row = await hydrateAndPersistApplicationFields(row);
       row = await hydrateApplicationProofUrls(row);
 
-      const resolvedFields = row.resolved_fields?.length
-        ? row.resolved_fields
-        : appItem?.resolvedFields || [];
+      const resolvedFields = enrichResolvedFieldsWithTemplateOptions(
+        row.resolved_fields?.length ? row.resolved_fields : appItem?.resolvedFields || [],
+        resolvedTemplate
+      );
       const status = row.status;
       const companyName = row.company_name || appItem?.companyName || '';
       const jobTitle = row.job_title || appItem?.jobTitle || '';
@@ -1859,7 +1932,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     if (appItem) {
       const rowId = (appItem as any).id || `${appItem.applywizzId}_${Buffer.from(appItem.jobUrl).toString('base64url').slice(0, 16)}`;
-      let resolvedFields = appItem.resolvedFields;
+      let resolvedFields = enrichResolvedFieldsWithTemplateOptions(appItem.resolvedFields, resolvedTemplate);
       let status = appItem.status;
       let proofWebUrl = (appItem as any).proofWebUrl || (appItem as any).proof_web_url;
       let dryRunScreenshotUrl = (appItem as any).dryRunScreenshotUrl || (appItem as any).dry_run_screenshot_url;
@@ -1869,7 +1942,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         const memApp = (await getApplication(rowId, appItem.jobUrl)) || (await getApplication(appItem.applywizzId, appItem.jobUrl));
         if (memApp) {
           if (Array.isArray(memApp.resolved_fields) && memApp.resolved_fields.length > 0) {
-            resolvedFields = memApp.resolved_fields as any;
+            resolvedFields = enrichResolvedFieldsWithTemplateOptions(memApp.resolved_fields, resolvedTemplate);
           }
           if (memApp.status) status = memApp.status as any;
           if (memApp.proof_web_url) proofWebUrl = memApp.proof_web_url;
@@ -1950,6 +2023,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           value: '',
           source: 'supabase',
           confidence: 0,
+          options: ['select', 'radio', 'checkbox'].includes(f.type)
+            ? Array.isArray(f.options)
+              ? f.options
+              : []
+            : undefined,
         })),
       });
       return;
@@ -2038,9 +2116,11 @@ export function startServer(
 
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
-        zohoReader.init().catch((err: any) => {
+        void Promise.all([zohoReader.init(), zohoReaderPool.init()])
+          .then(() => otpResolutionService.start())
+          .catch((err: any) => {
           log.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
-        });
+          });
       }
     } else {
       createLogger('ZohoReader').info(
@@ -2053,7 +2133,8 @@ export function startServer(
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 2;
       log.info(
-        `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, dequeue status=QUEUED)`
+        `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, ` +
+          `ZOHO_OTP_WORKER_POOL_SIZE=${config.ZOHO_OTP_WORKER_POOL_SIZE}, dequeue status=QUEUED)`
       );
       queueDaemon = new SubmissionQueueDaemon({ concurrency });
       registerQueueDaemon(queueDaemon);
@@ -2066,6 +2147,8 @@ export function startServer(
   });
 
   const cleanup = async () => {
+    otpResolutionService.stop();
+    await zohoReaderPool.stop().catch(() => {});
     await zohoReader.cleanup().catch(() => {});
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       // Allow in-flight Playwright workers to finish

@@ -35,6 +35,7 @@ import {
   requeueApplicationForRetry,
 } from '../../db/applications.js';
 import { getRetryReason } from '../../submitter/submissionRetry.js';
+import { otpResolutionService } from '../../services/otpResolutionService.js';
 import { isUserAdmin } from './auth.js';
 import {
   assertApplywizzZohoConnected,
@@ -294,6 +295,14 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       res.status(403).json({ error: 'Access denied' });
       return;
     }
+    if (appRow.status === 'RETRY') {
+      res.status(400).json({
+        success: false,
+        status: 'RETRY',
+        error: 'This application is awaiting an explicit operator retry.',
+      });
+      return;
+    }
   }
 
   // Asynchronous queue insertion (default production flow - Phase V2-4c)
@@ -372,20 +381,6 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         summary: result.summary,
       });
     } else if (result.status === 'OTP_REQUIRED') {
-      if (result.retryReason === 'OTP_FETCH_FAIL') {
-        const retry = await requeueApplicationForRetry(appId, result.retryReason, req.body?.jobUrl);
-        if (retry.requeued) {
-          res.status(202).json({
-            success: false,
-            status: 'QUEUED',
-            applicationId: result.applicationId,
-            retryCount: retry.retryCount,
-            message: `Retrying submission (${retry.retryCount}/3).`,
-            summary: result.summary,
-          });
-          return;
-        }
-      }
       res.status(202).json({
         success: false,
         status: result.status,
@@ -620,6 +615,7 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
     return;
   }
 
+  otpResolutionService.cancel(appId);
   const pausedSession = resolvePausedSession(appId);
   if (!pausedSession) {
     res.status(404).json({

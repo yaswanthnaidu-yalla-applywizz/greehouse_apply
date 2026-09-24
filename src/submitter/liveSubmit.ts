@@ -42,8 +42,7 @@ import { getProfile, getCompanyEmail, updateResumeStoragePath } from '../db/prof
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { uploadResume } from '../db/storage.js';
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
-import { zohoReader } from '../services/zohoReader.js';
-import { config } from '../config/env.js';
+import { otpResolutionService } from '../services/otpResolutionService.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { assertEligibleForSubmission } from '../submission/submissionEligibilityGate.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
@@ -1653,7 +1652,6 @@ export async function runLiveSubmit(
 
         keepSessionOpen = true;
 
-        // --- Automated Zoho Mail Reader OTP Resolution ---
         let companyEmail: string | null = null;
         try {
           const profile = await getProfile(application.applywizz_id);
@@ -1664,127 +1662,22 @@ export async function runLiveSubmit(
           log.warn(`[Live Submit] ⚠️ Could not fetch profile for company email: ${profErr.message}`);
         }
 
-        if (companyEmail && config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
-          log.info(
-            `[Live Submit] 🤖 Automated OTP resolution enabled. Querying Zoho Mail Reader for ${companyEmail}...`
-          );
-          let otpFetchFailed = false;
-          try {
-            const otpDetectedTime = pausedAt || Date.now();
-            const zohoResult = await zohoReader.fetchLatestOtp(companyEmail, {
-              timeoutMs: Math.max(config.ZOHO_CONNECTOR_TIMEOUT_MS || 120000, 120000),
-              sinceTimestamp: otpDetectedTime - 60000,
-              companyName: application.company_name || undefined,
-            });
-
-            if (zohoResult.success && zohoResult.otp) {
-              log.info(`[Live Submit] 🔑 Received OTP (${zohoResult.otp}) from Zoho Mail. Auto-submitting...`);
-              const submitResult = await submitOtpToPausedSession(sessionKey, zohoResult.otp, {
-                timeoutMs: options.timeoutMs ?? 30000,
-                jobUrl: targetUrl,
-              });
-
-              if (
-                submitResult.status === 'APPLIED' ||
-                submitResult.status === 'EMAIL_PROOF_PENDING'
-              ) {
-                keepSessionOpen = false; // session was completed & closed inside submitOtpToPausedSession
-                return {
-                  success: true,
-                  status: submitResult.status,
-                  applicationId,
-                  proofWebUrl: submitResult.proofWebUrl,
-                  proofCapturedAt: submitResult.proofCapturedAt,
-                  summary: fillSummary,
-                };
-              } else {
-                throw new Error(submitResult.errorMessage || 'Auto-submitted OTP was rejected or failed verification.');
-              }
-            } else {
-              otpFetchFailed = true;
-              throw new Error(zohoResult.errorMessage || 'Timeout: OTP was not filled in time.');
-            }
-          } catch (autoOtpErr: any) {
-            const otpErrMsg = 'OTP solve failed';
-            log.error(
-              `[Live Submit] ❌ ${otpErrMsg} for application ${applicationId}: ${autoOtpErr.message}`
-            );
-            keepSessionOpen = false;
-            screenshotCaptured = true;
-            const failedProof = await captureFailedScreenshot(page, application).catch(() => null);
-            await clearPausedSession(sessionKey).catch(() => {});
-            await closeSubmissionSession(sessionKey).catch(() => {});
-
-            if (otpFetchFailed && application.id) {
-              const currentApplication = await getApplication(application.id, application.job_url);
-              const storedRetryCount = Number(currentApplication?.retry_count ?? application.retry_count ?? 0);
-              const retryCount =
-                Number.isInteger(storedRetryCount) && storedRetryCount >= 0 && storedRetryCount < 3
-                  ? storedRetryCount + 1
-                  : 3;
-
-              const currentStatus = currentApplication?.status;
-              if (currentStatus === 'EMAIL_PROOF_PENDING' || currentStatus === 'APPLIED') {
-                log.warn(
-                  `[Live Submit] ⚠️ Zoho OTP fetch failed but application already at ${currentStatus} — not overwriting with OTP_REQUIRED.`
-                );
-                return {
-                  success: currentStatus === 'APPLIED',
-                  status: currentStatus,
-                  applicationId,
-                  errorMessage: otpErrMsg,
-                  retryReason: 'OTP_FETCH_FAIL',
-                  summary: fillSummary,
-                  proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-                  proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-                };
-              }
-
-              if (
-                storedRetryCount < 3 &&
-                (currentStatus === 'APPLYING' || currentStatus === 'OTP_REQUIRED')
-              ) {
-                await updateStatus(application.id, 'OTP_REQUIRED', {
-                  error_message: `OTP fetch failed; retry ${retryCount}/3`,
-                  job_url: application.job_url,
-                }).catch(() => {});
-                log.warn(`[OTP] Retry ${retryCount}/3 — Zoho fetch failed, will retry`);
-                return {
-                  success: false,
-                  status: 'OTP_REQUIRED',
-                  applicationId,
-                  errorMessage: otpErrMsg,
-                  retryReason: 'OTP_FETCH_FAIL',
-                  summary: fillSummary,
-                  proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-                  proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-                };
-              }
-            }
-
-            if (application.id) {
-              await updateStatus(application.id, 'FAILED', {
-                error_message: otpErrMsg,
-                proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
-                proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-                job_url: application.job_url,
-              }).catch(() => {});
-            }
-
-            return {
-              success: false,
-              status: 'FAILED',
-              applicationId,
-              errorMessage: otpErrMsg,
-              retryReason: 'OTP_FETCH_FAIL',
-              summary: fillSummary,
-              proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-              proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-            };
-          }
+        if (companyEmail) {
+          otpResolutionService.register({
+            applicationId,
+            email: companyEmail,
+            sinceTimestamp: pausedAt - 60000,
+            sessionKey,
+            attemptCount: 0,
+          });
         }
-
-        throw new Error('OTP solve failed');
+        return {
+          success: false,
+          status: 'OTP_REQUIRED',
+          applicationId,
+          requiresOtp: true,
+          summary: fillSummary,
+        };
       }
 
       // Check for form filling / validation errors on page before assuming CAPTCHA block
