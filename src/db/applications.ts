@@ -741,7 +741,10 @@ export async function updateStatus(
         const { data: current } = await statusQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
         previousStatus = current?.status as ApplicationStatus | undefined;
       }
-      const query = supabase.from('gh_candidate_applications').update(updatePayload);
+      const query = supabase
+        .from('gh_candidate_applications')
+        .update(updatePayload)
+        .select('id');
       let updateRes;
       if (isUuid) {
         updateRes = await query.eq('id', id);
@@ -752,9 +755,16 @@ export async function updateStatus(
       }
       if (updateRes?.error) {
         log.error(`[DB] updateStatus Supabase error (${id}, ${status}):`, updateRes.error.message);
+        throw updateRes.error;
+      }
+      if (!updateRes?.data || updateRes.data.length === 0) {
+        const error = new Error(`No application row updated for ${id}`);
+        log.error(`[DB] updateStatus Supabase update matched no rows (${id}, ${status})`);
+        throw error;
       }
     } catch (err: any) {
-      log.warn(`[DB] updateStatus exception:`, err);
+      log.error(`[DB] updateStatus exception (${id}, ${status}):`, err);
+      throw err;
     }
   }
 
@@ -1315,6 +1325,9 @@ export async function requeueApplicationForRetry(
       ? storedRetryCount
       : 0;
   if (currentRetryCount >= MAX_SUBMISSION_RETRIES) {
+    log.warn(
+      `[OTP TRACE] application=${applicationId} requeue=false retry_count=${currentRetryCount}/${MAX_SUBMISSION_RETRIES} reason="${reason}"`
+    );
     return { requeued: false, retryCount: currentRetryCount };
   }
 
@@ -1352,7 +1365,10 @@ export async function requeueApplicationForRetry(
 
   if (!updated) return { requeued: false, retryCount: currentRetryCount };
   cacheApplicationLocally({ ...app, ...payload });
-  log.info(`[Queue] Retry ${nextRetryCount}/${MAX_SUBMISSION_RETRIES} → QUEUED (${applicationId}): ${reason}`);
+  log.info(
+    `[OTP TRACE] application=${applicationId} requeue=true retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
+      `status=QUEUED reason="${reason}"`
+  );
   return { requeued: true, retryCount: nextRetryCount };
 }
 
