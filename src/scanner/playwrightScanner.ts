@@ -368,7 +368,9 @@ export class PlaywrightScanner {
                   );
                 }
               } finally {
+                log.info(`[Playwright Scanner] worker=${workerId} page.close start job=${jobIndex}`);
                 await page.close().catch(() => {});
+                log.info(`[Playwright Scanner] worker=${workerId} page.close complete job=${jobIndex}`);
               }
 
               // Check abort immediately after each URL completes
@@ -380,11 +382,20 @@ export class PlaywrightScanner {
               }
             }
           } finally {
+            log.info(`[Playwright Scanner] worker=${workerId} context.close start`);
             await context.close().catch(() => {});
+            log.info(`[Playwright Scanner] worker=${workerId} context.close complete`);
           }
         })();
 
-        workerTasks.push(task);
+        workerTasks.push(
+          Promise.race([
+            task,
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error(`Worker ${workerId} timed out after 30000ms`)), 30000)
+            ),
+          ])
+        );
       }
 
       await Promise.all(workerTasks);
