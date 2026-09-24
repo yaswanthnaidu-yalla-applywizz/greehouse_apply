@@ -67,6 +67,7 @@ export async function exportScannedJobs(
   templates: ScannedJobTemplate[],
   outputDir: string = config.OUTPUT_DIR
 ): Promise<ExportResult> {
+  log.info(`[Scanner] exportScannedJobs start templates=${templates.length}`);
   const resolvedDir = path.resolve(process.cwd(), outputDir);
 
   // Ensure output directory exists
