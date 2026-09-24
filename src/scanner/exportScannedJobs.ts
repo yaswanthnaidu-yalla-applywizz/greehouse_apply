@@ -116,7 +116,7 @@ export async function exportScannedJobs(
           .abortSignal(AbortSignal.timeout(30000));
 
         if (error) {
-          log.warn(
+          log.error(
             `[Export Scanned Jobs] ⚠️ Could not upsert batch ${batchNum}/${totalBatches} to scanned_job_templates: ${error.message}`
           );
         } else {
@@ -124,10 +124,15 @@ export async function exportScannedJobs(
           log.info(`[Scanner] upserted batch ${batchNum}/${totalBatches}`);
         }
       } catch (err: any) {
-        log.warn(
+        log.error(
           `[Export Scanned Jobs] ⚠️ Could not upsert batch ${batchNum}/${totalBatches} to scanned_job_templates: ${err?.message || err}`
         );
       }
+    }
+    if (persisted === 0) {
+      throw new Error(
+        `Could not upsert any of ${templates.length} scanned job templates to scanned_job_templates`
+      );
     }
     dbTemplatesPersisted = persisted;
     if (!compact) {
