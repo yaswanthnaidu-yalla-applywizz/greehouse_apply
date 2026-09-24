@@ -589,7 +589,7 @@ export class PlaywrightScanner {
 
         if (fields.length > 0) {
           const fieldsWithRequiredState = await markHiddenRequiredFields(page, fields);
-          template.fields = await this.exploreCascadingFields(page, fieldsWithRequiredState);
+          template.fields = await this.exploreCascadingFields(page, fieldsWithRequiredState, compactLogs);
           return template;
         }
       }
@@ -659,7 +659,7 @@ export class PlaywrightScanner {
       const domFields = await extractVisibleFormFields(page);
 
       if (domFields.length > 0) {
-        template.fields = await this.exploreCascadingFields(page, domFields);
+        template.fields = await this.exploreCascadingFields(page, domFields, compactLogs);
       } else {
         template.isExpired = true;
       }
@@ -680,7 +680,8 @@ export class PlaywrightScanner {
    */
   private async exploreCascadingFields(
     page: Page,
-    baseFields: ScannedField[]
+    baseFields: ScannedField[],
+    compactLogs: boolean
   ): Promise<ScannedField[]> {
     const allFields = [...baseFields];
     const knownFieldIds = new Set(baseFields.map((f) => f.fieldId));
@@ -789,9 +790,11 @@ export class PlaywrightScanner {
             };
 
             allFields.push(newField);
-            log.info(
-              `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
-            );
+            if (!compactLogs) {
+              log.info(
+                `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
+              );
+            }
           }
         } catch {
           // Continue exploration resiliently
