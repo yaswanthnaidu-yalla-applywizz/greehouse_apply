@@ -1,5 +1,5 @@
 import { getDbClient } from './client.js';
-import { FAILED_EQUIVALENT_STATUSES, SUBMITTED_STATUSES } from './applications.js';
+import { FAILED_EQUIVALENT_STATUSES } from './applications.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Stats Rollup');
@@ -39,9 +39,10 @@ export async function runStatsRollup(): Promise<void> {
 
   const { data: yesterdayRows, error: yesterdayErr } = await supabase
     .from('gh_candidate_applications')
-    .select('status')
-    .gte('submitted_at', yesterdayStart)
-    .lt('submitted_at', yesterdayEnd);
+    .select('status, submitted_at')
+    .not('status', 'in', '(READY_FOR_REVIEW,SKIPPED)')
+    .gte('created_at', yesterdayStart)
+    .lt('created_at', yesterdayEnd);
 
   if (yesterdayErr) {
     log.error('Failed to fetch yesterday applications for rollup:', yesterdayErr);
@@ -54,13 +55,14 @@ export async function runStatsRollup(): Promise<void> {
   let failed_count = 0;
 
   for (const row of yesterdayRows || []) {
-    if (row.status === 'SKIPPED') continue; // Do not count SKIPPED in total
     total_applications++;
 
-    if (SUBMITTED_STATUSES.includes(row.status)) {
-      submitted_count++;
-    }
-    if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') {
+    submitted_count++;
+    if (
+      (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') &&
+      row.submitted_at >= yesterdayStart &&
+      row.submitted_at < yesterdayEnd
+    ) {
       applied_count++;
     }
     if (FAILED_EQUIVALENT_STATUSES.includes(row.status)) {
@@ -292,15 +294,22 @@ export async function queryRollupStats(startIso: string, endIso: string): Promis
   if (liveStartIso < endIso) {
     const { data: liveRows } = await supabase
       .from('gh_candidate_applications')
-      .select('status')
-      .gte('submitted_at', liveStartIso)
-      .lte('submitted_at', endIso);
+      .select('status, submitted_at')
+      .not('status', 'in', '(READY_FOR_REVIEW,SKIPPED)')
+      .or(`submitted_at.gte.${liveStartIso},and(submitted_at.is.null,updated_at.gte.${liveStartIso})`)
+      .or(`submitted_at.lte.${endIso},and(submitted_at.is.null,updated_at.lte.${endIso})`);
 
     for (const row of liveRows || []) {
-      if (row.status === 'SKIPPED') continue;
       stats.total_applications++;
-      if (SUBMITTED_STATUSES.includes(row.status)) stats.submitted_count++;
-      if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') stats.applied_count++;
+      stats.submitted_count++;
+      if (
+        (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') &&
+        row.submitted_at &&
+        row.submitted_at >= liveStartIso &&
+        row.submitted_at <= endIso
+      ) {
+        stats.applied_count++;
+      }
       if (FAILED_EQUIVALENT_STATUSES.includes(row.status)) stats.failed_count++;
     }
   }
