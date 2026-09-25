@@ -1936,7 +1936,10 @@ export async function recoverStaleApplyingApplications(
     .lt('updated_at', cutoff)
     .select('id');
   if (error) {
-    log.warn(`[Queue] Failed to recover stale APPLYING applications: ${error.message}`);
+    log.error(
+      `[Queue] Failed to recover stale APPLYING applications: ${error.message}. ` +
+      'Apply src/db/migrations/026_retry_status_repair.sql in Supabase.'
+    );
     return 0;
   }
   const recovered = data?.length || 0;
