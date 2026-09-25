@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   filterOperatorApplicationJobs,
   isOperatorFormPanelBlocked,
+  OPERATOR_SUBMITTABLE_APPLICATION_STATUSES,
   operatorFormBlockedDetailMessage,
   isUnresolvedApplicationJob,
   isSkippedApplicationJob,
@@ -23,6 +24,7 @@ describe('candidateQueueFilter', () => {
     assert.equal(isOperatorFormPanelBlocked('APPLIED'), false);
     assert.equal(isOperatorFormPanelBlocked('SKIPPED'), true);
     assert.equal(isOperatorFormPanelBlocked('FAILED'), false);
+    assert.equal(isOperatorFormPanelBlocked('RETRY'), false);
     assert.equal(isOperatorFormPanelBlocked('DRY_RUN_COMPLETE'), false);
     assert.equal(isOperatorFormPanelBlocked('EMAIL_PROOF_PENDING'), false);
   });
@@ -33,6 +35,10 @@ describe('candidateQueueFilter', () => {
       operatorFormBlockedDetailMessage({ error_message: '46 fields (>= 35)', status: 'SKIPPED' }),
       /too many questions/i
     );
+  });
+
+  it('keeps retry applications in the operator form flow', () => {
+    assert.equal(OPERATOR_SUBMITTABLE_APPLICATION_STATUSES.has('RETRY'), true);
   });
 
   it('isSkippedApplicationJob is case-insensitive', () => {

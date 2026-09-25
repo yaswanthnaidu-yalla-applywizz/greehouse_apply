@@ -74,7 +74,7 @@ const MOCK_GREENHOUSE_REMIX_SPONSORSHIP_HTML = `
 <html><body>
 <form id="application_form">
   <label for="question_32545417010003">Will you now or in the future require sponsorship to work in the U.S.? *</label>
-  <div class="select-shell remix-css-abc">
+  <div class="select-shell remix-css-abc-container">
     <div class="select_input-container">
       <input class="remix-css-input" id="question_32545417010003" role="combobox" aria-expanded="false" autocomplete="off" type="text" />
     </div>
