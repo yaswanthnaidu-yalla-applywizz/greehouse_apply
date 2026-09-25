@@ -373,3 +373,5 @@
 2026-09-25 session-start scan: task-observer loaded; proof URL hydration removal session
 2026-09-25 deliverable flush: no observations; removed eager proof URL hydration from list/dashboard responses; typecheck passed
 2026-09-25 session-end: committed visual restyle (tokens.css, badge styling, font imports) and pushed feature/dashboard-visual-restyle to origin; no observations
+2026-09-25 session-start scan: files=14 parsed=14
+2026-09-25 deliverable flush: removed all box shadows across dashboard; active tab text set to black; typecheck and build verified clean; no new observations

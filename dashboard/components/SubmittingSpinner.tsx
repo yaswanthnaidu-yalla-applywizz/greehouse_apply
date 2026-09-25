@@ -14,7 +14,7 @@ export const SubmittingSpinner: React.FC<SubmittingSpinnerProps> = ({
   className = '',
 }) => (
   <div
-    className={`flex items-center justify-center gap-3 px-4 py-3 bg-[#E88474] text-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E] animate-pulse ${className}`}
+    className={`flex items-center justify-center gap-3 px-4 py-3 bg-[#E88474] text-white border-2 border-[#1A1A2E] rounded-xl animate-pulse ${className}`}
     role="status"
     aria-live="polite"
   >

@@ -251,7 +251,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       )}
 
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-[110] bg-[#9AC89A] border-2 border-[#1A1A2E] text-[#1E4620] px-4 py-3 rounded-lg font-bold shadow-[4px_4px_0px_#1A1A2E] flex items-center gap-2 animate-bounce">
+        <div className="fixed bottom-6 right-6 z-[110] bg-[#9AC89A] border-2 border-[#1A1A2E] text-[#1E4620] px-4 py-3 rounded-lg font-bold flex items-center gap-2 animate-bounce">
           <span>{toastMessage}</span>
         </div>
       )}
@@ -275,7 +275,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
             }
             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold font-mono transition-all ${
               canDryRun
-                ? 'bg-[#B8D4E8] hover:bg-[#A3C7DF] text-[#1A1A2E] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+                ? 'bg-[#B8D4E8] hover:bg-[#A3C7DF] text-[#1A1A2E] border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
                 : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
             }`}
           >
@@ -297,7 +297,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
               type="button"
               onClick={retrySubmission}
               disabled={isRetrying}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold font-mono text-[#9A3412] bg-[#FED7AA] hover:bg-[#FDBA74] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold font-mono text-[#9A3412] bg-[#FED7AA] hover:bg-[#FDBA74] border border-[#1A1A2E] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isRetrying ? 'Retrying...' : '↺ Retry Submission'}
             </button>
@@ -320,7 +320,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
             }
             className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-bold font-mono transition-all ${
               canSubmit
-                ? 'bg-[#E88474] hover:bg-[#D67161] text-white border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+                ? 'bg-[#E88474] hover:bg-[#D67161] text-white border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
                 : 'bg-[#E2E8F0] text-[#94A3B8] border border-[#CBD5E1] cursor-not-allowed'
             }`}
           >
@@ -356,7 +356,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                 <button
                   type="button"
                   onClick={onViewDryRun}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold text-[#1A1A2E] bg-white hover:bg-[#FAF4EB] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold text-[#1A1A2E] bg-white hover:bg-[#FAF4EB] border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
                 >
                   <span>🖼️</span>
                   <span>Dry-Run Screenshot</span>
@@ -373,7 +373,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                       setShowProofViewer(true);
                     }
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E4620] bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E4620] bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
                 >
                   <span>📸</span>
                   <span>View Web Proof</span>
@@ -387,7 +387,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                     onClick={captureEmailProof}
                     disabled={isCapturingEmailProof}
                     title="Capture confirmation email proof from candidate inbox"
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#DBEAFE] hover:bg-[#BFDBFE] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#DBEAFE] hover:bg-[#BFDBFE] border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isCapturingEmailProof ? (
                       <>
@@ -411,7 +411,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                       onViewEmailProof();
                     }
                   }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#BFDBFE] hover:bg-[#93C5FD] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#1E3A8A] bg-[#BFDBFE] hover:bg-[#93C5FD] border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
                 >
                   <span>📧</span>
                   <span>View Email Proof</span>
@@ -422,7 +422,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
                 <button
                   type="button"
                   onClick={onViewFailureScreenshot}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#7F1D1D] bg-[#FECACA] hover:bg-[#FCA5A5] border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-bold text-[#7F1D1D] bg-[#FECACA] hover:bg-[#FCA5A5] border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all font-mono"
                 >
                   <span>🛑</span>
                   <span>View Failure Screenshot</span>
