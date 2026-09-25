@@ -1905,6 +1905,7 @@ export async function countApplicationsByStatus(
       if (!error && typeof count === 'number') {
         return count;
       }
+
     } catch {
       // fall through
     }
@@ -1912,6 +1913,37 @@ export async function countApplicationsByStatus(
   return Array.from(memoryApplications.values()).filter((a) =>
     a.status === status && (!createdAtRange || rowCreatedAtInRange(a, createdAtRange))
   ).length;
+}
+
+/**
+ * Releases queue claims left behind by a crashed worker. Stale attempts are
+ * never requeued automatically; they become operator-visible RETRY rows.
+ */
+export async function recoverStaleApplyingApplications(
+  staleAfterMs = 15 * 60 * 1000
+): Promise<number> {
+  const cutoff = new Date(Date.now() - staleAfterMs).toISOString();
+  if (!isSupabaseConfigured()) return 0;
+
+  const { data, error } = await getDbClient()
+    .from('gh_candidate_applications')
+    .update({
+      status: 'RETRY',
+      error_message: 'Submission worker lease expired while applying. Operator retry required.',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('status', 'APPLYING')
+    .lt('updated_at', cutoff)
+    .select('id');
+  if (error) {
+    log.warn(`[Queue] Failed to recover stale APPLYING applications: ${error.message}`);
+    return 0;
+  }
+  const recovered = data?.length || 0;
+  if (recovered > 0) {
+    log.warn(`[Queue] Recovered ${recovered} stale APPLYING application(s) to RETRY.`);
+  }
+  return recovered;
 }
 
 /**
