@@ -184,7 +184,7 @@ const CUSTOM_SELECT_OPTION_LOCATOR =
 
 /** Greenhouse job-board remix-css searchable selects (not a native select element). */
 const GREENHOUSE_SELECT_INPUT_CONTAINER =
-  '[class*="select_input-container"], .select_input-container';
+  '[class*="select_input-container"], .select_input-container, [class*="remix-css-"][class*="-container"]';
 
 type OptionTextMatcher = (optionText: string, answerText: string) => boolean;
 
@@ -378,6 +378,29 @@ async function comboboxDisplaysAnswer(
   return Boolean(controlText && matchOption(controlText, answerText));
 }
 
+async function hiddenRequiredInputDisplaysAnswer(
+  control: Locator,
+  answerText: string,
+  matchOption: OptionTextMatcher
+): Promise<boolean> {
+  const shell = control
+    .locator(
+      'xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select_input-container") or contains(@class,"field-wrapper") or contains(@class,"remix-css-")][1]'
+    )
+    .first();
+  if ((await shell.count().catch(() => 0)) === 0) return false;
+
+  const requiredInputs = shell.locator(
+    'input.requiredInput, input[type="hidden"][required], input[type="hidden"][name*="required" i]'
+  );
+  const count = await requiredInputs.count().catch(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    const value = (await requiredInputs.nth(index).inputValue().catch(() => '')).trim();
+    if (value && matchOption(value, answerText)) return true;
+  }
+  return false;
+}
+
 async function resolveSelectOptionScope(control: Locator): Promise<Locator | null> {
   const fieldWrapper = control
     .locator('xpath=ancestor::*[contains(@class,"field-wrapper")][1]')
@@ -498,8 +521,11 @@ async function fillInteractiveSelectDropdown(
 
   if (clicked) {
     await searchInput?.blur().catch(() => {});
-    await page.waitForTimeout(100);
-    clicked = await comboboxDisplaysAnswer(searchInput || control, answerText, choiceOptionTextMatches);
+    await page.waitForTimeout(250);
+    const committedMatch = choiceOptionTextMatches;
+    clicked =
+      (await comboboxDisplaysAnswer(searchInput || control, answerText, committedMatch)) ||
+      (await hiddenRequiredInputDisplaysAnswer(searchInput || control, answerText, committedMatch));
     if (!clicked && retryCount === 0) {
       return fillInteractiveSelectDropdown(page, control, answerText, matchOption, 1);
     }

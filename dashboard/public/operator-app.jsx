@@ -297,7 +297,7 @@
       const hasUnresolved = unresolvedFieldsCount > 0;
       const isApplying = isSubmitting || SUBMIT_FLOW_STATUSES.has(String(applicationStatus));
       const isApplied = applicationStatus === 'APPLIED';
-      const isFailed = applicationStatus === 'FAILED';
+      const isFailed = applicationStatus === 'FAILED' || applicationStatus === 'RETRY';
       const hasProofActions =
         Boolean(dryRunScreenshotUrl) ||
         Boolean(proofUrl || proofWebUrl || isApplied || isEmailUnverified || isEmailProofPending) ||
@@ -384,7 +384,8 @@
       const canSubmit = !hasUnresolved && !isApplying && (
         applicationStatus === 'READY_FOR_REVIEW' ||
         applicationStatus === 'APPROVED' ||
-        applicationStatus === 'DRY_RUN_COMPLETE'
+        applicationStatus === 'DRY_RUN_COMPLETE' ||
+        applicationStatus === 'RETRY'
       );
       const canDryRun = !isApplying && !isDryRunning && (applicationStatus === 'READY_FOR_REVIEW' || applicationStatus === 'APPROVED');
       const hideSubmissionActions = applicationStatus === 'APPLIED' ||
@@ -1926,6 +1927,7 @@
         currentStatus === 'APPLIED' ||
         currentStatus === 'DRY_RUN_COMPLETE' ||
         currentStatus === 'FAILED' ||
+        currentStatus === 'RETRY' ||
         currentStatus === 'EMAIL_PROOF_PENDING';
       const submitFlowActive =
         isSubmitting ||
@@ -2150,11 +2152,11 @@
             return;
           }
 
-          if (!res.ok || data.status === 'FAILED') {
+          if (data.status === 'FAILED' || (!res.ok && data.status !== 'RETRY')) {
             const err = data.error || data.error_message || 'Submit request failed';
             setSubmitError(err);
             if (onStatusChange) {
-              onStatusChange('FAILED', {
+              onStatusChange(data.status || 'FAILED', {
                 ...data,
                 error: err,
               }, { persist: false });
@@ -2195,7 +2197,7 @@
           }
         } catch (err) {
           console.error('Submission failed:', err);
-          if (onStatusChange) onStatusChange('FAILED', { error: err.message }, { persist: false });
+          if (onStatusChange) onStatusChange('RETRY', { status: 'RETRY', error: err.message }, { persist: false });
           setIsSubmitting(false);
         }
       };

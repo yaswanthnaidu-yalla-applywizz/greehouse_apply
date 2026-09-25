@@ -101,7 +101,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   const isApplying =
     isSubmitting || SUBMIT_FLOW_STATUSES.has(String(applicationStatus));
   const isApplied = applicationStatus === 'APPLIED';
-  const isFailed = applicationStatus === 'FAILED';
+  const isFailed = applicationStatus === 'FAILED' || applicationStatus === 'RETRY';
   const isEmailProofPending = applicationStatus === 'EMAIL_PROOF_PENDING' || status === 'EMAIL_PROOF_PENDING';
   const hasProofActions =
     Boolean(dryRunScreenshotUrl) ||
@@ -203,7 +203,8 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
     !isApplying &&
     (applicationStatus === 'READY_FOR_REVIEW' ||
       applicationStatus === 'DRY_RUN_COMPLETE' ||
-      applicationStatus === 'FAILED');
+    applicationStatus === 'FAILED' ||
+    applicationStatus === 'RETRY');
   const canDryRun = !isApplying && !isDryRunning;
   const canRetry = isFailed && !submissionGateBlocked && Number(retryCount || 0) < 3;
 
