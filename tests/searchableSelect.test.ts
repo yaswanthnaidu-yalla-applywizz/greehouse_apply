@@ -78,6 +78,7 @@ const MOCK_GREENHOUSE_REMIX_SPONSORSHIP_HTML = `
     <div class="select_input-container">
       <input class="remix-css-input" id="question_32545417010003" role="combobox" aria-expanded="false" autocomplete="off" type="text" />
     </div>
+    <input type="hidden" class="requiredInput" id="requiredInput_32545417010003" value="" required />
     <div class="select__menu" id="menu_32545417010003" style="display:none;">
       <div class="select__option" role="option">Yes</div>
       <div class="select__option" role="option">No</div>
@@ -91,6 +92,7 @@ const MOCK_GREENHOUSE_REMIX_SPONSORSHIP_HTML = `
   var input = document.getElementById('question_32545417010003');
   var menu = document.getElementById('menu_32545417010003');
   var hidden = document.getElementById('question_32545417010003_native');
+  var requiredInput = document.getElementById('requiredInput_32545417010003');
   var options = menu.querySelectorAll('.select__option');
   function showMenu() {
     menu.style.display = 'block';
@@ -110,8 +112,11 @@ const MOCK_GREENHOUSE_REMIX_SPONSORSHIP_HTML = `
   options.forEach(function(o) {
     o.addEventListener('click', function() {
       hidden.value = o.textContent.trim();
-      input.value = o.textContent.trim();
       menu.style.display = 'none';
+      setTimeout(function() {
+        input.value = o.textContent.trim();
+        requiredInput.value = o.textContent.trim();
+      }, 50);
     });
   });
 </script>
@@ -223,6 +228,7 @@ async function runSearchableSelectTests(): Promise<void> {
       const res = await fillSingleField(page, field, 'AWL-31428', []);
       assert(res.success, 'Greenhouse remix sponsorship select should succeed');
       assert((await page.inputValue('#question_32545417010003')) === 'Yes', 'Combobox input should show Yes');
+      assert((await page.inputValue('#requiredInput_32545417010003')) === 'Yes', 'Hidden required input should show Yes');
 
       await page.close();
       console.log('  ✅ Greenhouse remix-css select_input-container (AWL-31428 sponsorship id)');

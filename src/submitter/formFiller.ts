@@ -497,6 +497,8 @@ async function fillInteractiveSelectDropdown(
   }
 
   if (clicked) {
+    await searchInput?.blur().catch(() => {});
+    await page.waitForTimeout(100);
     clicked = await comboboxDisplaysAnswer(searchInput || control, answerText, choiceOptionTextMatches);
     if (!clicked && retryCount === 0) {
       return fillInteractiveSelectDropdown(page, control, answerText, matchOption, 1);

@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS gh_candidate_applications (
             'SKIPPED'
         )),
     submission_order INTEGER,                            -- Global FIFO sequence number for daemon queue
-    retry_count INTEGER NOT NULL DEFAULT 0,              -- Automatic transient-failure retries used
+    retry_count INTEGER NOT NULL DEFAULT 0,              -- Manual retry attempts used
     assigned_ca_email TEXT,                              -- Assigned Campus Ambassador email for user isolation
     has_manual_edits BOOLEAN DEFAULT false,              -- True if operator edited any field; prioritized to end of queue
     reviewed_at TIMESTAMPTZ,                             -- Timestamp when operator reviewed/edited
