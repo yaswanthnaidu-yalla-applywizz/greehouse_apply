@@ -6,7 +6,6 @@ import { Router, type Request, type Response } from 'express';
 import {
   getApplication,
   getISTDateRangeUtc,
-  hydrateApplicationProofUrls,
   listApplications,
   countSubmittedApplicationsSince,
   countApplicationsByStatus,
@@ -323,7 +322,6 @@ devDashboardRouter.get('/applications/:id', async (req: Request, res: Response):
       res.status(404).json({ error: `Application '${id}' not found.` });
       return;
     }
-    app = await hydrateApplicationProofUrls(app);
     const events = app.id ? await listApplicationEvents({ applicationId: app.id, limit: 200 }) : { events: [] };
     const names = await displayNameMapForEmails([app.assigned_ca_email || '']);
     let managerEmail: string | null = null;

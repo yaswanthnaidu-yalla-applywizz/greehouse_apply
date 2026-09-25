@@ -89,7 +89,7 @@ _Last updated: 2026-09-22_
 - **Batched Template Upsert & Timeout (`exportScannedJobs.ts`):** Chunked bulk template upsert into batches of 50 rows with `AbortSignal.timeout(30000)` per batch. Replaced 1-by-1 sequential writes that caused silent stalls during Phase B export. Added per-batch logging: `[Scanner] upserted batch N/total`.
 
 ### 0k. Proof Image Rendering & Viewer Resilience (shipped 2026-09-21)
-- **Candidate Job Proof Hydration:** Added `hydrateApplicationProofUrls(row)` to `GET /api/candidates/:applywizzId/jobs/*` so operators always receive fresh valid signed URLs up front.
+- **Proof URL access:** List, dashboard, and candidate job responses now return raw storage paths; signed URLs are generated only by explicit proof viewer/retrieval routes.
 - **Dual-Lookup & Resilient Proof URL Renewal:** Updated `GET /api/applications/:id/proof-url` and `GET /api/applications/:id/proof` to support UUID and candidate ApplyWizz ID + `jobUrl` composite lookup.
 - **Server-Side Streaming Proxy (`/api/applications/:id/proof-image`):** Added a first-party binary image streaming proxy with service-role access that bypasses external storage token expiration and CORS restrictions.
 - **Multi-Stage Progressive Fallback in ProofViewer:** Updated `dashboard/components/ProofViewer.tsx` and `dashboard/public/operator-app.jsx` with progressive fallback (`initial signed URL` → `refreshed signed URL` → `proxy stream`) and passed `applicationId` and `kind` across `FormRenderer`, `SubmissionControls`, and `JobQueueView`. Eliminated infinite retry loops.

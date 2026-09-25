@@ -15,7 +15,6 @@ import {
   getRecentNotifications,
   upsertApplication,
   updateStatus,
-  hydrateApplicationProofUrls,
   serializeApplicationDto,
   hydrateAndPersistApplicationFields,
   retryFailedApplication,
@@ -453,10 +452,6 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
       };
     }
 
-    if (updatedApp) {
-      updatedApp = await hydrateApplicationProofUrls(updatedApp);
-    }
-
     const companyName = updatedApp?.company_name || updatedApp?.companyName || application?.company_name || application?.companyName || null;
     const jobTitle = updatedApp?.job_title || updatedApp?.jobTitle || application?.job_title || application?.jobTitle || null;
 
@@ -796,7 +791,6 @@ applicationsRouter.get('/:id', async (req: Request, res: Response): Promise<void
       return;
     }
 
-    app = await hydrateApplicationProofUrls(app);
     app = await hydrateAndPersistApplicationFields(app as ApplicationRow);
 
     const companyName = app.company_name || app.companyName || null;

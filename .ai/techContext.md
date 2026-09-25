@@ -52,6 +52,7 @@ npm run submit               # Live submission CLI
 # Database
 npm run db:migrate           # Run all pending migrations
 npm run db:backfill-company-email
+npm run db:fix-rollup        # Recompute today/yesterday daily stats rollups
 npm run backfill:profiles    # Refresh all Supabase profiles from ApplyWizz
 npm run db:clear             # Clear candidate_qa_bank answers
 

@@ -93,7 +93,7 @@ _Last updated: 2026-09-21_
 - [x] **Exposed Last Semantic Score (`semanticSearch.ts`):** Added `getLastSemanticScore()` tracking top candidate score even when below threshold (`match_threshold: 0.0` RPC probe) for accurate failure log scores.
 
 ### Proof Image Rendering & Viewer Resilience (2026-09-21)
-- [x] **Candidate Job Proof Hydration:** Added `hydrateApplicationProofUrls(row)` to `GET /api/candidates/:applywizzId/jobs/*` so operators always receive fresh valid signed URLs up front.
+- [x] **Proof URL access:** List and dashboard responses return raw storage paths; explicit proof viewer/retrieval routes generate signed URLs on demand.
 - [x] **Dual-Lookup & Resilient Proof URL Renewal:** Updated `GET /api/applications/:id/proof-url` and `GET /api/applications/:id/proof` to support UUID and candidate ApplyWizz ID + `jobUrl` composite lookup.
 - [x] **Server-Side Streaming Proxy (`/api/applications/:id/proof-image`):** Added a first-party binary image streaming proxy with service-role access that bypasses external storage token expiration and CORS restrictions.
 - [x] **Multi-Stage Progressive Fallback in ProofViewer:** Updated `dashboard/components/ProofViewer.tsx` and `dashboard/public/operator-app.jsx` with progressive fallback (`initial signed URL` → `refreshed signed URL` → `proxy stream`) and passed `applicationId` and `kind` across `FormRenderer`, `SubmissionControls`, and `JobQueueView`. Eliminated infinite retry loops.

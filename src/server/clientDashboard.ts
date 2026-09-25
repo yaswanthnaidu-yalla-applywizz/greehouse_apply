@@ -5,7 +5,6 @@
 import {
   rowCreatedAtInRange,
   getISTDateRangeUtc,
-  hydrateApplicationProofUrls,
   SUBMITTED_STATUSES,
   type ApplicationRow,
   type CreatedAtRangeFilter,
@@ -256,14 +255,10 @@ export async function loadClientDashboard(options: {
   if (error) throw error;
 
   const rawRows = (data || []) as ManagerApplicationRow[];
-  const hydrated = await Promise.all(
-    rawRows.map(async (row) => (row.status === 'APPLIED' ? hydrateApplicationProofUrls(row) : row))
-  );
-
-  const nameMap = await displayNameMapForEmails(hydrated.map(assignedCaEmail));
+  const nameMap = await displayNameMapForEmails(rawRows.map(assignedCaEmail));
   const grouped = new Map<string, ManagerClientRow>();
 
-  for (const application of hydrated) {
+  for (const application of rawRows) {
     if (application.status === 'SKIPPED') {
       continue;
     }

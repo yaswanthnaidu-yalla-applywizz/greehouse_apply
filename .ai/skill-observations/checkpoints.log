@@ -364,3 +364,11 @@
 2026-09-23 session-end: OTP retry queue/session lifecycle and gate-specific failure UI implemented and typechecked; no new observations
 2026-09-23 session-end: OTP retry lifecycle and submission-gate retry UI shipped in bfa08ad; observation log flushed with no new entries
 2026-09-23 checkpoint: inspected logs.1790165348544.log; ingest-only log lacked submission-worker evidence; added OTP TRACE and Gate TRACE lifecycle logging
+2026-09-24 session-start scan: files=14 parsed=14 suspect=0
+2026-09-24 no observations
+2026-09-25 performance audit: no observations
+2026-09-25 session-start scan: files=14 parsed=14
+2026-09-25 no observations
+2026-09-25 dashboard performance fixes: removed duplicate Supabase count overlay; parallelized initial admin hydration with candidate/stats fetch
+2026-09-25 session-start scan: task-observer loaded; proof URL hydration removal session
+2026-09-25 deliverable flush: no observations; removed eager proof URL hydration from list/dashboard responses; typecheck passed
