@@ -7,7 +7,7 @@ const log = createLogger('Stats Rollup');
 /**
  * Returns a strict YYYY-MM-DD string for a given epoch ms offset in IST (UTC+5:30)
  */
-function getIstDateString(timeMs: number): string {
+export function getIstDateString(timeMs: number): string {
   const istDate = new Date(timeMs + 5.5 * 60 * 60 * 1000);
   const yyyy = istDate.getUTCFullYear();
   const mm = String(istDate.getUTCMonth() + 1).padStart(2, '0');
@@ -18,7 +18,7 @@ function getIstDateString(timeMs: number): string {
 /**
  * Returns the exact UTC ISO strings for 00:00:00 IST and 23:59:59.999 IST of the given date.
  */
-function getIstDayBoundaries(dateStr: string): { startIso: string; endIso: string } {
+export function getIstDayBoundaries(dateStr: string): { startIso: string; endIso: string } {
   const start = new Date(`${dateStr}T00:00:00+05:30`);
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { startIso: start.toISOString(), endIso: end.toISOString() };
@@ -27,68 +27,72 @@ function getIstDayBoundaries(dateStr: string): { startIso: string; endIso: strin
 /**
  * Executes the daily, weekly, and monthly rollup aggregations, and expires old ingest data.
  */
-export async function runStatsRollup(): Promise<void> {
+export async function runStatsRollup(options?: { dailyDates?: string[] }): Promise<void> {
   log.info('Running stats rollup...');
   const supabase = getDbClient();
   const nowMs = Date.now();
   
-  // 1. Snapshot yesterday
   const yesterdayMs = nowMs - 24 * 60 * 60 * 1000;
   const yesterdayStr = getIstDateString(yesterdayMs);
-  const { startIso: yesterdayStart, endIso: yesterdayEnd } = getIstDayBoundaries(yesterdayStr);
+  const { startIso: yesterdayStart } = getIstDayBoundaries(yesterdayStr);
 
-  const { data: yesterdayRows, error: yesterdayErr } = await supabase
-    .from('gh_candidate_applications')
-    .select('status, submitted_at')
-    .not('status', 'in', '(READY_FOR_REVIEW,SKIPPED)')
-    .gte('created_at', yesterdayStart)
-    .lt('created_at', yesterdayEnd);
+  // 1. Snapshot requested days (normally yesterday only)
+  const dailyDates = options?.dailyDates ?? [yesterdayStr];
+  for (const dateStr of dailyDates) {
+    const { startIso, endIso } = getIstDayBoundaries(dateStr);
+    const { data: rows, error: rowsErr } = await supabase
+      .from('gh_candidate_applications')
+      .select('status, submitted_at')
+      .not('status', 'in', '(READY_FOR_REVIEW,SKIPPED)')
+      .gte('created_at', startIso)
+      .lt('created_at', endIso);
 
-  if (yesterdayErr) {
-    log.error('Failed to fetch yesterday applications for rollup:', yesterdayErr);
-    return;
-  }
-
-  let total_applications = 0;
-  let submitted_count = 0;
-  let applied_count = 0;
-  let failed_count = 0;
-
-  for (const row of yesterdayRows || []) {
-    total_applications++;
-
-    submitted_count++;
-    if (
-      (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') &&
-      row.submitted_at >= yesterdayStart &&
-      row.submitted_at < yesterdayEnd
-    ) {
-      applied_count++;
+    if (rowsErr) {
+      log.error(`Failed to fetch applications for ${dateStr} rollup:`, rowsErr);
+      continue;
     }
-    if (FAILED_EQUIVALENT_STATUSES.includes(row.status)) {
-      failed_count++;
+
+    let total_applications = 0;
+    let submitted_count = 0;
+    let applied_count = 0;
+    let failed_count = 0;
+
+    for (const row of rows || []) {
+      total_applications++;
+      submitted_count++;
+      if (
+        (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') &&
+        row.submitted_at &&
+        row.submitted_at >= startIso &&
+        row.submitted_at < endIso
+      ) {
+        applied_count++;
+      }
+      if (FAILED_EQUIVALENT_STATUSES.includes(row.status)) {
+        failed_count++;
+      }
     }
-  }
 
-  const { error: upsertDayErr } = await supabase
-    .from('gh_stats_rollups')
-    .upsert(
-      {
-        period_type: 'day',
-        period_start: yesterdayStart,
-        period_end: yesterdayEnd,
-        total_applications,
-        submitted_count,
-        applied_count,
-        failed_count,
-      },
-      { onConflict: 'period_type,period_start' }
-    );
+    const { error: upsertDayErr } = await supabase
+      .from('gh_stats_rollups')
+      .upsert(
+        {
+          period_type: 'day',
+          period_start: startIso,
+          period_end: endIso,
+          total_applications,
+          submitted_count,
+          applied_count,
+          failed_count,
+        },
+        { onConflict: 'period_type,period_start' }
+      );
 
-  if (upsertDayErr) {
-    log.error('Failed to upsert day rollup:', upsertDayErr);
-  } else {
-    log.info(`Rolled up day ${yesterdayStr}: ${total_applications} total`);
+    if (upsertDayErr) {
+      log.error(`Failed to upsert ${dateStr} day rollup:`, upsertDayErr);
+    } else {
+      log.info(`Rolled up day ${dateStr}: ${total_applications} total`);
+    }
   }
 
   // 2. Roll daily -> weekly

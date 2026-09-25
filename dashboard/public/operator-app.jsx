@@ -3027,95 +3027,6 @@
       return 'Today & Yesterday';
     }
 
-    function createdAtRangeForOverlay(dateFilterMode, customFrom, customTo) {
-      if (dateFilterMode === 'custom' && customFrom && customTo) {
-        return {
-          startIso: new Date(`${customFrom}T00:00:00+05:30`).toISOString(),
-          endIso: new Date(`${customTo}T23:59:59.999+05:30`).toISOString(),
-        };
-      }
-      return {
-        startIso: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        endIso: null,
-      };
-    }
-
-    function rowCreatedAtInClientRange(createdAt, range) {
-      if (!createdAt) return false;
-      const time = new Date(createdAt).getTime();
-      if (time < new Date(range.startIso).getTime()) return false;
-      if (range.endIso && time > new Date(range.endIso).getTime()) return false;
-      return true;
-    }
-
-    /** Dev/admin only: live Supabase overlay. Scoped roles use GET /api/candidates job_count (date + CA aligned). */
-    function shouldUseApplicationCountOverlay() {
-      if (ApplyWizzRoles.isOpsMode()) return false;
-      const role = ApplyWizzRoles.sessionRole();
-      return role === 'dev' || role === 'admin';
-    }
-
-    /** Overlay card counts from candidate_applications (exclude SKIPPED). Falls back to API totalJobs on error/empty-list blindness. */
-    async function overlayLiveApplicationCounts(candidates, authHeaders, dateFilterMode, customFrom, customTo) {
-      if (!Array.isArray(candidates) || candidates.length === 0) return candidates;
-      if (!shouldUseApplicationCountOverlay()) return candidates;
-      const client = await getSupabaseBrowserClient(authHeaders);
-      if (!client) return candidates;
-
-      const ids = candidates.map((c) => c.applywizzId).filter(Boolean);
-      if (ids.length === 0) return candidates;
-
-      const createdRange = createdAtRangeForOverlay(dateFilterMode, customFrom, customTo);
-      const OVERLAY_ID_CHUNK = 80;
-      let data = [];
-      for (let offset = 0; offset < ids.length; offset += OVERLAY_ID_CHUNK) {
-        const chunk = ids.slice(offset, offset + OVERLAY_ID_CHUNK);
-        let overlayQuery = client
-          .from('candidate_applications')
-          .select('applywizz_id, status, resolved_fields, created_at')
-          .in('applywizz_id', chunk)
-          .gte('created_at', createdRange.startIso);
-        if (createdRange.endIso) {
-          overlayQuery = overlayQuery.lte('created_at', createdRange.endIso);
-        }
-        const chunkResult = await overlayQuery;
-        if (chunkResult.error) {
-          console.warn('[Dashboard] candidate_applications count overlay failed:', chunkResult.error.message);
-          return candidates;
-        }
-        if (chunkResult.data) data = data.concat(chunkResult.data);
-      }
-
-      if (!data.length && ids.length > 0) {
-        return candidates;
-      }
-
-      const apiHadJobs = candidates.some((c) => Number(c.totalJobs) > 0);
-      if (apiHadJobs && data.length === 0) {
-        console.warn(
-          '[Dashboard] candidate_applications count overlay returned 0 rows while GET /api/candidates reported jobs — keeping API totals'
-        );
-        return candidates;
-      }
-
-      const counts = new Map();
-      for (const id of ids) counts.set(normalizeApplywizzId(id), 0);
-      for (const row of data) {
-        if (!rowCreatedAtInClientRange(row.created_at, createdRange)) continue;
-        if (isSkippedApplicationStatus(row.status)) continue;
-        if (!applicationRowHasPersistedResolution(row)) continue;
-        const key = normalizeApplywizzId(row.applywizz_id);
-        if (!counts.has(key)) continue;
-        counts.set(key, counts.get(key) + 1);
-      }
-
-      return candidates.map((c) => {
-        const key = normalizeApplywizzId(c.applywizzId);
-        if (!counts.has(key)) return c;
-        return { ...c, totalJobs: counts.get(key) };
-      });
-    }
-
     function withQueueJobCount(candidates, applywizzId, jobs) {
       if (!Array.isArray(candidates) || !applywizzId) return candidates;
       const liveCount = filterOperatorApplicationJobs(
@@ -3620,14 +3531,7 @@
               : candidatesRes.headers.get('x-work-history-unreachable') === 'true';
             const emptyMsg = !Array.isArray(raw) ? (raw.message || null) : null;
 
-            const candidatesWithLiveCounts = await overlayLiveApplicationCounts(
-              candidateData,
-              headers,
-              dateFilterMode,
-              customFrom,
-              customTo
-            );
-            setCandidates(candidatesWithLiveCounts);
+            setCandidates(candidateData);
             if (unreachable) setWorkHistoryUnreachable(true);
             setNoCandidatesMessage(emptyMsg);
 
@@ -3646,7 +3550,7 @@
         } finally {
           if (!isPolling) setIsLoadingCandidates(false);
         }
-      }, [dateQuery, dateFilterMode, customFrom, customTo]);
+      }, [dateQuery]);
 
       const handleRefresh = async () => {
         if (isRefreshing) return;
@@ -3726,20 +3630,15 @@
 
       useEffect(() => {
         if (!currentUser) return;
-        let cancelled = false;
-        (async () => {
-          await ensureAdminHydrated();
-          if (cancelled) return;
-          fetchInitialData(false);
-          fetchNotifications();
-        })();
+        void ensureAdminHydrated();
+        fetchInitialData(false);
+        fetchNotifications();
         const intervalMs = wsConnected ? 30000 : 3000;
         const pollInterval = setInterval(() => {
           fetchInitialData(true);
           fetchNotifications();
         }, intervalMs);
         return () => {
-          cancelled = true;
           clearInterval(pollInterval);
         };
       }, [currentUser, wsConnected, fetchInitialData, fetchNotifications, ensureAdminHydrated]);

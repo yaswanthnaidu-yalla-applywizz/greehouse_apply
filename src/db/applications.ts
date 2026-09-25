@@ -950,7 +950,7 @@ async function patchApplicationRecord(
 }
 
 /**
- * Re-signs private bucket proof URLs for API/dashboard consumers (avoids expired signed URLs in <img>).
+ * Re-signs a private bucket proof URL for an explicit proof retrieval request.
  */
 export async function hydrateApplicationProofUrls(app: ApplicationRow): Promise<ApplicationRow> {
   if (!isSupabaseConfigured()) {

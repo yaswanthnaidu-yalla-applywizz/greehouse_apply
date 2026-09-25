@@ -5,7 +5,6 @@
   var MANAGER_VIEW_AS_OPERATOR_KEY = 'applywizz_manager_view_as_operator';
   var VIEW_AS_MANAGER_EMAIL_KEY = 'applywizz_view_as_manager_email';
   var refreshInFlight = null;
-  var pageLoadRefreshPromise = null;
   var nativeFetch = root.fetch.bind(root);
   var ROLE_BY_EMAIL = {
     'yaswanthnaiduyalla@applywizz.ai': 'dev',
@@ -202,8 +201,6 @@
   }
 
   function ensureSession() {
-    if (pageLoadRefreshPromise) return pageLoadRefreshPromise;
-    if (refreshInFlight) return refreshInFlight;
     if (sessionCapExpired()) {
       redirectToLogin();
       return Promise.resolve(false);
@@ -351,14 +348,13 @@
     var storedRefresh = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     if (!storedRefresh) return Promise.resolve(true);
 
-    pageLoadRefreshPromise = refreshSession().then(function (ok) {
-      pageLoadRefreshPromise = null;
+    refreshSession().then(function (ok) {
       if (!ok) {
         redirectToLogin();
       }
       return ok;
     });
-    return pageLoadRefreshPromise;
+    return Promise.resolve(true);
   }
 
   initPageLoadRefresh();
