@@ -211,23 +211,6 @@ function fuzzyOptionTextMatch(optionText: string, answerText: string): boolean {
   return opt.includes(ans) || ans.includes(opt);
 }
 
-function normalizeEeocRaceValue(value: string, fieldId: string, name: string, label: string): string {
-  if (!/race|ethnic/i.test(`${fieldId} ${name} ${label}`)) return value;
-
-  const normalized = value.trim().toLowerCase();
-  const variants: Record<string, string> = {
-    asian: 'Asian (not Hispanic or Latino)',
-    'black or african american': 'Black or African American (not Hispanic or Latino)',
-    'american indian or alaska native': 'American Indian or Alaska Native (not Hispanic or Latino)',
-    'native hawaiian or other pacific islander':
-      'Native Hawaiian or Other Pacific Islander (not Hispanic or Latino)',
-    white: 'White (not Hispanic or Latino)',
-    'two or more races': 'Two or More Races (not Hispanic or Latino)',
-  };
-
-  return variants[normalized] || value;
-}
-
 async function isUsableNativeSelect(locator: Locator): Promise<boolean> {
   const tagName = await locator.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
   if (tagName !== 'SELECT') return false;
@@ -391,12 +374,12 @@ async function hiddenRequiredInputDisplaysAnswer(
   if ((await shell.count().catch(() => 0)) === 0) return false;
 
   const requiredInputs = shell.locator(
-    'input.requiredInput, input[type="hidden"][required], input[type="hidden"][name*="required" i]'
+    'input.requiredInput, input[class*="requiredInput"], input[type="hidden"][required], input[type="hidden"][name*="required" i]'
   );
   const count = await requiredInputs.count().catch(() => 0);
   for (let index = 0; index < count; index += 1) {
     const value = (await requiredInputs.nth(index).inputValue().catch(() => '')).trim();
-    if (value && matchOption(value, answerText)) return true;
+    if (value && (matchOption(value, answerText) || choiceOptionTextMatches(value, answerText))) return true;
   }
   return false;
 }
@@ -470,7 +453,19 @@ async function fillInteractiveSelectDropdown(
   }
 
   const optionScope = await resolveSelectOptionScope(control);
-  let clicked = await clickDropdownOptionByMatch(page, answerText, choiceOptionTextMatches, optionScope);
+
+  // Phase 1 (Authoritative Primary): Exact option match with resolved answerText
+  let clicked = await clickDropdownOptionByMatch(
+    page,
+    answerText,
+    exactOptionTextMatch,
+    optionScope
+  );
+
+  // Phase 2 (Fallback / Backup): If exact match fails, use normalized choice aliases, contains, or fuzzy
+  if (!clicked) {
+    clicked = await clickDropdownOptionByMatch(page, answerText, choiceOptionTextMatches, optionScope);
+  }
   if (!clicked) {
     clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
   }
@@ -496,7 +491,18 @@ async function fillInteractiveSelectDropdown(
     if ((await toggle.count()) > 0) {
       await toggle.click({ force: true }).catch(() => {});
       await page.waitForTimeout(350);
-      clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
+      clicked = await clickDropdownOptionByMatch(
+        page,
+        answerText,
+        exactOptionTextMatch,
+        optionScope
+      );
+      if (!clicked) {
+        clicked = await clickDropdownOptionByMatch(page, answerText, choiceOptionTextMatches, optionScope);
+      }
+      if (!clicked) {
+        clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
+      }
       if (!clicked) {
         clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
       }
@@ -738,6 +744,7 @@ export async function fillSingleField(
   const isCountryCode = isCountryCodeField(fieldId, name, label);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
   const isWorkAuthRelocation =
+    !isSponsorship &&
     /work.?auth|authorized.?to.?work|authorization.?to.?work|legally.?authorized|right.?to.?work|permission.?to.?work|can.?you.?work|do.?you.?have.?the.?right|are.?you.?permitted|work.?permit|employment.?eligibility|reloc|willing.?to.?relocat|open.?to.?(work|reloc)|able.?to.?work|eligible.?to.?work/i.test(
       label
     );
@@ -746,21 +753,28 @@ export async function fillSingleField(
       label
     );
   const referralOptionValues = ['LinkedIn', 'Social Media', 'Online'];
-  if (isWorkAuthRelocation) {
-    val = 'Yes';
-    log.info(`Work auth/relocation field detected — forcing Yes for label=${label}`);
-  } else if (isReferralSource) {
-    val = 'LinkedIn';
-    log.info(`Referral source field detected — forcing LinkedIn for label=${label}`);
+
+  // Only apply default heuristics as fallbacks when no resolved value is present
+  if (!val) {
+    if (isWorkAuthRelocation) {
+      val = 'Yes';
+      log.info(`Work auth/relocation field empty — fallback setting Yes for label=${label}`);
+    } else if (isReferralSource) {
+      val = 'LinkedIn';
+      log.info(`Referral source field empty — fallback setting LinkedIn for label=${label}`);
+    }
   }
+
   const isForcedCountryField =
+    !val &&
+    !isCountryCode &&
     /country/i.test(label) &&
     ['text', 'select', 'radio', 'location_autocomplete'].includes(rawType);
   if (isForcedCountryField) {
     val = 'United States';
-    log.info(`Country field detected — forcing United States for field=${label}`);
+    log.info(`Country field empty — fallback setting United States for field=${label}`);
   }
-  const optionValues = isReferralSource ? referralOptionValues : [val];
+  const optionValues = isReferralSource && !val ? referralOptionValues : [val];
 
   const fillResult: FieldFillResult = {
     fieldId,
@@ -915,7 +929,6 @@ export async function fillSingleField(
       // ==========================================
       const booleanValue = normalizeBooleanValue(val);
       let selectValue = booleanValue || val;
-      selectValue = normalizeEeocRaceValue(selectValue, fieldId, name, label);
 
       // Special resolution for country code dropdown (phone country) - strictly +1 (United States)
       let targetCountryName = 'United States';
@@ -934,6 +947,7 @@ export async function fillSingleField(
         if (radioCount > 0) {
           let radioClicked = false;
           let radioSelectorUsed = '';
+          const targetIsNo = normalizeBooleanValue(selectValue) === 'No' || /^no\b/i.test(selectValue.trim());
           for (let r = 0; r < radioCount; r++) {
             const radio = sponsorshipRadios.nth(r);
             const rVal = (await radio.getAttribute('value').catch(() => '')) || '';
@@ -947,7 +961,11 @@ export async function fillSingleField(
               const parentL = radio.locator('..').first();
               if ((await parentL.count()) > 0) rText = (await parentL.innerText().catch(() => '')) || '';
             }
-            if (/^yes\b/i.test(rText.trim()) || /^yes\b/i.test(rVal.trim()) || ['true', '1'].includes(rVal.trim().toLowerCase())) {
+            const matchesTarget = targetIsNo
+              ? (/^no\b/i.test(rText.trim()) || /^no\b/i.test(rVal.trim()) || ['false', '0'].includes(rVal.trim().toLowerCase()))
+              : (/^yes\b/i.test(rText.trim()) || /^yes\b/i.test(rVal.trim()) || ['true', '1'].includes(rVal.trim().toLowerCase()));
+
+            if (matchesTarget) {
               radioSelectorUsed = rId ? `#${rId}` : `input[type="radio"][name="${escapeAttr(name)}"][value="${rVal}"]`;
               await radio.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
               await radio.click({ force: true, timeout: 3000 });
@@ -958,7 +976,7 @@ export async function fillSingleField(
           if (radioClicked) {
             fillResult.success = true;
             log.info(
-              `[Submitter] Sponsorship field → selector: ${radioSelectorUsed || 'radio[name=' + name + ']'} → attempted click: Yes → result: selected`
+              `[Submitter] Sponsorship field → selector: ${radioSelectorUsed || 'radio[name=' + name + ']'} → attempted click: ${targetIsNo ? 'No' : 'Yes'} → result: selected`
             );
             return fillResult;
           }
@@ -1591,7 +1609,13 @@ export async function fillSingleField(
         } else if (role === 'combobox' || (className && className.includes('select__input'))) {
           const booleanValue = normalizeBooleanValue(val);
           const selectAnswer = booleanValue || val;
-          fillResult.success = await fillInteractiveSelectDropdown(page, found.locator, selectAnswer);
+          fillResult.success = await fillInteractiveSelectDropdown(
+            page,
+            found.locator,
+            selectAnswer,
+            exactOptionTextMatch,
+            0
+          );
         } else {
           // Standard text input
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
@@ -1921,7 +1945,10 @@ export async function fillForm(
     const visibleFailedFields: Array<{ result: FieldFillResult; index: number; field: ResolvedField }> = [];
     for (const { result, index } of failedInitialFields) {
       const field = fields[index];
-      if (field && await isResolvedFieldVisible(page, field)) {
+      const fieldType = String(field?.type || '').toLowerCase();
+      const isResolvedChoiceField =
+        fieldType === 'select' || fieldType === 'radio' || fieldType === 'checkbox' || fieldType === 'location_autocomplete';
+      if (field && !isResolvedChoiceField && await isResolvedFieldVisible(page, field)) {
         visibleFailedFields.push({ result, index, field });
       }
     }

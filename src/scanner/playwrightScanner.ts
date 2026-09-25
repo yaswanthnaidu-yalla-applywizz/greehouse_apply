@@ -255,7 +255,7 @@ export class PlaywrightScanner {
     this.timeoutMs = options.timeoutMs ?? config.PLAYWRIGHT_TIMEOUT;
     this.minJitterMs = options.minJitterMs ?? config.SCANNER_JITTER_MIN_MS;
     this.maxJitterMs = options.maxJitterMs ?? config.SCANNER_JITTER_MAX_MS;
-    this.headless = options.headless ?? true;
+    this.headless = process.env.RAILWAY_ENV === 'true' ? true : (options.headless ?? true);
     this.onJobScanned = options.onJobScanned;
   }
 

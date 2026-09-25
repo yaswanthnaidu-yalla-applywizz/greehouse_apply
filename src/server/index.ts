@@ -2113,12 +2113,13 @@ export function startServer(
     }
 
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
+      // Start fast REST API-based OTP resolution service immediately
+      otpResolutionService.start();
+
       if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
-        void Promise.all([zohoReader.init(), zohoReaderPool.init()])
-          .then(() => otpResolutionService.start())
-          .catch((err: any) => {
-          log.warn(`[Server] ⚠️ Zoho Reader background initialization error: ${err.message}`);
-          });
+        void Promise.all([zohoReader.init(), zohoReaderPool.init()]).catch((err: any) => {
+          log.warn(`[Server] ⚠️ Zoho Reader background Playwright pool init error: ${err.message}`);
+        });
       }
     } else {
       createLogger('ZohoReader').info(

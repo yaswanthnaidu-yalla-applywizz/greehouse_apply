@@ -763,7 +763,12 @@ export async function switchToHeadfulMode(
   await browser.close().catch(() => {});
 
   const appliedHeadfulAt = Date.now();
-  const isHeadless = options.headless !== undefined ? options.headless : false;
+  const isHeadless =
+    process.env.RAILWAY_ENV === 'true'
+      ? true
+      : options.headless !== undefined
+      ? options.headless
+      : false;
 
   let newBrowser: Browser;
   try {
@@ -1395,8 +1400,9 @@ export async function runLiveSubmit(
     };
   }
 
+  const isHeadless = process.env.RAILWAY_ENV === 'true' ? true : (options.headless ?? true);
   log.info(
-    `[Live Submit] 🚀 Initiating live submission for ${application.applywizz_id} [${targetUrl}] (headless: true)...`
+    `[Live Submit] 🚀 Initiating live submission for ${application.applywizz_id} [${targetUrl}] (headless: ${isHeadless})...`
   );
 
   // Update DB status to APPLYING
@@ -1416,10 +1422,10 @@ export async function runLiveSubmit(
   let screenshotCaptured = false;
 
   try {
-    // 2. Launch headless browser with anti-detection flags (strictly headless; never headful)
+    // 2. Launch browser with anti-detection flags (strictly headless on Railway; headful supported locally)
     try {
       browser = await chromium.launch({
-        headless: true,
+        headless: isHeadless,
         args: [
           '--disable-blink-features=AutomationControlled',
           '--no-sandbox',
