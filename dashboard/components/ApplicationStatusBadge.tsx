@@ -117,10 +117,10 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'QUEUED':
       return (
         <span
-          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
+          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-[#DBEAFE] text-[#2563eb] border border-transparent shadow-sm ${className}`}
           title="Application queued for submission daemon"
         >
-          <span className="w-2 h-2 rounded-full border-2 border-[#9A3412] border-t-transparent animate-spin"></span>
+          <span className="w-2 h-2 rounded-full bg-[#2563eb] animate-pulse"></span>
           <span>Queued</span>
         </span>
       );
@@ -130,21 +130,21 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'APPLYING':
       return (
         <span
-          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
+          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-[#FEF3C7] text-[#d97706] border border-transparent shadow-sm animate-pulse ${className}`}
           title="Automated submission in progress"
         >
-          <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
-          <span>Submitting... (Live)</span>
+          <span className="w-2 h-2 rounded-full bg-[#d97706] animate-pulse"></span>
+          <span>Submitting...</span>
         </span>
       );
 
     case 'EMAIL_PROOF_PENDING':
       return (
         <span
-          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`}
+          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-[#DBEAFE] text-[#2563eb] border border-transparent shadow-sm animate-pulse ${className}`}
           title="Web submission confirmed — verifying confirmation email..."
         >
-          <span className="w-2 h-2 rounded-full border-2 border-[#0369A1] border-t-transparent animate-spin"></span>
+          <span className="w-2 h-2 rounded-full bg-[#2563eb] animate-pulse"></span>
           <span>Email Pending...</span>
         </span>
       );
@@ -153,20 +153,20 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
       if (proofWebUrl && !proofEmailUrl && !proofEmailJson) {
         return (
           <span
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#DBEAFE] text-[#2563eb] border border-transparent shadow-sm ${className}`}
             title="A-Applied: Web confirmation proof captured, email proof pending or timed out"
           >
-            <span className="w-2 h-2 rounded-full bg-[#0284C7]"></span>
+            <span className="w-2 h-2 rounded-full bg-[#2563eb]"></span>
             <span>A-Applied</span>
           </span>
         );
       }
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#DCFCE7] text-[#16a34a] border border-transparent shadow-sm ${className}`}
           title="Applied & Verified: Both web and confirmation email proofs captured"
         >
-          <span className="w-2 h-2 rounded-full bg-[#1E4620]"></span>
+          <span className="w-2 h-2 rounded-full bg-[#16a34a]"></span>
           <span>Applied &amp; Verified</span>
         </span>
       );
@@ -174,9 +174,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'DRY_RUN_COMPLETE':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#E5E7EB] text-[#6b7280] border border-transparent shadow-sm ${className}`}
         >
-          <span className="w-2 h-2 rounded-full bg-[#1E3A5F]"></span>
+          <span className="w-2 h-2 rounded-full bg-[#6b7280]"></span>
           <span>Dry-Run Complete</span>
         </span>
       );
@@ -184,9 +184,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'FAILED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#EF4444] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#FEE2E2] text-[#dc2626] border border-transparent shadow-sm ${className}`}
         >
-          <span className="w-2 h-2 rounded-full bg-white"></span>
+          <span className="w-2 h-2 rounded-full bg-[#dc2626]"></span>
           <span>Submission Failed</span>
         </span>
       );
@@ -194,8 +194,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'EXPIRED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E2E8F0] text-[#475569] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#F3F4F6] text-[#6b7280] border border-transparent shadow-sm ${className}`}
         >
+          <span className="w-2 h-2 rounded-full bg-[#6b7280]"></span>
           <span>Closed / Expired</span>
         </span>
       );
@@ -203,10 +204,10 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     case 'CAPTCHA_TIMEOUT':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F97316] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#FEF3C7] text-[#d97706] border border-transparent shadow-sm ${className}`}
           title="Session timed out after 5 minutes"
         >
-          <span className="w-2 h-2 rounded-full bg-white"></span>
+          <span className="w-2 h-2 rounded-full bg-[#d97706]"></span>
           <span>Timeout</span>
         </span>
       );
@@ -215,9 +216,9 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
     default:
       return (
         <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F4D66B] text-[#5C4A0A] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#DBEAFE] text-[#2563eb] border border-transparent shadow-sm ${className}`}
         >
-          <span className="w-2 h-2 rounded-full bg-[#5C4A0A]"></span>
+          <span className="w-2 h-2 rounded-full bg-[#2563eb]"></span>
           <span>Ready for Review</span>
         </span>
       );
