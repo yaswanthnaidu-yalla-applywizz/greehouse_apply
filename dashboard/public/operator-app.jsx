@@ -721,14 +721,14 @@
       const isTextarea = field.type === 'textarea';
       const isUnresolved = field.source === 'unresolved';
       const fieldType = String(field.field_type || field.type || '').toLowerCase();
-      const fieldOptions = field.options && field.options.length > 0 ? field.options : null;
+      const fieldOptions = Array.isArray(field.options) && field.options.length > 0 ? field.options : null;
       const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions;
       const isCheckbox = fieldType === 'checkbox';
       const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
       // Derive quick-pick options for unresolved fields: use field.options, or Yes/No for boolean-type labels
       const quickPickOptions = (() => {
         if (!isUnresolved) return null;
-        if (fieldOptions) return fieldOptions.slice(0, 12); // cap at 12 to avoid overflow
+        if (fieldOptions) return fieldOptions;
         const lc = (field.label || '').toLowerCase();
         if (/\bdo you\b|\bare you\b|\bhave you\b|\bwill you\b|\bcan you\b|\bwould you\b|\bis your\b/.test(lc)) {
           return ['Yes', 'No'];
@@ -736,13 +736,17 @@
         return null;
       })();
 
-      const unresolvedHint =
-        fieldType === 'text' || fieldType === 'textarea'
-          ? 'Enter a specific answer. Example: years of experience, a number, a short sentence.'
+      const fieldHint =
+        isChoiceField || fieldType === 'select' || fieldType === 'radio'
+          ? 'This is a dropdown question, please choose from the given options.'
+          : isCheckbox
+          ? 'This is a multi-select checkbox question, please select all options that apply.'
+          : fieldType === 'location_autocomplete'
+          ? 'Start typing to search and select a city or location from the suggestions.'
           : fieldType === 'file'
           ? 'Upload the required document.'
-          : fieldType === 'location_autocomplete'
-          ? 'Enter city, state, or country as applicable.'
+          : fieldType === 'text' || fieldType === 'textarea'
+          ? 'Enter a specific answer. Example: years of experience, a number, a short sentence.'
           : 'Provide a clear, specific answer for this field.';
 
       // Handles quick-pick tap: directly PATCHes the selected option — no confirm step needed for tap actions.
@@ -904,8 +908,11 @@
                   className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
                 />
               )}
-              {isUnresolved && showHint && !quickPickOptions && (
-                <p className="mt-1.5 text-[10px] text-[#64748B]">{unresolvedHint}</p>
+              {showHint && (
+                <p className="mt-1.5 text-[10px] text-[#64748B] flex items-center gap-1 font-mono">
+                  <span>💡</span>
+                  <span>{fieldHint}</span>
+                </p>
               )}
 
               {!isConfirming ? (
@@ -1001,7 +1008,10 @@
               {/* Unresolved quick-pick option buttons */}
               {isUnresolved && quickPickOptions && (
                 <div className="mt-1.5 mb-2">
-                  <p className="text-[10px] text-[#64748B] mb-1.5 font-medium">Pick an answer:</p>
+                  <p className="text-[10px] text-[#64748B] mb-1.5 font-medium flex items-center gap-1">
+                    <span>💡</span>
+                    <span>{fieldHint}</span>
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
                     {quickPickOptions.map((opt) => (
                       <button
@@ -1032,6 +1042,7 @@
                   className="mt-1 p-2 rounded-md bg-[#FEF2F2] border border-[#EF4444] hover:bg-[#FEE2E2] cursor-pointer transition text-xs font-mono break-words"
                 >
                   <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved required field — click to provide answer</span>
+                  <p className="mt-1 text-[10px] text-[#64748B] font-normal">{fieldHint}</p>
                 </div>
               )}
               {/* Resolved: show value, click to edit */}

@@ -19,6 +19,7 @@
     "dashboard": "tsx src/server/index.ts",
     "pipeline": "tsx src/index.ts",
     "dry-run": "tsx src/submitter/runUserApplication.ts",
+    "demo:doordash-headful": "tsx scripts/runDoorDashHeadfulSelectDemo.ts",
     "submit": "tsx src/submitter/runLiveSubmitCli.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:backfill-company-email": "tsx src/db/backfillCompanyEmail.ts",

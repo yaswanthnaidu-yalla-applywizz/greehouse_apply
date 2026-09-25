@@ -316,10 +316,11 @@ async function main() {
     resolvedFields = yaswanthResolvedFields;
   }
 
-  log.info('🌐 Launching Chromium browser in visible (headful) mode...');
+  const isHeadless = process.env.RAILWAY_ENV === 'true';
+  log.info(`🌐 Launching Chromium browser (headless: ${isHeadless})...`);
   const browser = await chromium.launch({
-    headless: false,
-    slowMo: 60, // Slower interaction so the user can easily observe the filling in real-time
+    headless: isHeadless,
+    slowMo: isHeadless ? 0 : 60, // Slower interaction so the user can easily observe the filling in real-time
     args: [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',

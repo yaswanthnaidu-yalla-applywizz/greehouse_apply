@@ -446,6 +446,14 @@ submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Re
   const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
   const timeoutMs = req.body?.timeoutMs ?? 30000;
 
+  if (process.env.RAILWAY_ENV === 'true') {
+    res.status(400).json({
+      success: false,
+      error: 'Headful CAPTCHA solving is not supported in headless production environment.',
+    });
+    return;
+  }
+
   try {
     const application = await getApplication(appId, req.body?.jobUrl);
     if (!application) {
