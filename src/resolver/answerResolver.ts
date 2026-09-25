@@ -77,16 +77,32 @@ function profileIndicatesUsLocation(profile: ProfileRow | null): boolean {
   );
 }
 
+function getFieldOptions(field: ScannedField): string[] | undefined {
+  if (Array.isArray(field.options) && field.options.length > 0) {
+    return field.options;
+  }
+  const lc = (field.label || '').toLowerCase();
+  const fieldType = String(field.type || '').toLowerCase();
+  if (fieldType === 'select' || fieldType === 'radio') {
+    if (/\b(do you|are you|have you|will you|can you|would you|is your|were you|did you)\b/i.test(lc)) {
+      return ['Yes', 'No'];
+    }
+  }
+  return field.options;
+}
+
 function alignResolvedChoice(field: ScannedField, resolved: ResolvedField): ResolvedField {
-  if (resolved.source === 'unresolved' || !resolved.value.trim()) return resolved;
-  if (field.type === 'checkbox') return resolved;
-  if (field.type !== 'select' && field.type !== 'radio') return resolved;
+  const options = getFieldOptions(field) || resolved.options;
+  const baseWithOptions = { ...resolved, ...(options ? { options } : {}) };
+  if (resolved.source === 'unresolved' || !resolved.value.trim()) return baseWithOptions;
+  if (field.type === 'checkbox') return baseWithOptions;
+  if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
 
   const matched = matchChoiceOption(resolved.value, field.options);
-  if (matched) return { ...resolved, value: matched };
+  if (matched) return { ...baseWithOptions, value: matched };
 
   return {
-    ...resolved,
+    ...baseWithOptions,
     value: '',
     source: 'unresolved',
     resolvedByTier: null,
@@ -105,6 +121,7 @@ export function resolvePreTierField(
   profile: ProfileRow | null,
   isRequired: boolean
 ): ResolvedField | null {
+  const options = getFieldOptions(field);
   const base = {
     fieldId: field.fieldId,
     name: field.name,
@@ -114,6 +131,7 @@ export function resolvePreTierField(
     resolvedByTier: 1 as const,
     confidence: 1.0,
     isRequired,
+    ...(options ? { options } : {}),
   };
 
   if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
@@ -170,6 +188,7 @@ function resolveStructuredEeocField(
   if (!value) return null;
 
   log.info(`[Resolver] ✅ T1-STRUCT ${field.label} → "${value}"`);
+  const options = getFieldOptions(field);
   return {
     fieldId: field.fieldId,
     name: field.name,
@@ -180,6 +199,7 @@ function resolveStructuredEeocField(
     resolvedByTier: 1,
     confidence: 1.0,
     isRequired,
+    ...(options ? { options } : {}),
   };
 }
 
@@ -409,6 +429,7 @@ export class AnswerResolver {
   }
 
   private unresolvedField(field: ScannedField): ResolvedField {
+    const options = getFieldOptions(field);
     return {
       fieldId: field.fieldId,
       name: field.name,
@@ -419,6 +440,7 @@ export class AnswerResolver {
       resolvedByTier: null,
       confidence: 0,
       isRequired: Boolean(field.isRequired),
+      ...(options ? { options } : {}),
     };
   }
 
@@ -640,6 +662,15 @@ export class AnswerResolver {
           const reason = getTier5FailureReason(chunkFields[i]);
           log.info(`[Resolver] ❌ T5 ${chunkFields[i].label} — ${reason}`);
         }
+      }
+    }
+
+    // Ensure every resolved field retains options from the scanned template
+    for (let i = 0; i < template.fields.length; i++) {
+      const field = template.fields[i];
+      const options = getFieldOptions(field);
+      if (options && resolvedFields[i]) {
+        resolvedFields[i].options = options;
       }
     }
 

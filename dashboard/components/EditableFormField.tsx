@@ -108,20 +108,20 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
 
   const getHintText = (): string => {
     const type = (field.type || '').toLowerCase();
-    if (type === 'text' || type === 'textarea') {
-      return 'Enter a specific answer. Example: years of experience, a number, a short sentence.';
-    }
-    if (type === 'select' || type === 'radio') {
-      return 'Choose the option that best matches the candidate\'s profile.';
+    if (type === 'select' || type === 'radio' || isChoiceField) {
+      return 'This is a dropdown question, please choose from the given options.';
     }
     if (type === 'checkbox') {
-      return 'Check if applicable based on candidate\'s background.';
+      return 'This is a multi-select checkbox question, please select all options that apply.';
+    }
+    if (type === 'location_autocomplete') {
+      return 'Start typing to search and select a city or location from the suggestions.';
     }
     if (type === 'file') {
       return 'Upload the required document.';
     }
-    if (type === 'location_autocomplete') {
-      return 'Enter city, state, or country as applicable.';
+    if (type === 'text' || type === 'textarea') {
+      return 'Enter a specific answer. Example: years of experience, a number, a short sentence.';
     }
     return 'Provide a clear, specific answer for this field.';
   };

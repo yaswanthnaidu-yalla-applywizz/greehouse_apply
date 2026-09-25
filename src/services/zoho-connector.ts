@@ -380,3 +380,264 @@ export async function queryZohoConfirmationEmail(
     };
   }
 }
+
+/**
+ * Extracts an alphanumeric or numeric OTP code from email text or subject.
+ */
+export function extractOtpCodeFromText(text: string): string | null {
+  if (!text) return null;
+
+  // Pattern 0: Greenhouse's exact wording:
+  // "Copy and paste this code into the security code field on your application: NgW4NT62"
+  const greenhousePattern =
+    /copy\s*and\s*paste\s*this\s*code[^:\n]{0,120}:\s*([A-Za-z0-9]{6,16})\b/i;
+  const match0 = text.match(greenhousePattern);
+  if (match0 && match0[1]) {
+    return match0[1].trim();
+  }
+
+  // Pattern 1: Explicit labeled OTP code
+  const explicitPattern =
+    /(?:security\s*code|verification\s*code|verify\s*your\s*account\s*with|one-time\s*(?:passcode|code|password)|your\s*(?:verification\s*)?code|enter\s*(?:the\s*)?(?:following\s*)?code|confirmation\s*code|temporary\s*code)[^:\n]{0,80}(?:\s+is|\s*:)[\s\r\n:=]*([A-Za-z0-9]{6,16})\b/i;
+  const match1 = text.match(explicitPattern);
+  if (match1 && match1[1]) {
+    return match1[1].trim();
+  }
+
+  // Pattern 2: 8-character alphanumeric code standalone (e.g. Aebf0aDc)
+  const standalonePattern = /\b([A-Za-z0-9]{8})\b/g;
+  const words = text.match(standalonePattern) || [];
+  const stopWords = new Set([
+    'security',
+    'complete',
+    'received',
+    'position',
+    'employer',
+    'location',
+    'continue',
+    'question',
+    'response',
+    'required',
+    'password',
+    'username',
+    'greenhou',
+    'candidate',
+    'settings',
+  ]);
+  for (const w of words) {
+    if (!stopWords.has(w.toLowerCase())) {
+      if (/[0-9]/.test(w) && /[A-Za-z]/.test(w)) {
+        return w;
+      }
+    }
+  }
+
+  // Pattern 3: 6-digit numeric code
+  const sixDigitPattern = /\b(\d{6})\b/;
+  const match3 = text.match(sixDigitPattern);
+  if (match3 && match3[1]) {
+    return match3[1].trim();
+  }
+
+  return null;
+}
+
+export interface ZohoOtpApiQueryOptions {
+  candidateEmail: string;
+  sinceTimestamp: number;
+  companyName?: string;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}
+
+export interface ZohoOtpApiResult {
+  success: boolean;
+  otp?: string;
+  subject?: string;
+  receivedAt?: string;
+  errorMessage?: string;
+  reason?: string;
+}
+
+/**
+ * Fast REST API-based OTP polling service.
+ * Repeatedly queries the Zoho connector REST API at `pollIntervalMs` (default 2000ms)
+ * until a matching Greenhouse security code email arrives or `timeoutMs` expires.
+ */
+export async function fetchZohoOtpViaApi(
+  options: ZohoOtpApiQueryOptions
+): Promise<ZohoOtpApiResult> {
+  const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
+  const sinceTimestamp = options.sinceTimestamp || Date.now() - 3 * 60 * 1000;
+  const timeoutMs = options.timeoutMs ?? 30000;
+  const pollIntervalMs = options.pollIntervalMs ?? 2000;
+  const companyName = (options.companyName || '').trim();
+
+  if (!candidateEmail) {
+    return {
+      success: false,
+      reason: 'invalid email',
+      errorMessage: 'Candidate email is required for OTP resolution.',
+    };
+  }
+
+  const baseUrl = (config.ZOHO_CONNECTOR_URL || 'https://zoho-mail-reader.onrender.com/').replace(
+    /\/+$/,
+    ''
+  );
+  // Allow up to 2 minutes of clock skew before the reported challenge timestamp
+  const minTimeMs = sinceTimestamp - 2 * 60 * 1000;
+  const startTime = Date.now();
+  let attempt = 0;
+
+  log.info(
+    `[Zoho Connector] ⚡ Starting fast REST OTP poll for ${candidateEmail} ` +
+      `(pollInterval=${pollIntervalMs}ms, timeout=${timeoutMs / 1000}s, since=${new Date(
+        sinceTimestamp
+      ).toLocaleTimeString()})`
+  );
+
+  while (Date.now() - startTime < timeoutMs) {
+    attempt++;
+    const cycleStart = Date.now();
+
+    try {
+      const inboxUrl = `${baseUrl}/api/zoho/ui/inbox?email=${encodeURIComponent(
+        candidateEmail
+      )}&limit=15&start=1`;
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), Math.min(10000, timeoutMs));
+
+      const res = await fetch(inboxUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      }).finally(() => clearTimeout(fetchTimeout));
+
+      if (res.ok) {
+        const rawBody = await res.text();
+        let data: RawZohoInboxResponse | null = null;
+        try {
+          data = JSON.parse(rawBody) as RawZohoInboxResponse;
+        } catch {
+          data = null;
+        }
+
+        const messages = data?.messages || [];
+        const accountId = data?.accountId;
+
+        for (const msg of messages) {
+          const receivedMs = Number(msg.receivedTime);
+          if (Number.isNaN(receivedMs) || receivedMs < minTimeMs) {
+            continue;
+          }
+
+          const fromAddress = (msg.from || '').toLowerCase();
+          const subject = msg.subject || '';
+          const subjectLower = subject.toLowerCase();
+
+          // Senders that deliver Greenhouse security codes
+          const isGreenhouseSender =
+            fromAddress.includes('greenhouse-mail.io') ||
+            fromAddress.includes('no-reply@us.greenhouse-mail.io') ||
+            fromAddress.includes('greenhouse');
+
+          if (!isGreenhouseSender) {
+            continue;
+          }
+
+          // Subject must indicate a security / verification code
+          const isSecurityCodeSubject =
+            /security\s*code|\botp\b|verification\s*code|verify/i.test(subjectLower);
+
+          if (!isSecurityCodeSubject) {
+            continue;
+          }
+
+          // Optional company filter
+          if (companyName && companyName.length > 2) {
+            const normComp = normalizeCompanyName(companyName);
+            const normSub = normalizeCompanyName(subject);
+            const matchesCompany =
+              subjectLower.includes(companyName.toLowerCase()) ||
+              (normComp.length > 2 && normSub.includes(normComp));
+            if (!matchesCompany) {
+              // If company name was provided but subject explicitly names a DIFFERENT company, continue
+              log.info(
+                `[Zoho Connector] Security code subject "${subject}" did not match target company "${companyName}". Checking next.`
+              );
+              continue;
+            }
+          }
+
+          // 1. Try extracting OTP directly from subject
+          let extractedOtp = extractOtpCodeFromText(subject);
+
+          // 2. If not in subject, fetch the message body
+          const folderId = msg.folderId || data?.folder?.folderId;
+          if (!extractedOtp && accountId && folderId && msg.messageId) {
+            try {
+              const msgQs = new URLSearchParams({
+                email: candidateEmail,
+                accountId,
+                folderId,
+                messageId: msg.messageId,
+              });
+              const msgRes = await fetch(`${baseUrl}/api/zoho/ui/message?${msgQs}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+              });
+
+              if (msgRes.ok) {
+                const msgData = (await msgRes.json()) as RawZohoMessageResponse;
+                const bodyText =
+                  msgData.message?.textContent || stripHtml(msgData.message?.htmlContent || '');
+                extractedOtp = extractOtpCodeFromText(bodyText);
+              }
+            } catch (bodyErr: any) {
+              log.warn(
+                `[Zoho Connector] ⚠️ Failed to fetch message detail for OTP: ${bodyErr.message}`
+              );
+            }
+          }
+
+          if (extractedOtp) {
+            const receivedAt = new Date(receivedMs).toISOString();
+            log.info(
+              `[Zoho Connector] 🎯 Found OTP via REST API in attempt #${attempt}: ${extractedOtp} ` +
+                `(subject: "${subject}", received: ${receivedAt})`
+            );
+            return {
+              success: true,
+              otp: extractedOtp,
+              subject,
+              receivedAt,
+            };
+          }
+        }
+      } else {
+        log.warn(`[Zoho Connector] ⚠️ Inbox query returned HTTP ${res.status}`);
+      }
+    } catch (pollErr: any) {
+      log.warn(`[Zoho Connector] ⚠️ Poll attempt #${attempt} error: ${pollErr.message}`);
+    }
+
+    const elapsed = Date.now() - cycleStart;
+    const remaining = pollIntervalMs - elapsed;
+    if (remaining > 50 && Date.now() - startTime + remaining < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, remaining));
+    }
+  }
+
+  const reason = 'no matching greenhouse OTP email found';
+  log.warn(
+    `[Zoho Connector] ⏱️ Timeout after ${Math.round(
+      (Date.now() - startTime) / 1000
+    )}s (${attempt} attempts). ${reason} for ${candidateEmail}`
+  );
+  return {
+    success: false,
+    reason,
+    errorMessage: `Timed out waiting for Greenhouse verification email for ${candidateEmail}.`,
+  };
+}

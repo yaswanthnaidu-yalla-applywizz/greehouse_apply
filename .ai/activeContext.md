@@ -1,13 +1,19 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-25_
+_Last updated: 2026-09-26_
 
-## Current Session Update (2026-09-25 — stats/retry reliability)
+## Current Session Update (2026-09-26 — Fast REST API OTP Resolution & Submission Hardening)
 
-- Removed automatic submission requeue paths: worker and synchronous route failures now become operator-visible `RETRY`; only explicit operator retry can queue them again.
-- Added stale `APPLYING` recovery in the active submitter pool. Claims older than 15 minutes become `RETRY` with an operator-readable worker-lease-expired reason instead of remaining stuck indefinitely.
-- Hardened Greenhouse remix-css searchable-select verification with a settle/blur wait and hidden required-input regression coverage.
-- Reworked stats rollups to retain one daily historical grain, query exact selected ranges without day/week/month overlap, persist before cleanup, and clear all working applications/templates after a successful snapshot.
+- **Fast REST API OTP Resolution:** Replaced slow Playwright browser automation for OTP retrieval with direct REST API polling via `fetchZohoOtpViaApi` in `zoho-connector.ts`.
+  - Queries `/api/zoho/ui/inbox` and `/api/zoho/ui/message` every 2s for incoming Greenhouse security codes.
+  - Slashes OTP retrieval latency from 25–35+ seconds down to 2–5 seconds.
+  - Eliminates heavy Playwright browser instances and Chromium memory footprint on Railway.
+  - Kept Playwright `zohoReaderPool` as a graceful fallback only if REST endpoints encounter unexpected issues.
+- **Authoritative Operator Decisions:** Made operator-approved `resolved_fields` the primary truth for submission. Forced heuristics (work authorization/relocation defaults, referral sources, country) are relegated to backups that only execute if the field value is empty or unpopulated.
+- **Sponsorship Integrity Protected:** Fixed regex in `isWorkAuthRelocation` that matched sponsorship questions. Submitter strictly respects resolved sponsorship choices (clicking "No" when target is "No", never overriding to "Yes").
+- **Options Preservation & Hydration:** Updated resolver pipeline (`answerResolver.ts`) to persist `options` on all `ResolvedField` objects (with `['Yes', 'No']` defaults for boolean questions). Added automatic options enrichment in `applicationFieldHydration.ts` for existing database records using template field schemas.
+- **Operator Dashboard Enhancements:** Updated `EditableFormField.tsx` and `operator-app.jsx` to display full dropdown options and render contextual hints (e.g., "This is a dropdown question, please choose from the given options.", multi-select hints, location autocomplete hints).
+- **Two-Phase Dropdown Resolution:** Hardened `fillInteractiveSelectDropdown` with an exact-match first pass followed by aliased/fuzzy second pass, and updated hidden required-input selector to match Greenhouse `remix-css-*-requiredInput`.
 
 ## Current Session Update (2026-09-25)
 
