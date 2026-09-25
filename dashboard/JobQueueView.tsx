@@ -141,10 +141,10 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
           <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
             Assigned Applications Queue
           </span>
-          <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#1A1A2E] text-[#1E3A5F] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
+          <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#1A1A2E] text-[#1E3A5F] px-2 py-0.5 rounded font-bold">
             {queueJobs.length} Active
           </span>
-          <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#1A1A2E] text-[#1E4620] px-2 py-0.5 rounded font-bold shadow-[1px_1px_0px_#1A1A2E]">
+          <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#1A1A2E] text-[#1E4620] px-2 py-0.5 rounded font-bold">
             ⚡ &lt; 35 Qs
           </span>
         </div>
@@ -154,7 +154,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             href={candidate.resumeUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1E4620] hover:text-[#143015] bg-[#9AC89A] border border-[#1A1A2E] px-3 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1E4620] hover:text-[#143015] bg-[#9AC89A] border border-[#1A1A2E] px-3 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] transition-all"
           >
             <span>📄</span>
             <span>Master Resume PDF</span>
@@ -188,8 +188,8 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
               onClick={() => handleJobCardClick(job)}
               className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
                 isSelected
-                  ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
-                  : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+                  ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] ring-1 ring-[#1A1A2E]'
+                  : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] active:translate-x-[1px] active:translate-y-[1px]'
               }`}
             >
               {/* Top Row: Company Initial Badge + Company Name + Difficulty */}
@@ -213,7 +213,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                 </div>
                 {Boolean((job as any).has_manual_edits || job.hasManualEdits) && (
                   <span
-                    className="text-[9px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-1.5 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] shrink-0"
+                    className="text-[9px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-1.5 py-0.5 rounded shrink-0"
                     title="Application has manual operator edits and is queued last"
                   >
                     ⚠️ Edited (Queued Last)
@@ -260,7 +260,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                         }
                       }}
                       title="Click to view confirmation proof directly"
-                      className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
+                      className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
                     >
                       ✅ Applied
                     </span>
@@ -296,7 +296,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                         }
                       }}
                       title="Click to view failure screenshot proof directly"
-                      className="text-[10px] font-mono text-white font-bold bg-[#EF4444] hover:bg-[#DC2626] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
+                      className="text-[10px] font-mono text-white font-bold bg-[#EF4444] hover:bg-[#DC2626] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
                     >
                       ❌ Failed
                     </span>

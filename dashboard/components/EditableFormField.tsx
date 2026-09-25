@@ -151,8 +151,8 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     <div
       className={`group relative p-3.5 rounded-lg bg-white transition-all ${
         isUnresolved
-          ? 'border-2 border-[#EF4444] shadow-[2px_2px_0px_#EF4444]'
-          : 'border border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]'
+          ? 'border-2 border-[#EF4444]'
+          : 'border border-[#1A1A2E]'
       }`}
     >
       {/* Header with Field Label and Badges */}
@@ -271,7 +271,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                   type="button"
                   onClick={handleRequestSave}
                   disabled={isSaving}
-                  className="px-3 py-1 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1"
+                  className="px-3 py-1 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1"
                 >
                   <span>💾</span>
                   <span>Save Changes</span>
@@ -290,7 +290,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               </span>
             </div>
           ) : (
-            <div className="mt-2.5 p-3 rounded-lg bg-[#FEF3C7] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] animate-fadeIn">
+            <div className="mt-2.5 p-3 rounded-lg bg-[#FEF3C7] border-2 border-[#1A1A2E] animate-fadeIn">
               <div className="flex items-start gap-2">
                 <span className="text-base leading-none">⚠️</span>
                 <div className="flex-1">
@@ -318,7 +318,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                       type="button"
                       onClick={executeSave}
                       disabled={isSaving}
-                      className="px-3 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1 disabled:opacity-50"
+                      className="px-3 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1 disabled:opacity-50"
                     >
                       {isSaving ? (
                         <span>Saving...</span>
@@ -333,7 +333,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                       type="button"
                       onClick={() => setIsConfirming(false)}
                       disabled={isSaving}
-                      className="px-3 py-1.5 bg-white hover:bg-gray-100 text-[#1A1A2E] font-bold text-xs rounded border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                      className="px-3 py-1.5 bg-white hover:bg-gray-100 text-[#1A1A2E] font-bold text-xs rounded border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
                     >
                       Keep Editing
                     </button>

@@ -467,7 +467,7 @@ export const AdminDashboard: React.FC = () => {
   if (!token || !isAuthorized) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-[#FFF5EB] text-[#1A1A2E]">
-        <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6 shadow-[4px_4px_0_#1A1A2E]">
+        <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6">
           <h1 className="text-xl font-black mb-2">Admin dashboard</h1>
           <a href="/" className="inline-block bg-[#E88474] border-2 border-[#1A1A2E] px-4 py-2 text-sm font-bold rounded">Sign in</a>
         </div>
@@ -502,7 +502,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="text-xs font-bold uppercase">Stats
               <div className="mt-1 flex gap-1">
                 {(['day', 'week', 'month'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{range}</button>
                 ))}
               </div>
             </div>
@@ -512,7 +512,7 @@ export const AdminDashboard: React.FC = () => {
         </header>
         <nav className="flex flex-wrap gap-2 mb-6">
           {tabs.map((id) => (
-            <button key={id} type="button" onClick={() => { setTab(id); setSelectedManager(null); }} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${tab === id ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{id}</button>
+            <button key={id} type="button" onClick={() => { setTab(id); setSelectedManager(null); }} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${tab === id ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{id}</button>
           ))}
         </nav>
         {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
@@ -561,7 +561,7 @@ export const AdminDashboard: React.FC = () => {
                 ['AI %', overview.aiPercent],
                 ['Resume %', overview.resumePercent],
               ].map(([label, val]) => (
-                <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
+                <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4">
                   <p className="text-xs font-bold uppercase">{label}</p>
                   <p className="text-2xl font-black mt-1">{val ?? 0}</p>
                 </div>
@@ -802,14 +802,14 @@ export const AdminDashboard: React.FC = () => {
               <p className="text-xs text-[#64748B] font-mono mt-0.5">Org-wide visibility, ingest control, and operational oversight.</p>
             </div>
 
-            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-2">What you can do</h3>
               <p className="text-sm text-[#1A1A2E] leading-relaxed">
                 View <span className="font-bold">all</span> managers, operators, and applications. Start or stop CSV ingest from Storage. Inspect system health and audit activity. Application submission still happens on the <span className="font-bold">Operator</span> dashboard — not here.
               </p>
             </section>
 
-            <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tabs</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li><span className="font-bold">Overview</span> — org-wide counts and a recent activity snapshot.</li>
@@ -821,7 +821,7 @@ export const AdminDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-[#FEE2E2] border-2 border-[#991B1B] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-[#FEE2E2] border-2 border-[#991B1B] rounded-xl p-5">
               <h3 className="text-sm font-black text-[#991B1B] uppercase tracking-wide mb-2">Header: Date, Refresh, Start, Stop</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li><span className="font-bold">Date</span> drives managers, operators, and applications views that use a calendar day.</li>
@@ -830,7 +830,7 @@ export const AdminDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Important notes</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li>Ingest or Storage failures often need env credentials — check System and the Dev dashboard if stuck.</li>
@@ -839,7 +839,7 @@ export const AdminDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E] text-center">
+            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 text-center">
               <h3 className="text-sm font-black uppercase tracking-wide mb-2">Need help?</h3>
               <p className="text-sm text-[#64748B] leading-relaxed">
                 Contact{' '}

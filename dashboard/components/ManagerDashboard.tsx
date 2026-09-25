@@ -312,7 +312,7 @@ const SearchableDropdown: React.FC<{
         className="block w-full border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm bg-white"
       />
       {open && (
-        <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto bg-white border-2 border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E]">
+        <div className="absolute z-30 mt-1 w-full max-h-56 overflow-y-auto bg-white border-2 border-[#1A1A2E] rounded">
           {filteredOptions.length > 0 ? filteredOptions.map((option) => (
             <button
               key={option.value}
@@ -564,10 +564,10 @@ export const ManagerDashboard: React.FC = () => {
   if (!token || !isAuthorized) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-[#FFF5EB] text-[#1A1A2E]">
-        <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6 shadow-[4px_4px_0_#1A1A2E]">
+        <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6">
           <h1 className="text-xl font-black mb-2">Manager dashboard</h1>
           <p className="text-sm mb-4">Sign in to view your team&apos;s client table.</p>
-          <a href="/" className="inline-block bg-[#E88474] border-2 border-[#1A1A2E] px-4 py-2 text-sm font-bold rounded shadow-[2px_2px_0_#1A1A2E]">Sign in</a>
+          <a href="/" className="inline-block bg-[#E88474] border-2 border-[#1A1A2E] px-4 py-2 text-sm font-bold rounded">Sign in</a>
         </div>
       </main>
     );
@@ -587,7 +587,7 @@ export const ManagerDashboard: React.FC = () => {
       <EmailProofModal proof={emailProof} onClose={() => setEmailProof(null)} />
       {opsPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white border-2 border-[#1A1A2E] rounded-lg p-5 max-w-md w-full shadow-[4px_4px_0_#1A1A2E]">
+          <div className="bg-white border-2 border-[#1A1A2E] rounded-lg p-5 max-w-md w-full">
             <h2 className="text-lg font-black mb-2">Ops mode — choose manager</h2>
             <p className="text-xs text-[#64748B] mb-3">Operator dashboard will be scoped to that manager&apos;s team.</p>
             {opsPickerLoading && <p className="text-xs font-mono mb-2">Loading managers…</p>}
@@ -625,7 +625,7 @@ export const ManagerDashboard: React.FC = () => {
       <div className="max-w-7xl mx-auto">
         <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6">
           <div className="flex items-center gap-3">
-            <img src="/logo.webp" alt="ApplyWizz" className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black" />
+            <img src="/logo.webp" alt="ApplyWizz" className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] object-cover bg-black" />
             <div>
               <p className="text-xs font-mono font-bold uppercase tracking-widest text-[#64748B]">ApplyWizz / Control room</p>
               <h1 className="text-3xl font-black">Manager dashboard</h1>
@@ -675,7 +675,7 @@ export const ManagerDashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={enterOpsMode}
-                className="bg-[#1E3A5F] text-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded shadow-[2px_2px_0_#1A1A2E]"
+                className="bg-[#1E3A5F] text-white border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded"
               >
                 Ops mode
               </button>
@@ -686,7 +686,7 @@ export const ManagerDashboard: React.FC = () => {
         </header>
         <nav className="flex flex-wrap gap-2 mb-6">
           {tabs.map((item) => (
-            <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded ${tab === item.id ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{item.label}</button>
+            <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded ${tab === item.id ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{item.label}</button>
           ))}
         </nav>
         {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
@@ -702,7 +702,7 @@ export const ManagerDashboard: React.FC = () => {
                 ['Submitted (team)', submitted],
                 ['Applied (team)', applied],
               ].map(([label, val]) => (
-                <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
+                <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4">
                   <p className="text-xs font-bold uppercase">{label}</p>
                   <p className="text-2xl font-black mt-1">{val ?? 0}</p>
                 </div>
@@ -773,7 +773,7 @@ export const ManagerDashboard: React.FC = () => {
           <div className="space-y-4">
             <div className="flex gap-2">
               {(['day', 'week', 'month'] as const).map((range) => (
-                <button key={range} type="button" onClick={() => setReportRange(range)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${reportRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
+                <button key={range} type="button" onClick={() => setReportRange(range)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${reportRange === range ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{range}</button>
               ))}
             </div>
             <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
@@ -818,14 +818,14 @@ export const ManagerDashboard: React.FC = () => {
               <p className="text-xs text-[#64748B] font-mono mt-0.5">Oversee your team&apos;s applications — read-only monitoring, not submitting jobs.</p>
             </div>
 
-            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-2">What you see</h3>
               <p className="text-sm text-[#1A1A2E] leading-relaxed">
                 This dashboard shows <span className="font-bold">only your team</span>: operators linked to you when they sign in. You do not see other managers&apos; operators or clients. To submit applications, operators use the main <span className="font-bold">Operator</span> dashboard at <span className="font-mono">/</span>.
               </p>
             </section>
 
-            <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Home</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li>Summary cards: Applications, Submitted (team), Applied (team) — scoped to your date range.</li>
@@ -835,7 +835,7 @@ export const ManagerDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Operators, Activity, Reports</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li><span className="font-bold">Operators</span> — roster with status, apps, workload, last sign-in. Click an operator name to open Home filtered to that CA.</li>
@@ -844,7 +844,7 @@ export const ManagerDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Important notes</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li>Yellow warnings may mean no operators are assigned yet or work history was temporarily unreachable.</li>
@@ -855,7 +855,7 @@ export const ManagerDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E] text-center">
+            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 text-center">
               <h3 className="text-sm font-black uppercase tracking-wide mb-2">Need help?</h3>
               <p className="text-sm text-[#64748B] leading-relaxed">
                 Contact{' '}
