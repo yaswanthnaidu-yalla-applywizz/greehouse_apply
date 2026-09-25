@@ -208,7 +208,7 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative flex flex-col w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-[8px_8px_0px_#1A1A2E] border-2 border-[#1A1A2E] overflow-hidden text-[#1A1A2E]"
+        className="relative flex flex-col w-full max-w-5xl max-h-[90vh] bg-white rounded-xl border-2 border-[#1A1A2E] overflow-hidden text-[#1A1A2E]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -234,7 +234,7 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border border-[#1A1A2E] rounded-md transition-all ${
                 !currentUrl || isLoading
                   ? 'bg-[#E2E8F0] text-[#94A3B8] border-[#CBD5E1] cursor-not-allowed'
-                  : 'text-white bg-[#E88474] hover:bg-[#D67161] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+                  : 'text-white bg-[#E88474] hover:bg-[#D67161] active:translate-x-[1px] active:translate-y-[1px]'
               }`}
             >
               <span>⬇️</span>
@@ -299,7 +299,7 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
               <p className="text-xs font-mono text-[#64748B] mt-1">Retrieving secure verification screenshot</p>
             </div>
           ) : errorMessage ? (
-            <div className="flex flex-col items-center justify-center p-8 text-center max-w-md bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="flex flex-col items-center justify-center p-8 text-center max-w-md bg-white rounded-lg border-2 border-[#1A1A2E]">
               <span className="text-3xl mb-2">⚠️</span>
               <p className="text-sm font-bold text-[#EF4444] font-mono mb-1">Could not load proof</p>
               <p className="text-xs text-[#64748B] font-mono">{errorMessage}</p>
@@ -315,14 +315,14 @@ export const ProofViewer: React.FC<ProofViewerProps> = ({
                     setFallbackStage(1);
                     if (targetAppId) fetchSignedUrl(targetAppId, effectiveKind, metadata?.jobUrl);
                   }}
-                  className="mt-4 px-3 py-1.5 text-xs font-bold text-[#1A1A2E] bg-[#FFF5EB] hover:bg-[#FFE8D6] border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E]"
+                  className="mt-4 px-3 py-1.5 text-xs font-bold text-[#1A1A2E] bg-[#FFF5EB] hover:bg-[#FFE8D6] border border-[#1A1A2E] rounded"
                 >
                   🔄 Retry
                 </button>
               )}
             </div>
           ) : currentUrl ? (
-            <div className="bg-white rounded-lg border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden max-w-full">
+            <div className="bg-white rounded-lg border-2 border-[#1A1A2E] overflow-hidden max-w-full">
               <img
                 src={currentUrl}
                 alt="Application Confirmation Proof"

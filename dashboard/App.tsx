@@ -753,7 +753,7 @@ export const App: React.FC = () => {
             <img
               src="/logo.webp"
               alt="ApplyWizz"
-              className="w-8 h-8 rounded-md border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#E88474] object-cover bg-black"
+              className="w-8 h-8 rounded-md border-2 border-[#1A1A2E] object-cover bg-black"
             />
             <div>
               <span className="text-sm font-black tracking-tight text-[#1A1A2E] uppercase">
@@ -766,13 +766,13 @@ export const App: React.FC = () => {
           </div>
 
           {/* Navigation Tabs (Dashboard / Stats) */}
-          <nav className="hidden md:flex items-center gap-2 bg-white border border-[#1A1A2E] rounded-md p-1 shadow-[2px_2px_0px_#1A1A2E]">
+          <nav className="hidden md:flex items-center gap-2 bg-white border border-[#1A1A2E] rounded-md p-1">
             <button
               type="button"
               onClick={() => setActiveTab('dashboard')}
               className={`px-3 py-1 text-xs font-bold rounded transition-all ${
                 activeTab === 'dashboard'
-                  ? 'bg-[#E88474] text-white'
+                  ? 'bg-[#E88474] text-black'
                   : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
               }`}
             >
@@ -783,7 +783,7 @@ export const App: React.FC = () => {
               onClick={() => setActiveTab('stats')}
               className={`px-3 py-1 text-xs font-bold rounded transition-all ${
                 activeTab === 'stats'
-                  ? 'bg-[#E88474] text-white'
+                  ? 'bg-[#E88474] text-black'
                   : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
               }`}
             >
@@ -795,7 +795,7 @@ export const App: React.FC = () => {
         {/* Right: Metrics Pills, Notifications & User Avatar */}
         <div className="flex items-center gap-3">
           {/* Date Scope Filter (IST) */}
-          <div className="flex items-center gap-1.5 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
+          <div className="flex items-center gap-1.5 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded">
             <span className="text-xs font-mono font-bold text-[#64748B]">📅 IST:</span>
             <input
               type="date"
@@ -812,21 +812,21 @@ export const App: React.FC = () => {
 
           {stats && (
             <div className="hidden lg:flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5C4A0A] shadow-[1px_1px_0px_#1A1A2E]">
+              <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5C4A0A]">
                 <span>Candidates:</span>
                 <span>{stats.totalCandidates}</span>
               </div>
 
-              <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E3A5F] shadow-[1px_1px_0px_#1A1A2E]">
+              <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E3A5F]">
                 <span>Jobs:</span>
                 <span>{stats.totalApplications}</span>
               </div>
 
-              <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E4620] shadow-[1px_1px_0px_#1A1A2E]">
+              <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E4620]">
                 <span>🌿 supabase: {stats.supabasePercentage}%</span>
               </div>
 
-              <div className="flex items-center gap-1.5 bg-[#EDE9FE] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5B21B6] shadow-[1px_1px_0px_#1A1A2E]">
+              <div className="flex items-center gap-1.5 bg-[#EDE9FE] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5B21B6]">
                 <span>🔮 ai: {stats.aiPercentage}%</span>
               </div>
             </div>
@@ -837,7 +837,7 @@ export const App: React.FC = () => {
             onClick={handleRefresh}
             disabled={isRefreshing}
             title="Refresh Data"
-            className="text-xs bg-white hover:bg-[#FAF4EB] text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all disabled:opacity-60"
+            className="text-xs bg-white hover:bg-[#FAF4EB] text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all disabled:opacity-60"
           >
             <span className={isRefreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
           </button>
@@ -848,18 +848,18 @@ export const App: React.FC = () => {
               type="button"
               onClick={() => setIsNotifOpen((prev) => !prev)}
               title="Notifications"
-              className="relative p-1.5 bg-white border border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E] cursor-pointer hover:bg-[#FAF4EB] transition-colors"
+              className="relative p-1.5 bg-white border border-[#1A1A2E] rounded cursor-pointer hover:bg-[#FAF4EB] transition-colors"
             >
               <span className="text-xs">🔔</span>
               {unreadNotifsCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#EF4444] text-white text-[10px] font-black rounded-full flex items-center justify-center border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#EF4444] text-white text-[10px] font-black rounded-full flex items-center justify-center border border-[#1A1A2E]">
                   {unreadNotifsCount > 9 ? '9+' : unreadNotifsCount}
                 </span>
               )}
             </button>
 
             {isNotifOpen && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[6px_6px_0px_#1A1A2E] z-50 overflow-hidden animate-fadeIn">
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border-2 border-[#1A1A2E] rounded-xl z-50 overflow-hidden animate-fadeIn">
                 <div className="flex items-center justify-between px-3.5 py-2.5 bg-[#FFF5EB] border-b-2 border-[#1A1A2E]">
                   <div className="flex items-center gap-2">
                     <span className="text-sm">🔔</span>
@@ -872,7 +872,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={markAllNotifsAsRead}
-                        className="text-[10px] font-bold text-[#64748B] hover:text-[#1A1A2E] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]"
+                        className="text-[10px] font-bold text-[#64748B] hover:text-[#1A1A2E] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded"
                       >
                         Mark all read
                       </button>
@@ -881,7 +881,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={clearAllNotifs}
-                        className="text-[10px] font-bold text-[#EF4444] hover:text-[#B91C1C] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E]"
+                        className="text-[10px] font-bold text-[#EF4444] hover:text-[#B91C1C] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded"
                       >
                         Clear
                       </button>
@@ -920,7 +920,7 @@ export const App: React.FC = () => {
                               : isSuccess
                               ? 'bg-[#F0FDF4] border-[#86EFAC] hover:border-[#10B981]'
                               : 'bg-[#FEF2F2] border-[#FECACA] hover:border-[#EF4444]'
-                          } ${isUnread ? 'shadow-[2px_2px_0px_#1A1A2E]' : 'opacity-85'}`}
+                          } ${isUnread ? 'border-l-4 border-l-[#2563eb]' : 'opacity-85'}`}
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span
@@ -1013,7 +1013,7 @@ export const App: React.FC = () => {
           </div>
 
           {/* User Profile Avatar & Sign Out */}
-          <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
+          <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded">
             <div className="w-5 h-5 rounded-full bg-[#E88474] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-black text-white uppercase">
               {currentUser?.email ? currentUser.email.charAt(0) : 'U'}
             </div>
@@ -1026,7 +1026,7 @@ export const App: React.FC = () => {
             type="button"
             onClick={handleSignOut}
             title="Sign Out"
-            className="text-xs bg-[#FFF5EB] hover:bg-[#E88474] hover:text-white text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
+            className="text-xs bg-[#FFF5EB] hover:bg-[#E88474] hover:text-white text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
           >
             Sign Out
           </button>
@@ -1035,7 +1035,7 @@ export const App: React.FC = () => {
 
       {/* Work-History Unreachable Top Banner */}
       {workHistoryUnreachable && !workHistoryBannerDismissed && (
-        <div className="bg-[#FEF3C7] border-b-2 border-[#1A1A2E] px-6 py-2 text-xs font-bold text-[#92400E] flex items-center justify-between shadow-sm flex-shrink-0">
+        <div className="bg-[#FEF3C7] border-b-2 border-[#1A1A2E] px-6 py-2 text-xs font-bold text-[#92400E] flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
             <span>⚠️</span>
             <span>Work-history API unreachable — showing last known assigned candidates.</span>
@@ -1053,7 +1053,7 @@ export const App: React.FC = () => {
 
       {/* Real-time Worker Failure Banner / Toast */}
       {failureAlert && (
-        <div className="bg-[#FEE2E2] border-b-2 border-[#EF4444] px-6 py-3 text-xs font-bold text-[#991B1B] flex items-center justify-between shadow-md flex-shrink-0 animate-fadeIn">
+        <div className="bg-[#FEE2E2] border-b-2 border-[#EF4444] px-6 py-3 text-xs font-bold text-[#991B1B] flex items-center justify-between flex-shrink-0 animate-fadeIn">
           <div className="flex items-center gap-2.5">
             <span className="text-base">🚨</span>
             <div>
@@ -1089,7 +1089,7 @@ export const App: React.FC = () => {
 
         {stats ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-            <div className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5">
               <span className="text-xs font-bold uppercase tracking-wider text-[#5C4A0A]">
                 Total Candidates
               </span>
@@ -1101,7 +1101,7 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5">
               <span className="text-xs font-bold uppercase tracking-wider text-[#1E3A5F]">
                 Total Applications
               </span>
@@ -1113,7 +1113,7 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5">
               <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
                 Successful Applications
               </span>
@@ -1125,7 +1125,7 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded-xl p-5">
               <span className="text-xs font-bold uppercase tracking-wider text-[#991B1B]">
                 Failed Applications
               </span>
@@ -1137,7 +1137,7 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-[#E2F5E2] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="bg-[#E2F5E2] border-2 border-[#1A1A2E] rounded-xl p-5">
               <span className="text-xs font-bold uppercase tracking-wider text-[#1E4620]">
                 Supabase Cache
               </span>
@@ -1149,7 +1149,7 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-[#FFEAE8] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <div className="bg-[#FFEAE8] border-2 border-[#1A1A2E] rounded-xl p-5">
               <span className="text-xs font-bold uppercase tracking-wider text-[#6B2C2C]">
                 AI Synthesis
               </span>

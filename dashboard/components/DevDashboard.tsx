@@ -278,7 +278,7 @@ export const DevDashboard: React.FC = () => {
   if (!token || !isAuthorized) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6 bg-[#FFF5EB] text-[#1A1A2E]">
-        <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6 shadow-[4px_4px_0_#1A1A2E]">
+        <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6">
           <h1 className="text-xl font-black mb-2">Developer dashboard</h1>
           <a href="/" className="inline-block bg-[#E88474] border-2 border-[#1A1A2E] px-4 py-2 text-sm font-bold rounded">Sign in</a>
         </div>
@@ -317,7 +317,7 @@ export const DevDashboard: React.FC = () => {
             <div className="text-xs font-bold uppercase">Stats
               <div className="mt-1 flex gap-1">
                 {(['day', 'week', 'month'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{range}</button>
                 ))}
               </div>
             </div>
@@ -327,7 +327,7 @@ export const DevDashboard: React.FC = () => {
         </header>
         <nav className="flex flex-wrap gap-2 mb-6">
           {tabs.map((id) => (
-            <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${tab === id ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{id}</button>
+            <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${tab === id ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{id}</button>
           ))}
         </nav>
         {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
@@ -336,25 +336,25 @@ export const DevDashboard: React.FC = () => {
         {tab === 'system' && health && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-1">
-              <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
+              <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 col-span-2 md:col-span-1">
                 <p className="text-xs font-bold uppercase">Submitted</p>
                 <p className="text-2xl font-black mt-1">{health.submitted ?? health.submittedCount ?? 0}</p>
                 <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
               </div>
-              <div className="bg-[#F4D66B] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E] col-span-2 md:col-span-1">
+              <div className="bg-[#F4D66B] border-2 border-[#1A1A2E] rounded p-4 col-span-2 md:col-span-1">
                 <p className="text-xs font-bold uppercase">Selected period</p>
                 <p className="text-2xl font-black mt-1">{health.dateRange?.label || 'Today'}</p>
                 <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
               </div>
-              <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
+              <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded p-4">
                 <p className="text-xs font-bold uppercase">Applied</p>
                 <p className="text-2xl font-black mt-1">{health.applied ?? 0}</p>
               </div>
-              <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
+              <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded p-4">
                 <p className="text-xs font-bold uppercase">Failed</p>
                 <p className="text-2xl font-black mt-1">{health.failed ?? 0}</p>
               </div>
-              <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
+              <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded p-4">
                 <p className="text-xs font-bold uppercase">Queued</p>
                 <p className="text-2xl font-black mt-1">{health.queued ?? 0}</p>
               </div>
@@ -388,7 +388,7 @@ export const DevDashboard: React.FC = () => {
                     type="button"
                     disabled={gateSaving}
                     onClick={() => void setSubmissionGateEnabled(!submissionGate.enabled)}
-                    className={`px-4 py-2 text-xs font-black border-2 border-[#1A1A2E] rounded shadow-[2px_2px_0px_#1A1A2E] ${submissionGate.enabled ? 'bg-[#9AC89A]' : 'bg-[#FECACA]'}`}
+                    className={`px-4 py-2 text-xs font-black border-2 border-[#1A1A2E] rounded ${submissionGate.enabled ? 'bg-[#9AC89A]' : 'bg-[#FECACA]'}`}
                   >
                     {gateSaving ? 'Saving…' : submissionGate.enabled ? 'Gate ON — click to turn OFF' : 'Gate OFF — click to turn ON'}
                   </button>
@@ -531,14 +531,14 @@ export const DevDashboard: React.FC = () => {
               <p className="text-xs text-[#64748B] font-mono mt-0.5">Internals, debugging, and cross-role dashboard access.</p>
             </div>
 
-            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-2">Access</h3>
               <p className="text-sm text-[#1A1A2E] leading-relaxed">
                 Use the header switcher to open <span className="font-bold">Dev</span>, <span className="font-bold">Admin</span>, <span className="font-bold">Manager</span>, or <span className="font-bold">Operator</span> UIs. Dev role bypasses manager/operator API scoping when using those dashboards.
               </p>
             </section>
 
-            <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tabs</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li><span className="font-bold">System</span> — health probes, queue and worker summary, ingest line.</li>
@@ -550,7 +550,7 @@ export const DevDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E]">
+            <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5">
               <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tips</h3>
               <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
                 <li>Prefer Debugger over operator-facing messages when triaging production issues.</li>
@@ -560,7 +560,7 @@ export const DevDashboard: React.FC = () => {
               </ul>
             </section>
 
-            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 shadow-[4px_4px_0px_#1A1A2E] text-center">
+            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 text-center">
               <h3 className="text-sm font-black uppercase tracking-wide mb-2">Need help?</h3>
               <p className="text-sm text-[#64748B] leading-relaxed">
                 Contact{' '}

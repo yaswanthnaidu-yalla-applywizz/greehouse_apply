@@ -26,6 +26,14 @@ _Last updated: 2026-09-21_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### Dashboard Visual Restyling & Active Tab Text Fix (2026-09-25)
+- [x] Fixed active dashboard tab text turning white when selected: changed to explicit `text-black` across `dashboard/App.tsx`, `DevDashboard.tsx`, `ManagerDashboard.tsx`, `AdminDashboard.tsx`, and `AuthView.tsx`.
+- [x] Added explicit `nav button, nav button.bg-[#E88474], nav .active, header nav button { color: #000000 !important; }` in `tokens.css` to prevent button color overrides.
+- [x] Removed ALL box shadows across the dashboard: stripped every `shadow-[...]`, `shadow-sm`, `shadow-md`, `shadow-lg`, and `drop-shadow-*` class across all dashboard components.
+- [x] Removed `--color-shadow` token from `tokens.css` and replaced card shadows with subtle `border: 1px solid #f3f4f6 !important;` (`border-gray-100`).
+- [x] Added global shadow reset in `tokens.css`: `*, *::before, *::after { box-shadow: none !important; --tw-shadow: 0 0 #0000 !important; --tw-shadow-colored: 0 0 #0000 !important; }`.
+- [x] Rebuilt dashboard CSS bundle via `npm run build:dashboard-css` and verified full build and typecheck pass cleanly.
+
 ### Dev Debugger Enhancements (2026-09-23)
 - [x] Sourced and hydrated `proof_failed_url` in dev dashboard debugger endpoint (`/api/dev/applications/:id`).
 - [x] Rendered `Failed screenshot: View` link in `DevDashboard.tsx` and `dev.html` after web/email proof links.
