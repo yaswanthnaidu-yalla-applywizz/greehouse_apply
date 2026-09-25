@@ -65,6 +65,7 @@ ALTER TABLE gh_candidate_applications
     'APPLYING',
     'APPLIED',
     'FAILED',
+    'RETRY',
     'EXPIRED',
     'OTP_REQUIRED',
     'CAPTCHA_TIMEOUT',
