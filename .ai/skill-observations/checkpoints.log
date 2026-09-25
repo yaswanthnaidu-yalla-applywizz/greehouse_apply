@@ -372,3 +372,4 @@
 2026-09-25 dashboard performance fixes: removed duplicate Supabase count overlay; parallelized initial admin hydration with candidate/stats fetch
 2026-09-25 session-start scan: task-observer loaded; proof URL hydration removal session
 2026-09-25 deliverable flush: no observations; removed eager proof URL hydration from list/dashboard responses; typecheck passed
+2026-09-25 session-end: committed visual restyle (tokens.css, badge styling, font imports) and pushed feature/dashboard-visual-restyle to origin; no observations
