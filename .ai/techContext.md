@@ -47,6 +47,7 @@ npm run daemon               # Start queue worker daemon
 
 # Submission
 npm run dry-run              # Headful fill via src/submitter/runUserApplication.ts (local demo, not dashboard API)
+npm run demo:doordash-headful # Headful, non-submitting DoorDash React-Select diagnostic; set RESUME_PATH optionally
 npm run submit               # Live submission CLI
 
 # Database

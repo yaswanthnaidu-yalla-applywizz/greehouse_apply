@@ -1,5 +1,16 @@
 # Progress — What Works, What's Pending
 
+### Fast REST API OTP Resolution & Submission Hardening (2026-09-26)
+- [x] Implemented `fetchZohoOtpViaApi` in `src/services/zoho-connector.ts` to poll the Zoho connector REST API every 2s for incoming Greenhouse security codes.
+- [x] Switched `otpResolutionService.ts` to use REST API as primary resolver, reducing OTP retrieval time from ~30s to 2–5s.
+- [x] Maintained Playwright `zohoReaderPool` as a secondary fallback if REST endpoints are unreachable.
+- [x] Operator-approved resolved fields made authoritative truth during submission; forced heuristics relegated to secondary fallbacks if values are empty.
+- [x] Regex in `isWorkAuthRelocation` corrected to prevent overriding sponsorship questions; submitter respects "No" resolved choices without forcing "Yes".
+- [x] Preserved and enriched options for select/radio/checkbox fields across `answerResolver.ts` and `applicationFieldHydration.ts`.
+- [x] Added contextual UI hints and full option selects in `EditableFormField.tsx` and `operator-app.jsx`.
+- [x] Implemented 2-phase dropdown resolution (exact first, semantic alias/fuzzy second) in `formFiller.ts` and updated hidden required input selector.
+- [x] Fixed headful submission option forwarding in `liveSubmit.ts` and enforced headless in production container mode.
+
 ### Stats, retry, and React-Select reliability hardening (2026-09-25)
 - [x] Removed automatic submission requeue from the active submitter pool, synchronous submission route, and legacy queue daemon path; failures remain operator-visible `RETRY`.
 - [x] Added stale `APPLYING` recovery after a 15-minute worker claim timeout, transitioning abandoned claims to `RETRY` without automatic requeue.
