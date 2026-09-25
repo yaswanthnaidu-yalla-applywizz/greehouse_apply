@@ -1,5 +1,12 @@
 # Progress — What Works, What's Pending
 
+### Stats, retry, and React-Select reliability hardening (2026-09-25)
+- [x] Removed automatic submission requeue from the active submitter pool, synchronous submission route, and legacy queue daemon path; failures remain operator-visible `RETRY`.
+- [x] Added stale `APPLYING` recovery after a 15-minute worker claim timeout, transitioning abandoned claims to `RETRY` without automatic requeue.
+- [x] Added React-Select settle/blur verification and delayed hidden `requiredInput` regression coverage.
+- [x] Reworked stats to one non-overlapping daily historical grain, exact range querying, snapshot-before-prune ordering, and full working-table cleanup.
+- [ ] Manager-scoped historical detail reports still require a scoped rollup model if historical application rows are intentionally deleted.
+
 _Last updated: 2026-09-21_
 
 ### Form Submission Reliability Fixes (2026-09-23)
