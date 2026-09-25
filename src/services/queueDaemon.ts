@@ -151,7 +151,7 @@ export class QueueDaemon {
         });
         log.info(`[API] Status → APPLIED (application ${appId})`);
       } else if (result.status === 'FAILED') {
-        await updateStatus(application.id || application.applywizz_id, 'FAILED', {
+        await updateStatus(application.id || application.applywizz_id, 'RETRY', {
           proof_failed_url: result.proofFailedUrl || null,
           proof_failed_captured_at: result.proofFailedCapturedAt || null,
           error_message: result.errorMessage || result.message || 'Submission failed.',
@@ -160,7 +160,7 @@ export class QueueDaemon {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await updateStatus(application.id || application.applywizz_id, 'FAILED', {
+      await updateStatus(application.id || application.applywizz_id, 'RETRY', {
         error_message: message,
         job_url: application.job_url,
       });

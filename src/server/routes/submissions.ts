@@ -32,9 +32,7 @@ import {
   updateStatus,
   enqueueApplication,
   hydrateApplicationProofUrls,
-  requeueApplicationForRetry,
 } from '../../db/applications.js';
-import { getRetryReason } from '../../submitter/submissionRetry.js';
 import { otpResolutionService } from '../../services/otpResolutionService.js';
 import { isUserAdmin } from './auth.js';
 import {
@@ -391,35 +389,16 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         summary: result.summary,
       });
     } else if (result.status === 'QUEUED') {
-      const retryCount = result.retryReason === 'OTP_FETCH_FAIL'
-        ? (await getApplication(appId, req.body?.jobUrl))?.retry_count ?? 0
-        : undefined;
       res.status(202).json({
         success: false,
         status: 'QUEUED',
         applicationId: result.applicationId,
-        retryCount,
-        message: retryCount ? `Retrying submission (${retryCount}/3).` : 'Submission queued for retry.',
+        message: 'Submission queued.',
         summary: result.summary,
       });
     } else {
       const failReason = result.errorMessage || 'Submission failed.';
-      const retryReason = getRetryReason(result);
-      if (retryReason) {
-        const retry = await requeueApplicationForRetry(appId, retryReason, req.body?.jobUrl);
-        if (retry.requeued) {
-          res.status(202).json({
-            success: false,
-            status: 'QUEUED',
-            applicationId: result.applicationId,
-            retryCount: retry.retryCount,
-            message: `Retrying submission (${retry.retryCount}/3).`,
-            summary: result.summary,
-          });
-          return;
-        }
-      }
-      await updateStatus(appId, (result.status as any) || 'FAILED', {
+      await updateStatus(appId, 'RETRY', {
         error_message: failReason,
         proof_failed_url: result.proofFailedUrl,
         proof_failed_captured_at: result.proofFailedCapturedAt,
@@ -428,7 +407,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
 
       res.status(500).json({
         success: false,
-        status: result.status,
+        status: 'RETRY',
         applicationId: result.applicationId,
         error: failReason,
         proofFailedUrl: result.proofFailedUrl,
@@ -443,30 +422,16 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       respondEligibilityBlockedAsQueued(res, appId);
       return;
     }
-    const retryReason = getRetryReason(err instanceof Error ? err : String(err));
-    if (retryReason) {
-      const retry = await requeueApplicationForRetry(appId, retryReason, req.body?.jobUrl);
-      if (retry.requeued) {
-        res.status(202).json({
-          success: false,
-          status: 'QUEUED',
-          applicationId: appId,
-          retryCount: retry.retryCount,
-          message: `Retrying submission (${retry.retryCount}/3).`,
-        });
-        return;
-      }
-    }
     const errMessage = err instanceof Error ? err.message : String(err);
     log.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
-    await updateStatus(appId, 'FAILED', {
+    await updateStatus(appId, 'RETRY', {
       error_message: errMessage || 'Unexpected submit route error',
       job_url: req.body?.jobUrl,
     }).catch(() => {});
 
     res.status(500).json({
       success: false,
-      status: 'FAILED',
+      status: 'RETRY',
       error: 'Internal server error',
     });
   }

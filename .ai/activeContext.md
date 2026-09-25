@@ -2,6 +2,13 @@
 
 _Last updated: 2026-09-25_
 
+## Current Session Update (2026-09-25 — stats/retry reliability)
+
+- Removed automatic submission requeue paths: worker and synchronous route failures now become operator-visible `RETRY`; only explicit operator retry can queue them again.
+- Added stale `APPLYING` recovery in the active submitter pool. Claims older than 15 minutes become `RETRY` with an operator-readable worker-lease-expired reason instead of remaining stuck indefinitely.
+- Hardened Greenhouse remix-css searchable-select verification with a settle/blur wait and hidden required-input regression coverage.
+- Reworked stats rollups to retain one daily historical grain, query exact selected ranges without day/week/month overlap, persist before cleanup, and clear all working applications/templates after a successful snapshot.
+
 ## Current Session Update (2026-09-25)
 
 - Dashboard visual restyling completed:

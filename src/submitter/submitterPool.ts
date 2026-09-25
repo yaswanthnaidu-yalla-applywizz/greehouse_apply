@@ -9,14 +9,13 @@
 import {
   getNextQueuedApplicationForRoundRobin,
   logQueueStatusChange,
+  recoverStaleApplyingApplications,
   updateStatus,
-  requeueApplicationForRetry,
   type ApplicationRow,
 } from '../db/applications.js';
 import { wsManager } from '../server/ws.js';
 import { runLiveSubmit, type LiveSubmitResult } from './liveSubmit.js';
 import { createLogger } from '../utils/logger.js';
-import { getRetryReason } from './submissionRetry.js';
 import {
   isEligibleForSubmission,
   SubmissionEligibilityBlockedError,
@@ -153,6 +152,7 @@ export class SubmitterPool {
   private async dispatchQueue(): Promise<void> {
     while (this.isRunning) {
       try {
+        await recoverStaleApplyingApplications();
         const application = await getNextQueuedApplicationForRoundRobin();
         if (application) {
           const appRef = application.id || application.applywizz_id;
@@ -227,49 +227,28 @@ export class SubmitterPool {
             `[OTP] handed to resolution service (application ${applicationId})`
           );
         } else if (result.status === 'FAILED') {
-          const reason = getRetryReason(result);
-          if (reason) {
-            const retry = await requeueApplicationForRetry(applicationId, reason, application.job_url);
-            if (retry.requeued) {
-              await logQueueStatusChange(applicationId, 'APPLYING', 'RETRY');
-            } else {
-              await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
-              this.emitFailure(application, result.errorMessage || reason, result);
-            }
-          } else {
-            await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
-            this.emitFailure(application, result.errorMessage || 'Submission execution failed.', result);
-          }
+          const failureMessage = result.errorMessage || 'Submission execution failed.';
+          await updateStatus(applicationId, 'RETRY', {
+            error_message: failureMessage,
+            job_url: application.job_url,
+          });
+          await logQueueStatusChange(applicationId, 'APPLYING', 'RETRY');
+          this.emitFailure(application, failureMessage, result);
         } else if (result.status === 'QUEUED') {
           await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const reason = getRetryReason(error instanceof Error ? error : message);
-        if (reason) {
-          const retry = await requeueApplicationForRetry(applicationId, reason, application.job_url);
-          if (retry.requeued) {
-            await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
-          } else {
-            await updateStatus(applicationId, 'FAILED', {
-              error_message: message,
-              job_url: application.job_url,
-            });
-            await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
-            this.emitFailure(application, message);
-          }
-        } else {
-          try {
-            await updateStatus(applicationId, 'FAILED', {
-              error_message: message,
-              job_url: application.job_url,
-            });
-          } catch (statusError) {
-            log.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
-          }
-          await logQueueStatusChange(applicationId, 'APPLYING', 'FAILED');
-          this.emitFailure(application, message);
+        try {
+          await updateStatus(applicationId, 'RETRY', {
+            error_message: message,
+            job_url: application.job_url,
+          });
+        } catch (statusError) {
+          log.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
         }
+        await logQueueStatusChange(applicationId, 'APPLYING', 'RETRY');
+        this.emitFailure(application, message);
         work.reject(error instanceof Error ? error : new Error(message));
       } finally {
         this.inFlightApplicationIds.delete(applicationId);
