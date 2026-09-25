@@ -377,3 +377,4 @@
 2026-09-25 deliverable flush: removed all box shadows across dashboard; active tab text set to black; typecheck and build verified clean; no new observations
 2026-09-25 session-start: diagnosed React-Select commit timing, automatic retry paths, and overlapping stats/pruning behavior; implementation plan saved in session workspace.
 2026-09-25 validation-failure: PowerShell denied three validation commands before execution; observation 0025 flushed before recovery.
+2026-09-25 deliverable flush: fixed RETRY operator-form gating and hidden Greenhouse remix-css select verification; targeted tests, typecheck, build, and diff checks passed; no new observations.
