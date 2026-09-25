@@ -30,7 +30,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'manual') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E]">
         <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]"></span>
         <span>manual</span>
       </span>
@@ -39,7 +39,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'unresolved') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#1A1A2E]">
         <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444] animate-pulse"></span>
         <span>unresolved</span>
       </span>
@@ -48,7 +48,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'supabase') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#D1FAE5] text-[#065F46] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#D1FAE5] text-[#065F46] border border-[#1A1A2E]">
         <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
         <span>supabase</span>
         {confidence !== undefined && (
@@ -60,7 +60,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'resume_parse') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#CFFAFE] text-[#155E75] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#CFFAFE] text-[#155E75] border border-[#1A1A2E]">
         <span className="w-1.5 h-1.5 rounded-full bg-[#06B6D4]"></span>
         <span>resume</span>
       </span>
@@ -69,7 +69,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'fuzzy_match') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#DBEAFE] text-[#1E40AF] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#DBEAFE] text-[#1E40AF] border border-[#1A1A2E]">
         <span className="w-1.5 h-1.5 rounded-full bg-[#3B82F6]"></span>
         <span>fuzzy</span>
         {confidence !== undefined && (
@@ -81,7 +81,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'semantic') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#4338CA] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#4338CA] border border-[#1A1A2E]">
         <span className="w-1.5 h-1.5 rounded-full bg-[#6366F1]"></span>
         <span>semantic</span>
         {confidence !== undefined && (
@@ -93,7 +93,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   if (activeSource === 'api') {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#3730A3] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#3730A3] border border-[#1A1A2E]">
         <span className="w-1.5 h-1.5 rounded-full bg-[#6366F1]"></span>
         <span>api</span>
       </span>
@@ -102,7 +102,7 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
 
   // Default: 'ai'
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#EDE9FE] text-[#5B21B6] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#EDE9FE] text-[#5B21B6] border border-[#1A1A2E]">
       <span className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]"></span>
       <span>ai</span>
       {confidence !== undefined && (

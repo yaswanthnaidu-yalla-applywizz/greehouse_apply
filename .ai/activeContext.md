@@ -1,15 +1,15 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-22_
+_Last updated: 2026-09-25_
 
-## Current Session Update (2026-09-23)
+## Current Session Update (2026-09-25)
 
-- Form submission hardening completed: visible failed fields are re-attempted after cascade expansion, number inputs use DOM value assignment, date-year inputs accept explicit aria-label selectors, and retry queue `submission_order` no longer receives millisecond timestamps.
-- OTP retry status hardening completed: Zoho OTP-fetch failures no longer overwrite `EMAIL_PROOF_PENDING` or `APPLIED` statuses.
-- Choice-answer hardening completed: resolver outputs are fail-closed and aligned to scanned option labels, while Greenhouse searchable selects click and verify live options instead of treating typed filter text as a selection.
-- OTP retry and failure UI hardening implemented: `OTP_REQUIRED` fetch failures now requeue through the submitter pool up to three attempts, and only authoritative submission-gate failures show the requirements panel; ordinary failures expose retry.
-- Added `[OTP TRACE]` and `[Gate TRACE]` production logs to make pause, Zoho fetch result, retry decision, session cleanup, queue requeue, retry exhaustion, and gate decisions observable.
-- Added `[Resolver Choice]` logs showing Tier 1 raw answers, scanned options, and canonical semantic match results (including fail-closed `match=NONE`).
+- Dashboard visual restyling completed:
+  - Fixed active dashboard tab text turning white when selected: changed to explicit `text-black` across `dashboard/App.tsx`, `DevDashboard.tsx`, `ManagerDashboard.tsx`, `AdminDashboard.tsx`, and `AuthView.tsx`, and added `nav button, nav button.bg-[#E88474], nav .active, header nav button { color: #000000 !important; }` in `tokens.css`.
+  - Removed ALL box shadows across the dashboard: stripped every `shadow-[...]`, `shadow-sm`, `shadow-md`, `shadow-lg`, and `drop-shadow-*` class across all dashboard components (`App.tsx`, `AuthView.tsx`, `CandidateList.tsx`, `JobQueueView.tsx`, `FormRenderer.tsx`, `DifficultyBadge.tsx`, `EditableFormField.tsx`, `EmailProofRenderer.tsx`, `HeaderSignOut.tsx`, `SourceBadge.tsx`, `SubmittingSpinner.tsx`, `SubmissionControls.tsx`, `ProofViewer.tsx`, `DevDashboard.tsx`, `ManagerDashboard.tsx`, `AdminDashboard.tsx`).
+  - Removed `--color-shadow` token from `tokens.css` and replaced card shadows with subtle `border: 1px solid #f3f4f6 !important;` (`border-gray-100`).
+  - Added global shadow reset in `tokens.css`: `*, *::before, *::after { box-shadow: none !important; --tw-shadow: 0 0 #0000 !important; --tw-shadow-colored: 0 0 #0000 !important; }`.
+  - Rebuilt dashboard CSS bundle and verified typechecks and build pass cleanly.
 
 ## Docs
 

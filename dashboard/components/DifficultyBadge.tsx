@@ -35,7 +35,7 @@ export const DifficultyBadge: React.FC<DifficultyBadgeProps> = ({
   if (resolvedLevel === 'Easy') {
     return (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] ${className}`}
       >
         Easy
       </span>
@@ -45,7 +45,7 @@ export const DifficultyBadge: React.FC<DifficultyBadgeProps> = ({
   if (resolvedLevel === 'Medium') {
     return (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] ${className}`}
       >
         Medium
       </span>
@@ -54,7 +54,7 @@ export const DifficultyBadge: React.FC<DifficultyBadgeProps> = ({
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#E88474] text-white border border-[#1A1A2E] ${className}`}
     >
       Hard
     </span>

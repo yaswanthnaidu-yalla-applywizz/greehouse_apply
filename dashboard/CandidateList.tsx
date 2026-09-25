@@ -4,7 +4,7 @@
  * Renders candidate directory with neo-brutalist job board styling:
  * - Warm background (#FAF4EB / #FFF5EB) with crisp dark border (border-r-2 border-[#1A1A2E])
  * - Search input with dark border and coral active focus
- * - Card items with dark border, initials avatar, status pills, and hard shadow on active state
+ * - Card items with dark border, initials avatar, status pills
  *
  * References:
  * - 04-ui-ux-v2-refined.md
@@ -57,13 +57,13 @@ export const CandidateList: React.FC<CandidateListProps> = ({
               Candidates Directory
             </h2>
           </div>
-          <span className="text-xs font-mono bg-white text-[#1A1A2E] border border-[#1A1A2E] px-2 py-0.5 rounded shadow-[1px_1px_0px_#1A1A2E] font-bold">
+          <span className="text-xs font-mono bg-white text-[#1A1A2E] border border-[#1A1A2E] px-2 py-0.5 rounded font-bold">
             {filteredCandidates.length} / {candidates.length}
           </span>
         </div>
 
         {selectedDate && (
-          <div className="mb-2 px-2 py-0.5 bg-[#E2F0FB] border border-[#1A1A2E] rounded text-[10px] font-mono font-bold text-[#1E3A5F] flex items-center justify-between shadow-[1px_1px_0px_#1A1A2E]">
+          <div className="mb-2 px-2 py-0.5 bg-[#E2F0FB] border border-[#1A1A2E] rounded text-[10px] font-mono font-bold text-[#1E3A5F] flex items-center justify-between">
             <span>📅 Assigned: {selectedDate} (IST)</span>
           </div>
         )}
@@ -75,7 +75,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="🔍 Search name or AWL-ID..."
-            className="w-full bg-white border-2 border-[#1A1A2E] rounded-md px-3 py-2 text-xs text-[#1A1A2E] placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#E88474] transition-all font-medium shadow-[1px_1px_0px_#1A1A2E]"
+            className="w-full bg-white border-2 border-[#1A1A2E] rounded-md px-3 py-2 text-xs text-[#1A1A2E] placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#E88474] transition-all font-medium"
           />
           {searchTerm && (
             <button
@@ -122,8 +122,8 @@ export const CandidateList: React.FC<CandidateListProps> = ({
                 onClick={() => onSelectCandidate(c.applywizzId)}
                 className={`w-full text-left p-3 rounded-lg transition-all duration-150 relative ${
                   isSelected
-                    ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
-                    : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px]'
+                    ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] ring-1 ring-[#1A1A2E]'
+                    : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] active:translate-x-[1px] active:translate-y-[1px]'
                 }`}
               >
                 {/* Top Row: Initials Avatar + ID + Status */}

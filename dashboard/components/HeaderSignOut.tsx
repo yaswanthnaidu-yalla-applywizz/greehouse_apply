@@ -19,7 +19,7 @@ export const HeaderSignOut: React.FC<HeaderSignOutProps> = ({ onSignOut }) => {
   return (
     <div className="flex items-center gap-2">
       {email && (
-        <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E]">
+        <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded">
           <div className="w-5 h-5 rounded-full bg-[#E88474] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-black text-white uppercase">
             {email.charAt(0)}
           </div>
@@ -32,7 +32,7 @@ export const HeaderSignOut: React.FC<HeaderSignOutProps> = ({ onSignOut }) => {
         type="button"
         onClick={handleSignOut}
         title="Sign Out"
-        className="text-xs bg-[#FFF5EB] hover:bg-[#E88474] hover:text-white text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
+        className="text-xs bg-[#FFF5EB] hover:bg-[#E88474] hover:text-white text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
       >
         Sign Out
       </button>

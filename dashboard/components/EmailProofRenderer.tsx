@@ -62,7 +62,7 @@ export const EmailProofRenderer: React.FC<EmailProofRendererProps> = ({
 
   return (
     <article
-      className={`bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[4px_4px_0px_#1A1A2E] overflow-hidden text-[#1A1A2E] ${className}`}
+      className={`bg-white border-2 border-[#1A1A2E] rounded-xl overflow-hidden text-[#1A1A2E] ${className}`}
     >
       <header className="px-5 py-4 bg-[#EFF6FF] border-b-2 border-[#1A1A2E]">
         <div className="flex items-start justify-between gap-3">
