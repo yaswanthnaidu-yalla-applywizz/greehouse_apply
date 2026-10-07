@@ -129,7 +129,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
 
   if (!candidate || !selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
     return (
-      <div className="mobile-job-queue mobile-job-queue-message p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+      <div className="operator-job-queue mobile-job-queue mobile-job-queue-message p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
         {backButton}
         <div>Loading applications for {selectedApplywizzId || 'candidate'}…</div>
       </div>
@@ -138,7 +138,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
 
   if (queueJobs.length === 0) {
     return (
-      <div className="mobile-job-queue mobile-job-queue-message p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+      <div className="operator-job-queue mobile-job-queue mobile-job-queue-message p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
         {backButton}
         <div>No jobs assigned for this candidate.</div>
       </div>
@@ -146,7 +146,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   }
 
   return (
-    <div className="mobile-job-queue bg-[#FFF5EB] border-b-2 border-[#1A1A2E] px-6 pt-3">
+    <div className="operator-job-queue mobile-job-queue bg-[#FFF5EB] border-b-2 border-[#1A1A2E] px-6 pt-3">
       {backButton}
       {/* Queue Header & Counter */}
       <div className="flex items-center justify-between mb-2.5">
