@@ -155,6 +155,44 @@ const MOCK_BUTTON_ONLY_SPONSORSHIP_HTML = `
 </body></html>
 `;
 
+const MOCK_INCOMPLETE_SCHOOL_SELECT_HTML = `
+<!DOCTYPE html>
+<html><body>
+<form id="application_form">
+  <label for="school_input">School *</label>
+  <div class="select-shell">
+    <input id="school_input" role="combobox" aria-expanded="false" autocomplete="off" />
+    <div class="select__menu" id="school_menu" style="display:none">
+      <div class="select__option" role="option">University of Waterloo</div>
+      <div class="select__option" role="option">Waterloo High School</div>
+    </div>
+  </div>
+  <input type="hidden" id="school_value" name="school" value="" />
+</form>
+<script>
+  var input = document.getElementById('school_input');
+  var menu = document.getElementById('school_menu');
+  var hidden = document.getElementById('school_value');
+  var options = menu.querySelectorAll('[role="option"]');
+  input.addEventListener('focus', function() { menu.style.display = 'block'; });
+  input.addEventListener('input', function() {
+    menu.style.display = 'block';
+    var query = input.value.trim().toLowerCase();
+    options.forEach(function(option) {
+      option.style.display = !query || option.textContent.trim().toLowerCase().startsWith(query) ? '' : 'none';
+    });
+  });
+  options.forEach(function(option) {
+    option.addEventListener('click', function() {
+      hidden.value = option.textContent.trim();
+      input.value = option.textContent.trim();
+      menu.style.display = 'none';
+    });
+  });
+</script>
+</body></html>
+`;
+
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
@@ -254,6 +292,42 @@ async function runSearchableSelectTests(): Promise<void> {
 
       await page.close();
       console.log('  ✅ Button-only dropdown (No)');
+    });
+
+    await withMockPage(MOCK_INCOMPLETE_SCHOOL_SELECT_HTML, async (url) => {
+      const page = await browser!.newPage();
+      await page.goto(url);
+
+      const partialListField: ResolvedField = {
+        fieldId: 'school',
+        name: 'school',
+        type: 'select',
+        label: 'School',
+        value: 'University of Waterloo',
+        options: ['Captured School 1', 'Captured School 2'],
+        optionsComplete: false,
+        isRequired: true,
+        metadata: { selector: '#school_input' },
+        source: 'manual',
+        resolvedByTier: 1,
+        confidence: 1,
+      };
+      const matching = await fillSingleField(page, partialListField, 'TEST', []);
+      assert(matching.success, 'Typed answer from incomplete options should resolve against a live Greenhouse choice');
+      assert((await page.inputValue('#school_value')) === 'University of Waterloo', 'Real option must be committed');
+
+      await page.goto(url);
+      const missing = await fillSingleField(
+        page,
+        { ...partialListField, value: 'University Not Listed' },
+        'TEST',
+        []
+      );
+      assert(!missing.success, 'A typed value absent from live options must fail closed');
+      assert((await page.inputValue('#school_value')) === '', 'Unmatched search text must not be accepted as a selection');
+
+      await page.close();
+      console.log('  ✅ Incomplete searchable choice resolves live and fails closed when absent');
     });
 
     console.log('\n✅ All searchable select tests passed.');

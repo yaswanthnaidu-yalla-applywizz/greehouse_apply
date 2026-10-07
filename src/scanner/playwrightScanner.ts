@@ -25,8 +25,16 @@ import type {
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
+import { enrichMissingChoiceOptions } from './liveChoiceOptions.js';
 
 const log = createLogger('Playwright Scanner');
+
+function choiceCaptureReporter(compactLogs: boolean) {
+  if (compactLogs) return undefined;
+  return (field: ScannedField, reason: string) => {
+    log.warn(`[Playwright Scanner] ⚠️ Choice capture note for "${field.name}" (${field.fieldId}): ${reason}`);
+  };
+}
 
 /**
  * Configuration options for initializing the PlaywrightScanner.
@@ -545,6 +553,7 @@ export class PlaywrightScanner {
                 label: sanitizeLabelText(rawLabel) || fieldId,
                 isRequired: isReq,
                 options,
+                ...(options && options.length > 0 ? { optionsComplete: true } : {}),
                 metadata: {
                   selector: `#${name}`,
                 },
@@ -579,6 +588,7 @@ export class PlaywrightScanner {
                     label: sanitizeLabelText(rawLabel) || fieldId,
                     isRequired: isReq,
                     options,
+                    ...(options && options.length > 0 ? { optionsComplete: true } : {}),
                     metadata: {
                       section: sectionName,
                       selector: `#${name}`,
@@ -592,7 +602,12 @@ export class PlaywrightScanner {
 
         if (fields.length > 0) {
           const fieldsWithRequiredState = await markHiddenRequiredFields(page, fields);
-          template.fields = await this.exploreCascadingFields(page, fieldsWithRequiredState, compactLogs);
+          const fieldsWithCascades = await this.exploreCascadingFields(page, fieldsWithRequiredState, compactLogs);
+          template.fields = await enrichMissingChoiceOptions(
+            page,
+            fieldsWithCascades,
+            choiceCaptureReporter(compactLogs),
+          );
           return template;
         }
       }
@@ -662,7 +677,12 @@ export class PlaywrightScanner {
       const domFields = await extractVisibleFormFields(page);
 
       if (domFields.length > 0) {
-        template.fields = await this.exploreCascadingFields(page, domFields, compactLogs);
+        const fieldsWithCascades = await this.exploreCascadingFields(page, domFields, compactLogs);
+        template.fields = await enrichMissingChoiceOptions(
+          page,
+          fieldsWithCascades,
+          choiceCaptureReporter(compactLogs),
+        );
       } else {
         template.isExpired = true;
       }
@@ -689,6 +709,7 @@ export class PlaywrightScanner {
     const allFields = [...baseFields];
     const knownFieldIds = new Set(baseFields.map((f) => f.fieldId));
     const knownNames = new Set(baseFields.map((f) => f.name).filter(Boolean));
+    const attemptedChoiceOptionFields = new Set<string>();
 
     // Identify candidate choice fields that might trigger cascading DOM updates
     const choiceFields = baseFields.filter(
@@ -782,7 +803,8 @@ export class PlaywrightScanner {
           // Check for newly visible form fields
           const newlyVisible = await getUnmappedVisibleFields(page, knownFieldIds, knownNames);
 
-          for (const newField of newlyVisible) {
+          const newlyVisibleWithRequiredState = await markHiddenRequiredFields(page, newlyVisible);
+          for (const newField of newlyVisibleWithRequiredState) {
             knownFieldIds.add(newField.fieldId);
             if (newField.name) knownNames.add(newField.name);
 
@@ -797,6 +819,48 @@ export class PlaywrightScanner {
               log.info(
                 `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
               );
+            }
+          }
+
+          const choiceFieldsToEnrich: ScannedField[] = [];
+          for (const field of allFields) {
+            const key = `${field.name}:${field.fieldId}`;
+            if (
+              !field.isRequired ||
+              (field.type !== 'select' && field.type !== 'radio') ||
+              (Array.isArray(field.options) && field.options.length > 0) ||
+              attemptedChoiceOptionFields.has(key)
+            ) continue;
+
+            let isVisible = false;
+            for (const value of [field.name, field.fieldId]) {
+              if (!value) continue;
+              const label = page.locator(`label[for=${JSON.stringify(value)}]`).first();
+              if (await label.count() && await label.isVisible()) {
+                isVisible = true;
+                break;
+              }
+            }
+            if (isVisible) {
+              attemptedChoiceOptionFields.add(key);
+              choiceFieldsToEnrich.push(field);
+            }
+          }
+
+          const enrichedChoiceFields = await enrichMissingChoiceOptions(
+            page,
+            choiceFieldsToEnrich,
+            choiceCaptureReporter(compactLogs),
+          );
+          for (const enrichedField of enrichedChoiceFields) {
+            const field = allFields.find((candidate) => (
+              candidate.name === enrichedField.name && candidate.fieldId === enrichedField.fieldId
+            ));
+            if (field) {
+              if (enrichedField.options?.length) field.options = enrichedField.options;
+              if (enrichedField.optionsComplete !== undefined) {
+                field.optionsComplete = enrichedField.optionsComplete;
+              }
             }
           }
         } catch {
