@@ -142,13 +142,16 @@ export class V1Pipeline {
     if (!compact) log.info('[Pipeline Phase A] 🔍 Stream-parsing CSV & deduplicating Greenhouse URLs...');
     try {
       uniqueUrls = await readAndDeduplicateUrls(resolvedCsvPath, {
-        limit: options.limit,
         concurrency: 25,
       });
+      if (options.limit && options.limit > 0 && uniqueUrls.length > options.limit) {
+        uniqueUrls = uniqueUrls.slice(0, options.limit);
+      }
       if (compact) {
         log.info(`[Pipeline] phase A done unique_urls=${uniqueUrls.length}`);
       } else {
-        log.info(`[Pipeline Phase A] ✅ Extracted ${uniqueUrls.length} unique canonical Greenhouse URLs.\n`);
+        const cap = options.limit && options.limit > 0 ? ` (capped at ${options.limit})` : '';
+        log.info(`[Pipeline Phase A] ✅ Extracted ${uniqueUrls.length} unique canonical Greenhouse URLs${cap}.\n`);
       }
     } catch (err: any) {
       haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed', err);
@@ -178,6 +181,7 @@ export class V1Pipeline {
       } else {
         log.info(`[Pipeline Phase B] 🌐 Scanning ${uniqueUrls.length} unique URLs with Playwright pool...`);
       }
+      let scanCompleted = false;
       try {
         const scanner = new PlaywrightScanner({
           workerPoolSize: scanWorkers,
@@ -187,17 +191,21 @@ export class V1Pipeline {
         });
 
         scannedTemplates = await scanner.scanUniqueUrls(uniqueUrls);
+        scanCompleted = true;
+      } catch (err: any) {
+        if (isPipelineAbortedError(err)) {
+          throw err;
+        }
+        log.warn(`[Pipeline Phase B] ⚠️ Playwright scan encountered non-fatal error: ${err.message}. Continuing.`);
+      }
+
+      if (scanCompleted) {
         await exportScannedJobs(scannedTemplates, resolvedOutputDir);
         if (compact) {
           log.info(`[Pipeline] phase B done templates=${scannedTemplates.length}`);
         } else {
           log.info(`[Pipeline Phase B] ✅ Successfully scanned ${scannedTemplates.length} job form schemas.\n`);
         }
-      } catch (err: any) {
-        if (isPipelineAbortedError(err)) {
-          throw err;
-        }
-        log.warn(`[Pipeline Phase B] ⚠️ Playwright scan encountered non-fatal error: ${err.message}. Continuing.`);
       }
     }
     throwIfPipelineAborted('Phase B');
@@ -211,6 +219,7 @@ export class V1Pipeline {
       log.info('[Pipeline Phase C] 👥 Segregating candidates & syncing ApplyWizz profiles...');
     }
     try {
+      const allowedJobUrls = new Set(uniqueUrls);
       const candidateMap = await segregateCandidatesByApplyWizzId(resolvedCsvPath, {
         limit: options.limit,
         concurrency: 10,
@@ -219,6 +228,12 @@ export class V1Pipeline {
         // CSV IDs are an explicit ingest request — fetch missing profiles so application upserts can satisfy the FK.
         allowOutboundApi: true,
       });
+
+      // Filter candidate segment jobs to only those present in scanned uniqueUrls
+      for (const segment of candidateMap.values()) {
+        segment.jobs = segment.jobs.filter((j) => allowedJobUrls.has(j.canonicalUrl));
+        segment.totalJobs = segment.jobs.length;
+      }
 
       await exportCandidateSegments(candidateMap, resolvedOutputDir);
       candidateSegments = Array.from(candidateMap.values());
