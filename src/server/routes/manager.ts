@@ -9,7 +9,6 @@ import { Router, type Request, type Response } from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
   applyCreatedAtRangeFilter,
-  countSubmittedApplicationsSince,
   listApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
@@ -25,6 +24,7 @@ import { distinctApplywizzIdsForOperatorEmails, hasUnrestrictedDashboardAccess, 
 import { parseDashboardCreatedAtRange, parseDashboardStatsRange, serializeDateRange } from '../dashboardDateRange.js';
 import { displayNameMapForEmails, isActiveWithin, listAuthDirectory } from '../authDirectory.js';
 import { createLogger } from '../../utils/logger.js';
+import { getApplicationStats } from '../../db/applicationStats.js';
 
 const log = createLogger('Manager');
 
@@ -293,6 +293,10 @@ managerRouter.get('/dashboard', async (req: Request, res: Response): Promise<voi
       submitted: payload.totals.submitted,
       completed: payload.totals.submitted,
       applied: payload.totals.applied,
+      failed: payload.totals.failed,
+      statsAvailable: payload.statsAvailable,
+      statsPartial: payload.statsPartial,
+      statsAvailableFrom: payload.statsAvailableFrom,
     });
   } catch (error) {
     log.error('[Manager Router] Failed to load dashboard:', error);
@@ -348,7 +352,7 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
 
     const operators = new Map<
       string,
-      { email: string; name: string; applications: number; submitted: number; completed: number; applied: number; pending: number; failed: number }
+      { email: string; name: string; applications: number | null; submitted: number | null; completed: number | null; applied: number | null; pending: number; failed: number | null }
     >();
     const teamOperatorEmails = unrestricted
       ? await listAllOperatorEmails()
@@ -359,12 +363,12 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       operators.set(normalizedEmail, {
         email: normalizedEmail,
         name: normalizedEmail.split('@')[0],
-        applications: 0,
-        submitted: 0,
-        completed: 0,
-        applied: 0,
+        applications: dashboard.statsAvailable ? 0 : null,
+        submitted: dashboard.statsAvailable ? 0 : null,
+        completed: dashboard.statsAvailable ? 0 : null,
+        applied: dashboard.statsAvailable ? 0 : null,
         pending: 0,
-        failed: 0,
+        failed: dashboard.statsAvailable ? 0 : null,
       });
     }
     for (const row of dashboard.rows) {
@@ -373,6 +377,22 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
       const current = operators.get(email) || {
         email,
         name: row.assignedTo,
+        applications: dashboard.statsAvailable ? 0 : null,
+        submitted: dashboard.statsAvailable ? 0 : null,
+        completed: dashboard.statsAvailable ? 0 : null,
+        applied: dashboard.statsAvailable ? 0 : null,
+        pending: 0,
+        failed: dashboard.statsAvailable ? 0 : null,
+      };
+      current.pending += row.pending;
+      operators.set(email, current);
+    }
+    for (const metric of dashboard.byOperator) {
+      const email = metric.email.trim().toLowerCase();
+      if (!email) continue;
+      const current = operators.get(email) || {
+        email,
+        name: email.split('@')[0],
         applications: 0,
         submitted: 0,
         completed: 0,
@@ -380,12 +400,11 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         pending: 0,
         failed: 0,
       };
-      current.applications += row.applications;
-      current.submitted += row.submitted;
-      current.completed += row.submitted;
-      current.applied += row.applied;
-      current.pending += row.pending;
-      current.failed += row.failed;
+      current.applications = metric.total;
+      current.submitted = metric.submitted;
+      current.completed = metric.submitted;
+      current.applied = metric.applied;
+      current.failed = metric.failed;
       operators.set(email, current);
     }
 
@@ -398,12 +417,12 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         operators.set(email, {
           email,
           name: user.name || email.split('@')[0],
-          applications: 0,
-          submitted: 0,
-          completed: 0,
-          applied: 0,
+          applications: dashboard.statsAvailable ? 0 : null,
+          submitted: dashboard.statsAvailable ? 0 : null,
+          completed: dashboard.statsAvailable ? 0 : null,
+          applied: dashboard.statsAvailable ? 0 : null,
           pending: 0,
-          failed: 0,
+          failed: dashboard.statsAvailable ? 0 : null,
         });
       }
       for (const user of directory) {
@@ -413,12 +432,12 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         operators.set(email, {
           email,
           name: user.displayName || email.split('@')[0],
-          applications: 0,
-          submitted: 0,
-          completed: 0,
-          applied: 0,
+          applications: dashboard.statsAvailable ? 0 : null,
+          submitted: dashboard.statsAvailable ? 0 : null,
+          completed: dashboard.statsAvailable ? 0 : null,
+          applied: dashboard.statsAvailable ? 0 : null,
           pending: 0,
-          failed: 0,
+          failed: dashboard.statsAvailable ? 0 : null,
         });
       }
     }
@@ -430,12 +449,12 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         email: operator.email,
         name: operator.name,
         status: active ? 'active' : 'inactive',
-        applications: operator.applications,
-        submitted: operator.submitted,
-        completed: operator.submitted,
-        applied: operator.applied,
+        applications: dashboard.statsAvailable ? operator.applications : null,
+        submitted: dashboard.statsAvailable ? operator.submitted : null,
+        completed: dashboard.statsAvailable ? operator.submitted : null,
+        applied: dashboard.statsAvailable ? operator.applied : null,
         pending: operator.pending,
-        failed: operator.failed,
+        failed: dashboard.statsAvailable ? operator.failed : null,
         lastSignInAt: user?.lastSignInAt || null,
       };
     });
@@ -448,11 +467,17 @@ managerRouter.get('/operators', async (req: Request, res: Response): Promise<voi
         totalApplications: dashboard.totals.applications,
         submitted: dashboard.totals.submitted,
         applied: dashboard.totals.applied,
-        assigned: items.reduce((total, item) => total + item.applications, 0),
+        failed: dashboard.totals.failed,
+        assigned: dashboard.statsAvailable
+          ? items.reduce((total, item) => total + (item.applications ?? 0), 0)
+          : null,
         active: items.filter((item) => item.status === 'active').length,
         inactive: items.filter((item) => item.status === 'inactive').length,
       },
       warning: dashboard.warning,
+      statsAvailable: dashboard.statsAvailable,
+      statsPartial: dashboard.statsPartial,
+      statsAvailableFrom: dashboard.statsAvailableFrom,
     });
   } catch (error) {
     log.error('[Manager Router] Failed to load operators:', error);
@@ -500,12 +525,6 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
   }
 
   try {
-    const scoped = await scopedApplywizzIds(req);
-    if (!isSupabaseConfigured() || (scoped.ids && scoped.ids.length === 0)) {
-      res.json({ range, buckets: [], perOperator: [], warning: scoped.warning });
-      return;
-    }
-
     const reportRange = parseDashboardStatsRange({ range });
     if ('error' in reportRange) {
       res.status(400).json({ error: reportRange.error });
@@ -513,73 +532,76 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
     }
     const start = reportRange.fromDate!;
     const end = reportRange.toDate!;
-    const { startIso, endIso } = reportRange;
-
-    let query = getDbClient()
-      .from('gh_candidate_applications')
-      .select('submitted_at, assigned_ca_email, applywizz_id, status')
-      .neq('status', 'READY_FOR_REVIEW')
-      .gte('submitted_at', startIso)
-      .lte('submitted_at', endIso);
-    if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const rows = data || [];
-    const bucketMap = new Map<string, number>();
-    const operatorMap = new Map<string, number>();
-    const appliedMap = new Map<string, number>();
-    for (const row of rows) {
-      const created = row.submitted_at ? new Date(row.submitted_at) : null;
-      if (!created) continue;
-      const ist = new Date(created.getTime() + 5.5 * 60 * 60 * 1000);
-      let key = ist.toISOString().slice(0, 10);
-      if (range === 'week') {
-        const week = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()));
-        const day = week.getUTCDay() || 7;
-        week.setUTCDate(week.getUTCDate() - day + 1);
-        key = week.toISOString().slice(0, 10);
-      } else if (range === 'month') {
-        key = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}`;
-      }
-      bucketMap.set(key, (bucketMap.get(key) || 0) + 1);
-      const email = String(row.assigned_ca_email || '').trim().toLowerCase();
-      if (email) {
-        operatorMap.set(email, (operatorMap.get(email) || 0) + 1);
-        if (row.status === 'APPLIED' || row.status === 'EMAIL_PROOF_PENDING') {
-          appliedMap.set(email, (appliedMap.get(email) || 0) + 1);
-        }
-      }
+    const managerEmail = managerEmailForRequest(req);
+    const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
+    const unrestricted = hasUnrestrictedDashboardAccess(role);
+    const stats = await getApplicationStats({
+      range: { fromDate: start, toDate: end },
+      scope: unrestricted ? {} : { managerEmail },
+      includeBreakdown: true,
+    });
+    if (!stats.available) {
+      res.json({
+        range,
+        start,
+        end,
+        buckets: [],
+        perOperator: [],
+        statsAvailable: false,
+        statsPartial: false,
+        statsAvailableFrom: stats.availableFrom,
+        dateRange: serializeDateRange(reportRange),
+      });
+      return;
     }
 
-    const names = await displayNameMapForEmails(Array.from(operatorMap.keys()));
-    const perOperator = await Promise.all(
-      Array.from(operatorMap.entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(async ([email, applications]) => {
-          const submitted = await countSubmittedApplicationsSince(startIso, [email], endIso);
-          return {
-            email,
-            name: names.get(email) || email.split('@')[0],
-            applications,
-            apps: applications,
-            submitted,
-            completed: submitted,
-            approved: submitted,
-            applied: appliedMap.get(email) || 0,
-          };
-        })
-    );
+    const bucketMap = new Map<string, { total: number; submitted: number; applied: number; failed: number }>();
+    for (const day of stats.byDate) {
+      let key = day.date;
+      if (range === 'week') {
+        const [year, month, date] = day.date.split('-').map(Number);
+        const week = new Date(Date.UTC(year, month - 1, date));
+        const weekday = week.getUTCDay() || 7;
+        week.setUTCDate(week.getUTCDate() - weekday + 1);
+        key = week.toISOString().slice(0, 10);
+      } else if (range === 'month') {
+        key = day.date.slice(0, 7);
+      }
+      const counts = bucketMap.get(key) || { total: 0, submitted: 0, applied: 0, failed: 0 };
+      counts.total += day.counts.total || 0;
+      counts.submitted += day.counts.submitted || 0;
+      counts.applied += day.counts.applied || 0;
+      counts.failed += day.counts.failed || 0;
+      bucketMap.set(key, counts);
+    }
+
+    const names = await displayNameMapForEmails(stats.byOperator.map((operator) => operator.email));
+    const perOperator = stats.byOperator
+      .filter((operator) => (operator.submitted || 0) > 0 || (operator.total || 0) > 0)
+      .sort((a, b) => (b.submitted || 0) - (a.submitted || 0))
+      .map((operator) => ({
+        email: operator.email,
+        name: names.get(operator.email) || operator.email.split('@')[0],
+        applications: operator.total || 0,
+        apps: operator.total || 0,
+        submitted: operator.submitted || 0,
+        completed: operator.submitted || 0,
+        approved: operator.submitted || 0,
+        applied: operator.applied || 0,
+        failed: operator.failed || 0,
+      }));
     res.json({
       range,
       start,
       end,
       buckets: Array.from(bucketMap.entries())
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, applications]) => ({ date, applications })),
+        .map(([date, counts]) => ({ date, applications: counts.total, ...counts })),
       perOperator,
       dateRange: serializeDateRange(reportRange),
-      warning: scoped.warning,
+      statsAvailable: true,
+      statsPartial: stats.partial,
+      statsAvailableFrom: stats.availableFrom,
     });
   } catch (error) {
     log.error('[Manager Router] Failed to load reports:', error);
@@ -599,6 +621,11 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
 
   try {
     const scoped = await scopedApplywizzIds(req);
+    const role = resolveRequestAppRole(req as AuthenticatedRequest, scoped.managerEmail);
+    const stats = await getApplicationStats({
+      range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+      scope: hasUnrestrictedDashboardAccess(role) ? {} : { managerEmail: scoped.managerEmail },
+    });
     let applications: Array<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'status' | 'created_at'>> = [];
     if (isSupabaseConfigured()) {
       let query = getDbClient()
@@ -628,7 +655,11 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
 
     res.json({
       candidates: candidateIds.size,
-      applications: applications.length,
+      applications: stats.counts.total,
+      totalApplications: stats.counts.total,
+      submitted: stats.counts.submitted,
+      applied: stats.counts.applied,
+      failed: stats.counts.failed,
       dateRange: serializeDateRange(parsedRange),
       statusCounts,
       queue: {
@@ -637,9 +668,12 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
         otpRequired: statusCounts.OTP_REQUIRED ?? 0,
       },
       outcomes: {
-        applied: (statusCounts.APPLIED ?? 0) + (statusCounts.EMAIL_PROOF_PENDING ?? 0),
-        failed: (statusCounts.FAILED ?? 0) + (statusCounts.CAPTCHA_TIMEOUT ?? 0),
+        applied: stats.counts.applied,
+        failed: stats.counts.failed,
       },
+      statsAvailable: stats.available,
+      statsPartial: stats.partial,
+      statsAvailableFrom: stats.availableFrom,
       warning: scoped.warning,
       generatedAt: new Date().toISOString(),
     });

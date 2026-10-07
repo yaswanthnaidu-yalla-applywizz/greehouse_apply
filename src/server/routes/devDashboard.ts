@@ -8,10 +8,9 @@ import {
   getApplication,
   getISTDateRangeUtc,
   listApplications,
-  countSubmittedApplicationsSince,
   countApplicationsByStatus,
-  getSubmissionOutcomeCounts,
 } from '../../db/applications.js';
+import { getApplicationStats } from '../../db/applicationStats.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { listApplicationEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
@@ -70,6 +69,7 @@ devDashboardRouter.patch('/submission-gate', async (req: Request, res: Response)
   if (typeof enabled !== 'boolean') {
     res.status(400).json({ error: 'Body must include boolean "enabled".' });
     return;
+  }
   if (isSandboxMode()) {
     setSubmissionEligibilityGateEnabled(false);
     res.json({
@@ -78,7 +78,6 @@ devDashboardRouter.patch('/submission-gate', async (req: Request, res: Response)
       source: 'sandbox_default',
     });
     return;
-  }
   }
   setSubmissionEligibilityGateEnabled(enabled);
   if (isSupabaseConfigured()) {
@@ -115,19 +114,24 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
       startIso,
       endIso,
     });
-    const [submitted, outcomes, queued] = await Promise.all([
-      countSubmittedApplicationsSince(startIso, undefined, endIso),
-      getSubmissionOutcomeCounts({ createdAtRange: { startIso, endIso } }),
+    const [stats, queued] = await Promise.all([
+      getApplicationStats({
+        range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+      }),
       countApplicationsByStatus('QUEUED', { startIso, endIso }),
     ]);
     res.json({
       ...(await collectHealthSnapshot()),
       submitClicks,
       submitClicksDate: parsedRange.toDate,
-      submitted,
-      submittedCount: submitted,
-      applied: outcomes.successfulApplications,
-      failed: outcomes.failedApplications,
+      totalApplications: stats.counts.total,
+      submitted: stats.counts.submitted,
+      submittedCount: stats.counts.submitted,
+      applied: stats.counts.applied,
+      failed: stats.counts.failed,
+      statsAvailable: stats.available,
+      statsPartial: stats.partial,
+      statsAvailableFrom: stats.availableFrom,
       queued,
       dateRange: serializeDateRange(parsedRange),
     });
@@ -157,7 +161,7 @@ devDashboardRouter.get('/runs', async (req: Request, res: Response): Promise<voi
       .from('gh_candidate_applications')
       .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles!inner(client_name)', { count: 'exact' })
       .gte('created_at', startIso)
-      .lte('created_at', endIso)
+      .lt('created_at', endIso)
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1);
     if (status) query = query.eq('status', status);
@@ -214,7 +218,7 @@ devDashboardRouter.get('/errors', async (req: Request, res: Response): Promise<v
         .in('status', ['FAILED', 'CAPTCHA_TIMEOUT']);
       if (date) {
         const { startIso, endIso } = getISTDateRangeUtc(date);
-        query = query.gte('updated_at', startIso).lte('updated_at', endIso);
+        query = query.gte('updated_at', startIso).lt('updated_at', endIso);
       }
       const { data, error } = await query;
       if (!error && data) {
@@ -234,7 +238,7 @@ devDashboardRouter.get('/errors', async (req: Request, res: Response): Promise<v
         const end = Date.parse(endIso);
         failed = failed.filter((row) => {
           const at = Date.parse(row.updated_at || row.created_at || '');
-          return Number.isFinite(at) && at >= start && at <= end;
+          return Number.isFinite(at) && at >= start && at < end;
         });
       }
     }

@@ -5,6 +5,7 @@
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { isActiveWithin, listAuthDirectory } from './authDirectory.js';
 import { createLogger } from '../utils/logger.js';
+import { getManagerApplicationTotals } from '../db/applicationStats.js';
 
 const log = createLogger('Admin Manager Stats');
 
@@ -13,12 +14,21 @@ const MANAGER_ACTIVE_HOURS = 48;
 export interface ManagerTeamStats {
   operators: number;
   clients: number;
-  applications: number;
+  applications: number | null;
+  statsAvailable: boolean;
+  statsAvailableFrom: string | null;
   status: 'active' | 'inactive';
 }
 
 function emptyStats(): ManagerTeamStats {
-  return { operators: 0, clients: 0, applications: 0, status: 'inactive' };
+  return {
+    operators: 0,
+    clients: 0,
+    applications: null,
+    statsAvailable: false,
+    statsAvailableFrom: null,
+    status: 'inactive',
+  };
 }
 
 /**
@@ -96,24 +106,12 @@ export async function buildManagerTeamStats(
     result.get(manager)!.clients = ids.size;
   }
 
-  const { data: appRows, error: appsError } = await getDbClient()
-    .from('gh_candidate_applications')
-    .select('id, profiles!inner(ca_email)');
-
-  if (appsError) {
-    log.warn(`[Admin Manager Stats] applications query failed: ${appsError.message}`);
-  } else {
-    for (const row of appRows || []) {
-      const caEmail = (
-        (row as { profiles?: { ca_email?: string | null } }).profiles?.ca_email || ''
-      )
-        .trim()
-        .toLowerCase();
-      if (!caEmail) continue;
-      const manager = caEmailToManager.get(caEmail);
-      if (!manager) continue;
-      result.get(manager)!.applications += 1;
-    }
+  const managerTotals = await getManagerApplicationTotals(managers);
+  for (const manager of managers) {
+    const stats = result.get(manager)!;
+    stats.applications = managerTotals.available ? managerTotals.totals.get(manager) ?? 0 : null;
+    stats.statsAvailable = managerTotals.available;
+    stats.statsAvailableFrom = managerTotals.availableFrom;
   }
 
   const authByEmail = new Map(
