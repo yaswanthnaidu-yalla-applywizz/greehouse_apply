@@ -7,7 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { isEligibleForSubmission } from '../../submission/submissionEligibilityGate.js';
+import { isWithinSubmissionQuestionLimit } from '../../submission/questionLimit.js';
 import {
   applyCreatedAtRangeFilter,
   getApplication,
@@ -581,7 +581,7 @@ applicationsRouter.post('/:id/retry', requireAuth, async (req: Request, res: Res
     if (
       !application ||
       application.status !== 'RETRY' ||
-      !isEligibleForSubmission(application).eligible
+      !isWithinSubmissionQuestionLimit(application).eligible
     ) {
       res.status(400).json({ error: 'This failure cannot be retried' });
       return;

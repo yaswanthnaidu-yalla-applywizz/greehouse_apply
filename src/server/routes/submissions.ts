@@ -54,18 +54,17 @@ import { createLogger } from '../../utils/logger.js';
 import { insertAuditEvent, SUBMIT_CLICK_AUDIT_ACTION } from '../../db/events.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { resolveRole } from './auth.js';
+import { QuestionLimitExceededError } from '../../submission/questionLimit.js';
 
 const log = createLogger('Submissions');
 
 export const submissionsRouter = Router();
 
-/** Operator-facing accept for submission-gate blocks (no queue write; same JSON as a real queue). */
-function respondEligibilityBlockedAsQueued(res: Response, appId: string): void {
-  res.status(200).json({
-    success: true,
-    status: 'QUEUED',
+function respondQuestionLimitExceeded(res: Response, appId: string, message: string): void {
+  res.status(422).json({
+    success: false,
     applicationId: appId,
-    message: 'Application queued for submission.',
+    error: message,
   });
 }
 
@@ -329,10 +328,9 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
       return;
     } catch (err: unknown) {
-      const errObj = err as { name?: string; message?: string };
-      if (errObj?.name === 'SubmissionEligibilityBlockedError') {
-        log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${errObj.message}`);
-        respondEligibilityBlockedAsQueued(res, appId);
+      if (err instanceof QuestionLimitExceededError) {
+        log.warn(`[Submissions Router] Question limit blocked ${appId}: ${err.message}`);
+        respondQuestionLimitExceeded(res, appId, err.message);
         return;
       }
       log.error(`[Submissions Router] ❌ Enqueue error for ${appId}:`, err);
@@ -416,10 +414,9 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
     }
   } catch (err: unknown) {
-    const errObj = err as { name?: string; message?: string };
-    if (errObj?.name === 'SubmissionEligibilityBlockedError') {
-      log.warn(`[Submissions Router] Submission gate blocked ${appId}: ${errObj.message}`);
-      respondEligibilityBlockedAsQueued(res, appId);
+    if (err instanceof QuestionLimitExceededError) {
+      log.warn(`[Submissions Router] Question limit blocked ${appId}: ${err.message}`);
+      respondQuestionLimitExceeded(res, appId, err.message);
       return;
     }
     const errMessage = err instanceof Error ? err.message : String(err);

@@ -21,11 +21,6 @@ import { emailsForRole } from './auth.js';
 import { fetchLinkedCaIds } from '../clientDashboard.js';
 import { createLogger } from '../../utils/logger.js';
 import {
-  getSubmissionEligibilityGateEnabled,
-  setSubmissionEligibilityGateEnabled,
-} from '../runtimeState.js';
-import { submissionGateCriteria } from '../../submission/submissionEligibilityGate.js';
-import {
   countAuditEventsByActionInRange,
   SUBMIT_CLICK_AUDIT_ACTION,
 } from '../../db/events.js';
@@ -39,67 +34,6 @@ function parseLimit(value: unknown, fallback = 100): number {
   if (!Number.isInteger(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, 500);
 }
-
-devDashboardRouter.get('/submission-gate', async (_req: Request, res: Response): Promise<void> => {
-  const sandbox = isSandboxMode();
-  let enabled = sandbox ? false : getSubmissionEligibilityGateEnabled();
-  if (!sandbox && isSupabaseConfigured()) {
-    try {
-      const { data, error } = await getDbClient()
-        .from('system_config')
-        .select('value')
-        .eq('key', 'submission_eligibility_gate_enabled')
-        .maybeSingle();
-      if (!error && data && data.value !== undefined && data.value !== null) {
-        enabled = typeof data.value === 'boolean' ? data.value : (data.value === 'true' || data.value === true);
-      }
-    } catch {
-      // Fall through to in-memory gate value
-    }
-  }
-  res.json({
-    enabled,
-    criteria: submissionGateCriteria(),
-    source: sandbox ? 'sandbox_default' : 'system_config',
-  });
-});
-
-devDashboardRouter.patch('/submission-gate', async (req: Request, res: Response): Promise<void> => {
-  const enabled = req.body?.enabled;
-  if (typeof enabled !== 'boolean') {
-    res.status(400).json({ error: 'Body must include boolean "enabled".' });
-    return;
-  }
-  if (isSandboxMode()) {
-    setSubmissionEligibilityGateEnabled(false);
-    res.json({
-      enabled: false,
-      criteria: submissionGateCriteria(),
-      source: 'sandbox_default',
-    });
-    return;
-  }
-  setSubmissionEligibilityGateEnabled(enabled);
-  if (isSupabaseConfigured()) {
-    try {
-      await getDbClient()
-        .from('system_config')
-        .upsert({
-          key: 'submission_eligibility_gate_enabled',
-          value: enabled,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'key' });
-    } catch (err: any) {
-      log.warn(`[Dev] Could not update system_config in Supabase: ${err.message}`);
-    }
-  }
-  log.info(`[Dev] Submission eligibility gate → ${enabled ? 'ON' : 'OFF'}`);
-  res.json({
-    enabled,
-    criteria: submissionGateCriteria(),
-    source: 'system_config',
-  });
-});
 
 devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<void> => {
   try {

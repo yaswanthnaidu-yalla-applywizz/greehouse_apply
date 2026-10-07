@@ -57,7 +57,7 @@ Manually applying to hundreds of Greenhouse ATS postings per candidate does not 
 | **Operator** | `/` | Review Q&A, dry-run, approve & submit, handle OTP |
 | **Manager** | `/manager` | Team client table, operators, activity, ops mode |
 | **Admin** | `/admin` | Org overview, CSV ingest Start/Stop, audit |
-| **Dev** | `/dev` | Health, queue, integrations, submission gate, debugger |
+| **Dev** | `/dev` | Health, queue, integrations, debugger |
 
 ---
 
@@ -430,9 +430,9 @@ Greenhouse boards mix classic inputs and remix-css React-Select. Fill path: nati
 - OTP: Fast REST API polling via `fetchZohoOtpViaApi` against Zoho connector (`/api/zoho/ui/inbox`, `/message`). Gate with `isGreenhouseOtpEmail` before regex. Pure REST polling completes in 2–5s without Chromium browser overhead. Playwright `zohoReaderPool` is eliminated.
 - Confirmation: REST `queryZohoConfirmationEmail`, forward window `submitted_at` → +10 min, reject OTP subjects. Poller only runs while status is `EMAIL_PROOF_PENDING`.
 
-**Submission eligibility gate**
+**Submission question limit**
 
-When enabled (default): live submit requires CSV score **20–60** and `field_count < 35`. Dev dashboard `/dev` System tab toggles it until process restart (`runtimeState`). Display badge `eligibleForSubmission` is independent of the toggle.
+CSV job score never restricts queueing or live submission. Jobs with 35 or more questions remain skipped, and live submission rejects an unknown or over-limit field count.
 
 ### 3.5 Tests
 
@@ -443,7 +443,7 @@ When enabled (default): live submit requires CSV score **20–60** and `field_co
 | `e2eIntegration.test.ts` | 7-checkpoint suite; locally 28/32; Tier 1 Email assertion fails |
 | `resolverWaterfall.test.ts` | Waterfall units |
 | `batchLlmValidation.test.ts` | Fail-closed option alignment |
-| `submissionEligibilityGate.test.ts` | Score / field-count gate |
+| `questionLimit.test.ts` | Score-independent submission / field-count cap |
 | `searchableSelect.test.ts` | Combobox helpers |
 | `dashboardRoleResolution.test.ts` | Email map vs JWT vs `users.role` |
 | `operatorManagerMapping.test.ts` | Login manager mapping |
@@ -805,8 +805,7 @@ Critical flags:
 |---|---|
 | `RAILWAY_ENV=true` | No headful Playwright; memory cap; ingest stop enabled |
 | `ENABLE_QUEUE_WORKER=true` | In-process submit daemon |
-| `MAX_JOB_QUESTIONS=35` | Skip / gate threshold |
-| `SUBMISSION_ELIGIBILITY_GATE_ENABLED` | Boot default; `/dev` can override until restart |
+| `MAX_JOB_QUESTIONS=35` | Skip or reject jobs with 35+ questions |
 | `RESOLVER_WORKER_POOL_SIZE` | Parallel resolve (1–5) |
 | `WORKER_POOL_SIZE` | Scan concurrency (1–10) |
 
@@ -820,7 +819,7 @@ Full list: `.ai/techContext.md` and `src/config/env.ts`.
 | Operator | `/api/candidates`, `/jobs`, `/api/applications` (fields, status, approve, dry-run, submit, OTP, proofs) |
 | Admin | `trigger-ingest-from-storage`, `stop-ingest`, `ingest-status`, `supabase-storage-health`, `/api/admin/*` |
 | Manager | `/api/manager/dashboard`, `operators`, `activity`, `reports`, assignment PATCH |
-| Dev | `/api/dev/health`, `runs`, `errors`, `queue`, `integrations`, `applications/:id`, `submission-gate` |
+| Dev | `/api/dev/health`, `runs`, `errors`, `queue`, `integrations`, `applications/:id` |
 
 ### 7.4 Related docs
 

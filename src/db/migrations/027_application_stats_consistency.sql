@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS gh_stats_config (
 INSERT INTO gh_stats_config (key, value)
 VALUES (
   'available_from',
-  to_char((timezone('Asia/Kolkata', now())::date + 1), 'YYYY-MM-DD')
+  to_char(timezone('Asia/Kolkata', now())::date, 'YYYY-MM-DD')
 )
 ON CONFLICT (key) DO NOTHING;
 
