@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import { createLogger } from '../utils/logger.js';
+import { SANDBOX_CA_EMAIL } from './sandboxAssignment.js';
 import {
   akshithaSegment,
   akshithaTemplates,
@@ -827,6 +828,16 @@ export async function runSandboxMigrations(): Promise<void> {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_api_fetch_at TIMESTAMPTZ;
   `);
 
+  // Sandbox dashboards assign every candidate and application to the dev operator.
+  await pool.query(
+    `UPDATE profiles SET ca_email = $1 WHERE ca_email IS DISTINCT FROM $1`,
+    [SANDBOX_CA_EMAIL]
+  );
+  await pool.query(
+    `UPDATE gh_candidate_applications SET assigned_ca_email = $1 WHERE assigned_ca_email IS DISTINCT FROM $1`,
+    [SANDBOX_CA_EMAIL]
+  );
+
   // 3. Seed demo candidate Akshitha G (AWL-31428)
   await seedSandboxDemoData();
 }
@@ -846,6 +857,7 @@ export async function seedSandboxDemoData(): Promise<void> {
         last_name: profile.lastName,
         email: profile.email,
         company_email: profile.email,
+        ca_email: SANDBOX_CA_EMAIL,
         phone: profile.phone,
         country: profile.country,
         country_code: profile.countryCode,
@@ -889,6 +901,7 @@ export async function seedSandboxDemoData(): Promise<void> {
           company_name: app.companyName,
           job_title: app.jobTitle,
           status: app.status,
+          assigned_ca_email: SANDBOX_CA_EMAIL,
           resolved_fields: app.resolvedFields,
           updated_at: new Date().toISOString(),
         },

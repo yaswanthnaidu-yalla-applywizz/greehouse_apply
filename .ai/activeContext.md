@@ -2,6 +2,12 @@
 
 _Last updated: 2026-10-07_
 
+## Current Session Update — Sandbox CA Assignment
+
+- Sandbox mode now assigns every profile and application to `yaswanthnaiduyalla@applywizz.ai`, including existing local DB rows normalized at startup and seeded demo data.
+- Newly ingested candidates use the sandbox operator email without fetching the external CA map; profile/application upserts and serialized application responses also enforce the sandbox assignment.
+- Production CA mapping remains unchanged. Focused regression tests pass; full typecheck/build are currently blocked by unrelated `questionLimit.ts` exports missing from the checked-in source.
+
 ## Current Session Update (2026-10-07 — Question Limit Removal & Submission Gate Audit)
 
 - Removed the 35-question limit cap upon explicit user instruction: `isWithinSubmissionQuestionLimit`, `assertWithinSubmissionQuestionLimit`, and `isWithinSubmissionQuestionLimitForDisplay` in `src/submission/questionLimit.ts` and `isOverQuestionCap` in `src/db/skippedApplications.ts` now permit all applications regardless of question count. Applications will not be skipped or blocked from auto-enqueue or submission due to field count.

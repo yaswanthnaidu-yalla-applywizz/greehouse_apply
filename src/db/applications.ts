@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import { getSandboxCaEmail, resolveAssignedCaEmail } from './sandboxAssignment.js';
 import { hydrateApplicationResolvedFields } from './applicationFieldHydration.js';
 import {
   getSignedProofUrl,
@@ -336,7 +337,12 @@ export function cacheApplicationLocally(app: ApplicationRow): ApplicationRow {
   const id =
     app.id ||
     `${app.applywizz_id}_${Buffer.from(app.job_url || '').toString('base64url').slice(0, 16)}`;
-  const cached = { ...app, id };
+  const sandboxCaEmail = getSandboxCaEmail();
+  const cached = {
+    ...app,
+    ...(sandboxCaEmail ? { assigned_ca_email: sandboxCaEmail } : {}),
+    id,
+  };
   memoryApplications.set(id, cached);
   if (app.applywizz_id && app.applywizz_id !== id) {
     memoryApplications.set(app.applywizz_id, cached);
@@ -356,6 +362,11 @@ export async function upsertApplication(
     ...app,
     updated_at: new Date().toISOString(),
   };
+  const sandboxCaEmail = getSandboxCaEmail();
+  if (sandboxCaEmail) {
+    payload.assigned_ca_email = sandboxCaEmail;
+    profileCaEmailCache.set(payload.applywizz_id, sandboxCaEmail);
+  }
 
   let existingRow: Pick<ApplicationRow, 'status' | 'resolved_fields'> | null = null;
   if (payload.applywizz_id && payload.job_url) {
@@ -411,7 +422,7 @@ export async function upsertApplication(
     delete payload.id;
   }
 
-  if (!payload.assigned_ca_email && payload.applywizz_id && isSupabaseConfigured()) {
+  if (!sandboxCaEmail && !payload.assigned_ca_email && payload.applywizz_id && isSupabaseConfigured()) {
     const cachedCaEmail = profileCaEmailCache.get(payload.applywizz_id);
     if (cachedCaEmail) {
       payload.assigned_ca_email = cachedCaEmail;
@@ -433,6 +444,7 @@ export async function upsertApplication(
       }
     }
   } else if (payload.assigned_ca_email && payload.applywizz_id) {
+    payload.assigned_ca_email = resolveAssignedCaEmail(payload.assigned_ca_email);
     profileCaEmailCache.set(payload.applywizz_id, String(payload.assigned_ca_email).trim().toLowerCase());
   }
 
@@ -1299,7 +1311,9 @@ export function serializeApplicationDto(
   const reviewedAt = merged.reviewed_at || merged.reviewedAt || null;
   const submittedAt = merged.submitted_at || merged.submittedAt || null;
   const submissionOrder = merged.submission_order ?? merged.submissionOrder ?? null;
-  const assignedCaEmail = merged.assigned_ca_email || merged.assignedCaEmail || null;
+  const assignedCaEmail = resolveAssignedCaEmail(
+    merged.assigned_ca_email || merged.assignedCaEmail || null
+  );
   const createdAt = merged.created_at || merged.createdAt;
   const updatedAt = merged.updated_at || merged.updatedAt;
   const retryCount = Number(merged.retry_count ?? merged.retryCount ?? 0);
