@@ -1427,7 +1427,7 @@
 
       return (
         <aside className="w-80 flex-shrink-0 bg-[#FAF4EB] border-r-2 border-[#1A1A2E] flex flex-col h-full overflow-hidden text-[#1A1A2E]">
-          <div className="p-4 border-b-2 border-[#1A1A2E] bg-[#FFF5EB] sticky top-0 z-10">
+          <div className="operator-directory-header p-4 border-b-2 border-[#1A1A2E] bg-[#FFF5EB] sticky top-0 z-10">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
                 <span className="text-sm">👥</span>
@@ -1466,7 +1466,7 @@
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
+          <div className="candidate-directory-scrollbar flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
             {isLoading ? (
               <div className="p-6 text-center text-xs text-[#64748B] font-mono animate-pulse">
                 Loading candidate records...
@@ -1653,7 +1653,7 @@
 
       if (!candidate || !selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
         return (
-          <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+          <div className="operator-job-queue p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
             Loading applications for {selectedApplywizzId || 'candidate'}…
           </div>
         );
@@ -1661,14 +1661,14 @@
 
       if (queueJobs.length === 0) {
         return (
-          <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+          <div className="operator-job-queue p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
             No jobs assigned for this candidate.
           </div>
         );
       }
 
       return (
-        <div className="bg-[#FFF5EB] border-b-2 border-[#1A1A2E] px-6 pt-3">
+        <div className="operator-job-queue bg-[#FFF5EB] border-b-2 border-[#1A1A2E] px-6 pt-3">
           <div className="flex items-center justify-between mb-2.5">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
