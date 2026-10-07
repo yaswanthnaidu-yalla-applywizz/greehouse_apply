@@ -454,6 +454,7 @@
 2026-10-06 session-end: stats consistency decisions clarified; plan+handover saved to to-do/plan+handove.md; implementation intentionally paused; no new observation
 2026-10-07 session-start scan: files=12 parsed=12 suspect=0 (resume stats consistency)
 2026-10-07 session-start scan: files=12 parsed=12
+2026-10-07 session-end: zero-context partial staging misapplied mixed-file hunks; full server file restaged, build/typecheck passed, observation 0027 actioned
 2026-10-07 no observations
 2026-10-07T07:18:29+05:30 session-start scan: files=12 parsed=12 suspect=0 (stats rollup lore)
 2026-10-07 no observations (explained legacy rollup and migration 027 canonical stats flow; no code changes)
