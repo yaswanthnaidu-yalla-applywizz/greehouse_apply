@@ -1,7 +1,7 @@
 ---
 id: 3
 title: "A bug report's prescribed fix can name a mechanism the code does not have"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "diagnosis before implementation; reading a defect report against the code
 date: 2026-09-15
 session_context: "Double-submission report: 'after OTP solve fails to FAILED, the queue immediately re-picks the same app', with a four-point fix prescribed for src/submitter/queueWorker.ts. Second session (2026-09-17): a 7-item dashboard-stats spec whose every premise was already implemented in the code. Third session (2026-09-18): single-line spec to add an event insert in enqueueApplication that was already in the uncommitted patch tree; fourth session (2026-09-18): a positional `insertApplicationEvent(...)` sketch for the APPLYING dequeue branch, against a single-object signature; fifth-seventh (same day): `activeTab` (actual binding `tab`) and `operator.apps` (actual binding `row`) in manager.html, then a raw-HTML block with inline `style=`/`onclick=` and an `apiFetch` helper prescribed for the JSX-only admin.html, where the named insertion point already held an equivalent status bar"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principle 9)"
 reference: "logs.1789452368028.log"
 ---
 

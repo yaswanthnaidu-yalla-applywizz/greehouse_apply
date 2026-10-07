@@ -278,7 +278,7 @@ erDiagram
 
 **Storage buckets:** `resumes`, `proofs_web`, `proofs_dry_run`, `proofs_failed`, `proofs_mail`, `csv_uploads`.
 
-**Migrations on disk:** `001`–`019` plus `latest_supabase_migration.sql`. Schema has drifted: `schema.sql` is a V2 snapshot and does not include later columns (`csv_job_score`, `users`, events, `APPROVED`, etc.). Source of truth is the migration folder + live Supabase.
+**Migrations on disk:** `001`–`026` plus `latest_supabase_migration.sql`. Schema has drifted: `schema.sql` is a V2 snapshot and does not include later columns (`csv_job_score`, `users`, events, `APPROVED`, rollups, retry status, etc.). Source of truth is the migration folder + live Supabase.
 
 **RLS posture:**
 
@@ -356,8 +356,8 @@ flowchart TD
 | Browser | Playwright Chromium |
 | Resolve | Fuse.js, pdf-parse, OpenAI / Gemini / OpenRouter / Ollama |
 | Validation | Zod (`src/config/env.ts`) |
-| UI (served) | Inline JSX in `dashboard/public/*.html`, React 18 + Babel **from CDN**, Tailwind CDN |
-| UI (unserved) | `dashboard/*.tsx` — typechecked, never bundled |
+| UI (served) | Vite-bundled React 18 TSX app (`dist/client`) when `DASHBOARD_MODE=tsx`, with fallback to inline Babel `dashboard/public/*.html` |
+| UI (source) | `dashboard/*.tsx` (Vite multi-entry build: index/admin/manager/dev), Tailwind CSS build |
 
 `package.json` still describes the project as **"Greenhouse Job Application Automation System (V1)"**. Production is V2+.
 
@@ -410,11 +410,11 @@ These five files hold most of the operational complexity:
 - `AnswerResolver` — used. Tiers 1 → 2 → batched 5.
 - `ResolverWorkerPool` — **never imported** outside its own file. This is the only caller of Tier 3.
 
-**Two dashboards**
+**Dual-mode dashboards**
 
-- Served: `dashboard/public/index.html` (and sibling HTML files).
-- Typechecked only: `dashboard/App.tsx`, `JobQueueView.tsx`, `FormRenderer.tsx`, components.
-- `npm run build` / Dockerfile compile `src/` only. Editing `.tsx` does not change production UI.
+- `DASHBOARD_MODE=tsx` (Railway default): Vite compiles `dashboard/*.tsx` into `dist/client`, served statically with client-side React 18, Tailwind, and modular components.
+- `DASHBOARD_MODE=html` (or `/fallback` route): Serves `dashboard/public/*.html` with Babel in-browser transformation for quick debugging or CDN fallback.
+- `npm run build` runs `tsc && vite build`, compiling both server (`dist/`) and frontend (`dist/client`). Editing `.tsx` updates the production Vite bundle directly.
 
 **Logging**
 
@@ -427,7 +427,7 @@ Greenhouse boards mix classic inputs and remix-css React-Select. Fill path: nati
 
 **OTP / email proof**
 
-- OTP: Playwright against Zoho reader UI. Reset filter every lookup. Gate with `isGreenhouseOtpEmail` **before** regex. `extractOtpCode` is unsafe on ungated mail.
+- OTP: Fast REST API polling via `fetchZohoOtpViaApi` against Zoho connector (`/api/zoho/ui/inbox`, `/message`). Gate with `isGreenhouseOtpEmail` before regex. Pure REST polling completes in 2–5s without Chromium browser overhead. Playwright `zohoReaderPool` is eliminated.
 - Confirmation: REST `queryZohoConfirmationEmail`, forward window `submitted_at` → +10 min, reject OTP subjects. Poller only runs while status is `EMAIL_PROOF_PENDING`.
 
 **Submission eligibility gate**

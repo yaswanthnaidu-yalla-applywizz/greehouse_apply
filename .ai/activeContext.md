@@ -1,6 +1,93 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-09-26_
+_Last updated: 2026-10-06_
+
+## Current Session Update (2026-10-06 — Canonical Application Statistics)
+
+- Replaced the dashboard metric source with a shared statistics service backed by transactional per-day creation/status-transition facts in migration 027. Admin/Dev, Manager dashboard/operators/reports/overview/stats, and the operator stats API use the same Total/Submitted/Applied/Failed contract while preserving global vs team/CA scope.
+- Added explicit pre-cutover unavailability and partial-range behavior; Manager detail panels disclose that retained job/proof rows may be incomplete. Ingestion refuses to prune until migration 027 is installed.
+- Focused stats tests, TypeScript checks, and the production build pass. Migration 027 has not been applied: local Docker/Postgres was unavailable, and no production migration or deployment was authorized.
+
+## Current Session Update (2026-10-06 — Apple Music Dark Mode Retheme Across All Dashboards)
+
+- Completed full dark-mode Apple Music visual retheme across modern Vite TSX dashboard components (`App.tsx`, `AdminDashboard.tsx`, `DevDashboard.tsx`, `ManagerDashboard.tsx`, `AuthView.tsx`, `CandidateList.tsx`, `JobQueueView.tsx`, `FormRenderer.tsx`, `EditableFormField.tsx`, `SourceBadge.tsx`, `SubmissionControls.tsx`, `ProofViewer.tsx`, `DifficultyBadge.tsx`, `HeaderSignOut.tsx`, `DevSwitcher.tsx`) and legacy HTML shells (`index.html`, `admin.html`, `dev.html`, `manager.html`, `operator-app.jsx`).
+- Design system: `#0a0a0a` (base bg), `#1c1c1e` (surface 1/cards/modals/sidebars), `#2c2c2e` (surface 2/inputs/borders/dividers), `#3a3a3c` (surface 3/glassy pills/input borders), `#8e8e93` (low-contrast/metadata text), `#ffffff` (primary text).
+- Status & badges: `#30d158` (APPLIED/QUEUED/APPLYING/approve), `#ff453a` (FAILED/error/unresolved), `#ff9f0a` (OTP/CAPTCHA/SKIPPED/warning), `#0a84ff` (Supabase), `#5ac8fa` (AI), `#0071e3` (Manual), `#30d158`/`#ff9f0a`/`#ff453a` (Difficulty Easy/Med/Hard).
+- Zero changes to business logic, routing, endpoints, or data-fetching code. Recompiled Tailwind CSS bundle (`npm run build:dashboard-css`); full typechecks (`npm run typecheck`) and production build (`npm run build`) pass cleanly.
+
+## Current Session Update (2026-10-06 — Operator Dashboard Resolution Metrics)
+
+- Removed the Supabase and AI percentage pills from the TSX operator dashboard header and removed the corresponding cards from its Stats tab.
+- The four remaining Stats cards now use a two-column layout. Shared `/api/stats` fields and the legacy operator dashboard are unchanged.
+- Dashboard typecheck and production build pass.
+
+## Current Session Update (2026-10-06 — Ingestion Zoho Connection Check)
+
+- After Phase C ensures profiles for CSV candidates, the shared segregator now takes one `/api/zoho/ui/users` snapshot and matches candidate `company_email` values against connected Zoho emails.
+- Live true/false statuses are persisted to `profiles.zoho_connected`; connector failures fall back to stored flags, with NULL treated as disconnected. Disconnected candidates remain skipped before resolution.
+- The existing `SANDBOX=true` bypass is retained. Focused Zoho status tests, `npm run typecheck`, and `npm run build` pass.
+
+## Current Session Update (2026-10-06 — Profile-Fact Resolution in Tiers 3–4)
+
+- Tier 3 now embeds profile and nested `raw_api_payload` fact labels on demand, checks them before semantic QA-bank lookup, and caches embeddings in process memory without a schema change.
+- Tier 4 fuzzy-matches the same candidate facts before its QA-bank fallback; the resolver worker-pool path now runs both tiers in order.
+- Added targeted tests for fact extraction, semantic ranking/thresholding, profile-first matching, and QA-bank fallback.
+
+## Current Session Update (2026-10-06 — Incomplete Required Choice Handling)
+
+- Required searchable selects now carry an `optionsComplete` marker from scanning through resolver, application hydration, and dashboard payloads.
+- Partial lists are not treated as exhaustive by answer matching or Tier 5 prompts. Required selects marked incomplete use text entry in the operator UI while retaining `type: "select"`; submission still requires a matching, committed live option.
+- Added scanner, resolver, and searchable-select regressions; `npm run typecheck`, `npm run build`, and the focused tests pass.
+
+## Current Session Update (2026-10-06 — Required-Only IMC Dropdown Diagnostic)
+
+- Live option enrichment now skips optional choice fields and cascade exploration attempts each required choice field only once when it becomes visible.
+- Added and ran `scripts/scanImcJob4908708101.ts`; saved the scan and response diagnostics to `output/imc_job_4908708101_scan.txt`.
+- On the IMC posting, School is required. The bounded three-pass scroll captured 100 school entries and marked the list partial; inspected JSON responses did not expose a school-options payload.
+
+## Current Session Update (2026-10-06 — Missing Choice Option Capture)
+
+- The scanner supplements select/radio fields missing Remix choices using native controls or Playwright pointer interaction with Greenhouse custom controls; portaled menu options are supported and existing Remix choices remain authoritative.
+- The earlier browser fixture opened its menu on synthetic `click` and kept options inside the field wrapper, so it did not model the reported Greenhouse control. The regression now requires `mousedown` and renders choices in a portal.
+- The user confirmed a fresh sandbox scan now persists options for Country, School, Degree, Gender, transgender, ethnicity, Race, Veteran Status, and Disability Status.
+- Local browser regression, typecheck, and production build pass; scanner logs now identify visible custom controls whose options could not be captured.
+
+## Current Session Update (2026-10-06 — Direct Admin CSV Upload)
+
+- Added an Admin/dev-only TSX dashboard upload flow that validates supported CSV headers, uploads to the `csv_uploads` bucket with progress, then requires explicit confirmation before ingestion.
+- New uploads are staged under `pending/` so the existing latest-pending Start flow cannot ingest them before confirmation; confirmed runs target the exact uploaded object.
+- The legacy dashboard fallback and existing Start flow remain unchanged.
+
+## Current Session Update (2026-10-06 — Sandbox Candidate Jobs Loading)
+
+- Candidate detail, job-list, and job-detail read endpoints no longer apply the Zoho-connected-profile gate in local sandbox mode, allowing sandbox records to load without connected mail accounts.
+- The Zoho gate remains active in production and on submission routes.
+
+## Current Session Update (2026-10-06 — Sandbox DB Viewer Usability)
+
+- Kept the DB table list at a fixed sidebar width and constrained horizontal/vertical overflow to the results pane so wide rows no longer squeeze it away.
+- JSON/JSONB cells now show a compact, single-line summary and expand/collapse on click using native disclosure controls.
+
+## Current Session Update (2026-10-06 — Sandbox Scanned-Template Persistence)
+
+- Fixed sandbox scanning persistence: `exportScannedJobs` no longer invokes Supabase-only `.abortSignal()` on the local PostgreSQL query builder.
+- Moved template export outside the non-fatal Playwright scan catch so database write failures are surfaced to the ingest runner.
+- Re-exported the existing scan artifact and verified all 10 templates are now in `gh_scanned_job_templates`.
+
+## Current Session Update (2026-10-05 — Role Switcher Persistence & Dev Operator Mode)
+
+- Fixed Dev mode navigation so dev users (`sessionRole() === 'dev'`) can seamlessly switch to Operator mode and return to Dev/Admin/Manager without manual URL editing.
+- Persisted `applywizz_dev_operator_view` session flag on the Operator dashboard (`/`), eliminating bounce-back to `/dev` upon page reload.
+- Integrated `<DevSwitcher current="/" />` into `dashboard/App.tsx` navigation header for dev users.
+- Synchronized `DevSwitcher` click handlers in `DevSwitcher.tsx`, `dev.html`, `admin.html`, and `manager.html` to set the flag when navigating to `/` and clear it when transitioning to `/dev`, `/admin`, or `/manager`.
+- Cleaned up session key on user sign-out (`clearSession()` in `useSession.ts` and `roleAccess.js`).
+- Verified `npm run build` succeeds cleanly.
+
+## Current Session Update (2026-10-05 — Resolver Correctness Fixes)
+
+- Corrected the diagnosed country, Tier 5 choice-alignment, inferred-option, profile URL, Tier 4 URL, consent, state, degree, and education-date resolution cases.
+- Tier 5 now reuses its effective options for final alignment; option-less rich EEOC identity selects remain unresolved instead of receiving fabricated choices.
+- Added focused resolver regression coverage; `npm run typecheck` passes.
 
 ## Current Session Update (2026-09-26 — Fast REST API OTP Resolution & Submission Hardening)
 
@@ -8,7 +95,7 @@ _Last updated: 2026-09-26_
   - Queries `/api/zoho/ui/inbox` and `/api/zoho/ui/message` every 2s for incoming Greenhouse security codes.
   - Slashes OTP retrieval latency from 25–35+ seconds down to 2–5 seconds.
   - Eliminates heavy Playwright browser instances and Chromium memory footprint on Railway.
-  - Kept Playwright `zohoReaderPool` as a graceful fallback only if REST endpoints encounter unexpected issues.
+  - Completely eliminated legacy Playwright `zohoReaderPool` and removed `zohoReader.ts` file. All OTP retrieval and email confirmation proof resolution run exclusively via pure REST API endpoints (`/api/zoho/ui/inbox` and `/api/zoho/ui/message`).
 - **Authoritative Operator Decisions:** Made operator-approved `resolved_fields` the primary truth for submission. Forced heuristics (work authorization/relocation defaults, referral sources, country) are relegated to backups that only execute if the field value is empty or unpopulated.
 - **Sponsorship Integrity Protected:** Fixed regex in `isWorkAuthRelocation` that matched sponsorship questions. Submitter strictly respects resolved sponsorship choices (clicking "No" when target is "No", never overriding to "Yes").
 - **Options Preservation & Hydration:** Updated resolver pipeline (`answerResolver.ts`) to persist `options` on all `ResolvedField` objects (with `['Yes', 'No']` defaults for boolean questions). Added automatic options enrichment in `applicationFieldHydration.ts` for existing database records using template field schemas.
@@ -43,11 +130,10 @@ _Last updated: 2026-09-26_
 - Removed disparate rollup overrides and separate count queries in `/api/manager/operators`; operators table metrics now aggregate directly from client applications.
 - Parity enforced across both TSX (`dashboard/components/ManagerDashboard.tsx`) and legacy HTML (`dashboard/public/manager.html`).
 
-### 0u. Stats Rollup System (shipped 2026-09-23)
-- Implemented `runStatsRollup` (`src/db/statsRollup.ts`) and `024_stats_rollups.sql` migration.
-- Automatically calculates daily, weekly, and monthly aggregate counts (Total, Submitted, Applied, Failed) and prunes previous days' historical `gh_candidate_applications` and `gh_scanned_job_templates`.
-- Wired into ingestion pipeline step before Phase A.
-- `/api/admin/overview`, `/api/manager/dashboard`, and `/api/stats` were updated to read aggregated results via `queryRollupStats` combined with unrolled live rows for blazing fast UI analytics.
+### 0u. Canonical Application Statistics (implementation complete locally; migration pending)
+- Migration `027_application_stats_consistency.sql` defines the cutover, transactional application facts, and global/manager/CA scopes; it intentionally does not backfill incompatible history.
+- `src/db/applicationStats.ts` provides the shared IST date, status, deduplication, scope, and availability contract used by Admin/Dev, Manager dashboard/operators/reports/overview/stats, and `/api/stats`.
+- `runStatsRollup()` is now a migration guard before pruning; legacy `gh_stats_rollups` is no longer used by dashboard metric APIs. Do not deploy the new code before applying migration 027.
 
 ### 0t. Answer Resolution Quality Fixes (shipped 2026-09-23)
 - **Pre-tier Consent Rule (`answerResolver.ts`):** Added a pre-tier regex match for consent, acknowledge, certify, and agree fields, immediately resolving to the affirmative dropdown/radio option or "Yes" with confidence 1.0.
@@ -223,7 +309,7 @@ _Last updated: 2026-09-26_
   - `finalizeLlmAnswer` includes 3-step fuzzy option fallback (normalized comparison, contains check for short options, Fuse.js threshold 0.85) before hard reject on choice fields.
 
 ## Immediate Blockers / Open Questions
-- None as of 2026-09-16 (migrations 016/017, Storage ingest keys, and prod smoke assumed done).
+- Apply and PostgreSQL-validate migration 027 before deploying dependent code. Docker was unavailable for local PostgreSQL validation; production migration and deployment require explicit authorization.
 - Operator-triggered retry is implemented locally; verify the retry button and atomic `FAILED` → `QUEUED` transition in operator smoke testing.
 - **Open question (2026-09-18):** `GET /api/manager/reports` `perOperator[].apps` is an **all-time** count (spec gave it no date predicate) while `applications` / `completed` / `approved` in the same object are **period-scoped** — confirm whether `apps` was meant to be period-scoped too; it will read as inconsistent next to its neighbours in any UI built on it — now rendered in the Reports per-operator table, so the mismatch is user-visible.
 

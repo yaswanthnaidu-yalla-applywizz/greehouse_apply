@@ -1,7 +1,7 @@
 ---
 id: 19
 title: "A field added to a stats row inherits its siblings' scope by implication and nothing else"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "implementing a spec whose new field omits a scope qualifier its neighbour
 date: 2026-09-18
 session_context: "Added apps / completed / approved to each operator row of GET /api/manager/reports; two fields named their window (periodStart), the first named none"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principles 7/8/9) or documented as noted in weekly triage"
 reference: "src/server/routes/manager.ts GET /api/manager/reports (perOperator construction)"
 ---
 

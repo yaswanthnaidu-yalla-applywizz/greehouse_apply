@@ -1,9 +1,54 @@
 # Progress — What Works, What's Pending
 
+### Apple Music Dark Mode Retheme Across All Dashboards (2026-10-06)
+- [x] Rethemed all modern Vite TSX dashboard components (`App.tsx`, `AdminDashboard.tsx`, `DevDashboard.tsx`, `ManagerDashboard.tsx`, `AuthView.tsx`, `CandidateList.tsx`, `JobQueueView.tsx`, `FormRenderer.tsx`, `EditableFormField.tsx`, `SourceBadge.tsx`, `SubmissionControls.tsx`, `ProofViewer.tsx`, `DifficultyBadge.tsx`, `HeaderSignOut.tsx`, `DevSwitcher.tsx`) and legacy HTML shells (`index.html`, `admin.html`, `dev.html`, `manager.html`, `operator-app.jsx`).
+- [x] Defined Apple Music token system in `tokens.css` and `dashboard/tailwind.config.cjs`: `#0a0a0a` (page/bg), `#1c1c1e` (surface 1/cards/modals), `#2c2c2e` (surface 2/inputs/borders), `#3a3a3c` (surface 3/glassy pills/borders), `#8e8e93` (low-contrast/metadata text), `#ffffff` (primary text).
+- [x] Rethemed status accents (`#30d158` APPLIED/QUEUED/APPLYING/approve, `#ff453a` FAILED/error, `#ff9f0a` OTP/CAPTCHA/SKIPPED/warning), source badges (`#0a84ff` Supabase, `#5ac8fa` AI, `#0071e3` Manual), and difficulty badges (`#30d158` Easy, `#ff9f0a` Medium, `#ff453a` Hard).
+- [x] Recompiled Tailwind CSS bundle (`npm run build:dashboard-css`); typechecks (`npm run typecheck`) and production build (`npm run build`) pass cleanly with zero logic changes.
+
+### Profile-Fact Resolution in Tiers 3–4 (2026-10-06)
+- [x] Tier 3 semantically compares question embeddings with candidate profile and nested raw-payload fact labels before searching the QA-bank vector index.
+- [x] Tier 4 fuzzy-matches profile/raw-payload fact labels before falling back to historical QA-bank answers.
+- [x] Kept fact embeddings in process memory; no profile column or database migration is required.
+- [x] Updated the parallel resolver worker path to execute semantic Tier 3 and fuzzy Tier 4 consistently.
+
+### Sandbox Candidate Jobs Loading (2026-10-06)
+- [x] Bypassed the Zoho-connected-profile gate on candidate/job read endpoints only in sandbox mode so local jobs can load without Zoho setup.
+- [x] Kept production reads and all submission routes behind the existing Zoho gate.
+
+### Sandbox DB Viewer Formatting (2026-10-06)
+- [x] Prevented wide query results from collapsing the table-list sidebar; results scroll inside their own pane.
+- [x] JSON/JSONB cells now default to a compact preview and expand/collapse when clicked.
+
+### Sandbox Scanned-Template Persistence (2026-10-06)
+- [x] Kept `exportScannedJobs` on the local PostgreSQL thenable path in sandbox instead of calling Supabase-only `.abortSignal()`.
+- [x] Separated scanner errors from export errors so failed scanned-template writes propagate and fail ingestion rather than being logged as a non-fatal scan warning.
+- [x] Re-exported the existing 10 scanned templates to the sandbox DB and verified all 10 rows were persisted; `npm run typecheck` passes.
+
+### Role Switcher Persistence & Dev Operator Mode (2026-10-05)
+- [x] Persisted role switcher across both TSX and HTML dashboards; dev users can switch freely to Operator mode and return to Dev/Admin/Manager without manual URL editing.
+- [x] Operator dashboard (`dashboard/App.tsx`) now renders `<DevSwitcher current="/" />` in the top header for users authenticated as `dev`.
+- [x] Maintained `applywizz_dev_operator_view` session flag while browsing the Operator dashboard so page reloads do not bounce dev users to `/dev`.
+- [x] Aligned `DevSwitcher` click handlers across `DevSwitcher.tsx`, `dev.html`, `admin.html`, and `manager.html` to set the flag on Operator click and clear it on other role clicks.
+- [x] Added `applywizz_dev_operator_view` removal to session logout routines in `useSession.ts` and `roleAccess.js`.
+
+### Resolver Correctness Fixes (2026-10-05)
+- [x] Country pre-tier resolution now uses the candidate profile and country aliases; unresolved country fields do not reach Tier 5.
+- [x] Tier 5 choices retain their effective options through final alignment, and option-less rich EEOC identity fields no longer receive fabricated Yes/No options.
+- [x] Profile URL fallbacks, Tier 4 URL guards, restrictive-covenant consent gating, state extraction, binary degree answers, and education date selects were corrected.
+- [x] Added focused resolver regression checks and passed `npm run typecheck`.
+
+### Sandbox Production Parity (2026-10-05)
+- [x] Implemented `docker-compose.sandbox.yml` with PostgreSQL 17/pgvector and pgweb for a complete local database matching Supabase.
+- [x] Implemented `SandboxQueryBuilder` that maps standard Supabase `.from().select().eq().insert().upsert()` methods to raw local Postgres SQL (with `.not()` support).
+- [x] Auto-loads `SANDBOX=true` mode and overrides JWT `requireAuth` to auto-login dev user `yaswanthnaiduyalla@applywizz.ai`.
+- [x] Triggers auto-ingestion on `npm run sandbox:fresh` by copying any root CSV to the local Dropzone and bypassing caching pipeline loops.
+- [x] Included visual HTML database viewer inside the server at `http://localhost:3001/dev/db` as a fast UI for operators.
+
 ### Fast REST API OTP Resolution & Submission Hardening (2026-09-26)
 - [x] Implemented `fetchZohoOtpViaApi` in `src/services/zoho-connector.ts` to poll the Zoho connector REST API every 2s for incoming Greenhouse security codes.
 - [x] Switched `otpResolutionService.ts` to use REST API as primary resolver, reducing OTP retrieval time from ~30s to 2–5s.
-- [x] Maintained Playwright `zohoReaderPool` as a secondary fallback if REST endpoints are unreachable.
+- [x] Completely removed legacy Playwright `zohoReaderPool` and `zohoReader.ts`; OTP resolution and email verification now run 100% via REST API without launching Chromium.
 - [x] Operator-approved resolved fields made authoritative truth during submission; forced heuristics relegated to secondary fallbacks if values are empty.
 - [x] Regex in `isWorkAuthRelocation` corrected to prevent overriding sponsorship questions; submitter respects "No" resolved choices without forcing "Yes".
 - [x] Preserved and enriched options for select/radio/checkbox fields across `answerResolver.ts` and `applicationFieldHydration.ts`.
@@ -16,9 +61,16 @@
 - [x] Added stale `APPLYING` recovery after a 15-minute worker claim timeout, transitioning abandoned claims to `RETRY` without automatic requeue.
 - [x] Added React-Select settle/blur verification and delayed hidden `requiredInput` regression coverage.
 - [x] Reworked stats to one non-overlapping daily historical grain, exact range querying, snapshot-before-prune ordering, and full working-table cleanup.
-- [ ] Manager-scoped historical detail reports still require a scoped rollup model if historical application rows are intentionally deleted.
+- [x] Added manager/CA-scoped historical metric facts in migration 027; migration validation/application is pending before deployment.
 
-_Last updated: 2026-09-21_
+### Canonical Dashboard Application Statistics (2026-10-06)
+- [x] Added migration 027 for idempotent daily creation/status-transition facts, event-time global/manager/CA ownership, and an explicit availability cutover without legacy backfill.
+- [x] Unified Admin/Dev, Manager dashboard/operators/reports/overview/stats, and `/api/stats` around Total, Submitted, Applied, and Failed definitions; preserved team/CA scoping and explicit partial/unavailable range states.
+- [x] Changed `db:fix-rollup` to inspect canonical yesterday/today facts read-only; ingestion pruning remains guarded by migration 027.
+- [x] Added focused contract/scope/cutover/operator-attribution tests; `npm run typecheck` and `npm run build` pass.
+- [ ] Apply and PostgreSQL-validate migration 027 before deployment. Local Docker was unavailable; no production migration or deploy was performed.
+
+_Last updated: 2026-10-06_
 
 ### Form Submission Reliability Fixes (2026-09-23)
 - [x] Re-attempted initially failed fields that become visible after cascade expansion, while leaving still-hidden fields failed.
@@ -43,6 +95,24 @@ _Last updated: 2026-09-21_
 - [x] Added `[OTP TRACE]` and `[Gate TRACE]` logs for production verification of the retry/session lifecycle and gate decisions.
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
+
+### Missing Choice Option Capture (2026-10-06)
+- [x] Enriched Remix fields missing choice values from visible native selects, radio groups, and custom Greenhouse dropdowns opened through Playwright pointer interaction (including portaled menus).
+- [x] Re-ran enrichment during cascade exploration so initially hidden choice fields are captured when revealed; extraction does not select a value.
+- [x] Added browser-backed regression tests for mousedown-only EEOC-style custom selects, portaled options, native selects, conditional visibility, and preserving existing Remix options.
+- [x] User confirmed a fresh sandbox scan now persists options for Country, School, Degree, Gender, transgender, ethnicity, Race, Veteran Status, and Disability Status.
+
+### Incomplete Required Choice Handling (2026-10-06)
+- [x] Marked native/Remix choice lists complete and detected scrollable/virtualized custom menus as partial without exhaustive scrolling.
+- [x] Propagated completeness through resolver, LLM, application hydration, and operator API payloads; partial options no longer constrain answer selection.
+- [x] Required incomplete selects render as text entry with an exact-choice hint while retaining `type: "select"`.
+- [x] Confirmed live submission selects and verifies an actual Greenhouse option and fails closed when no live option matches.
+- [x] Passed focused browser/resolver tests, `npm run typecheck`, and `npm run build`.
+
+### Direct Admin CSV Upload (2026-10-06)
+- [x] Added Admin/dev-only CSV upload to the production TSX Admin dashboard, with supported-header validation, a 25 MiB cap, and upload progress.
+- [x] Staged uploads under `csv_uploads/pending/` and required confirmation before triggering ingestion for the exact object; missing targets fail without falling back to another CSV.
+- [x] Preserved the existing latest-pending Start flow and legacy dashboard; `npm run build` and focused CSV upload validation tests pass.
 
 ### Dashboard Visual Restyling & Active Tab Text Fix (2026-09-25)
 - [x] Fixed active dashboard tab text turning white when selected: changed to explicit `text-black` across `dashboard/App.tsx`, `DevDashboard.tsx`, `ManagerDashboard.tsx`, `AdminDashboard.tsx`, and `AuthView.tsx`.
@@ -288,6 +358,9 @@ _Last updated: 2026-09-21_
 | Item | Status | Notes |
 |---|---|---|
 | **Admin managers + operator workload (API + HTML)** | Implemented locally, uncommitted | `adminManagerStats.ts`, workload count in `applications.ts`, admin/manager route wiring; `admin.html` / `manager.html` display-only PARALLEL fields (2026-09-16) |
+| **Zoho connection check during candidate ingestion** | Implemented locally, uncommitted | Shared candidate sync checks one connector snapshot, persists `profiles.zoho_connected`, falls back to stored flags on connector failure, and skips disconnected candidates; sandbox bypass retained (2026-10-06) |
+| **Operator dashboard resolution metrics** | Implemented locally, uncommitted | Removed Supabase/AI percentage pills and Stats-tab cards from the TSX operator dashboard only; shared API and legacy UI unchanged (2026-10-06) |
+| **Canonical application statistics** | Implemented locally; migration pending | Migration 027 and shared service unify application metric APIs and dashboard surfaces; apply/validate migration before deploying (2026-10-06) |
 
 ---
 
@@ -306,6 +379,11 @@ _Last updated: 2026-09-21_
 ---
 
 ## Known Bugs / Gotchas
+- **Large Greenhouse searchable lists remain partial:** required-only scanning avoids optional-field cost and the IMC diagnostic captured 100 School options in three bounded scroll passes, but marked the list partial. No school-options JSON payload appeared in inspected network responses; a full-list source/resolution path is still needed for large required searchable dropdowns.
+- **✅ FIXED — missing dropdown choices in sandbox scanned templates:** the first local fixture used a synthetic click-only, non-portaled menu and passed despite not matching the Greenhouse control. The scanner now uses Playwright pointer interaction, reads portal-rendered options, and logs visible controls whose choices remain unavailable; user confirmed the fresh sandbox schema includes the missing choices.
+- **✅ FIXED — sandbox scanned jobs missing from DB:** `exportScannedJobs` called the Supabase `.abortSignal()` method on the local `SandboxQueryBuilder`, causing a runtime `TypeError` after writing `output/scanned_jobs.json`; the Phase B catch treated it as a scan warning and ingestion still completed. Sandbox now awaits the local query builder directly, and export failures are no longer swallowed as scanner failures.
+- **✅ FIXED — sandbox DB viewer misrendered `resolved_fields`:** `/dev/db` now pretty-prints object/array cells (including the `resolved_fields` JSONB array) as escaped, whitespace-preserving JSON, so `SELECT * FROM "gh_candidate_applications" LIMIT 50;` displays the field objects rather than `[object Object]`.
+- **Gotcha — sandbox pgweb Compose entry is under `volumes`:** `docker-compose.sandbox.yml` declares `pgweb` under the top-level `volumes` key instead of `services`, so pgweb is not configured as a service and Compose may reject its volume definition.
 - **✅ FIXED — `candidate_applications` FK after CSV ingest:** removed pre-resolve upserts (`ensureApplicationRowsFromCsv` / segregator). Ingest still syncs profiles first; application rows appear only after resolution (or SKIPPED over-cap)
 - **✅ FIXED — Railway process crash on `/api/candidates`:** non-ASCII en-dash in `X-Dashboard-Date-Range` → Node `ERR_INVALID_CHAR`; use ASCII `-` and `sanitizeHttpHeaderValue()`
 - **✅ FIXED — new `profiles` rows never insert (schema cache):** Railway 2026-09-15 logs — ApplyWizz fetch OK, PostgREST rejected `country`/`country_code` on `profiles`. Migration **016** adds columns; `upsertProfile` / profile patches strip any column missing from the schema cache and retry so creates are not blocked. **Apply 016 in Supabase SQL Editor** for country to persist
@@ -335,3 +413,11 @@ _Last updated: 2026-09-21_
 - **React-Select combobox:** Do not use keyboard Enter as a fallback after failed option click — it clears the type-ahead without committing (use option click or flyout toggle). Full-page option search uses `page.locator('body')` (Locator, not Page) for portaled menus.
 - **Local dry-run script** (`runUserApplication.ts`) is separate from dashboard `POST .../dry-run` (`dryRun.ts` + Supabase application row)
 - **Gotcha — same column labels, three different windows (2026-09-18):** `Assigned` is the operator **email string** on Home, a **period-scoped count** on the Operators summary card, and an **all-time count** in the new Reports column. `Completed` is **today-IST only** on Home's card and on Operators (`countCompletedApplicationsByOperatorSince(getISTDateRangeUtc(getISTDateString()).startIso)` ignores the date filter) but **period-scoped** in the new Reports column. Managers comparing tabs will read the differences as bugs.
+- **Pre-launch audit risk — form filler can falsely mark selects filled:** `formFiller.ts` marks the misclassified native-select path successful even after both `selectOption` attempts fail, and marks location autocomplete successful when no option is committed; required-field gating trusts the resolved value rather than the actual control state.
+- **Pre-launch audit risk — resolver may submit incorrect identity answers:** the work-authorization pre-tier rule unconditionally selects Yes for matching non-question labels, while required EEOC fields without structured candidate data can reach Tier 5 and receive an unverified LLM choice.
+- **Pre-launch audit risk — successful submissions can be reported FAILED:** confirmation verification recognizes only a narrow fixed set of titles, URLs, and body phrases; a successful Greenhouse response using other wording times out and becomes retryable FAILED.
+- **Pre-launch audit risk — empty resolution can overwrite existing answers:** `upsertApplication` ignores errors from the pre-read used to preserve non-empty `resolved_fields`, then the Supabase upsert can replace the existing JSONB array with all-empty values.
+- **Pre-launch audit risk — stale APPLYING recovery has no failure circuit breaker:** each dispatch cycle retries recovery, treats a database error as zero recovered rows, and continues polling; stale claims remain APPLYING while the error persists.
+- **Pre-launch audit risk — status persistence errors are swallowed in submission routes:** RETRY/FAILED writes can fail while the route returns a status response, leaving the database row in its earlier state; route-level APPLIED writes are redundant with the submit helpers' persisted APPLIED transition.
+- **Pre-launch audit risk — automatic status pushes are not delivered:** worker status transitions bypass the route-level WebSocket broadcaster, and the legacy Supabase listener targets `candidate_applications` instead of the published `gh_candidate_applications` table; the active badge refreshes by polling.
+- **Pre-launch audit risk — production mode and CORS depend on exact environment values:** `NODE_ENV` defaults to development, allowing the internal-secret middleware's development bypass when unset; `ALLOWED_ORIGINS` is split without trimming, so whitespace after commas prevents matching.
