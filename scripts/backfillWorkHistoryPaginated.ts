@@ -5,8 +5,8 @@
 import fs from 'fs';
 import path from 'path';
 
-export const DEFAULT_WORK_HISTORY_FROM = '2026-09-14';
-export const DEFAULT_WORK_HISTORY_TO = '2026-09-14';
+export const DEFAULT_WORK_HISTORY_FROM = '2026-10-06';
+export const DEFAULT_WORK_HISTORY_TO = '2026-10-06';
 export const WORK_HISTORY_PAGE_SIZE = 50;
 
 const WORK_HISTORY_BASE =
