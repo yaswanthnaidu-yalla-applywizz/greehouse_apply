@@ -78,6 +78,10 @@ const MOCK_REMIX_CONDITIONAL_FORM = `
 <!DOCTYPE html>
 <html><body>
   <form id="application_form">
+    <label for="start_date">Date Available to Start?</label>
+    <input id="start_date" name="start_date" type="date" />
+    <label for="availability_text">Earliest Start Date</label>
+    <input id="availability_text" name="availability_text" type="text" placeholder="DD/MM/YYYY" />
     <label for="authorization">Authorized to work?</label>
     <select id="authorization" name="authorization">
       <option value="">Select...</option><option value="Yes">Yes</option><option value="No">No</option>
@@ -101,9 +105,13 @@ const MOCK_REMIX_CONDITIONAL_FORM = `
     window.__remixContext = { state: { loaderData: { root: { jobPost: {
       title: 'Test Job',
       company_name: 'Test Company',
-      questions: [{ label: 'Authorized to work?', required: true, fields: [
-        { name: 'authorization', type: 'single_select', values: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] }
-      ] }],
+      questions: [
+        { label: 'Date Available to Start?', required: true, fields: [{ name: 'start_date', type: 'input' }] },
+        { label: 'Earliest Start Date', required: true, fields: [{ name: 'availability_text', type: 'input' }] },
+        { label: 'Authorized to work?', required: true, fields: [
+          { name: 'authorization', type: 'single_select', values: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] }
+        ] }
+      ],
       eeoc_sections: [{ title: 'Voluntary Self-Identification', questions: [
         { label: 'Race', required: true, fields: [{ name: '1333', type: 'single_select' }] }
       ] }]
@@ -200,6 +208,17 @@ async function run(): Promise<void> {
     const scanner = new PlaywrightScanner({ headless: true, minJitterMs: 0, maxJitterMs: 0 });
     const scanPage = await browser.newPage();
     const scannedTemplate = await scanner.scanSingleUrl(`http://127.0.0.1:${address.port}/remix`, scanPage);
+    const scannedStartDate = scannedTemplate.fields.find((field) => field.name === 'start_date');
+    assert(scannedStartDate?.type === 'date', 'Remix scan identifies date controls from the live form DOM');
+    assert(
+      scannedStartDate?.metadata?.expectedDateFormat === 'YYYY-MM-DD',
+      'Remix scan captures the native ISO date format'
+    );
+    const scannedTextDate = scannedTemplate.fields.find((field) => field.name === 'availability_text');
+    assert(
+      scannedTextDate?.metadata?.expectedDateFormat === 'DD/MM/YYYY',
+      'Remix scan captures textual placeholder date formatting'
+    );
     const scannedRace = scannedTemplate.fields.find((field) => field.label === 'Race');
     assert(scannedRace?.options?.join('|') === 'Asian|White', 'Remix scan captures missing options after cascade exploration reveals the EEOC field');
     assert(scannedRace?.optionsComplete === true, 'marks authoritative Remix choice values complete');

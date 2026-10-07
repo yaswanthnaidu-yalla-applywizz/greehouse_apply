@@ -1,5 +1,59 @@
 # Progress — What Works, What's Pending
 
+### Sandbox CA Assignment
+- [x] Sandbox startup normalizes all existing profile and application CA assignments to `yaswanthnaiduyalla@applywizz.ai`; demo seeds and subsequent profile/application writes use the same assignment.
+- [x] Sandbox ingestion skips external CA mapping and assigns the dev email to each ingested AWL ID. Production CA mapping is unchanged.
+- [x] Added sandbox-versus-production regression coverage; focused tests pass.
+
+### CI Failure Repair (2026-10-07)
+- [x] Restored the exported `QuestionLimitExceededError` compatibility type without reintroducing a question cap; corrected dependent TypeScript narrowing errors in submission routes.
+- [x] Added the sandbox assignment regression test to the GitHub Actions unit-test list. Full typecheck, production build, and all CI-selected unit tests pass locally.
+- [ ] Verify GitHub Actions, including the Docker container build (Docker Desktop unavailable locally).
+
+### Question Limit Removal (2026-10-07)
+- [x] Removed the 35-question limit cap per explicit user instruction: [`isWithinSubmissionQuestionLimit`](src/submission/questionLimit.ts), [`assertWithinSubmissionQuestionLimit`](src/submission/questionLimit.ts), and [`isWithinSubmissionQuestionLimitForDisplay`](src/submission/questionLimit.ts) now permit all applications regardless of question count.
+- [x] Confirmed the legacy submission eligibility gate (`submissionEligibilityGate.ts` score range 20–60) was already removed in commit `27eb482`; verified zero remaining score or question gates block submission.
+- [x] Updated test suite in `tests/questionLimit.test.ts`; `npm run typecheck` and `npm run build` pass cleanly.
+
+### Auto-Queue Routing + Post-Ingest CA Notification (2026-10-07)
+- [x] Auto-queue routing: applications where no required field is `source: 'ai'` or `'unresolved'` are automatically enqueued for submission (`status: 'QUEUED'`, `submission_order` assigned via `enqueueApplication`) at resolve time, skipping `READY_FOR_REVIEW`.
+- [x] Status preservation on re-ingest: existing in-flight and terminal statuses (`APPLIED`, `FAILED`, `APPLYING`, `QUEUED`, `OTP_*`, `CAPTCHA_*`, `SKIPPED`, `RETRY`, `EMAIL_PROOF_PENDING`, `DRY_RUN_COMPLETE`, `EXPIRED`) are preserved and never overwritten or downgraded to `READY_FOR_REVIEW`.
+- [x] Operator queue naturally hides `QUEUED` applications via `filterOperatorApplicationJobs` across modern TSX dashboards, legacy operator shells (`operator-app.jsx`), and candidate job APIs; non-queued applications (`READY_FOR_REVIEW`, `SKIPPED`, `FAILED`, `RETRY`, etc.) remain visible for operator review and manual submission.
+- [x] Post-ingest CA notification email: hooked after Phase D in `runFullPipeline` to send one HTML summary email per CA with new `READY_FOR_REVIEW` applications created this run (grouped client and application counts, linking to `https://gh.applywizz.ai`). Optional `CA_NOTIFICATION_EMAIL_OVERRIDE` supported for sandbox testing. Dispatched via Azure/M365 Graph sendMail with try/catch non-blocking error handling.
+- [x] Verification: added comprehensive unit test suite in `tests/autoQueueAndCaNotification.test.ts` and enhanced `tests/candidateQueueFilter.test.ts`. Full typecheck (`npm run typecheck`) and production build (`npm run build`) pass cleanly.
+
+### Documentation alignment (2026-10-07)
+- [x] Reviewed AGENTS.md and the `.ai` project docs to confirm the active sprint state and shipped status are documented consistently.
+- [x] Kept this pass to documentation maintenance only; no user-facing code or infrastructure changes were necessary.
+
+### Proof Image Fallback (2026-10-07)
+- [x] Fixed the authenticated proof-image proxy's local fallback to search the bucket-specific output directory, including `output/proofs_failed` for failed screenshots.
+- [x] Added storage upload/sign/download and missing-object endpoint diagnostics so cloud failures no longer disappear silently.
+- [x] Added a regression test for local proof fallback across web, failed, mail, and dry-run buckets; production storage remains unverified without proof-route requests in the supplied logs.
+
+### Resolver Evidence and Answer Integrity (2026-10-07)
+- [x] Country values prefer `additional_information.zip_or_country`; complete choices require a unique shared match, and mismatches continue through all tiers, including Tier 5 for optional standalone country fields.
+- [x] Removed synthetic country/calling-code defaults. Phone answers now come only from resume header facts, strip international calling prefixes, and Tier 3–5 phone answers must match the resume number.
+- [x] Availability dates use UTC application date + 7 days with captured control/placeholder formats; dropdowns prefer a unique one-week choice, otherwise the first listed option after “Immediately”. TSX and legacy operator views show the expected format.
+- [x] Prevented `desired_start_date` from filling month/year component fields with a full date; education month/year values continue through the education-specific resolver.
+- [x] Unified conservative unique option matching, corrected misleading Tier 5 failure labels, made batch JSON parsing tolerate valid wrapped arrays while failing closed on malformed data, and rejected UUID-shaped Tier 4 answers for non-identifier fields.
+- [x] Added regression tests for country Tier 5 evidence, resume-only phones, availability date/dropdown rules, batch parsing, date metadata in Remix scans, education month/year isolation, and UUID rejection. Focused resolver/scanner tests, `npm run typecheck`, and `npm run build` pass.
+
+### Supabase Storage Probe Client Isolation (2026-10-07)
+- [x] Removed the storage-discovery path's ability to replace the process-wide Supabase DB client with whichever key could list a CSV.
+- [x] Storage discovery still probes configured keys independently; ingestion operations use the configured service-role database client.
+- [x] `npm run typecheck` passes.
+
+### OTP Body-Only Extraction (2026-10-07)
+- [x] OTP lookup now fetches the matching email body for code extraction; the subject remains only a Greenhouse/security-email filter.
+- [x] Added a regression test confirming a code-like subject is ignored in favor of the message-body OTP.
+
+### Country Answer Integrity (2026-10-07)
+- [x] Country fields use `additional_information.zip_or_country` before profile country and require a matching captured choice for select/radio controls.
+- [x] Country option mismatches return a Tier 1 miss and continue through the normal resolver tiers instead of inventing an answer or being excluded from Tier 5.
+- [x] Removed candidate-ID and generic country/calling-code defaults from profile normalization, persistence, and Tier 1 matching.
+- [x] Added resolver regressions for absent country data, candidate-ID inference, payload precedence, option mismatches, incomplete choices, and country mentions inside sponsorship questions; focused resolver tests and `npm run typecheck` pass.
+
 ### Apple Music Dark Mode Retheme Across All Dashboards (2026-10-06)
 - [x] Rethemed all modern Vite TSX dashboard components (`App.tsx`, `AdminDashboard.tsx`, `DevDashboard.tsx`, `ManagerDashboard.tsx`, `AuthView.tsx`, `CandidateList.tsx`, `JobQueueView.tsx`, `FormRenderer.tsx`, `EditableFormField.tsx`, `SourceBadge.tsx`, `SubmissionControls.tsx`, `ProofViewer.tsx`, `DifficultyBadge.tsx`, `HeaderSignOut.tsx`, `DevSwitcher.tsx`) and legacy HTML shells (`index.html`, `admin.html`, `dev.html`, `manager.html`, `operator-app.jsx`).
 - [x] Defined Apple Music token system in `tokens.css` and `dashboard/tailwind.config.cjs`: `#0a0a0a` (page/bg), `#1c1c1e` (surface 1/cards/modals), `#2c2c2e` (surface 2/inputs/borders), `#3a3a3c` (surface 3/glassy pills/borders), `#8e8e93` (low-contrast/metadata text), `#ffffff` (primary text).
@@ -68,9 +122,15 @@
 - [x] Unified Admin/Dev, Manager dashboard/operators/reports/overview/stats, and `/api/stats` around Total, Submitted, Applied, and Failed definitions; preserved team/CA scoping and explicit partial/unavailable range states.
 - [x] Changed `db:fix-rollup` to inspect canonical yesterday/today facts read-only; ingestion pruning remains guarded by migration 027.
 - [x] Added focused contract/scope/cutover/operator-attribution tests; `npm run typecheck` and `npm run build` pass.
-- [ ] Apply and PostgreSQL-validate migration 027 before deployment. Local Docker was unavailable; no production migration or deploy was performed.
+- [x] Applied migration 027 in the connected Supabase project and verified both stats tables, the `available_from` value (`2026-10-08`), and the capture trigger via SQL on 2026-10-07.
 
-_Last updated: 2026-10-06_
+_Last updated: 2026-10-07_
+
+### Same-day application stats and score-independent submissions (2026-10-07)
+- [x] Fixed fresh stats installs to begin availability on the current IST day, and added migration 028 to move an existing future cutover to the earliest day with recorded facts (or today when no facts exist).
+- [x] Kept pre-trigger history explicitly unavailable; production must apply migration 028 before current-day captured facts appear.
+- [x] Removed the submission score gate, its Dev UI/API/runtime toggle, and its environment flag. All scores are accepted; the existing 35-question submission cap is unchanged.
+- [x] Added regression coverage that low and missing CSV scores do not block, while the field-count boundary remains enforced.
 
 ### Form Submission Reliability Fixes (2026-09-23)
 - [x] Re-attempted initially failed fields that become visible after cascade expansion, while leaving still-hidden fields failed.
@@ -87,14 +147,20 @@ _Last updated: 2026-10-06_
 - [x] Hardened searchable Greenhouse controls to click live options, verify committed state, and retry once when a click does not commit.
 - [x] Added regression coverage for semantic mappings, ambiguity rejection, and Greenhouse searchable-select fixtures.
 
-### OTP Retry and Submission-Gate Failure UI (2026-09-23)
+### OTP Retry and Submission Question-Limit Failure UI (2026-09-23; score gate removed 2026-10-07)
 - [x] Requeued OTP-fetch failures returned as `OTP_REQUIRED` through the submitter pool and accepted `OTP_REQUIRED` in the guarded retry transition.
 - [x] Prevented double incrementing of `retry_count` by making the queue retry owner apply the increment once per attempt.
-- [x] Added authoritative `submissionGateBlocked` metadata to application DTOs and job rows.
-- [x] Limited the requirements panel to gate-blocked failures and exposed retry for ordinary failed applications.
-- [x] Added `[OTP TRACE]` and `[Gate TRACE]` logs for production verification of the retry/session lifecycle and gate decisions.
+- [x] Added authoritative submission-block metadata to application DTOs and job rows; it now identifies only question-limit blocks.
+- [x] Limited the requirements panel to question-limit failures and exposed retry for ordinary failed applications.
+- [x] Added `[OTP TRACE]` and question-limit logs for production verification of retry and submission decisions.
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
+
+### Responsive TSX Operator Mobile Flow (2026-10-07)
+- [x] Added a mobile-only candidates → jobs → application screen flow at ≤768px with back navigation that preserves the selected candidate and job.
+- [x] Mobile candidate cards show only name and job count; the job queue becomes a scrollable application list, and application review keeps the carousel/full-list toggle with a fixed Dry-Run and Approve & Submit bar.
+- [x] Preserved the desktop split-pane and left all legacy dashboards untouched.
+- [x] Verified `npm run typecheck:dashboard`, `npm run build:dashboard`, and `git diff --check`.
 
 ### Missing Choice Option Capture (2026-10-06)
 - [x] Enriched Remix fields missing choice values from visible native selects, radio groups, and custom Greenhouse dropdowns opened through Playwright pointer interaction (including portaled menus).
@@ -332,7 +398,7 @@ _Last updated: 2026-10-06_
 - [x] **Dashboard role + candidate list fixes** — `resolveRoleFromRequest` uses `resolveEffectiveAppRole` (email map beats stale JWT operator); manager team scope merges profile IDs; dev/admin `GET /api/candidates` supplements from DB date range; Zoho connected filter skipped for unrestricted roles (`3b42135`, 2026-09-17)
 - [x] **Parallel ingest resolve + batched Tier 5 + admin stop** — `RESOLVER_WORKER_POOL_SIZE` (default 3); Tier 5 chunks of 15 with `finalizeRawAnswer`; stop enabled on Railway; admin ingest-status on all tabs (`56d5270`, 2026-09-17)
 - [x] **Admin operators by manager** — `GET /api/admin/operators?manager=` uses `users.manager_email`; `managerEmail` on operator rows (2026-09-16)
-- [x] **Submission eligibility gate** — ingest all CSV scores; resolve all templates; gate at submit (score 20–60, field_count &lt; 35); Dev dashboard toggle; migration 019 (2026-09-16)
+- [x] **Submission question limit** — ingest all CSV scores; resolve all templates; keep the 35-question cap at resolve/submit. The formerly shipped 20–60 score gate and Dev toggle were removed on 2026-10-07.
 - [x] **Operator completion toast** — when a selected candidate's `READY_FOR_REVIEW` / `APPROVED` job count transitions to zero, show a dismissible five-second toast once per candidate per session (2026-09-17)
 - [x] **Unresolved-field helper hints** — context-aware inline guidance appears below unresolved answer inputs and hides on focus or typing (2026-09-17)
 - [x] **Operator-triggered retry** — retryable OTP/security-code/unresolved-required failures can be manually requeued from the operator dashboard; non-retryable failures remain terminal (2026-09-17)
@@ -379,6 +445,10 @@ _Last updated: 2026-10-06_
 ---
 
 ## Known Bugs / Gotchas
+- **✅ FIXED — CI build/typecheck/tests failed because `questionLimit.ts` lost the `QuestionLimitExceededError` export during merge:** restored the compatibility error class while retaining unlimited question eligibility; `npm run typecheck`, `npm run build`, and the CI unit-test set pass.
+- **Historical only — invalid start-date answers in 2026-10-07 ingestion log:** pre-fix output used `01/05/1927` for `Date Available to Start?` and copied full desired-start dates into month/year components. The deterministic +7-day rule and component-field exclusion now prevent those paths; regression coverage is in `tests/resolverDiagnosedFixes.test.ts`.
+- **Stats cutover previously hid same-day captured facts (2026-10-07):** migration 027 set `available_from` to the next IST day, so the dashboard hid events already captured on the migration day. Migration 028 repairs existing configuration using the earliest recorded event date; apply it to production. Pre-trigger history remains unrecoverable.
+- **✅ FIXED — production dashboard stats migration missing (2026-10-07):** Railway logs showed `/api/dev/health` and `/api/admin/overview` failing because `gh_stats_config.available_from` was absent. Applied migration 027 in Supabase, verified both stats tables, the `available_from` value (`2026-10-08`), and the capture trigger, then the operator confirmed the production dashboard is working. The separate `gh_audit_events` RLS warning was not verified after recovery.
 - **Large Greenhouse searchable lists remain partial:** required-only scanning avoids optional-field cost and the IMC diagnostic captured 100 School options in three bounded scroll passes, but marked the list partial. No school-options JSON payload appeared in inspected network responses; a full-list source/resolution path is still needed for large required searchable dropdowns.
 - **✅ FIXED — missing dropdown choices in sandbox scanned templates:** the first local fixture used a synthetic click-only, non-portaled menu and passed despite not matching the Greenhouse control. The scanner now uses Playwright pointer interaction, reads portal-rendered options, and logs visible controls whose choices remain unavailable; user confirmed the fresh sandbox schema includes the missing choices.
 - **✅ FIXED — sandbox scanned jobs missing from DB:** `exportScannedJobs` called the Supabase `.abortSignal()` method on the local `SandboxQueryBuilder`, causing a runtime `TypeError` after writing `output/scanned_jobs.json`; the Phase B catch treated it as a scan warning and ingestion still completed. Sandbox now awaits the local query builder directly, and export failures are no longer swallowed as scanner failures.

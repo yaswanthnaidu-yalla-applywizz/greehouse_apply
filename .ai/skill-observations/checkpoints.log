@@ -418,6 +418,7 @@
 2026-10-06 session-start scan: files=11 parsed=11
 2026-10-06 deliverable flush: moved pgweb into Compose services so localhost:8081 is published; Docker unavailable here, so stack startup could not be verified; no new observations
 2026-10-06 checkpoint: removed obsolete documentation files tmro1, Untitled document, code-review-report, architecture-flows; preserved .ai and to-do; no observations
+2026-10-07 session-start scan: files=0 parsed=0 (docs alignment pass: AGENTS + .ai project docs reviewed; no new observations)
 2026-10-06 deliverable flush: configured pgweb with --url because DATABASE_URL was ignored; recreated container and verified PostgreSQL connection in logs plus HTTP 200 on localhost:8081; no new observations
 2026-10-06 session-end: synced all docs per AGENTS.md (AGENTS.md, projectbrief, systemPatterns, techContext, activeContext, progress, OVERVIEW); typecheck clean; no new observations
 2026-10-06 session-start scan: files=27 parsed=25
@@ -456,8 +457,46 @@
 2026-10-07 session-start scan: files=12 parsed=12
 2026-10-07 session-end: zero-context partial staging misapplied mixed-file hunks; full server file restaged, build/typecheck passed, observation 0027 actioned
 2026-10-07 no observations
+2026-10-07 no observations
+2026-10-07 session-start scan: files=13 parsed=13
 2026-10-07T07:18:29+05:30 session-start scan: files=12 parsed=12 suspect=0 (stats rollup lore)
 2026-10-07 no observations (explained legacy rollup and migration 027 canonical stats flow; no code changes)
 2026-10-07 no observations (troubleshot repeated migration 027 function lookup error)
 2026-10-07 checkpoint: user reports stats table/config/RLS setup and trigger creation succeeded in SQL Editor; earlier failures were SQL selection/execution, not schema qualification
 2026-10-07 session-start scan: files=12 parsed=12
+2026-10-07 session-start scan: files=13 parsed=13
+2026-10-07 no observations
+2026-10-07 no observations
+2026-10-07 no observations
+2026-10-07 no observations
+2026-10-07 session-start scan: files=13 parsed=13
+2026-10-07 no observations
+2026-10-07 session-start scan: files=13 parsed=13
+2026-10-07 no observations
+2026-10-07 session-start scan: files=13 parsed=13
+2026-10-07 session-start scan: files=13 parsed=13
+2026-10-07 checkpoint: logged 0028 as open; Supabase storage probe must not replace shared DB client
+2026-10-07 no observations
+2026-10-07 checkpoint: no observations
+2026-10-07 checkpoint: no task-observer skill observations accumulated
+2026-10-07 session-start scan: files=14 parsed=14
+2026-10-07 deliverable flush: prevented desired_start_date from populating start-date month/year fields; resolver and live-choice scanner regressions, typecheck, build, and diff check pass; no new observations
+2026-10-07 deliverable flush: fixed bucket-aware local proof fallback and added storage failure diagnostics; proof fallback regression and typecheck pass; no new observations
+2026-10-07 checkpoint: no observations
+2026-10-07 session-start scan: files=14 parsed=14
+session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
+2026-10-07 session-start scan: files=14 parsed=14
+2026-10-07 session-start scan: files=14 parsed=14 (plantoprod review)
+2026-10-07 session-start scan: files=14 parsed=14
+2026-10-07 session-start scan: files=14 parsed=14 (Auto-queue CA notify plan implementation)
+2026-10-07 deliverable flush: auto-queue routing + post-ingest CA notification shipped; 19 tests pass; typecheck & build clean; no new observations
+2026-10-07 deliverable flush: removed MAX_JOB_QUESTIONS limit per user instruction; verified submission score gate already eliminated; tests, typecheck & build clean; no new observations
+2026-10-07 session-start scan: files=0 parsed=0
+2026-10-07 session-start scan: files=14 parsed=14
+2026-10-07 deliverable flush: responsive TSX operator mobile flow shipped; dashboard typecheck/build and CSS parse pass; no new observations
+2026-10-07 checkpoint correction: prior session-start scan entry with files=0 was inaccurate; actual scan had files=14 parsed=14
+2026-10-07 session-start scan: files=14 parsed=14
+2026-10-07 | resolved PR #42 merge conflict by retaining dev question-limit removal and verifying tests
+2026-10-07 resumed session-start scan: files=14 parsed=14
+2026-10-07 deliverable flush: sandbox CA assignment implemented; focused regression tests pass; full typecheck/build blocked by pre-existing missing QuestionLimitExceededError export; no new observations
+2026-10-07 session-start scan: files=14 parsed=14

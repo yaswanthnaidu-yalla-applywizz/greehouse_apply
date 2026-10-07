@@ -107,11 +107,6 @@ export function resolveSupabaseCredentials(): ResolvedSupabaseCredentials {
   return { url, serviceKey: '', serviceKeySource: null };
 }
 
-/** Swap the process-wide client after ingest finds a key that can see Storage. */
-export function replaceDbClient(client: SupabaseClient): void {
-  supabaseClientInstance = client;
-}
-
 /** Service role (or best available) key for server DB, Storage, and Auth admin API. */
 export function getSupabaseServerApiKey(): string {
   return resolveSupabaseCredentials().serviceKey;
@@ -281,4 +276,3 @@ export const supabase = new Proxy({} as SupabaseClient, {
 });
 
 export default supabase;
-

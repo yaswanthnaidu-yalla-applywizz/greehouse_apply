@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import { getSandboxCaEmail } from './sandboxAssignment.js';
 import type { ApplyWizzCandidateProfile } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -107,9 +108,9 @@ export function profileRowToCandidateProfile(row: ProfileRow): ApplyWizzCandidat
     firstName: row.first_name || (isAkshitha ? 'AKSHITHA' : ''),
     lastName: row.last_name || (isAkshitha ? 'G' : ''),
     email: getCompanyEmail(row) || (isAkshitha ? 'akshitha.reddy@applywizard.ai' : ''),
-    phone: row.phone || (isAkshitha ? '940-222-8193' : ''),
-    country: isYaswanth ? 'India' : (isAkshitha ? (row.country || 'United States of America') : (row.country || undefined)),
-    countryCode: isYaswanth ? '+91' : (isAkshitha ? (row.country_code || '+1') : (row.country_code || undefined)),
+    phone: row.phone || '',
+    country: row.country || undefined,
+    countryCode: row.country_code || undefined,
     location: isYaswanth ? (row.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (row.location || 'Dallas, Texas, United States') : (row.location || '')),
     linkedinUrl: row.linkedin_url || '',
     websiteUrl: row.website_url || undefined,
@@ -232,15 +233,20 @@ export async function upsertProfile(
   const companyEmail =
     profile.company_email ||
     extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
+  const sandboxCaEmail = getSandboxCaEmail();
   const payload: ProfileRow = {
     ...profile,
-    ...(profile.ca_email !== undefined
-      ? { ca_email: profile.ca_email ? profile.ca_email.trim().toLowerCase() : null }
+    ...(profile.ca_email !== undefined || sandboxCaEmail
+      ? {
+          ca_email:
+            sandboxCaEmail ||
+            (profile.ca_email ? profile.ca_email.trim().toLowerCase() : null),
+        }
       : {}),
-    country: isYaswanth ? 'India' : (isAkshitha ? (profile.country ?? 'United States of America') : (profile.country ?? null)),
-    country_code: isYaswanth ? '+91' : (isAkshitha ? (profile.country_code ?? '+1') : (profile.country_code ?? null)),
+    country: profile.country ?? null,
+    country_code: profile.country_code ?? null,
     location: isYaswanth ? (profile.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (profile.location || 'Dallas, Texas, United States') : (profile.location ?? null)),
-    phone: isAkshitha ? (profile.phone || '940-222-8193') : (profile.phone ?? null),
+    phone: profile.phone ?? null,
     company_email: companyEmail,
     email: companyEmail || profile.email || null,
     updated_at: new Date().toISOString(),
@@ -389,14 +395,11 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
 
       if (!error && data) {
         const row = data as ProfileRow;
+        const sandboxCaEmail = getSandboxCaEmail();
+        if (sandboxCaEmail) row.ca_email = sandboxCaEmail;
         if (isYaswanth) {
-          row.country = 'India';
-          row.country_code = '+91';
           if (!row.location) row.location = 'Hyderabad, Telangana, India';
         } else if (isAkshitha) {
-          if (!row.country) row.country = 'United States of America';
-          if (!row.country_code) row.country_code = '+1';
-          if (!row.phone) row.phone = '940-222-8193';
           if (!row.location) row.location = 'Dallas, Texas, United States';
         }
         return row;
@@ -420,9 +423,9 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
         last_name: profileData.lastName || (isAkshitha ? 'G' : null),
         email: profileData.email || (isAkshitha ? 'akshitha.reddy@applywizard.ai' : null),
         company_email: profileData.companyEmail || (isAkshitha ? 'akshitha.reddy@applywizard.ai' : null),
-        phone: isAkshitha ? (profileData.phone || '940-222-8193') : (profileData.phone || null),
-        country: isYaswanth ? 'India' : (isAkshitha ? (profileData.country || 'United States of America') : (profileData.country || null)),
-        country_code: isYaswanth ? '+91' : (isAkshitha ? (profileData.countryCode || profileData.country_code || '+1') : (profileData.countryCode || profileData.country_code || null)),
+        phone: profileData.phone || null,
+        country: profileData.country || null,
+        country_code: profileData.countryCode || profileData.country_code || null,
         location: isYaswanth ? (profileData.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (profileData.location || 'Dallas, Texas, United States') : (profileData.location || null)),
         linkedin_url: profileData.linkedinUrl || null,
         website_url: profileData.websiteUrl || null,
@@ -435,6 +438,7 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
         resume_storage_path: profileData.localResumePath || (isAkshitha ? 'resumes/AWL-31428_resume.pdf' : null),
         raw_api_payload: profileData.demographics ? { demographics: profileData.demographics } : null,
         zoho_connected: Boolean(profileData.zoho_connected ?? profileData.zohoConnected),
+        ...(getSandboxCaEmail() ? { ca_email: getSandboxCaEmail() } : {}),
       };
     } catch {}
   }
@@ -448,9 +452,7 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
       last_name: 'Yalla',
       email: 'yaswanthnaidu004@gmail.com',
       company_email: 'yaswanthnaidu004@gmail.com',
-      phone: '9573939153',
-      country: 'India',
-      country_code: '+91',
+      ...(getSandboxCaEmail() ? { ca_email: getSandboxCaEmail() } : {}),
       location: 'Hyderabad, Telangana, India',
       linkedin_url: 'https://linkedin.com/in/yaswanth-yalla',
       work_authorization: 'US Citizen',
@@ -469,9 +471,7 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
       last_name: 'G',
       email: 'akshitha.reddy@applywizard.ai',
       company_email: 'akshitha.reddy@applywizard.ai',
-      phone: '940-222-8193',
-      country: 'United States of America',
-      country_code: '+1',
+      ...(getSandboxCaEmail() ? { ca_email: getSandboxCaEmail() } : {}),
       location: 'Dallas, Texas, United States',
       linkedin_url: 'https://www.linkedin.com/in/akshitha-reddy',
       work_authorization: 'H1B',
@@ -583,20 +583,23 @@ export async function upsertProfileCaEmail(
   caEmail: string
 ): Promise<void> {
   const id = (applywizzId || '').trim();
-  const email = (caEmail || '').trim().toLowerCase();
+  const email = getSandboxCaEmail() || (caEmail || '').trim().toLowerCase() || null;
   if (!id || !email) return;
 
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const { error } = await supabase
+      let query = supabase
         .from('profiles')
         .update({
           ca_email: email,
           updated_at: new Date().toISOString(),
         })
-        .eq('applywizz_id', id)
-        .is('ca_email', null);
+        .eq('applywizz_id', id);
+      if (!getSandboxCaEmail()) {
+        query = query.is('ca_email', null);
+      }
+      const { error } = await query;
 
       if (error) {
         log.warn(`[DB] upsertProfileCaEmail error (${id}): ${error.message}`);

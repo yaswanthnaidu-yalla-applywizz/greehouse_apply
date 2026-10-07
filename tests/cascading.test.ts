@@ -7,7 +7,11 @@ import { createHash } from 'crypto';
 import { chromium, type Browser } from 'playwright';
 import { PlaywrightScanner } from '../src/scanner/playwrightScanner.js';
 import { fillForm } from '../src/submitter/formFiller.js';
-import { extractVisibleFormFields, getUnmappedVisibleFields } from '../src/submitter/cascadeDetector.js';
+import {
+  captureFormControlMetadata,
+  extractVisibleFormFields,
+  getUnmappedVisibleFields,
+} from '../src/submitter/cascadeDetector.js';
 import { upsertProfile } from '../src/db/profiles.js';
 import { upsertAnswer } from '../src/db/qaBank.js';
 import type { ResolvedField } from '../src/types/index.js';
@@ -31,6 +35,14 @@ const MOCK_DYNAMIC_FORM_HTML = `
     <div class="field">
       <label for="email">Email *</label>
       <input type="email" id="email" name="email" required />
+    </div>
+    <div class="field">
+      <label for="available_date">Date Available to Start?</label>
+      <input type="date" id="available_date" name="available_date" />
+    </div>
+    <div class="field">
+      <label for="availability_text">Earliest Start Date</label>
+      <input type="text" id="availability_text" name="availability_text" placeholder="DD/MM/YYYY" />
     </div>
 
     <!-- Base Dropdown that triggers conditional field -->
@@ -138,6 +150,31 @@ async function runCascadingTestSuite() {
 
     const initialVisible = await extractVisibleFormFields(page);
     assert(initialVisible.length >= 4, 'Initial visible fields extracted from DOM');
+    const nativeDate = initialVisible.find((field) => field.name === 'available_date');
+    assert(nativeDate?.type === 'date', 'Native date inputs are identified as date fields');
+    assert(
+      nativeDate?.metadata?.expectedDateFormat === 'YYYY-MM-DD',
+      'Native date metadata includes its ISO value format'
+    );
+    const textDate = initialVisible.find((field) => field.name === 'availability_text');
+    assert(
+      textDate?.metadata?.expectedDateFormat === 'DD/MM/YYYY',
+      'Text date metadata captures the placeholder date format'
+    );
+    const remixDateMetadata = await captureFormControlMetadata(page, [
+      {
+        fieldId: 'available_date',
+        name: 'available_date',
+        type: 'text',
+        label: 'Date Available to Start?',
+        isRequired: false,
+      },
+    ]);
+    assert(
+      remixDateMetadata[0].type === 'date' &&
+        remixDateMetadata[0].metadata?.expectedDateFormat === 'YYYY-MM-DD',
+      'Remix state fields are enriched with native date control metadata'
+    );
 
     const hasSponsorshipInitially = initialVisible.some((f) => f.name === 'require_sponsorship' || f.fieldId.includes('sponsorship'));
     assert(hasSponsorshipInitially === false, 'Hidden conditional field 1 not in initial visible list');

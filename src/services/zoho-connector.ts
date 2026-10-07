@@ -570,12 +570,11 @@ export async function fetchZohoOtpViaApi(
             }
           }
 
-          // 1. Try extracting OTP directly from subject
-          let extractedOtp = extractOtpCodeFromText(subject);
+          // OTP codes are read from the message body; the subject only identifies candidate emails.
+          let extractedOtp: string | null = null;
 
-          // 2. If not in subject, fetch the message body
           const folderId = msg.folderId || data?.folder?.folderId;
-          if (!extractedOtp && accountId && folderId && msg.messageId) {
+          if (accountId && folderId && msg.messageId) {
             try {
               const msgQs = new URLSearchParams({
                 email: candidateEmail,

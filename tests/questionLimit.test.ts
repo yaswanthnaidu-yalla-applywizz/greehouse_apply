@@ -5,10 +5,9 @@ import {
   isWithinSubmissionQuestionLimit,
   isWithinSubmissionQuestionLimitForDisplay,
   assertWithinSubmissionQuestionLimit,
-  QuestionLimitExceededError,
 } from '../src/submission/questionLimit.js';
 
-describe('submission question limit', () => {
+describe('submission question limit (removed)', () => {
   it('does not restrict submissions based on CSV job score', () => {
     const lowScoreApplication = { field_count: 10, csv_job_score: -100 };
     const unscoredApplication = { field_count: 10, csv_job_score: null };
@@ -22,33 +21,43 @@ describe('submission question limit', () => {
     );
   });
 
-  it('enforces the existing question-count cap', () => {
+  it('permits all question counts without cap', () => {
     assert.equal(
       isWithinSubmissionQuestionLimit({ field_count: config.MAX_JOB_QUESTIONS - 1 }).eligible,
       true
     );
     assert.equal(
       isWithinSubmissionQuestionLimit({ field_count: config.MAX_JOB_QUESTIONS }).eligible,
-      false
+      true
     );
-    assert.equal(isWithinSubmissionQuestionLimit({}).eligible, false);
+    assert.equal(
+      isWithinSubmissionQuestionLimit({ field_count: 100 }).eligible,
+      true
+    );
+    assert.equal(isWithinSubmissionQuestionLimit({}).eligible, true);
   });
 
-  it('uses the same question-count cap for display and live submission', () => {
+  it('always marks eligible for display and live submission', () => {
     assert.equal(
       isWithinSubmissionQuestionLimitForDisplay({ field_count: config.MAX_JOB_QUESTIONS - 1 }),
       true
     );
     assert.equal(
       isWithinSubmissionQuestionLimitForDisplay({ field_count: config.MAX_JOB_QUESTIONS }),
-      false
+      true
+    );
+    assert.equal(
+      isWithinSubmissionQuestionLimitForDisplay({ field_count: 150 }),
+      true
     );
   });
 
-  it('surfaces an explicit error when the question limit blocks submission', () => {
-    assert.throws(
-      () => assertWithinSubmissionQuestionLimit({ field_count: config.MAX_JOB_QUESTIONS }),
-      QuestionLimitExceededError
+  it('assertWithinSubmissionQuestionLimit never throws', () => {
+    assert.doesNotThrow(() =>
+      assertWithinSubmissionQuestionLimit({ field_count: config.MAX_JOB_QUESTIONS })
+    );
+    assert.doesNotThrow(() =>
+      assertWithinSubmissionQuestionLimit({ field_count: 999 })
     );
   });
 });

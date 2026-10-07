@@ -997,6 +997,9 @@ submissionsRouter.get('/:id/proof-url', async (req: Request, res: Response): Pro
     }
 
     if (!signedUrl) {
+      log.warn(
+        `[Submissions Router] Proof URL unavailable kind=${kind} bucket=${bucket} path=${objectPath} application=${storageKey}`
+      );
       res.status(404).json({ error: `No signed URL available for ${kind} proof.` });
       return;
     }
@@ -1025,6 +1028,11 @@ submissionsRouter.get('/:id/proof-image', async (req: Request, res: Response): P
     (typeof req.query.job_url === 'string' ? req.query.job_url : '');
   const kind = String(req.query.kind || 'web').toLowerCase();
   const queryToken = typeof req.query.token === 'string' ? req.query.token.trim() : '';
+
+  if (!['web', 'failed', 'dryrun', 'dry_run', 'email', 'mail'].includes(kind)) {
+    res.status(400).json({ error: `Invalid kind '${kind}'. Use web, failed, dryrun, or email.` });
+    return;
+  }
 
   if (!(req as any).user && queryToken && isSupabaseConfigured()) {
     try {
@@ -1089,6 +1097,9 @@ submissionsRouter.get('/:id/proof-image', async (req: Request, res: Response): P
     }
 
     if (!buffer) {
+      log.warn(
+        `[Submissions Router] Proof image unavailable kind=${kind} bucket=${bucket} path=${objectPath} application=${storageKey}`
+      );
       res.status(404).json({ error: `Proof image not found for ${kind}.` });
       return;
     }

@@ -17,7 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { getDbClient, isSupabaseConfigured, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient, replaceDbClient } from '../db/client.js';
+import { getDbClient, isSupabaseConfigured, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient } from '../db/client.js';
 import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { V1Pipeline, PipelineResult } from '../orchestrator/pipeline.js';
@@ -94,7 +94,6 @@ export async function listPendingDropzoneCsvs(): Promise<{
       .map((f) => ({ name: f.name, createdAt: f.created_at ?? null }));
     if (fromList.length > 0) {
       fromList.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      replaceDbClient(client);
       return { files: fromList, source: candidate.source, listedNames: listNames, probeLines };
     }
   }
