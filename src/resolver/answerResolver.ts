@@ -920,6 +920,8 @@ export class AnswerResolver {
     let resolvedCount = 0;
     let totalSuccessful = 0;
     let totalUnsuccessful = 0;
+    let autoQueuedApplications = 0;
+    let readyForReviewApplications = 0;
     const noTemplateLoggedUrls = new Set<string>();
 
     const processResolveTask = async (): Promise<void> => {
@@ -1020,7 +1022,7 @@ export class AnswerResolver {
               withinQuestionLimit &&
               (!existingStatus || RESOLVE_AUTO_ENQUEUE_ELIGIBLE.has(existingStatus));
 
-            await upsertApplication({
+            const persistedApplication = await upsertApplication({
               applywizz_id: app.applywizzId,
               job_url: persistJobUrl,
               company_name: app.companyName,
@@ -1038,14 +1040,20 @@ export class AnswerResolver {
                   jobUrl: persistJobUrl,
                   assignedCaEmail: assignedCaEmail || undefined,
                 });
+                autoQueuedApplications++;
                 log.info(
                   `[Answer Resolver] Auto-queued ${app.applywizzId} ${persistJobUrl} (no required AI/unresolved fields)`
                 );
               } catch (enqueueErr: any) {
+                if (persistedApplication.status === 'READY_FOR_REVIEW') {
+                  readyForReviewApplications++;
+                }
                 log.warn(
                   `[Answer Resolver] ⚠️ Auto-enqueue skipped for ${app.applywizzId} ${persistJobUrl}: ${enqueueErr?.message || enqueueErr}`
                 );
               }
+            } else if (persistedApplication.status === 'READY_FOR_REVIEW') {
+              readyForReviewApplications++;
             }
           } catch (dbErr: any) {
             if (isMissingTableError(dbErr)) {
@@ -1094,6 +1102,26 @@ export class AnswerResolver {
         `[Resolver] candidate=${seg.applywizzId} jobs=${stats.total} fields=${fields} resolved=${resolved} unresolved=${fields - resolved} t1=${tierCounts[0]} t2=${tierCounts[1]} t3=${tierCounts[2]} t4=${tierCounts[3]} t5=${tierCounts[4]}`
       );
     }
+
+    const questionsByCategory: Record<ReturnType<typeof resolutionSourceKey>, number> = {
+      supabase: 0,
+      resume: 0,
+      semantic: 0,
+      fuzzy: 0,
+      llm: 0,
+      unresolved: 0,
+      other: 0,
+    };
+    for (const app of applications) {
+      for (const field of app.resolvedFields) {
+        questionsByCategory[resolutionSourceKey(field)]++;
+      }
+    }
+    const totalQuestions = Object.values(questionsByCategory).reduce((sum, count) => sum + count, 0);
+    const unresolvedQuestions = questionsByCategory.unresolved;
+    log.info(
+      `[Answer Resolver] resolution summary questions=${totalQuestions} resolved=${totalQuestions - unresolvedQuestions} unresolved=${unresolvedQuestions} resolved_by_category=supabase:${questionsByCategory.supabase},resume:${questionsByCategory.resume},semantic:${questionsByCategory.semantic},fuzzy:${questionsByCategory.fuzzy},llm:${questionsByCategory.llm},other:${questionsByCategory.other} auto_queued=${autoQueuedApplications} ready_for_review=${readyForReviewApplications}`
+    );
 
     if (compact) {
       log.info(
