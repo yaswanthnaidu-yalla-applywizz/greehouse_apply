@@ -2,7 +2,7 @@
  * Admin org-ops API. Strictly admin + dev (via requireRole on /api/admin).
  */
 
-import { Router, type Request, type Response } from 'express';
+import express, { Router, type Request, type Response } from 'express';
 import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
@@ -13,9 +13,10 @@ import {
   getISTDateRangeUtc,
   type ApplicationStatus,
 } from '../../db/applications.js';
-import { queryRollupStats } from '../../db/statsRollup.js';
+import { getApplicationStats } from '../../db/applicationStats.js';
 import crypto from 'crypto';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
+import { CSV_UPLOADS_BUCKET } from '../../db/storage.js';
 import { insertAuditEvent, listAuditEvents } from '../../db/events.js';
 import { upsertIngestRun } from '../../db/ingestRuns.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
@@ -35,10 +36,90 @@ import {
 } from '../../orchestrator/pipelineAbort.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { createLogger } from '../../utils/logger.js';
+import {
+  isValidCsvUploadObjectName,
+  MAX_CSV_UPLOAD_BYTES,
+  sanitizeCsvUploadFilename,
+  validateCsvUpload,
+} from '../../candidate/csvUploadValidation.js';
 
 const log = createLogger('Admin Dashboard');
 
 export const adminDashboardRouter = Router();
+
+const csvUploadBody = express.raw({ type: 'application/octet-stream', limit: MAX_CSV_UPLOAD_BYTES });
+
+adminDashboardRouter.post(
+  '/csv-upload',
+  (req: Request, res: Response, next): void => {
+    csvUploadBody(req, res, (error?: unknown) => {
+      if (!error) {
+        next();
+        return;
+      }
+      const status = (error as { status?: number; statusCode?: number }).statusCode
+        || (error as { status?: number }).status
+        || 400;
+      res.status(status).json({
+        error: status === 413 ? 'CSV file exceeds the 25 MiB upload limit.' : 'Unable to read the CSV upload.',
+      });
+    });
+  },
+  async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as AuthenticatedRequest;
+    if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
+      res.status(403).json({ error: 'Forbidden: only admins and developers can upload CSV files.' });
+      return;
+    }
+    if (!req.is('application/octet-stream') || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+      res.status(400).json({ error: 'Upload a non-empty CSV file.' });
+      return;
+    }
+    if (req.body.length > MAX_CSV_UPLOAD_BYTES) {
+      res.status(413).json({ error: 'CSV file exceeds the 25 MiB upload limit.' });
+      return;
+    }
+
+    const requestedName = typeof req.query.filename === 'string' ? req.query.filename : '';
+    let safeName: string;
+    try {
+      safeName = sanitizeCsvUploadFilename(requestedName);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid CSV filename.' });
+      return;
+    }
+
+    const validation = validateCsvUpload(req.body.toString('utf8'));
+    if (!validation.valid) {
+      res.status(400).json({
+        error: 'CSV headers are not supported. Include the required columns for the OLD or NEW CSV format.',
+      });
+      return;
+    }
+    if (!isSupabaseConfigured()) {
+      res.status(503).json({ error: 'CSV storage is not configured.' });
+      return;
+    }
+
+    const objectPath = `pending/${crypto.randomUUID()}_${safeName}`;
+    try {
+      const { error } = await getDbClient()
+        .storage
+        .from(CSV_UPLOADS_BUCKET)
+        .upload(objectPath, req.body, { contentType: 'text/csv', upsert: false });
+      if (error) throw error;
+      res.status(201).json({
+        objectPath,
+        fileName: safeName,
+        sizeBytes: req.body.length,
+        format: validation.format,
+      });
+    } catch (error) {
+      log.error('[Admin] CSV upload to storage failed:', error);
+      res.status(502).json({ error: 'Unable to save the CSV in storage.' });
+    }
+  }
+);
 
 const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
   'READY_FOR_REVIEW',
@@ -76,8 +157,10 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
     const operators = directory.filter((user) => user.role === 'operator');
     const activeOperators = operators.filter((user) => isActiveWithin(user.lastSignInAt));
 
-    const [rollup, queued, applying, metrics, audit] = await Promise.all([
-      queryRollupStats(parsedRange.startIso, parsedRange.endIso!),
+    const [stats, queued, applying, metrics, audit] = await Promise.all([
+      getApplicationStats({
+        range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+      }),
       countApplicationsByStatus('QUEUED', createdAtRange),
       countApplicationsByStatus('APPLYING', createdAtRange),
       getDashboardApplicationMetrics({ createdAtRange }),
@@ -90,11 +173,15 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       operators: operators.length,
       activeOperators: activeOperators.length,
       inactiveOperators: Math.max(0, operators.length - activeOperators.length),
-      submitted: rollup.submitted_count,
-      applied: rollup.applied_count,
+      totalApplications: stats.counts.total,
+      submitted: stats.counts.submitted,
+      applied: stats.counts.applied,
       running: applying,
       queued,
-      failed: rollup.failed_count,
+      failed: stats.counts.failed,
+      statsAvailable: stats.available,
+      statsPartial: stats.partial,
+      statsAvailableFrom: stats.availableFrom,
       supabasePercent: totalFields > 0
         ? Math.round((metrics.supabaseTaggedCount / totalFields) * 100)
         : 0,
@@ -130,7 +217,9 @@ adminDashboardRouter.get('/managers', async (req: Request, res: Response): Promi
       const stats = statsByManager.get(email) || {
         operators: 0,
         clients: 0,
-        applications: 0,
+        applications: null,
+        statsAvailable: false,
+        statsAvailableFrom: null,
         status: 'inactive' as const,
       };
       return {
@@ -139,6 +228,8 @@ adminDashboardRouter.get('/managers', async (req: Request, res: Response): Promi
         assignedOperators: stats.operators,
         assignedClients: stats.clients,
         applications: stats.applications,
+        statsAvailable: stats.statsAvailable,
+        statsAvailableFrom: stats.statsAvailableFrom,
         lastSignInAt: user?.lastSignInAt || null,
         status: stats.status,
       };
@@ -272,7 +363,7 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
     if (status) query = query.eq('status', status);
     if (date) {
       const { startIso, endIso } = getISTDateRangeUtc(date);
-      query = query.gte('created_at', startIso).lte('created_at', endIso);
+      query = query.gte('created_at', startIso).lt('created_at', endIso);
     }
     const { data, error, count } = await query;
     if (error) throw error;
@@ -362,6 +453,13 @@ adminDashboardRouter.post(
   '/trigger-ingest-from-storage',
   async (req: Request, res: Response): Promise<void> => {
     const authReq = req as AuthenticatedRequest;
+    const requestedFileName = req.body && typeof req.body === 'object' ? req.body.fileName : undefined;
+    if (requestedFileName !== undefined && (
+      typeof requestedFileName !== 'string' || !isValidCsvUploadObjectName(requestedFileName)
+    )) {
+      res.status(400).json({ error: 'Invalid CSV upload object name.' });
+      return;
+    }
     const ingestServiceUrl = (process.env.INGEST_SERVICE_URL || '').trim().replace(/\/+$/, '');
 
     if (ingestServiceUrl) {
@@ -382,7 +480,7 @@ adminDashboardRouter.post(
         const response = await fetch(`${ingestServiceUrl}/api/admin/trigger-ingest-from-storage`, {
           method: 'POST',
           headers,
-          body: req.body && Object.keys(req.body).length > 0 ? JSON.stringify(req.body) : undefined,
+          body: requestedFileName ? JSON.stringify({ fileName: requestedFileName }) : undefined,
         });
 
         const contentType = response.headers.get('content-type') || '';
@@ -441,7 +539,11 @@ adminDashboardRouter.post(
 
     try {
       const { ingestCsvFromStorage } = await import('../../scanner/storageCsvIngestion.js');
-      const result = await ingestCsvFromStorage({ runId, triggeredBy: actorEmail });
+      const result = await ingestCsvFromStorage({
+        runId,
+        triggeredBy: actorEmail,
+        fileName: requestedFileName,
+      });
       setIngestRun({
         running: false,
         runId,
