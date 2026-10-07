@@ -20,6 +20,14 @@ const negativeTokens = [
   'false',
 ];
 
+const countryAliases = [
+  'United States',
+  'United States of America',
+  'US',
+  'USA',
+  'U.S.',
+];
+
 function normalize(value: string): string {
   return value
     .toLowerCase()
@@ -58,7 +66,7 @@ function optionPolarity(option: string): 'affirmative' | 'negative' | null {
 
 function canonicalAlias(value: string): string | null {
   const normalized = normalize(value);
-  if (/^united states(?: of america)?$|^usa$|^us$/.test(normalized)) return 'united states';
+  if (countryAliases.some((alias) => normalize(alias) === normalized)) return 'united states';
   if (/^asian(?: not hispanic or latino)?$|^asian or pacific islander$/.test(normalized)) return 'asian';
   if (/^black(?: or african american| not hispanic or latino)?$/.test(normalized)) return 'black';
   if (/^white(?: not hispanic or latino)?$|^caucasian$/.test(normalized)) return 'white';

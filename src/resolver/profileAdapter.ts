@@ -27,6 +27,18 @@ export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext
     payload.additional_information !== null &&
     typeof payload.additional_information === 'object';
   const additional = hasAdditionalInformation ? payload.additional_information : {};
+  const firstEducation: unknown = Array.isArray(profile.education) ? profile.education[0] : undefined;
+  const educationRecord: Record<string, unknown> =
+    firstEducation && typeof firstEducation === 'object'
+      ? (firstEducation as Record<string, unknown>)
+      : {};
+  const educationDate = (...keys: string[]): unknown => {
+    for (const key of keys) {
+      const date = educationRecord[key];
+      if (date !== undefined && date !== null && date !== '') return date;
+    }
+    return undefined;
+  };
   const value = (stored: unknown, raw: unknown): unknown =>
     stored !== undefined && stored !== null && stored !== '' ? stored : raw;
   const rawValue = (raw: unknown, stored: unknown): unknown =>
@@ -61,7 +73,14 @@ export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext
       highest_education: additional.highest_education,
       university_name: additional.university_name,
       cumulative_gpa: additional.cumulative_gpa,
-      graduation_year: additional.graduation_year,
+      graduation_year:
+        additional.graduation_year ??
+        educationDate('graduationYear', 'graduation_year'),
+      start_date: educationDate('startDate', 'start_date') ?? additional.education_start_date,
+      end_date: educationDate('endDate', 'end_date') ?? additional.education_end_date,
+      graduation_date:
+        educationDate('graduationDate', 'graduation_date') ??
+        additional.graduation_date,
       main_subject: additional.main_subject,
     },
     experience: {

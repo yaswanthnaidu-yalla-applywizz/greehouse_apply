@@ -53,6 +53,7 @@ export interface BatchQuestion {
   value?: string;
   /** When set, batch prompt instructs the model to pick one option verbatim. */
   options?: string[];
+  optionsComplete?: boolean;
 }
 
 /**
@@ -78,16 +79,22 @@ export function fieldHasChoiceOptions(field: ScannedField): boolean {
   return opts !== undefined && opts.length > 0;
 }
 
+export function isRichEeocIdentityQuestion(field: ScannedField): boolean {
+  return /gender identity|sexual orientation|\bethnicity\b|\bpronouns?\b/i.test(field.label);
+}
+
 /**
  * Options for prompt + alignment — uses scanned options, or defaults Yes/No for binary radio/select.
  */
 export function getEffectiveFieldOptions(field: ScannedField): string[] | undefined {
+  if (field.optionsComplete === false) return undefined;
   if (field.options && field.options.length > 0) {
     return field.options;
   }
   if (
     (field.type === 'radio' || field.type === 'select') &&
-    isBinaryYesNoQuestion({ ...field, options: ['Yes', 'No'] })
+    !isRichEeocIdentityQuestion(field) &&
+    isBinaryYesNoQuestion(field)
   ) {
     return ['Yes', 'No'];
   }
@@ -464,7 +471,10 @@ export class LLMSynthesizer {
     }
 
     const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
-    const systemMessage = isChoiceField
+    const incompleteChoice = field.type === 'select' && field.optionsComplete === false;
+    const systemMessage = incompleteChoice
+      ? 'You are an automated job application assistant. Return only one concise, exact choice label supported by candidate data. The scanned choice list is incomplete; do not invent a value. If candidate data does not support an answer, return NONE.'
+      : isChoiceField
       ? 'You are an automated job application assistant. You MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.'
       : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
 
@@ -583,6 +593,14 @@ export class LLMSynthesizer {
     let answer = parsed.answer;
     let confidence = parsed.confidence;
 
+    if (
+      field.type === 'select' &&
+      field.optionsComplete === false &&
+      /^none$/i.test(answer.trim())
+    ) {
+      return unresolvedField(field);
+    }
+
     if (/does not contain|no information|cannot determine|not (found|available|mentioned|provided|specified)|unable to (find|determine)|resume does not|i do not have (specific|direct|relevant|detailed)|i cannot provide|i don't have (specific|direct)|no specific (experience|information|detail)|not (explicitly|directly) mentioned|not specified in/i.test(answer)) {
       return unresolvedField(field);
     }
@@ -658,7 +676,7 @@ export class LLMSynthesizer {
     const prompt = `Resolve every numbered job application question using only the candidate resume and job description.
 Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
 
-For any question with Options provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate.
+For any question with a complete Options list provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate. If a choice list is marked incomplete, do not treat the captured options as exhaustive; return a concise exact choice supported by candidate data or NONE.
 
 Candidate resume:
 ${resumeText.slice(0, 12000)}
@@ -676,7 +694,8 @@ ${questions
           question.options && question.options.length > 0
             ? ` Options: ${question.options.join(' | ')}`
             : '';
-        return `${index}. [${question.type}] ${question.label}${opts}${question.value ? ` (existing value: ${question.value})` : ''}`;
+        const completenessHint = question.optionsComplete === false ? ' [choice options incomplete]' : '';
+        return `${index}. [${question.type}] ${question.label}${completenessHint}${opts}${question.value ? ` (existing value: ${question.value})` : ''}`;
       })
       .join('\n')}`;
     const systemMessage = `You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order. Example: ["answer 1", "answer 2"]. NEVER return markdown or explanatory text.
@@ -687,7 +706,7 @@ EEOC RULE: For gender, race/ethnicity, veteran status, and disability status fie
 
 CREATIVE RULE: For open-ended text questions (why do you want this role, describe your experience, tell us about yourself, cover letter style fields): write a professional, specific, 2-4 sentence answer using the candidate's actual work experience, skills, education, and job role from the profile. Do not say the resume does not contain information — synthesize a real answer.
 
-OPTION RULE: For select/radio/checkbox fields, you MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.
+OPTION RULE: For select/radio/checkbox fields with complete options provided, return exactly one provided option. For a select marked with incomplete options, do not constrain the answer to the partial sample; return a concise exact choice supported by candidate data, or NONE if unsupported.
 
 US LOCATION RULE: If asked whether the candidate is currently located in the US, and the profile shows state_of_residence or zip_or_country containing a US state or "United States", answer Yes.`;
 
@@ -822,7 +841,13 @@ ${resumeText.slice(0, 3000)}`;
       ? buildProfileDecisionContext(field, profile)
       : '';
 
-    const instructions = isBinaryYesNoQuestion(field)
+    const incompleteChoice = field.type === 'select' && field.optionsComplete === false;
+    const instructions = incompleteChoice
+      ? `Instructions:
+1. This is a dropdown with an incomplete scanned option list; the full option list is not provided.
+2. Return only one concise exact choice label supported by candidate information, in the format expected by the dropdown (for example, a full school name).
+3. Do not invent or assume candidate information. If no supported answer is available, return NONE.`
+      : isBinaryYesNoQuestion(field)
       ? `Instructions:
 1. Use the exact requires_sponsorship and work_authorization values from the profile. Do not guess.
 2. You MUST respond with exactly one of the provided options, no other text.`

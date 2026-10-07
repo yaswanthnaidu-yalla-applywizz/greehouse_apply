@@ -7,6 +7,7 @@ import {
   LLMSynthesizer,
   LLM_MIN_CONFIDENCE,
   getEffectiveFieldOptions,
+  isRichEeocIdentityQuestion,
   type BatchQuestion,
   type JobContext,
 } from './llmSynthesizer.js';
@@ -112,6 +113,14 @@ export async function resolveTier5(
     company: jobContext.companyName || 'Company',
   };
 
+  if (
+    (field.type === 'radio' || field.type === 'select') &&
+    (!field.options || field.options.length === 0) &&
+    isRichEeocIdentityQuestion(field)
+  ) {
+    return null;
+  }
+
   const adaptedProfile = toCandidateProfile(candidateProfile);
   const effectiveOptions = getEffectiveFieldOptions(field);
   const fieldForLlm: ScannedField =
@@ -175,6 +184,7 @@ export async function resolveTier5(
         resolvedByTier: 5,
         confidence,
         isRequired: Boolean(field.isRequired),
+        ...(effectiveOptions ? { options: effectiveOptions } : {}),
       };
 
       // Write-back to persistent candidate QA bank
@@ -236,6 +246,13 @@ export async function resolveTier5Batch(
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i];
     const combined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`;
+    if (
+      (field.type === 'radio' || field.type === 'select') &&
+      (!field.options || field.options.length === 0) &&
+      isRichEeocIdentityQuestion(field)
+    ) {
+      continue;
+    }
     if (/email/i.test(combined)) {
       const compEmail = getCompanyEmail(candidateProfile);
       if (compEmail) {
@@ -266,6 +283,7 @@ export async function resolveTier5Batch(
         label: field.label,
         type: field.type,
         options: effectiveOptions,
+        optionsComplete: field.optionsComplete,
       };
     });
 
@@ -309,6 +327,7 @@ export async function resolveTier5Batch(
         resolvedByTier: 5,
         confidence,
         isRequired: Boolean(field.isRequired),
+        ...(effectiveOptions ? { options: effectiveOptions } : {}),
       };
 
       try {

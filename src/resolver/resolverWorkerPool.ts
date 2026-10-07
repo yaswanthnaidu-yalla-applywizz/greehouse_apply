@@ -9,6 +9,7 @@ import { findAnswersByCandidate } from '../db/qaBank.js';
 import { getOrParseResume } from './tier2ResumeParse.js';
 import { resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
+import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveBatchLlmFields, type UnresolvedFieldGroup } from './batchLlmResolver.js';
 import { resolvePreTierField } from './answerResolver.js';
@@ -119,14 +120,47 @@ export class ResolverWorkerPool {
       }
       const tier1 = await resolveTier1(application.applywizz_id, field, profile);
       const tier2 = tier1 || await resolveTier2(application.applywizz_id, field, parsedResume);
-      const tier3 = tier2 || await resolveTier3(application.applywizz_id, field, qaEntries);
-      if (tier3) resolved.push(tier3);
+      if (tier2) {
+        resolved.push(tier2);
+        continue;
+      }
+
+      const semantic = await findSemanticMatch(
+        field.label,
+        application.applywizz_id,
+        field.type,
+        field.options,
+        0.82,
+        profile
+      );
+      if (semantic) {
+        resolved.push({
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: semantic.value,
+          source: 'semantic',
+          resolvedByTier: 3,
+          confidence: semantic.confidence,
+          isRequired: Boolean(field.isRequired),
+        });
+        continue;
+      }
+
+      const fuzzy = await resolveTier3(
+        application.applywizz_id,
+        field,
+        qaEntries,
+        profile
+      );
+      if (fuzzy) resolved.push(fuzzy);
       else pending.push(field);
     }
 
     log.info(
       `[Resolver] Worker ${workerId} resolving ${application.applywizz_id} ${application.id || application.job_url} ` +
-      `(Tier 1-4 complete, ${pending.length} questions pending LLM) | ` +
+      `(Tiers 1-4 complete, ${pending.length} questions pending LLM) | ` +
       `${this.workerCount - 1} idle, 1 busy.`
     );
 
