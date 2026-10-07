@@ -2,6 +2,13 @@ export type SubmissionQuestionCount = {
   field_count?: number | null;
 };
 
+export class QuestionLimitExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QuestionLimitExceededError';
+  }
+}
+
 export function isWithinSubmissionQuestionLimit(_application?: SubmissionQuestionCount): {
   eligible: boolean;
   reason?: string;

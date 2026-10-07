@@ -6,7 +6,12 @@ _Last updated: 2026-10-07_
 
 - Sandbox mode now assigns every profile and application to `yaswanthnaiduyalla@applywizz.ai`, including existing local DB rows normalized at startup and seeded demo data.
 - Newly ingested candidates use the sandbox operator email without fetching the external CA map; profile/application upserts and serialized application responses also enforce the sandbox assignment.
-- Production CA mapping remains unchanged. Focused regression tests pass; full typecheck/build are currently blocked by unrelated `questionLimit.ts` exports missing from the checked-in source.
+- Production CA mapping remains unchanged. Focused regression tests, full typecheck, and production build pass.
+
+## Current Session Update — CI Failure Repair
+
+- Fixed CI failures on `63d33ea`: restored the exported `QuestionLimitExceededError` used by queue/submit callers while keeping the question-count policy unlimited, and corrected the dependent TypeScript narrowing errors.
+- Added `tests/sandboxAssignment.test.ts` to the GitHub Actions unit-test command. Local typecheck, production build, and all CI-selected unit tests pass; Docker image build could not be run locally because Docker Desktop is unavailable.
 
 ## Current Session Update (2026-10-07 — Question Limit Removal & Submission Gate Audit)
 
