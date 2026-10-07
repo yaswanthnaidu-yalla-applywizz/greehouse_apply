@@ -58,10 +58,7 @@ import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHyd
 import {
   cacheApplicationLocally,
   applyCreatedAtRangeFilter,
-  getSubmissionOutcomeCounts,
   getDashboardApplicationMetrics,
-  countSubmittedApplicationsSince,
-  countAppliedApplicationsSince,
   getApplication,
   upsertApplication,
   serializeApplicationDto,
@@ -71,7 +68,7 @@ import {
   type ApplicationRow,
   type CandidateQueueStatus,
 } from '../db/applications.js';
-import { queryRollupStats } from '../db/statsRollup.js';
+import { getApplicationStats } from '../db/applicationStats.js';
 import {
   istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
@@ -102,10 +99,11 @@ import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resol
 import { getSupabaseKeyDiagnostics } from '../db/supabaseKeyDiagnostics.js';
 import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import {
-import { isSandboxMode } from '../db/sandboxClient.js';
   assertApplywizzZohoConnected,
   fetchZohoConnectedApplywizzIdSet,
 } from '../db/zohoConnected.js';
+import { isSandboxMode } from '../db/sandboxClient.js';
+import { isValidCsvUploadObjectName } from '../candidate/csvUploadValidation.js';
 import { SubmissionQueueDaemon } from '../submitter/queueWorker.js';
 import {
   demoApplication,
@@ -119,7 +117,6 @@ import {
   loadSecondaryDemoArtifacts,
   inMemoryDemoJobRowsForDashboard,
 } from '../dashboard/demoFixtures.js';
-import { zohoReader, zohoReaderPool } from '../services/zohoReader.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
 import type {
   CandidateJobApplication,
@@ -127,6 +124,9 @@ import type {
   ScannedJobTemplate,
 } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('Server');
+
 async function assertCandidateZohoConnectedForViewing(
   applywizzId: string,
   options: { isAdmin?: boolean; allowAdminDemo?: boolean }
@@ -134,9 +134,6 @@ async function assertCandidateZohoConnectedForViewing(
   if (isSandboxMode()) return { allowed: true };
   return assertApplywizzZohoConnected(applywizzId, options);
 }
-
-
-const log = createLogger('Server');
 
 const ACTIVE_CANDIDATES_LOG_INTERVAL_MS = 10 * 60 * 1000;
 const lastActiveCandidatesLogByCa = new Map<string, number>();
@@ -191,11 +188,16 @@ function applyApplicationAggregatesToSummaries(
  */
 export interface DashboardStats {
   totalCandidates: number;
-  totalApplications: number;
-  submitted: number;
-  submittedCount: number;
-  applied: number;
-  failed: number;
+  totalApplications: number | null;
+  submitted: number | null;
+  submittedCount: number | null;
+  applied: number | null;
+  failed: number | null;
+  successfulApplications: number | null;
+  failedApplications: number | null;
+  statsAvailable: boolean;
+  statsPartial: boolean;
+  statsAvailableFrom: string;
   dateRange?: {
     preset: string;
     from: string | null;
@@ -333,6 +335,11 @@ function enrichResolvedFieldsWithTemplateOptions(
         : Array.isArray(current.options)
           ? current.options
           : [],
+      ...(typeof scanned?.optionsComplete === 'boolean'
+        ? { optionsComplete: scanned.optionsComplete }
+        : typeof current.optionsComplete === 'boolean'
+          ? { optionsComplete: current.optionsComplete }
+          : {}),
     };
   });
 }
@@ -504,6 +511,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         res.status(403).json({ error: 'Forbidden: only admins can start the pipeline.' });
         return;
       }
+      const requestedFileName = req.body && typeof req.body === 'object' ? req.body.fileName : undefined;
+      if (requestedFileName !== undefined && (
+        typeof requestedFileName !== 'string' || !isValidCsvUploadObjectName(requestedFileName)
+      )) {
+        res.status(400).json({ error: 'Invalid CSV upload object name.' });
+        return;
+      }
 
       if (getIngestRun().running) {
         res.status(409).json({
@@ -538,7 +552,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
       try {
         const { ingestCsvFromStorage } = await import('../scanner/storageCsvIngestion.js');
-        const result = await ingestCsvFromStorage({ runId, triggeredBy: actorEmail });
+        const result = await ingestCsvFromStorage({
+          runId,
+          triggeredBy: actorEmail,
+          fileName: requestedFileName,
+        });
         setIngestRun({
           running: false,
           startedAt,
@@ -644,24 +662,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
     });
 
-    return app;
-  }
-
-  loadArtifacts(outputDir, { log: true });
-  const app = express();
-
-  app.use(
-    cors({
-      origin: process.env.ALLOWED_ORIGINS?.split(',') ?? false,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: [
-        'Authorization',
-        'Content-Type',
-        'X-View-As',
-        'X-View-As-Manager-Email',
-        'X-Dashboard-Date-Range',
-        'X-Work-History-Unreachable',
-      ],
     /**
      * Local Sandbox Storage File Serving
      * Serves locally uploaded resumes, proofs, and csvs in sandbox mode.
@@ -691,6 +691,24 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     });
 
+    return app;
+  }
+
+  loadArtifacts(outputDir, { log: true });
+  const app = express();
+
+  app.use(
+    cors({
+      origin: process.env.ALLOWED_ORIGINS?.split(',') ?? false,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: [
+        'Authorization',
+        'Content-Type',
+        'X-View-As',
+        'X-View-As-Manager-Email',
+        'X-Dashboard-Date-Range',
+        'X-Work-History-Unreachable',
+      ],
     })
   );
   app.use(express.json());
@@ -812,24 +830,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     res.status(404).send('Fallback developer dashboard page not found.');
   });
 
-  // Favicon / logo / other public assets. index:false so '/' stays on the guarded HTML routes.
-  app.use(express.static(publicDir, { index: false }));
-
-  const operatorApiGuard = [requireAuth, requireOperatorDashboardAccess] as const;
-  const candidateListApiGuard = [requireAuth, requireRole('operator', 'manager', 'admin', 'dev')] as const;
-  const usersApiGuard = [requireAuth, requireRole('manager', 'admin', 'dev')] as const;
-  const adminApiGuard = [requireAuth, requireRole('admin', 'dev')] as const;
-  const managerApiGuard = [requireAuth, requireRole('manager', 'dev')] as const;
-  const devApiGuard = [requireAuth, requireRole('dev')] as const;
-
-  // Auth routes (public)
-  app.use('/api/auth', authRouter);
-
-  // Applications, field patch, dry-run, and submission routes (protected)
-  app.use('/api/applications', ...operatorApiGuard, submissionsRouter);
-  app.use('/api/applications', ...operatorApiGuard, applicationsRouter);
-
-  // Real events notifications routes (protected)
   app.get('/dev/db', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
     if (process.env.SANDBOX !== 'true') {
       res.status(403).send('Sandbox mode only');
@@ -952,6 +952,24 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     `);
   });
 
+  // Favicon / logo / other public assets. index:false so '/' stays on the guarded HTML routes.
+  app.use(express.static(publicDir, { index: false }));
+
+  const operatorApiGuard = [requireAuth, requireOperatorDashboardAccess] as const;
+  const candidateListApiGuard = [requireAuth, requireRole('operator', 'manager', 'admin', 'dev')] as const;
+  const usersApiGuard = [requireAuth, requireRole('manager', 'admin', 'dev')] as const;
+  const adminApiGuard = [requireAuth, requireRole('admin', 'dev')] as const;
+  const managerApiGuard = [requireAuth, requireRole('manager', 'dev')] as const;
+  const devApiGuard = [requireAuth, requireRole('dev')] as const;
+
+  // Auth routes (public)
+  app.use('/api/auth', authRouter);
+
+  // Applications, field patch, dry-run, and submission routes (protected)
+  app.use('/api/applications', ...operatorApiGuard, submissionsRouter);
+  app.use('/api/applications', ...operatorApiGuard, applicationsRouter);
+
+  // Real events notifications routes (protected)
   app.use('/api/notifications', ...operatorApiGuard, notificationsRouter);
 
   // Dashboard client config (protected)
@@ -1113,7 +1131,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const unrestricted = hasUnrestrictedDashboardAccess(role) && !viewAsManagerEmail;
 
     let allowedCandidateIds: string[] | undefined = undefined;
-    let submittedOperatorEmails: string[] | undefined;
     if (!unrestricted) {
       if (!userEmail && !viewAsManagerEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
@@ -1127,7 +1144,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           createdAtRange
         );
         allowedCandidateIds = team.candidateIds;
-        submittedOperatorEmails = team.operatorEmails;
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(
           userEmail!,
@@ -1135,7 +1151,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           createdAtRange
         );
         allowedCandidateIds = team.candidateIds;
-        submittedOperatorEmails = team.operatorEmails;
       } else {
         const merged = await mergeWorkHistoryForIstDates({
           mode: 'ca',
@@ -1143,39 +1158,24 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           dates: istDatesForWorkHistory(parsedRange),
         });
         allowedCandidateIds = merged.candidateIds;
-        submittedOperatorEmails = userEmail ? [userEmail] : [];
       }
     }
 
-    let outcomes = { failedApplications: 0 };
-    let submitted = 0;
-    let applied = 0;
-
-    if (unrestricted) {
-      const rollup = await queryRollupStats(createdAtRange.startIso, createdAtRange.endIso!);
-      outcomes.failedApplications = rollup.failed_count;
-      submitted = rollup.submitted_count;
-      applied = rollup.applied_count;
-    } else {
-      const [resOutcomes, resSubmitted, resApplied] = await Promise.all([
-        getSubmissionOutcomeCounts({
-          createdAtRange,
-          allowedCandidateIds,
-        }),
-        countSubmittedApplicationsSince(
-          createdAtRange.startIso,
-          submittedOperatorEmails,
-          createdAtRange.endIso
-        ),
-        countAppliedApplicationsSince(
-          createdAtRange.startIso,
-          submittedOperatorEmails,
-          createdAtRange.endIso
-        ),
-      ]);
-      outcomes = resOutcomes;
-      submitted = resSubmitted;
-      applied = resApplied;
+    const statsScope = unrestricted
+      ? {}
+      : viewAsManagerEmail || role === 'manager'
+        ? { managerEmail: viewAsManagerEmail || userEmail || undefined }
+        : { caEmail: userEmail || undefined };
+    let applicationStats;
+    try {
+      applicationStats = await getApplicationStats({
+        range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+        scope: statsScope,
+      });
+    } catch (error) {
+      log.error('[Stats] Failed to load canonical application statistics:', error);
+      res.status(500).json({ error: 'Unable to load application statistics.' });
+      return;
     }
 
     const metrics = await getDashboardApplicationMetrics({
@@ -1185,11 +1185,16 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const stats: DashboardStats = {
       totalCandidates: metrics.totalCandidates,
-      totalApplications: metrics.totalApplications,
-      submitted,
-      submittedCount: submitted,
-      applied,
-      failed: outcomes.failedApplications,
+      totalApplications: applicationStats.counts.total,
+      submitted: applicationStats.counts.submitted,
+      submittedCount: applicationStats.counts.submitted,
+      applied: applicationStats.counts.applied,
+      successfulApplications: applicationStats.counts.applied,
+      failed: applicationStats.counts.failed,
+      failedApplications: applicationStats.counts.failed,
+      statsAvailable: applicationStats.available,
+      statsPartial: applicationStats.partial,
+      statsAvailableFrom: applicationStats.availableFrom,
       dateRange: serializeDateRange(parsedRange),
     };
 
@@ -2276,15 +2281,6 @@ export function startServer(
       // Start fast REST API-based OTP resolution service immediately
       otpResolutionService.start();
 
-      if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
-        void Promise.all([zohoReader.init(), zohoReaderPool.init()]).catch((err: any) => {
-          log.warn(`[Server] ⚠️ Zoho Reader background Playwright pool init error: ${err.message}`);
-        });
-      }
-    } else {
-      createLogger('ZohoReader').info(
-        '[ZohoReader] Skipping background session — queue worker disabled on this service'
-      );
     }
 
     // Launch background round-robin submission worker daemon if enabled (Phase V2-4c)
@@ -2292,8 +2288,7 @@ export function startServer(
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 2;
       log.info(
-        `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, ` +
-          `ZOHO_OTP_WORKER_POOL_SIZE=${config.ZOHO_OTP_WORKER_POOL_SIZE}, dequeue status=QUEUED)`
+        `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, dequeue status=QUEUED)`
       );
       queueDaemon = new SubmissionQueueDaemon({ concurrency });
       registerQueueDaemon(queueDaemon);
@@ -2307,8 +2302,6 @@ export function startServer(
 
   const cleanup = async () => {
     otpResolutionService.stop();
-    await zohoReaderPool.stop().catch(() => {});
-    await zohoReader.cleanup().catch(() => {});
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       // Allow in-flight Playwright workers to finish
       log.info('[Server] 🧹 Shutting down background queue daemon...');
