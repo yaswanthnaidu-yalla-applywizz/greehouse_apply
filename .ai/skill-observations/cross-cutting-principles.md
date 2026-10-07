@@ -57,3 +57,30 @@ Evidence: This constraint is why dry-run and live-submit have separate code path
 
 An answer that isn't written back costs LLM money again on the next run for the same candidate.
 Evidence: The entire Tier 1 hit rate improvement depends on consistent write-back.
+
+---
+
+## Principle 7: Guarded Probes & Verifications
+
+**Shell probes that return 0 or empty must not be treated as findings without confirming the probe itself ran correctly (quotes/escapes intact, right tool). HTML/JSX surfaces without static typechecking require explicit DOM scope checks; token presence is not shape correctness.**
+
+Applies to: shell-based verification probes, test running, unchecked HTML/JSX frontend surfaces.
+Evidence: #0005 (probes rewritten in transit via shell quoting), #0016 (token presence vs DOM nesting/shape), #0018 (per-surface verification blind spots).
+
+---
+
+## Principle 8: Secondary Passes Must Reuse Invariant Gates
+
+**Any backfill, safety-net, or secondary pass must enforce the same FK/eligibility checks as the primary pass. No bypass.**
+
+Applies to: ingest backfills, queue recovery passes, reconcilers, and secondary data processors.
+Evidence: #0013 (secondary CSV ensure pass bypassed parent profile existence gate, violating FK constraints).
+
+---
+
+## Principle 9: Code Context Governs Idiom Safety
+
+**Before applying a spec sketch or copying a local pattern, read the enclosing try/catch and control-flow. A fix name referencing a nonexistent mechanism, or an idiom transplanted into different error-fallthrough semantics, must be caught at planning time, not after a bad diff.**
+
+Applies to: code refactoring, bug fixes from prompt specs, applying idioms across distinct callers.
+Evidence: #0003 (spec prescribing nonexistent mechanisms or already-applied changes), #0017 (convention copied into different error/catch control flow).

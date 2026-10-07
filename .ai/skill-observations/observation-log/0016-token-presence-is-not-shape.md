@@ -1,7 +1,7 @@
 ---
 id: 16
 title: "A structural defect survives every symbol-level check a spec asks for"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "verifying a delivered feature against its written spec"
 date: 2026-09-17
 session_context: "Audited a 7-item dashboard stats spec (submitted_today, role-scoped, four panels) against a React/JSX dashboard after commit ae4946b shipped it"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principle 7)"
 reference:
 ---
 

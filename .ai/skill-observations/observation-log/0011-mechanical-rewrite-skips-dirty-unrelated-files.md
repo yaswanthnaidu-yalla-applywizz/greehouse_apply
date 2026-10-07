@@ -1,7 +1,7 @@
 ---
 id: 11
 title: "A repo-wide mechanical rewrite must skip files whose dirty diff is not from this task"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "bulk search-replace across a working tree that other sessions also have o
 date: 2026-09-15
 session_context: "Replacing console.* with a central logger across src/; manager.ts already had an incomplete role-scoping refactor"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principles 7/8/9) or documented as noted in weekly triage"
 reference:
 ---
 

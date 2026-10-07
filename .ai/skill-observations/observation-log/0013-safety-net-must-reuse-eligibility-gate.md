@@ -1,7 +1,7 @@
 ---
 id: 13
 title: "A safety-net pass must reuse the primary eligibility gate"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "pipeline: backfill / ensure-* after a filtered pass"
 date: 2026-09-15
 session_context: "CSV ingest FK: candidate_applications upsert for AWL-39218 with no profiles row"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principle 8)"
 reference:
 ---
 
