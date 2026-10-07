@@ -65,6 +65,7 @@
     "express": "^4.21.2",
     "fast-csv": "^5.0.3",
     "fuse.js": "^7.1.0",
+    "libphonenumber-js": "^1.13.14",
     "lru-cache": "^11.5.3",
     "openai": "^4.86.1",
     "pdf-parse": "^1.1.1",

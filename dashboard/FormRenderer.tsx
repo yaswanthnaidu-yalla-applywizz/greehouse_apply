@@ -33,6 +33,8 @@ export interface FormRendererProps {
   candidateName?: string;
   /** API Base URL */
   apiBaseUrl?: string;
+  /** Return to the mobile application queue */
+  onBack: () => void;
   /** Callback fired when an operator manually modifies a field */
   onFieldUpdate?: (updatedField: ResolvedField) => void;
   /** Callback fired when status transitions (e.g. from polling or submission) */
@@ -48,6 +50,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   isLoading = false,
   candidateName,
   apiBaseUrl = '',
+  onBack,
   onFieldUpdate,
   onStatusChange,
 }) => {
@@ -167,6 +170,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
   const currentField = displayFields[boundedIndex];
+  const mobileBackButton = (
+    <button type="button" onClick={onBack} className="mobile-screen-back">
+      <span aria-hidden="true">←</span> Applications
+    </button>
+  );
 
   const handleApproveAndNext = () => {
     if (currentField) {
@@ -201,7 +209,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   if (isLoading) {
     return (
-      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+      <div className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+        {mobileBackButton}
         <div className="w-8 h-8 border-2 border-[#1A1A2E] border-t-transparent rounded-full animate-spin mb-4"></div>
         <p className="text-xs font-mono font-bold text-[#1A1A2E]">Loading application form...</p>
       </div>
@@ -210,7 +219,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   if (!application) {
     return (
-      <div className="flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+      <div className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+        {mobileBackButton}
         <div className="text-4xl mb-3">📋</div>
         <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
         <p className="text-xs text-[#64748B] mt-1 font-medium">
@@ -221,7 +231,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   }
 
   if (isOperatorFormPanelBlocked(currentStatus)) {
-    return <OperatorFormBlockedPanel application={application} />;
+    return (
+      <>
+        {mobileBackButton}
+        <OperatorFormBlockedPanel application={application} />
+      </>
+    );
   }
 
   const getAuthHeaders = (): Record<string, string> => {
@@ -332,7 +347,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto px-5 py-3.5 md:px-7 md:py-4 max-w-5xl mx-auto w-full custom-scrollbar">
+    <div className="mobile-form-renderer flex-1 overflow-y-auto px-5 py-3.5 md:px-7 md:py-4 max-w-5xl mx-auto w-full custom-scrollbar">
+      {mobileBackButton}
       {/* Proof Viewer Modal */}
       <EmailProofModal
         isOpen={emailProofOpen}
@@ -428,7 +444,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           </div>
 
           {/* Submission Action Controls */}
-          <div className="shrink-0 flex flex-col items-end gap-1.5">
+          <div className="mobile-submission-bar shrink-0 flex flex-col items-end gap-1.5">
             <SubmissionControls
               applicationId={appId}
               jobUrl={jobUrl}

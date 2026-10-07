@@ -51,6 +51,7 @@ export function buildPayloadContext(profile: ProfileWithPayload): PayloadContext
       company_email: rawValue(client.company_email, 'company_email' in profile ? profile.company_email : undefined),
       phone: value('phone' in profile ? profile.phone : profile.phone, undefined),
       full_address: additional.full_address,
+      zip_or_country: additional.zip_or_country,
       date_of_birth: additional.date_of_birth,
       gender: additional.gender,
     },

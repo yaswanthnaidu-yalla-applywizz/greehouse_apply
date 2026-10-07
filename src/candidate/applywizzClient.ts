@@ -174,13 +174,8 @@ export class ApplyWizzClient {
 
     const enforceCandidateDefaults = (p: ApplyWizzCandidateProfile) => {
       if (isYaswanth) {
-        p.country = 'India';
-        p.countryCode = '+91';
         if (!p.location) p.location = 'Hyderabad, Telangana, India';
       } else if (isAkshitha) {
-        if (!p.country) p.country = 'United States of America';
-        if (!p.countryCode) p.countryCode = '+1';
-        if (!p.phone) p.phone = '940-222-8193';
         if (!p.location) p.location = 'Dallas, Texas, United States';
       }
       return p;
@@ -431,8 +426,8 @@ export class ApplyWizzClient {
 
     const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
     const isAkshitha = applywizzId.trim().toUpperCase() === 'AWL-31428' || applywizzId.trim().toLowerCase().includes('akshitha');
-    const country = isYaswanth ? 'India' : (addInfo.country || client.country || (isAkshitha ? 'United States of America' : undefined));
-    const countryCode = isYaswanth ? '+91' : (addInfo.country_code || client.country_code || (isAkshitha ? '+1' : undefined));
+    const country = addInfo.country || client.country || undefined;
+    const countryCode = addInfo.country_code || client.country_code || undefined;
 
     return {
       applywizzId,
@@ -440,7 +435,7 @@ export class ApplyWizzClient {
       firstName: firstName || (isAkshitha ? 'AKSHITHA' : ''),
       lastName: lastName || (isAkshitha ? 'G' : ''),
       email,
-      phone: isAkshitha ? (phone || '940-222-8193') : phone,
+      phone,
       location: isYaswanth ? (location || 'Hyderabad, Telangana, India') : (isAkshitha ? (location || 'Dallas, Texas, United States') : location),
       country,
       countryCode,

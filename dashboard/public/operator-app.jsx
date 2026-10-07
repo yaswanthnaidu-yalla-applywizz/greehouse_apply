@@ -723,6 +723,14 @@
       const isTextarea = field.type === 'textarea';
       const isUnresolved = field.source === 'unresolved';
       const fieldType = String(field.field_type || field.type || '').toLowerCase();
+      const isAvailabilityDate =
+        /\b(?:date available to start|available to start|availability date|available date|desired start date|earliest start date|when can you start|when could you start)\b/i.test(
+          `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`
+        ) || /^start date$/i.test(String(field.label || '').trim());
+      const expectedDateFormat = isAvailabilityDate
+        ? field.metadata?.expectedDateFormat ||
+          (field.type === 'date' || field.metadata?.inputType === 'date' ? 'YYYY-MM-DD' : 'MM/DD/YYYY')
+        : null;
       const fieldOptions = Array.isArray(field.options) && field.options.length > 0 ? field.options : null;
       const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions;
       const isCheckbox = fieldType === 'checkbox';
@@ -812,6 +820,9 @@
                 )}
                 <span className="text-[10px] font-mono text-[#64748B] font-normal">({field.type})</span>
               </label>
+              {expectedDateFormat && (
+                <p className="mt-1 text-[10px] text-[#64748B]">Expected date format: {expectedDateFormat}</p>
+              )}
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
@@ -2688,7 +2699,8 @@
     }
 
     function filterOperatorApplicationJobs(jobs) {
-      return Array.isArray(jobs) ? jobs : [];
+      if (!Array.isArray(jobs)) return [];
+      return jobs.filter((job) => String(job?.status || '').trim().toUpperCase() !== 'QUEUED');
     }
 
     function isUnresolvedApplicationJob(row) {

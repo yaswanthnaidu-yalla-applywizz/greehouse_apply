@@ -91,6 +91,28 @@ export const QUEUE_DONE_STATUSES: ApplicationStatus[] = [
 
 export const COMPLETED_STATUSES = IN_FLIGHT_STATUSES;
 
+/** Statuses that resolve/re-ingest must never overwrite (terminal + in-flight). */
+export const RESOLVE_STATUS_PRESERVE: ReadonlySet<ApplicationStatus> = new Set([
+  'APPLIED',
+  'FAILED',
+  'APPLYING',
+  'QUEUED',
+  'OTP_REQUIRED',
+  'CAPTCHA_TIMEOUT',
+  'CAPTCHA_REQUIRED',
+  'SKIPPED',
+  'RETRY',
+  'EMAIL_PROOF_PENDING',
+  'DRY_RUN_COMPLETE',
+  'EXPIRED',
+]);
+
+/** Existing statuses eligible for resolve-time auto-enqueue. */
+export const RESOLVE_AUTO_ENQUEUE_ELIGIBLE: ReadonlySet<ApplicationStatus> = new Set([
+  'READY_FOR_REVIEW',
+  'APPROVED',
+]);
+
 export interface EmailProofJson {
   from: string;
   to?: string;
@@ -335,28 +357,36 @@ export async function upsertApplication(
     updated_at: new Date().toISOString(),
   };
 
+  let existingRow: Pick<ApplicationRow, 'status' | 'resolved_fields'> | null = null;
+  if (payload.applywizz_id && payload.job_url) {
+    try {
+      const existing = await getApplicationByCandidateAndJob(payload.applywizz_id, payload.job_url);
+      if (existing) {
+        existingRow = { status: existing.status, resolved_fields: existing.resolved_fields };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  if (
+    existingRow?.status &&
+    RESOLVE_STATUS_PRESERVE.has(existingRow.status) &&
+    payload.status !== 'SKIPPED'
+  ) {
+    delete payload.status;
+  }
+
   if (
     payload.status !== 'SKIPPED' &&
     Array.isArray(payload.resolved_fields) &&
     !hasAnyNonEmptyResolvedField(payload.resolved_fields) &&
     payload.applywizz_id &&
-    payload.job_url &&
-    isSupabaseConfigured()
+    payload.job_url
   ) {
-    try {
-      const supabase = getDbClient();
-      const { data: existing } = await supabase
-        .from('gh_candidate_applications')
-        .select('resolved_fields')
-        .eq('applywizz_id', payload.applywizz_id)
-        .eq('job_url', payload.job_url)
-        .maybeSingle();
-      const existingFields = existing?.resolved_fields;
-      if (hasAnyNonEmptyResolvedField(existingFields)) {
-        payload.resolved_fields = existingFields;
-      }
-    } catch {
-      /* fall through — empty payload is acceptable for brand-new rows */
+    const existingFields = existingRow?.resolved_fields;
+    if (hasAnyNonEmptyResolvedField(existingFields)) {
+      payload.resolved_fields = existingFields;
     }
   }
 
@@ -435,6 +465,12 @@ export async function upsertApplication(
     } catch (err: any) {
       log.warn(`[DB] upsertApplication exception:`, err);
     }
+  }
+
+  if (!payload.status && existingRow?.status) {
+    payload.status = existingRow.status;
+  } else if (!payload.status) {
+    payload.status = 'READY_FOR_REVIEW';
   }
 
   const fallbackId = app.id || `${app.applywizz_id}_${Buffer.from(app.job_url).toString('base64url').slice(0, 16)}`;

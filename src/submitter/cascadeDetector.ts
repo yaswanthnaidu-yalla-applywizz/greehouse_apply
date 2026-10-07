@@ -21,6 +21,18 @@ export function sanitizeLabelText(label: string): string {
     .trim();
 }
 
+function detectDateFormat(inputType?: string, placeholder?: string): string | undefined {
+  if (inputType?.toLowerCase() === 'date') return 'YYYY-MM-DD';
+  const tokens = placeholder?.match(/(y{2,4}|m{1,2}|d{1,2})/gi);
+  if (!tokens || tokens.length !== 3 || !tokens.some((token) => /^y/i.test(token)) ||
+      !tokens.some((token) => /^m/i.test(token)) || !tokens.some((token) => /^d/i.test(token))) {
+    return undefined;
+  }
+  return tokens.map((token) => token.toUpperCase().replace(/^Y{2}$/, 'YY').replace(/^Y{3,4}$/, 'YYYY')).join(
+    placeholder?.match(/[./-]/)?.[0] || '/'
+  );
+}
+
 /**
  * Generates a normalized field identifier from label, name, or DOM id.
  */
@@ -310,7 +322,9 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
         var label = clean(rawLabel);
 
         var detectedType = 'text';
-        if (el.tagName.toLowerCase() === 'textarea') {
+        if (rawType === 'date') {
+          detectedType = 'date';
+        } else if (el.tagName.toLowerCase() === 'textarea') {
           detectedType = 'textarea';
         } else if (rawType === 'file') {
           detectedType = 'file';
@@ -328,6 +342,7 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
                     el.getAttribute('aria-required') === 'true' ||
                     (rawLabel && rawLabel.indexOf('*') !== -1) ||
                     hasHiddenRequiredInput(el);
+        var placeholder = el.getAttribute('placeholder') || '';
 
         fields.push({
           name: name || id,
@@ -336,7 +351,9 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
           label: label || name || id,
           isRequired: !!isReq,
           section: section,
-          selector: id ? '#' + id : 'input[name="' + name + '"]'
+          selector: id ? '#' + id : 'input[name="' + name + '"]',
+          inputType: rawType || (el.tagName.toLowerCase() === 'textarea' ? 'textarea' : ''),
+          placeholder: placeholder
         });
       }
 
@@ -359,10 +376,13 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
       scannedField.optionsComplete = f.optionsComplete;
     }
 
-    if (f.section || f.selector) {
+    if (f.section || f.selector || f.inputType || f.placeholder) {
       scannedField.metadata = {
         section: f.section || undefined,
         selector: f.selector || undefined,
+        inputType: f.inputType || undefined,
+        placeholder: f.placeholder || undefined,
+        expectedDateFormat: detectDateFormat(f.inputType, f.placeholder),
       };
     }
 
@@ -383,5 +403,44 @@ export async function getUnmappedVisibleFields(
     if (knownFieldIds.has(f.fieldId)) return false;
     if (f.name && knownNames.has(f.name)) return false;
     return true;
+  });
+}
+
+export async function captureFormControlMetadata(
+  page: Page,
+  fields: ScannedField[]
+): Promise<ScannedField[]> {
+  const controls = await page.evaluate((fieldRefs) => {
+    const elements = Array.from(document.querySelectorAll('input, textarea, select')) as Array<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >;
+    return fieldRefs.map((field) => {
+      const element = elements.find((candidate) =>
+        candidate.name === field.name || candidate.id === field.name ||
+        candidate.name.endsWith(`[${field.name}]`) || candidate.id.endsWith(field.fieldId)
+      );
+      if (!element) return {};
+      const inputType = element instanceof HTMLInputElement ? element.type : element.tagName.toLowerCase();
+      return {
+        inputType,
+        placeholder: element.getAttribute('placeholder') || undefined,
+      };
+    });
+  }, fields.map(({ name, fieldId }) => ({ name, fieldId })));
+
+  return fields.map((field, index) => {
+    const control = controls[index];
+    if (!control.inputType && !control.placeholder) return field;
+    const expectedDateFormat = detectDateFormat(control.inputType, control.placeholder);
+    return {
+      ...field,
+      ...(control.inputType === 'date' ? { type: 'date' as const } : {}),
+      metadata: {
+        ...field.metadata,
+        ...(control.inputType ? { inputType: control.inputType } : {}),
+        ...(control.placeholder ? { placeholder: control.placeholder } : {}),
+        ...(expectedDateFormat ? { expectedDateFormat } : {}),
+      },
+    };
   });
 }

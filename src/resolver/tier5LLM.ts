@@ -16,6 +16,14 @@ import { generateFingerprint } from './fingerprint.js';
 import { writeEmbedding } from './semanticSearch.js';
 import { profileRowToCandidateProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
+import { createLogger } from '../utils/logger.js';
+import {
+  buildQuestionRelevantEvidence,
+  isPhoneNumberField,
+  resumeAnswerMatchesPhone,
+} from './candidateEvidence.js';
+
+const log = createLogger('Tier 5 LLM');
 
 export type LlmFailureReason = 'timeout' | 'rate_limit' | 'server_error' | 'permanent';
 
@@ -25,16 +33,6 @@ export interface LlmFailureInfo {
   message: string;
   statusCode?: number;
   timestamp: number;
-}
-
-let lastLlmFailure: LlmFailureInfo | null = null;
-
-export function getLastLlmFailure(): LlmFailureInfo | null {
-  return lastLlmFailure;
-}
-
-export function clearLastLlmFailure(): void {
-  lastLlmFailure = null;
 }
 
 export function classifyLlmError(err: unknown): LlmFailureInfo {
@@ -173,6 +171,11 @@ export async function resolveTier5(
       if (confidence < LLM_MIN_CONFIDENCE) {
         return null;
       }
+      if (isPhoneNumberField(field)) {
+        const resumePhone = resumeAnswerMatchesPhone(rawResult.value, resumeFacts, resumeText);
+        if (!resumePhone) return null;
+        rawResult.value = resumePhone;
+      }
 
       const resolvedField: ResolvedField = {
         fieldId: field.fieldId,
@@ -207,7 +210,7 @@ export async function resolveTier5(
     }
   } catch (err: unknown) {
     const failure = classifyLlmError(err);
-    lastLlmFailure = failure;
+    log.error(`[Resolver] T5 provider failure for "${field.label}": ${failure.reason}`);
   }
 
   return null;
@@ -282,8 +285,9 @@ export async function resolveTier5Batch(
       return {
         label: field.label,
         type: field.type,
-        options: effectiveOptions,
+        options: effectiveOptions || (field.optionsComplete === false ? field.options : undefined),
         optionsComplete: field.optionsComplete,
+        candidateEvidence: buildQuestionRelevantEvidence(field, candidateProfile, resumeText),
       };
     });
 
@@ -316,13 +320,21 @@ export async function resolveTier5Batch(
       if (confidence < LLM_MIN_CONFIDENCE) {
         continue;
       }
+      const resumePhone = isPhoneNumberField(field)
+        ? resumeAnswerMatchesPhone(
+            finalized.value,
+            candidateProfile.resume_facts,
+            resumeText
+          )
+        : null;
+      if (isPhoneNumberField(field) && !resumePhone) continue;
 
       const resolvedField: ResolvedField = {
         fieldId: field.fieldId,
         name: field.name,
         type: field.type,
         label: field.label,
-        value: finalized.value.trim(),
+        value: resumePhone || finalized.value.trim(),
         source: 'ai',
         resolvedByTier: 5,
         confidence,
@@ -349,7 +361,7 @@ export async function resolveTier5Batch(
     }
   } catch (err: unknown) {
     const failure = classifyLlmError(err);
-    lastLlmFailure = failure;
+    log.error(`[Resolver] T5 batch provider failure for ${llmFields.length} questions: ${failure.reason}`);
   }
 
   return results;

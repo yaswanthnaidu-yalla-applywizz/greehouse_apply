@@ -10,8 +10,8 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Skipped Applications');
 
-export function isOverQuestionCap(fieldCount: number): boolean {
-  return fieldCount >= config.MAX_JOB_QUESTIONS;
+export function isOverQuestionCap(_fieldCount: number): boolean {
+  return false;
 }
 
 /**
