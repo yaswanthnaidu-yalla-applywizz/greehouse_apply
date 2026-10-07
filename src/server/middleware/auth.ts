@@ -21,6 +21,16 @@ export async function requireAuth(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  // Sandbox auto-login bypass
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    req.user = {
+      email: 'yaswanthnaiduyalla@applywizz.ai',
+      role: 'dev',
+    };
+    next();
+    return;
+  }
+
   // If Supabase is not configured (offline / testing mode) or running test suite, bypass auth
   if (
     !isSupabaseConfigured() ||

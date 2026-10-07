@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: applywizz-sandbox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: applywizz_sandbox
+    ports:
+      - "5432:5432"
+    volumes:
+      - sandbox_pgdata:/var/lib/postgresql/data
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: applywizz-sandbox-pgweb
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    command:
+      - "--url"
+      - "postgres://postgres:postgres@host.docker.internal:5432/applywizz_sandbox?sslmode=disable"
+
+volumes:
+  sandbox_pgdata:
