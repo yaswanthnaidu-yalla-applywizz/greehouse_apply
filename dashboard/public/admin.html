@@ -12,7 +12,7 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="/roleAccess.js"></script>
 </head>
-<body class="bg-[#FFF5EB] text-[#1A1A2E]">
+<body class="bg-[#0a0a0a] text-white">
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useCallback } = React;
@@ -28,7 +28,20 @@
       return (
         <nav className="flex flex-wrap items-center gap-1 bg-white border-2 border-[#1A1A2E] rounded p-1">
           {links.map((link) => (
-            <a key={link.href} href={link.href} className={`px-2 py-1 text-xs font-bold rounded ${current === link.href ? 'bg-[#E88474] text-white' : 'hover:bg-[#FAF4EB]'}`}>{link.label}</a>
+            <a
+              key={link.href}
+              href={link.href}
+              onClick={() => {
+                if (link.href === '/') {
+                  sessionStorage.setItem('applywizz_dev_operator_view', 'true');
+                } else {
+                  sessionStorage.removeItem('applywizz_dev_operator_view');
+                }
+              }}
+              className={`px-2 py-1 text-xs font-bold rounded ${current === link.href ? 'bg-[#E88474] text-white' : 'hover:bg-[#FAF4EB]'}`}
+            >
+              {link.label}
+            </a>
           ))}
         </nav>
       );
@@ -149,7 +162,7 @@
       );
     }
 
-    function ClientTable({ rows, loading, expanded, onToggle, onEmailProof }) {
+    function ClientTable({ rows, loading, statsAvailable = true, expanded, onToggle, onEmailProof }) {
       return (
         <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-xs">
@@ -165,10 +178,10 @@
                   <React.Fragment key={row.client}>
                     <tr className="border-b border-[#1A1A2E]/20">
                       <td className="p-3 font-black">{row.client}</td>
-                      <td className="p-3 font-mono">{row.applications}</td>
-                      <td className="p-3">{(row.submitted ?? row.completed) ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:submitted`)}>{row.submitted ?? row.completed}</button> : <span className="font-mono">0</span>}</td>
+                      <td className="p-3 font-mono">{statsAvailable ? row.applications ?? 0 : '—'}</td>
+                      <td className="p-3">{!statsAvailable ? <span className="font-mono">—</span> : (row.submitted ?? row.completed) ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:submitted`)}>{row.submitted ?? row.completed}</button> : <span className="font-mono">0</span>}</td>
                       <td className="p-3">{row.pending ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:pending`)}>{row.pending}</button> : <span className="font-mono">0</span>}</td>
-                      <td className="p-3">{row.failed ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:failed`)}>{row.failed}</button> : <span className="font-mono">0</span>}</td>
+                      <td className="p-3">{!statsAvailable ? <span className="font-mono">—</span> : row.failed ? <button type="button" className="font-mono underline" onClick={() => onToggle(`${row.client}:failed`)}>{row.failed}</button> : <span className="font-mono">0</span>}</td>
                       <td className="p-3 text-[#64748B]">{row.assignedTo || '—'}</td>
                     </tr>
                     {openKey && (
@@ -424,6 +437,7 @@
                     ['Operators', overview.operators],
                     ['Active operators', overview.activeOperators],
                     ['Inactive operators', overview.inactiveOperators],
+                    ['Total Applications', overview.totalApplications],
                     ['Submitted', overview.submitted ?? overview.completed],
                     ['Applied', overview.applied],
                     ['Running', overview.running],
@@ -435,10 +449,12 @@
                   ].map(([label, val]) => (
                     <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
                       <p className="text-xs font-bold uppercase">{label}</p>
-                      <p className="text-2xl font-black mt-1">{val ?? 0}</p>
+                      <p className="text-2xl font-black mt-1">{overview.statsAvailable === false && ['Total Applications', 'Submitted', 'Applied', 'Failed'].includes(label) ? '—' : val ?? 0}</p>
                     </div>
                   ))}
                 </div>
+                {overview.statsAvailable === false && <p role="status" className="mb-6 text-sm text-[#64748B]">Application statistics before {overview.statsAvailableFrom || 'the cutover date'} are unavailable.</p>}
+                {overview.statsAvailable !== false && overview.statsPartial && <p role="status" className="mb-6 text-sm text-[#64748B]">Partial statistics: dates before {overview.statsAvailableFrom || 'the cutover date'} are excluded.</p>}
                 <div className="bg-white border-2 border-[#1A1A2E] rounded">
                   <h2 className="p-3 font-black uppercase text-xs border-b-2 border-[#1A1A2E] bg-[#FAF4EB]">Recent activity</h2>
                   <ul className="text-xs divide-y divide-[#1A1A2E]/20">
@@ -456,7 +472,7 @@
               <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-xs">
                   <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-                    <tr>{['Manager', 'Operators', 'Clients', 'Apps', 'Status'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+                    <tr>{['Manager', 'Operators', 'Clients', 'Apps since cutover', 'Status'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
                   </thead>
                   <tbody>
                     {managers.map((manager) => (
@@ -467,7 +483,7 @@
                         </td>
                         <td className="p-3 font-mono">{manager.assignedOperators ?? 0}</td>
                         <td className="p-3 font-mono">{manager.assignedClients ?? 0}</td>
-                        <td className="p-3 font-mono">{manager.applications ?? 0}</td>
+                        <td className="p-3 font-mono" title={manager.statsAvailableFrom ? `Available from ${manager.statsAvailableFrom}` : 'Stats cutover is not active'}>{manager.statsAvailable === false ? '—' : manager.applications ?? 0}</td>
                         <td className="p-3 uppercase font-bold">{manager.status || '—'}</td>
                       </tr>
                     ))}
@@ -481,11 +497,19 @@
                 <button type="button" className="text-xs font-bold underline" onClick={() => setSelectedManager(null)}>← All managers</button>
                 <p className="text-sm font-black">{selectedManager}</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[['Submitted', managerDash.submitted ?? managerDash.completed], ['Applied', managerDash.totals?.applied], ['Pending', managerDash.totals?.pending], ['Failed', managerDash.totals?.failed]].map(([label, val]) => (
-                    <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-3"><p className="text-[10px] font-bold uppercase">{label}</p><p className="text-xl font-black">{val ?? 0}</p></div>
+                  {[
+                    ['Total Applications', managerDash.totals?.applications],
+                    ['Submitted', managerDash.submitted ?? managerDash.completed],
+                    ['Applied', managerDash.totals?.applied],
+                    ['Pending', managerDash.totals?.pending],
+                    ['Failed', managerDash.totals?.failed],
+                  ].map(([label, val]) => (
+                    <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-3"><p className="text-[10px] font-bold uppercase">{label}</p><p className="text-xl font-black">{managerDash.statsAvailable === false && label !== 'Pending' ? '—' : val ?? 0}</p></div>
                   ))}
                 </div>
-                <ClientTable rows={managerDash.rows || []} loading={loading} expanded={expanded} onToggle={(key) => setExpanded(expanded === key ? null : key)} onEmailProof={setEmailProof} />
+                {managerDash.statsAvailable === false && <p className="bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">Application statistics before {managerDash.statsAvailableFrom || 'the cutover date'} are unavailable.</p>}
+                {managerDash.statsAvailable !== false && managerDash.statsPartial && <p className="bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">Partial statistics: dates before {managerDash.statsAvailableFrom || 'the cutover date'} are excluded.</p>}
+                <ClientTable rows={managerDash.rows || []} loading={loading} statsAvailable={managerDash.statsAvailable !== false} expanded={expanded} onToggle={(key) => setExpanded(expanded === key ? null : key)} onEmailProof={setEmailProof} />
               </div>
             )}
 

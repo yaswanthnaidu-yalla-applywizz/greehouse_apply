@@ -40,6 +40,8 @@ import {
   sessionRole,
   isOpsMode,
 } from './hooks/useSession.js';
+import { DevSwitcher } from './components/DevSwitcher.js';
+import { HeaderSignOut } from './components/HeaderSignOut.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -126,7 +128,6 @@ export const App: React.FC = () => {
     const role = sessionRole();
     if (role === 'dev') {
       if (sessionStorage.getItem('applywizz_dev_operator_view') === 'true') {
-        sessionStorage.removeItem('applywizz_dev_operator_view');
         return;
       }
       window.location.replace('/dev');
@@ -232,6 +233,9 @@ export const App: React.FC = () => {
     setWorkHistoryBannerDismissed(false);
     setNoCandidatesMessage(null);
     setCurrentUser(null);
+    try {
+      sessionStorage.removeItem('applywizz_dev_operator_view');
+    } catch {}
     await sessionSignOut();
   };
 
@@ -715,16 +719,16 @@ export const App: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="flex items-center justify-center min-h-screen w-screen bg-[#FFF5EB] p-4 select-none font-sans">
+      <div className="flex items-center justify-center min-h-screen w-screen bg-[#0a0a0a] p-4 select-none font-sans">
         <AuthView onAuthSuccess={(user) => setCurrentUser(user)} apiBaseUrl={API_BASE_URL} />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#FFF5EB] text-[#1A1A2E] font-sans overflow-hidden select-none">
+    <div className="flex flex-col h-screen w-screen bg-[#0a0a0a] text-[#ffffff] font-sans overflow-hidden select-none">
       {opsMode && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#E2F0FB] border-b-2 border-[#1A1A2E] text-xs font-bold shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-[#1c1c1e] border-b border-[#2c2c2e] text-xs font-semibold shrink-0 text-[#0a84ff]">
           <span>
             {opsManagerEmail
               ? `👤 Viewing as Operator — Manager mode active (${opsManagerEmail})`
@@ -732,7 +736,7 @@ export const App: React.FC = () => {
           </span>
           <button
             type="button"
-            className="underline text-[#1E3A5F] hover:text-[#1A1A2E] cursor-pointer font-bold"
+            className="underline text-[#0a84ff] hover:text-[#ffffff] cursor-pointer font-semibold"
             onClick={() => {
               sessionStorage.removeItem('applywizz_manager_view_as_operator');
               sessionStorage.removeItem('applywizz_view_as_manager_email');
@@ -746,34 +750,34 @@ export const App: React.FC = () => {
         </div>
       )}
       {/* Top Navigation & Brand Header */}
-      <header className="h-16 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] flex items-center justify-between px-6 flex-shrink-0">
+      <header className="h-16 bg-[#0a0a0a] border-b border-[#2c2c2e] flex items-center justify-between px-6 flex-shrink-0">
         {/* Left: Brand Logo & Navigation Links */}
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2.5">
             <img
               src="/logo.webp"
               alt="ApplyWizz"
-              className="w-8 h-8 rounded-md border-2 border-[#1A1A2E] object-cover bg-black"
+              className="w-8 h-8 rounded-lg border border-[#2c2c2e] object-cover bg-black"
             />
             <div>
-              <span className="text-sm font-black tracking-tight text-[#1A1A2E] uppercase">
+              <span className="text-sm font-bold tracking-tight text-[#ffffff] uppercase">
                 ApplyWizz
               </span>
-              <span className="text-[10px] block font-mono text-[#64748B] font-bold">
+              <span className="text-[10px] block font-mono text-[#8e8e93] font-medium">
                 Auto Apply V2
               </span>
             </div>
           </div>
 
           {/* Navigation Tabs (Dashboard / Stats) */}
-          <nav className="hidden md:flex items-center gap-2 bg-white border border-[#1A1A2E] rounded-md p-1">
+          <nav className="hidden md:flex items-center gap-1 bg-[#1c1c1e] border border-[#2c2c2e] rounded-lg p-1">
             <button
               type="button"
               onClick={() => setActiveTab('dashboard')}
-              className={`px-3 py-1 text-xs font-bold rounded transition-all ${
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
                 activeTab === 'dashboard'
-                  ? 'bg-[#E88474] text-black'
-                  : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
+                  ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+                  : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
               }`}
             >
               Dashboard
@@ -781,22 +785,23 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setActiveTab('stats')}
-              className={`px-3 py-1 text-xs font-bold rounded transition-all ${
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
                 activeTab === 'stats'
-                  ? 'bg-[#E88474] text-black'
-                  : 'text-[#1A1A2E] hover:bg-[#FAF4EB]'
+                  ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+                  : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
               }`}
             >
               Stats
             </button>
           </nav>
+          <DevSwitcher current="/" />
         </div>
 
         {/* Right: Metrics Pills, Notifications & User Avatar */}
         <div className="flex items-center gap-3">
           {/* Date Scope Filter (IST) */}
-          <div className="flex items-center gap-1.5 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded">
-            <span className="text-xs font-mono font-bold text-[#64748B]">📅 IST:</span>
+          <div className="flex items-center gap-1.5 bg-[#1c1c1e] border border-[#2c2c2e] px-2.5 py-1 rounded-md">
+            <span className="text-xs font-mono font-medium text-[#8e8e93]">📅 IST:</span>
             <input
               type="date"
               value={selectedDate}
@@ -806,28 +811,20 @@ export const App: React.FC = () => {
                 }
               }}
               title="Filter dashboard by assignments on this IST date"
-              className="text-xs font-mono font-bold text-[#1A1A2E] bg-transparent border-none outline-none cursor-pointer"
+              className="text-xs font-mono font-medium text-[#ffffff] bg-transparent border-none outline-none cursor-pointer"
             />
           </div>
 
           {stats && (
             <div className="hidden lg:flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-[#F4D66B] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5C4A0A]">
+              <div className="flex items-center gap-1.5 bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#8e8e93]">
                 <span>Candidates:</span>
-                <span>{stats.totalCandidates}</span>
+                <span className="text-[#ffffff] font-semibold">{stats.totalCandidates}</span>
               </div>
 
-              <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E3A5F]">
+              <div className="flex items-center gap-1.5 bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#8e8e93]">
                 <span>Jobs:</span>
-                <span>{stats.totalApplications}</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 bg-[#9AC89A] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E4620]">
-                <span>🌿 supabase: {stats.supabasePercentage}%</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 bg-[#EDE9FE] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#5B21B6]">
-                <span>🔮 ai: {stats.aiPercentage}%</span>
+                <span className="text-[#ffffff] font-semibold">{stats.totalApplications}</span>
               </div>
             </div>
           )}
@@ -837,7 +834,7 @@ export const App: React.FC = () => {
             onClick={handleRefresh}
             disabled={isRefreshing}
             title="Refresh Data"
-            className="text-xs bg-white hover:bg-[#FAF4EB] text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all disabled:opacity-60"
+            className="text-xs bg-[#1c1c1e] hover:bg-[#2c2c2e] text-[#8e8e93] hover:text-[#ffffff] border border-[#2c2c2e] px-2.5 py-1 rounded-md active:translate-x-[1px] active:translate-y-[1px] font-semibold transition-all disabled:opacity-60"
           >
             <span className={isRefreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
           </button>
@@ -848,22 +845,22 @@ export const App: React.FC = () => {
               type="button"
               onClick={() => setIsNotifOpen((prev) => !prev)}
               title="Notifications"
-              className="relative p-1.5 bg-white border border-[#1A1A2E] rounded cursor-pointer hover:bg-[#FAF4EB] transition-colors"
+              className="relative p-1.5 bg-[#1c1c1e] border border-[#2c2c2e] rounded-md cursor-pointer hover:bg-[#2c2c2e] transition-colors"
             >
               <span className="text-xs">🔔</span>
               {unreadNotifsCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#EF4444] text-white text-[10px] font-black rounded-full flex items-center justify-center border border-[#1A1A2E]">
+                <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 bg-[#ff453a] text-white text-[10px] font-black rounded-full flex items-center justify-center border border-[#1c1c1e]">
                   {unreadNotifsCount > 9 ? '9+' : unreadNotifsCount}
                 </span>
               )}
             </button>
 
             {isNotifOpen && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border-2 border-[#1A1A2E] rounded-xl z-50 overflow-hidden animate-fadeIn">
-                <div className="flex items-center justify-between px-3.5 py-2.5 bg-[#FFF5EB] border-b-2 border-[#1A1A2E]">
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl z-50 overflow-hidden animate-fadeIn shadow-2xl">
+                <div className="flex items-center justify-between px-3.5 py-2.5 bg-[#141416] border-b border-[#2c2c2e]">
                   <div className="flex items-center gap-2">
                     <span className="text-sm">🔔</span>
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-[#ffffff]">
                       Notifications {unreadNotifsCount > 0 && `(${unreadNotifsCount} new)`}
                     </span>
                   </div>
@@ -872,7 +869,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={markAllNotifsAsRead}
-                        className="text-[10px] font-bold text-[#64748B] hover:text-[#1A1A2E] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded"
+                        className="text-[10px] font-semibold text-[#8e8e93] hover:text-[#ffffff] bg-[#2c2c2e] border border-[#3a3a3c] px-2 py-0.5 rounded-md"
                       >
                         Mark all read
                       </button>
@@ -881,7 +878,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={clearAllNotifs}
-                        className="text-[10px] font-bold text-[#EF4444] hover:text-[#B91C1C] bg-white border border-[#1A1A2E] px-1.5 py-0.5 rounded"
+                        className="text-[10px] font-semibold text-[#ff453a] hover:text-[#ffffff] bg-[#ff453a]/15 border border-[#ff453a]/30 px-2 py-0.5 rounded-md"
                       >
                         Clear
                       </button>
@@ -889,7 +886,7 @@ export const App: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setIsNotifOpen(false)}
-                      className="text-[#64748B] hover:text-[#1A1A2E] text-xs font-bold px-1"
+                      className="text-[#8e8e93] hover:text-[#ffffff] text-xs font-bold px-1"
                     >
                       ✕
                     </button>
@@ -898,7 +895,7 @@ export const App: React.FC = () => {
 
                 <div className="max-h-80 overflow-y-auto p-2.5 space-y-2 custom-scrollbar">
                   {notifications.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-[#64748B]">
+                    <div className="p-6 text-center text-xs text-[#8e8e93]">
                       No notifications yet. Alerts for succeeded and failed applications will appear here.
                     </div>
                   ) : (
@@ -916,26 +913,26 @@ export const App: React.FC = () => {
                           }}
                           className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
                             isApplying
-                              ? 'bg-[#EFF6FF] border-[#BFDBFE] hover:border-[#3B82F6]'
+                              ? 'bg-[#2c2c2e] border-[#0a84ff]/40 hover:border-[#0a84ff]'
                               : isSuccess
-                              ? 'bg-[#F0FDF4] border-[#86EFAC] hover:border-[#10B981]'
-                              : 'bg-[#FEF2F2] border-[#FECACA] hover:border-[#EF4444]'
-                          } ${isUnread ? 'border-l-4 border-l-[#2563eb]' : 'opacity-85'}`}
+                              ? 'bg-[#2c2c2e] border-[#30d158]/40 hover:border-[#30d158]'
+                              : 'bg-[#2c2c2e] border-[#ff453a]/40 hover:border-[#ff453a]'
+                          } ${isUnread ? 'border-l-4 border-l-[#0a84ff]' : 'opacity-85'}`}
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span
                               className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                 isApplying
-                                  ? 'bg-[#DBEAFE] text-[#1D4ED8] border border-[#93C5FD]'
+                                  ? 'bg-[#0a84ff]/15 text-[#0a84ff] border border-[#0a84ff]/30'
                                   : isSuccess
-                                  ? 'bg-[#DCFCE7] text-[#166534] border border-[#86EFAC]'
-                                  : 'bg-[#FEE2E2] text-[#991B1B] border border-[#FECACA]'
+                                  ? 'bg-[#30d158]/15 text-[#30d158] border border-[#30d158]/30'
+                                  : 'bg-[#ff453a]/15 text-[#ff453a] border border-[#ff453a]/30'
                               }`}
                             >
                               {isApplying ? '⏳ Applying' : isSuccess ? '✅ Succeeded' : '❌ Failed'}
                             </span>
                             <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-[#64748B] font-mono">
+                              <span className="text-[10px] text-[#8e8e93] font-mono">
                                 {notif.timestamp ? new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                               </span>
                               <button
@@ -945,32 +942,32 @@ export const App: React.FC = () => {
                                   clearNotification(notif.id);
                                 }}
                                 title="Dismiss notification"
-                                className="text-[10px] text-[#94A3B8] hover:text-[#EF4444] px-1 py-0.5 rounded hover:bg-white/80 font-bold transition-colors"
+                                className="text-[10px] text-[#8e8e93] hover:text-[#ff453a] px-1 py-0.5 rounded hover:bg-[#3a3a3c] font-bold transition-colors"
                               >
                                 ✕
                               </button>
                             </div>
                           </div>
 
-                          <div className="text-xs font-bold text-[#1A1A2E]">
+                          <div className="text-xs font-semibold text-[#ffffff]">
                             {notif.candidateName || notif.applywizzId}{' '}
-                            <span className="font-mono text-[10px] text-[#64748B] font-normal">
+                            <span className="font-mono text-[10px] text-[#8e8e93] font-normal">
                               ({notif.applywizzId})
                             </span>
                           </div>
 
-                          <div className="text-[11px] text-[#475569] font-medium truncate mt-0.5">
+                          <div className="text-[11px] text-[#8e8e93] font-medium truncate mt-0.5">
                             🏢 {notif.companyName} — {notif.jobTitle}
                           </div>
 
                           {isApplying && (
-                            <div className="mt-1 text-[10px] text-[#1D4ED8] font-mono flex items-center gap-1">
+                            <div className="mt-1 text-[10px] text-[#0a84ff] font-mono flex items-center gap-1">
                               <span className="inline-block animate-spin">⏳</span> Application submission in progress...
                             </div>
                           )}
 
                           {!isSuccess && !isApplying && (
-                            <div className="mt-1.5 p-1.5 bg-white border border-[#EF4444]/40 rounded text-[11px] text-[#991B1B] font-mono break-words leading-tight">
+                            <div className="mt-1.5 p-1.5 bg-[#1c1c1e] border border-[#ff453a]/30 rounded text-[11px] text-[#ff453a] font-mono break-words leading-tight">
                               <span className="font-bold">Reason: </span>
                               {notif.reason || 'Submission failed or was rejected.'}
                             </div>
@@ -983,7 +980,7 @@ export const App: React.FC = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
-                                className="text-[10px] font-bold text-[#166534] underline hover:text-[#14532D]"
+                                className="text-[10px] font-semibold text-[#30d158] underline hover:text-[#28b84d]"
                               >
                                 View Proof Screenshot ↗
                               </a>
@@ -997,7 +994,7 @@ export const App: React.FC = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
-                                className="text-[10px] font-bold text-[#991B1B] underline hover:text-[#7F1D1D]"
+                                className="text-[10px] font-semibold text-[#ff453a] underline hover:text-[#ff453a]/80"
                               >
                                 View Failure Screenshot ↗
                               </a>
@@ -1013,29 +1010,13 @@ export const App: React.FC = () => {
           </div>
 
           {/* User Profile Avatar & Sign Out */}
-          <div className="flex items-center gap-2 bg-white border border-[#1A1A2E] px-2.5 py-1 rounded">
-            <div className="w-5 h-5 rounded-full bg-[#E88474] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-black text-white uppercase">
-              {currentUser?.email ? currentUser.email.charAt(0) : 'U'}
-            </div>
-            <span className="text-xs font-bold text-[#1A1A2E] max-w-[130px] truncate hidden sm:inline" title={currentUser?.email}>
-              {currentUser?.email || 'Operator'}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleSignOut}
-            title="Sign Out"
-            className="text-xs bg-[#FFF5EB] hover:bg-[#E88474] hover:text-white text-[#1A1A2E] border border-[#1A1A2E] px-2.5 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] font-bold transition-all"
-          >
-            Sign Out
-          </button>
+          <HeaderSignOut onSignOut={handleSignOut} />
         </div>
       </header>
 
       {/* Work-History Unreachable Top Banner */}
       {workHistoryUnreachable && !workHistoryBannerDismissed && (
-        <div className="bg-[#FEF3C7] border-b-2 border-[#1A1A2E] px-6 py-2 text-xs font-bold text-[#92400E] flex items-center justify-between flex-shrink-0">
+        <div className="bg-[#ff9f0a]/10 border-b border-[#ff9f0a]/30 px-6 py-2 text-xs font-bold text-[#ff9f0a] flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
             <span>⚠️</span>
             <span>Work-history API unreachable — showing last known assigned candidates.</span>
@@ -1043,7 +1024,7 @@ export const App: React.FC = () => {
           <button
             type="button"
             onClick={() => setWorkHistoryBannerDismissed(true)}
-            className="text-[#92400E] hover:text-[#1A1A2E] text-sm font-black transition-opacity"
+            className="text-[#ff9f0a] hover:text-white text-sm font-bold transition-colors"
             title="Dismiss warning"
           >
             ✕
@@ -1053,16 +1034,16 @@ export const App: React.FC = () => {
 
       {/* Real-time Worker Failure Banner / Toast */}
       {failureAlert && (
-        <div className="bg-[#FEE2E2] border-b-2 border-[#EF4444] px-6 py-3 text-xs font-bold text-[#991B1B] flex items-center justify-between flex-shrink-0 animate-fadeIn">
+        <div className="bg-[#ff453a]/10 border-b border-[#ff453a]/30 px-6 py-3 text-xs font-bold text-[#ff453a] flex items-center justify-between flex-shrink-0 animate-fadeIn">
           <div className="flex items-center gap-2.5">
             <span className="text-base">🚨</span>
             <div>
-              <span className="font-black uppercase tracking-wider text-[#7F1D1D]">Submission Failed: </span>
-              <span>
+              <span className="font-bold uppercase tracking-wider text-[#ff453a]">Submission Failed: </span>
+              <span className="text-white">
                 {failureAlert.companyName ? `${failureAlert.companyName} — ` : ''}
                 {failureAlert.reason}
               </span>
-              <span className="ml-2 font-mono font-normal text-[11px] text-[#B91C1C]">
+              <span className="ml-2 font-mono font-normal text-[11px] text-[#8e8e93]">
                 ({new Date(failureAlert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})
               </span>
             </div>
@@ -1070,7 +1051,7 @@ export const App: React.FC = () => {
           <button
             type="button"
             onClick={() => setFailureAlert(null)}
-            className="text-[#991B1B] hover:text-[#7F1D1D] text-sm font-black px-1.5 py-0.5 rounded hover:bg-white/50 transition-colors"
+            className="text-[#ff453a] hover:text-white text-sm font-bold px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors"
             title="Dismiss alert"
           >
             ✕
@@ -1081,142 +1062,128 @@ export const App: React.FC = () => {
       {/* Main Workspace (Split-screen Dashboard or Stats View) */}
       <div className={`flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full custom-scrollbar ${activeTab === 'stats' ? '' : 'hidden'}`}>
         <div className="mb-6">
-          <h2 className="text-2xl font-black text-[#1A1A2E]">Application Pipeline Stats</h2>
-          <p className="text-xs text-[#64748B] font-mono mt-0.5">
+          <h2 className="text-2xl font-bold text-[#ffffff]">Application Pipeline Stats</h2>
+          <p className="text-xs text-[#8e8e93] font-mono mt-0.5">
             Real-time throughput metrics, resolution tier breakdowns, and submission telemetry.
           </p>
         </div>
+        {stats?.statsAvailable === false && (
+          <p className="mb-4 rounded-xl border border-[#ff9f0a]/40 bg-[#ff9f0a]/15 p-3 text-xs font-semibold text-[#ff9f0a]">
+            Application statistics before {stats.statsAvailableFrom || 'the cutover date'} are unavailable.
+          </p>
+        )}
+        {stats?.statsAvailable !== false && stats?.statsPartial && (
+          <p className="mb-4 rounded-xl border border-[#ff9f0a]/40 bg-[#ff9f0a]/15 p-3 text-xs font-semibold text-[#ff9f0a]">
+            Partial statistics: dates before {stats.statsAvailableFrom} are excluded.
+          </p>
+        )}
 
         {stats ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-            <div className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#5C4A0A]">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">
                 Total Candidates
               </span>
-              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
+              <div className="text-3xl font-bold text-[#ffffff] mt-2">
                 {stats.totalCandidates}
               </div>
-              <div className="text-[11px] font-mono text-[#5C4A0A] mt-1">
+              <div className="text-[11px] font-mono text-[#8e8e93] mt-1">
                 Ingested &amp; segregated
               </div>
             </div>
 
-            <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#1E3A5F]">
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">
                 Total Applications
               </span>
-              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                {stats.totalApplications}
+              <div className="text-3xl font-bold text-[#ffffff] mt-2">
+                {stats.statsAvailable === false ? '—' : stats.totalApplications}
               </div>
-              <div className="text-[11px] font-mono text-[#1E3A5F] mt-1">
+              <div className="text-[11px] font-mono text-[#8e8e93] mt-1">
                 Active job assignments
               </div>
             </div>
 
-            <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#065F46]">
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#30d158]">
                 Successful Applications
               </span>
-              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                {stats.successfulApplications ?? 0}
+              <div className="text-3xl font-bold text-[#ffffff] mt-2">
+                {stats.statsAvailable === false ? '—' : stats.successfulApplications ?? 0}
               </div>
-              <div className="text-[11px] font-mono text-[#065F46] mt-1">
-                Submitted with APPLIED status
+              <div className="text-[11px] font-mono text-[#30d158] mt-1">
+                APPLIED or EMAIL_PROOF_PENDING
               </div>
             </div>
 
-            <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#991B1B]">
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#ff453a]">
                 Failed Applications
               </span>
-              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                {stats.failedApplications ?? 0}
+              <div className="text-3xl font-bold text-[#ffffff] mt-2">
+                {stats.statsAvailable === false ? '—' : stats.failedApplications ?? 0}
               </div>
-              <div className="text-[11px] font-mono text-[#991B1B] mt-1">
+              <div className="text-[11px] font-mono text-[#ff453a] mt-1">
                 Terminal FAILED submissions
-              </div>
-            </div>
-
-            <div className="bg-[#E2F5E2] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#1E4620]">
-                Supabase Cache
-              </span>
-              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                {stats.supabasePercentage}%
-              </div>
-              <div className="text-[11px] font-mono text-[#1E4620] mt-1">
-                {stats.supabaseTaggedCount} fields (0 API calls)
-              </div>
-            </div>
-
-            <div className="bg-[#FFEAE8] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#6B2C2C]">
-                AI Synthesis
-              </span>
-              <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                {stats.aiPercentage}%
-              </div>
-              <div className="text-[11px] font-mono text-[#6B2C2C] mt-1">
-                {stats.aiTaggedCount} fields synthesized
               </div>
             </div>
           </div>
         ) : (
-          <div className="p-8 text-center text-xs font-mono text-[#64748B]">Loading statistics...</div>
+          <div className="p-8 text-center text-xs font-mono text-[#8e8e93]">Loading statistics...</div>
         )}
       </div>
 
       <div className={`flex flex-1 overflow-hidden ${activeTab === 'dashboard' ? '' : 'hidden'}`}>
-          {/* Left Pane: Candidates Directory */}
-          <CandidateList
-            candidates={candidates}
-            selectedId={selectedCandidateId}
-            onSelectCandidate={(id) => setSelectedCandidateId((prev) => (prev === id ? null : id))}
-            isLoading={isLoadingCandidates || isAuthHydrating}
-            emptyMessage={noCandidatesMessage}
-            selectedDate={selectedDate}
-          />
+        {/* Left Pane: Candidates Directory */}
+        <CandidateList
+          candidates={candidates}
+          selectedId={selectedCandidateId}
+          onSelectCandidate={(id) => setSelectedCandidateId((prev) => (prev === id ? null : id))}
+          isLoading={isLoadingCandidates || isAuthHydrating}
+          emptyMessage={noCandidatesMessage}
+          selectedDate={selectedDate}
+        />
 
-          {/* Right Pane: Candidate Jobs Queue & Form Renderer */}
-          <main className="flex-1 flex flex-col bg-[#FFF5EB] overflow-hidden">
-            {candidateDetail ? (
-              <>
-                {/* Right Top: Job Queue Tabs */}
-                <JobQueueView
-                  candidate={candidateDetail}
-                  selectedApplywizzId={selectedCandidateId}
-                  selectedJobUrl={selectedJobUrl}
-                  onSelectJob={(url) => {
-                    setSelectedJobUrl(url);
-                    if (!url) {
-                      setApplication(null);
-                      setIsLoadingApplication(false);
-                    }
-                  }}
-                />
+        {/* Right Pane: Candidate Jobs Queue & Form Renderer */}
+        <main className="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden">
+          {candidateDetail ? (
+            <>
+              {/* Right Top: Job Queue Tabs */}
+              <JobQueueView
+                candidate={candidateDetail}
+                selectedApplywizzId={selectedCandidateId}
+                selectedJobUrl={selectedJobUrl}
+                onSelectJob={(url) => {
+                  setSelectedJobUrl(url);
+                  if (!url) {
+                    setApplication(null);
+                    setIsLoadingApplication(false);
+                  }
+                }}
+              />
 
-                {/* Right Main: Form Renderer */}
-                <FormRenderer
-                  key={selectedJobUrl || 'no-job'}
-                  application={application}
-                  isLoading={isLoadingApplication}
-                  candidateName={candidateDetail.clientName}
-                  apiBaseUrl={API_BASE_URL}
-                  onFieldUpdate={handleFieldUpdate}
-                  onStatusChange={handleStatusChange}
-                />
-              </>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-[#64748B]">
-                <div className="text-4xl mb-2">👤</div>
-                <p className="text-sm font-bold text-[#1A1A2E]">No Candidate Selected</p>
-                <p className="text-xs text-[#64748B] mt-1 font-medium">
-                  Select a candidate from the left directory to view assigned applications.
-                </p>
-              </div>
-            )}
-          </main>
-        </div>
+              {/* Right Main: Form Renderer */}
+              <FormRenderer
+                key={selectedJobUrl || 'no-job'}
+                application={application}
+                isLoading={isLoadingApplication}
+                candidateName={candidateDetail.clientName}
+                apiBaseUrl={API_BASE_URL}
+                onFieldUpdate={handleFieldUpdate}
+                onStatusChange={handleStatusChange}
+              />
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-[#8e8e93]">
+              <div className="text-4xl mb-2">👤</div>
+              <p className="text-sm font-semibold text-[#ffffff]">No Candidate Selected</p>
+              <p className="text-xs text-[#8e8e93] mt-1 font-medium">
+                Select a candidate from the left directory to view assigned applications.
+              </p>
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 };
