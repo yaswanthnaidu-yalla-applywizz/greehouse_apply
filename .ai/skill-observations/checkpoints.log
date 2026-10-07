@@ -500,3 +500,4 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 2026-10-07 resumed session-start scan: files=14 parsed=14
 2026-10-07 deliverable flush: sandbox CA assignment implemented; focused regression tests pass; full typecheck/build blocked by pre-existing missing QuestionLimitExceededError export; no new observations
 2026-10-07 session-start scan: files=14 parsed=14
+2026-10-07 deliverable flush: repaired CI question-limit export; local typecheck/build/CI unit suite passed; GitHub push and PR runs all green including Docker build; no new observations
