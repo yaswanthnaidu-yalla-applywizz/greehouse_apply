@@ -10,6 +10,7 @@ import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
+import { isPhoneNumberField } from './candidateEvidence.js';
  
 const log = createLogger('Tier 1 Supabase');
 
@@ -39,50 +40,33 @@ function matchBestOption(targetValue: string, options?: string[], _label = targe
     return targetValue;
   }
 
-  const normTarget = normalizeText(targetValue);
-
-  // 1. Exact match
-  for (const opt of options) {
-    if (normalizeText(opt) === normTarget) {
-      return opt;
-    }
-  }
-
-  // 2. Special dial code match if target is +1 or +91
+  // Special dial-code options can contain labels such as "+1 United States".
   if (/^\+?\d{1,3}$/.test(targetValue.trim())) {
     const cleanDigits = targetValue.replace(/\D/g, '');
-    for (const opt of options) {
-      if (new RegExp(`(\\+|\\b)${cleanDigits}\\b`).test(opt)) {
-        return opt;
-      }
-    }
+    const matches = options.filter((option) => new RegExp(`(?:\\+|\\b)${cleanDigits}\\b`).test(option));
+    if (matches.length === 1) return matches[0];
   }
 
-  // 3. Substring match
-  for (const opt of options) {
-    const normOpt = normalizeText(opt);
-    if (normOpt.includes(normTarget) || normTarget.includes(normOpt)) {
-      return opt;
-    }
-  }
+  return matchChoiceOption(targetValue, options);
+}
 
-  // 4. Boolean heuristics (Yes/No / Agree)
-  if (normTarget === 'yes' || normTarget === 'true' || normTarget === '1' || normTarget === 'agree') {
-    const yesOpt = options.find((o) => /^(yes|agree|i agree|accept|i accept|true|i acknowledge)/i.test(o.trim()) || o.trim() === '1');
-    if (yesOpt) return yesOpt;
+export function isCountryField(field: ScannedField): boolean {
+  const normalizedLabel = normalizeText(field.label);
+  const normalizedName = normalizeText(field.name);
+  const normalizedId = normalizeText(field.fieldId);
+  if (/\b(?:phone|dialing|calling|code)\b/.test(`${normalizedName} ${normalizedId}`)) {
+    return false;
   }
-  if (normTarget === 'no' || normTarget === 'false' || normTarget === '0' || normTarget === 'disagree') {
-    const noOpt = options.find((o) => /^(no|disagree|i disagree|decline|false|do not)/i.test(o.trim()) || o.trim() === '0');
-    if (noOpt) return noOpt;
+  if (/^(?:do|does|did|are|is|will|would|can|could|have|has)\b/.test(normalizedLabel)) {
+    return false;
   }
-
-  // 5. Fuzzy option match
-  const fuse = new Fuse(options, { threshold: 0.6 });
-  const results = fuse.search(targetValue);
-  if (results.length > 0) {
-    return results[0].item;
-  }
-  return null;
+  return (
+    normalizedName === 'country' ||
+    normalizedId === 'country' ||
+    /^(?:(?:candidate|current|residential)\s+)?country(?:\s+of\s+(?:residence|residency))?$/.test(
+      normalizedLabel
+    )
+  );
 }
 
 function normalizeProfileUrl(value: string | null | undefined): string | null {
@@ -237,8 +221,6 @@ function resolveStandardProfileAttribute(
   const normName = normalizeText(field.name);
   const normId = normalizeText(field.fieldId);
   const combined = `${normLabel} ${normName} ${normId}`;
-  const isYaswanth = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-YASWANTH';
-  const isAkshitha = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-31428' || (profile.client_name || '').toLowerCase().includes('akshitha');
 
   // Cover Letter - NEVER fill or upload cover letters per policy
   if (/cover\s*letter|cover_letter/i.test(combined)) {
@@ -261,19 +243,19 @@ function resolveStandardProfileAttribute(
     normName === 'phone_country_code' ||
     /phone.*country|country.*phone/i.test(combined)
   ) {
-    const targetCountry = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'India'));
+    const targetCountry = profile.country?.trim();
+    const targetCode = profile.country_code?.trim();
+    if (!targetCountry && !targetCode) return null;
     if (field.options && field.options.length > 0) {
-      const countryMatch = matchBestOption(targetCountry, field.options, field.label);
+      const countryMatch = targetCountry
+        ? matchBestOption(targetCountry, field.options, field.label)
+        : null;
       if (countryMatch) return countryMatch;
-      const codeMatch = matchBestOption(
-        isYaswanth ? '+91' : (profile.country_code || (isAkshitha ? '+1' : '+91')),
-        field.options,
-        field.label
-      );
+      const codeMatch = targetCode ? matchBestOption(targetCode, field.options, field.label) : null;
       if (codeMatch) return codeMatch;
       return null;
     }
-    return targetCountry;
+    return targetCountry || null;
   }
 
   // Calling Code / Dialing Code
@@ -284,23 +266,14 @@ function resolveStandardProfileAttribute(
     normName === 'dialing_code' ||
     /calling.*code|dialing.*code/i.test(combined)
   ) {
-    const targetCode = isYaswanth ? '+91' : (profile.country_code || (isAkshitha ? '+1' : '+91'));
+    const targetCode = profile.country_code?.trim();
+    if (!targetCode) return null;
     if (field.options && field.options.length > 0) {
       const codeMatch = matchBestOption(targetCode, field.options, field.label);
       if (codeMatch) return codeMatch;
       return null;
     }
     return targetCode;
-  }
-
-  // Country (direct check before generic text matching)
-  if (
-    normId === 'country' ||
-    normName === 'country' ||
-    /^(candidate|current)?\s*country(\s*of\s*residence)?$/i.test(normLabel)
-  ) {
-    const targetCountry = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'India'));
-    return matchBestOption(targetCountry, field.options, field.label);
   }
 
   // First Name
@@ -354,18 +327,6 @@ function resolveStandardProfileAttribute(
       return profile.company_email.trim();
     }
     return getCompanyEmail(profile);
-  }
-
-  // Phone (stripping +1 or +91 so Greenhouse country prefix is not duplicated)
-  if (/phone|mobile|contact number/i.test(combined)) {
-    if (profile.phone) {
-      let clean = profile.phone.trim();
-      clean = clean.replace(/^\+?91[\s.-]*/, '').replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
-      if (clean.replace(/\D/g, '').length >= 7) {
-        return clean;
-      }
-    }
-    return null;
   }
 
   // LinkedIn or GitHub
@@ -484,12 +445,6 @@ function resolveStandardProfileAttribute(
       return profile.location ? extractStateValue(profile.location.trim()) : null;
     }
     return profile.location || null;
-  }
-
-  // Country
-  if (/\bcountry\b|\bnationality\b/i.test(combined)) {
-    const rawVal = isYaswanth ? 'India' : (profile.country || (isAkshitha ? 'United States of America' : 'United States'));
-    return matchBestOption(rawVal, field.options, field.label);
   }
 
   // Demographics / Salary / Experience from raw_api_payload if present
@@ -768,7 +723,13 @@ export function resolveFromPayloadStructured(
     match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa) ??
     match(/graduation year|year of graduation|when did you graduate|expected graduation/, additional.graduation_year) ??
     match(/^discipline$|field of study|major|area of study|degree (in|subject)|main subject/, additional.main_subject) ??
-    match(/start date|available to start|when can you start|earliest start|desired start/, additional.desired_start_date, true) ??
+    (!/\b(?:month|year)\b/.test(normalizedLabel)
+      ? match(
+          /start date|available to start|when can you start|earliest start|desired start/,
+          additional.desired_start_date,
+          true
+        )
+      : null) ??
     matchBoolean(/willing to relocate|open to relocation|relocate/, additional.willing_to_relocate) ??
     matchBoolean(/work (in|from) office|hybrid|in.?office days|3 days/, additional.can_work_3_days_in_office) ??
     matchBoolean(/background (check|screening|investigation consent)/, additional.willing_background_check) ??
@@ -819,14 +780,41 @@ export async function resolveTier1(
   // 1. Check profiles columns directly & standard attributes
   const candidateProfile = profile || (await getProfile(applywizzId));
   if (candidateProfile && isYaswanth) {
-    candidateProfile.country = 'India';
-    candidateProfile.country_code = '+91';
     if (!candidateProfile.location) candidateProfile.location = 'Hyderabad, Telangana, India';
   } else if (candidateProfile && isAkshitha) {
-    if (!candidateProfile.country) candidateProfile.country = 'United States of America';
-    if (!candidateProfile.country_code) candidateProfile.country_code = '+1';
-    if (!candidateProfile.phone) candidateProfile.phone = '940-222-8193';
     if (!candidateProfile.location) candidateProfile.location = 'Dallas, Texas, United States';
+  }
+
+  // Profile phone is not authoritative; Tier 2 extracts the number from resume facts.
+  if (isPhoneNumberField(field)) return null;
+
+  if (isCountryField(field)) {
+    const additional = candidateProfile?.raw_api_payload?.additional_information;
+    const payloadCountry =
+      typeof additional?.zip_or_country === 'string' ? additional.zip_or_country.trim() : '';
+    const candidateCountry =
+      payloadCountry || candidateProfile?.country?.trim() || '';
+    if (!candidateCountry) return null;
+
+    const value =
+      field.type === 'select' || field.type === 'radio'
+        ? matchChoiceOption(candidateCountry, field.options)
+        : candidateCountry;
+    if (!value) return null;
+    log.info(`[Resolver] ✅ T1 ${field.label} → "${value}"`);
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      type: field.type,
+      label: field.label,
+      value,
+      source: 'supabase',
+      resolvedByTier: 1,
+      confidence: 1.0,
+      isRequired: Boolean(field.isRequired),
+      ...(field.options ? { options: field.options } : {}),
+      ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+    };
   }
 
   if (candidateProfile) {

@@ -16,7 +16,11 @@
 
 import { chromium, type Browser, type Page } from 'playwright';
 import { config } from '../config/env.js';
-import { getUnmappedVisibleFields, extractVisibleFormFields } from '../submitter/cascadeDetector.js';
+import {
+  getUnmappedVisibleFields,
+  extractVisibleFormFields,
+  captureFormControlMetadata,
+} from '../submitter/cascadeDetector.js';
 import type {
   ScannedField,
   ScannedFieldType,
@@ -601,7 +605,8 @@ export class PlaywrightScanner {
         }
 
         if (fields.length > 0) {
-          const fieldsWithRequiredState = await markHiddenRequiredFields(page, fields);
+          const fieldsWithMetadata = await captureFormControlMetadata(page, fields);
+          const fieldsWithRequiredState = await markHiddenRequiredFields(page, fieldsWithMetadata);
           const fieldsWithCascades = await this.exploreCascadingFields(page, fieldsWithRequiredState, compactLogs);
           template.fields = await enrichMissingChoiceOptions(
             page,

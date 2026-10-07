@@ -19,8 +19,8 @@ import type {
   ScannedField,
 } from '../types/index.js';
 import { haltWithDevAlert, createLogger } from '../utils/logger.js';
-import { buildPayloadContext } from './profileAdapter.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
+import { buildQuestionRelevantEvidence } from './candidateEvidence.js';
 
 const log = createLogger('LLM Synthesizer');
 
@@ -54,6 +54,7 @@ export interface BatchQuestion {
   /** When set, batch prompt instructs the model to pick one option verbatim. */
   options?: string[];
   optionsComplete?: boolean;
+  candidateEvidence?: string;
 }
 
 /**
@@ -239,6 +240,65 @@ function parseLlmResponse(raw: string): { answer: string; confidence: number | n
   return { answer: cleaned, confidence: null };
 }
 
+function extractJsonValue(text: string): unknown | null {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Model responses sometimes wrap an otherwise valid JSON value in prose.
+  }
+
+  for (let start = 0; start < text.length; start++) {
+    const opener = text[start];
+    if (opener !== '[' && opener !== '{') continue;
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+    for (let end = start; end < text.length; end++) {
+      const char = text[end];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+      } else if (char === '[' || char === '{') {
+        stack.push(char === '[' ? ']' : '}');
+      } else if (char === ']' || char === '}') {
+        if (stack.pop() !== char) break;
+        if (stack.length === 0) {
+          try {
+            return JSON.parse(text.slice(start, end + 1));
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function parseBatchAnswerResponse(raw: string, expectedCount: number): string[] | null {
+  let parsed = extractJsonValue(cleanLLMOutput(raw));
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    if (entries.every(([key]) => /^\d+$/.test(key))) {
+      entries.sort(([left], [right]) => Number(left) - Number(right));
+    }
+    parsed = entries.map(([, value]) => value);
+  }
+  if (!Array.isArray(parsed)) return null;
+
+  const answers = parsed.map((item) =>
+    typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'
+      ? cleanLLMOutput(String(item))
+      : ''
+  );
+  return Array.from({ length: expectedCount }, (_, index) => answers[index] || '');
+}
+
 /**
  * Coerces LLM or heuristic output to strict "Yes" or "No" for binary questions.
  */
@@ -320,68 +380,7 @@ export function matchExactOption(text: string, options?: string[]): string | nul
  * 3. Unique prefix matching
  */
 export function matchFuzzyOption(text: string, options?: string[]): string | null {
-  if (!options || options.length === 0) return null;
-  const rawAnswer = text.trim();
-  if (!rawAnswer) return null;
-
-  const semanticMatch = matchChoiceOption(rawAnswer, options);
-  if (semanticMatch) return semanticMatch;
-
-  // 1. Try normalized comparison: strip punctuation, lowercase, trim both answer and each option
-  const stripPunctuation = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, '').trim();
-  const normAnswer = stripPunctuation(rawAnswer);
-  if (normAnswer) {
-    for (const opt of options) {
-      if (stripPunctuation(opt) === normAnswer) {
-        return opt;
-      }
-    }
-  }
-
-  // 2. Accept a prefix only when it identifies exactly one option.
-  const prefixMatches = options.filter((option) => {
-    const normalizedOption = stripPunctuation(option);
-    return normalizedOption.startsWith(normAnswer) || normAnswer.startsWith(normalizedOption);
-  });
-  if (prefixMatches.length === 1) {
-    return prefixMatches[0];
-  }
-
-  return null;
-}
-
-const EEOC_ALIASES: Record<string, string[]> = {
-  female: ['female', 'woman', 'she/her', 'she / her'],
-  male: ['male', 'man', 'he/him', 'he / him'],
-  asian: ['asian', 'asian (not hispanic or latino)', 'asian or pacific islander'],
-  black: ['black', 'black or african american', 'black (not hispanic or latino)'],
-  white: ['white', 'white (not hispanic or latino)', 'caucasian'],
-  hispanic: ['hispanic', 'hispanic or latino', 'hispanic/latino'],
-  'two or more': ['two or more races', 'multiracial', 'two or more'],
-  'i am not a protected veteran': ['i am not a protected veteran', 'not a veteran', 'none of the above'],
-  'no, i do not have a disability': [
-    'no, i do not have a disability',
-    'no disability',
-    "i don't have a disability",
-    'no, i do not have a disability and have not had one in the past',
-  ],
-  decline: ['decline to self-identify', "i don't wish to answer", 'prefer not to say', 'prefer not to answer', 'choose not to disclose'],
-};
-
-function normalizeAlias(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function matchEeocAliasOption(answer: string, options: string[]): string | null {
-  const normalizedAnswer = normalizeAlias(answer);
-  for (const aliases of Object.values(EEOC_ALIASES)) {
-    if (!aliases.some((alias) => normalizeAlias(alias) === normalizedAnswer)) continue;
-    const matched = options.find((option) =>
-      aliases.some((alias) => normalizeAlias(alias) === normalizeAlias(option))
-    );
-    if (matched) return matched;
-  }
-  return null;
+  return matchChoiceOption(text, options);
 }
 
 /**
@@ -615,20 +614,14 @@ export class LLMSynthesizer {
     if (choiceOptions && choiceOptions.length > 0) {
       if (/gender|race|ethnicity|hispanic|latino|veteran|disability|eeoc/i.test(field.label)) {
         log.debug(
-          `[T5 EEOC] label="${field.label}" llmAnswer="${answer}" options=${JSON.stringify(choiceOptions)}`
+          `[T5 EEOC] label="${field.label}" options=${JSON.stringify(choiceOptions)}`
         );
       }
-      let matched = matchExactOption(answer, choiceOptions);
-      if (!matched) {
-        matched = matchFuzzyOption(answer, choiceOptions);
-      }
-      if (!matched) {
-        matched = matchEeocAliasOption(answer, choiceOptions);
-      }
+      const matched = matchChoiceOption(answer, choiceOptions);
 
       if (!matched) {
         log.warn(
-          `[Resolver] ❌ T5 no option match raw="${answer}" options=${JSON.stringify(choiceOptions)}`
+          `[Resolver] ❌ T5 no option match label="${field.label}" options=${JSON.stringify(choiceOptions)}`
         );
         return unresolvedField(field);
       }
@@ -654,48 +647,29 @@ export class LLMSynthesizer {
    */
   public async synthesizeBatchAnswers(
     questions: BatchQuestion[],
-    resumeText: string,
+    _resumeText: string,
     jobDescription: string,
-    profile?: ApplyWizzCandidateProfile
+    _profile?: ApplyWizzCandidateProfile
   ): Promise<string[]> {
     if (questions.length === 0) return [];
 
-    const payloadContext = profile ? buildPayloadContext(profile) : null;
-    const candidateContext = profile
-      ? `Candidate Information:
-- Full Name: ${profile.clientName}
-- Work Authorization: ${profile.workAuthorization || 'not provided'}
-- Requires Sponsorship: ${profile.requiresSponsorship === true ? 'Yes' : 'No'}
-- Location: ${profile.location || 'not provided'}
-- Education: ${profile.education?.map((e) => `${e.degree} in ${e.fieldOfStudy}`).join(', ') || 'on file'}
-- Work Experience: ${profile.workExperience?.slice(0, 3).map((w) => `${w.title} at ${w.company}`).join(', ') || 'on file'}
-
-`
-      : '';
-
-    const prompt = `Resolve every numbered job application question using only the candidate resume and job description.
+    const prompt = `Resolve every numbered job application question using only the candidate evidence and job description.
 Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
 
 For any question with a complete Options list provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate. If a choice list is marked incomplete, do not treat the captured options as exhaustive; return a concise exact choice supported by candidate data or NONE.
 
-Candidate resume:
-${resumeText.slice(0, 12000)}
-
 Job description:
 ${jobDescription.slice(0, 12000)}
 
-${candidateContext}${payloadContext ? `Candidate Profile:
-${JSON.stringify(payloadContext, null, 2)}
-
-` : ''}Questions:
+Questions:
 ${questions
       .map((question, index) => {
         const opts =
           question.options && question.options.length > 0
-            ? ` Options: ${question.options.join(' | ')}`
+            ? ` ${question.optionsComplete === false ? 'Captured options (incomplete)' : 'Options'}: ${question.options.join(' | ')}`
             : '';
         const completenessHint = question.optionsComplete === false ? ' [choice options incomplete]' : '';
-        return `${index}. [${question.type}] ${question.label}${completenessHint}${opts}${question.value ? ` (existing value: ${question.value})` : ''}`;
+        return `${index}. [${question.type}] ${question.label}${completenessHint}${opts}${question.value ? ` (existing value: ${question.value})` : ''}\nCandidate evidence:\n${question.candidateEvidence || '(No directly relevant candidate evidence found.)'}`;
       })
       .join('\n')}`;
     const systemMessage = `You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order. Example: ["answer 1", "answer 2"]. NEVER return markdown or explanatory text.
@@ -739,81 +713,14 @@ US LOCATION RULE: If asked whether the candidate is currently located in the US,
       throw err;
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(cleanLLMOutput(raw));
-    } catch (parseErr) {
-      log.error(`[Resolver] LLM Parse Error: failed to parse batch response. Raw output:\n${raw}`);
+    const answers = parseBatchAnswerResponse(raw, questions.length);
+    if (!answers) {
+      log.error(
+        `[Resolver] LLM Parse Error: batch response did not contain a valid JSON array (${raw.length} characters); all questions left unresolved.`
+      );
       return questions.map(() => '');
     }
-
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const obj = parsed as Record<string, unknown>;
-      const keys = Object.keys(obj);
-      const allNumeric = keys.length > 0 && keys.every((k) => !isNaN(Number(k)));
-      if (allNumeric) {
-        keys.sort((a, b) => Number(a) - Number(b));
-        parsed = keys.map((k) => obj[k]);
-      } else {
-        parsed = Object.values(obj);
-      }
-    }
-
-    if (!Array.isArray(parsed)) {
-      log.error(`[Resolver] LLM Parse Error: batch response is not an array. Raw output:\n${raw}`);
-      return questions.map(() => '');
-    }
-
-    let answers: string[] = parsed.map((item) => {
-      if (typeof item === 'string') return item;
-      return item === null || item === undefined ? '' : String(item);
-    });
-
-    if (answers.length < questions.length) {
-      while (answers.length < questions.length) {
-        answers.push('');
-      }
-    } else if (answers.length > questions.length) {
-      answers = answers.slice(0, questions.length);
-    }
-
-    return answers.map((answer) => cleanLLMOutput(answer));
-  }
-
-  /**
-   * Builds a compact, structured resume facts block (~2k tokens) rather than dumping unbounded raw text.
-   */
-  private buildResumeFactsBlock(resumeFacts?: any, resumeText: string = ''): string {
-    if (resumeFacts && typeof resumeFacts === 'object') {
-      const jobs = Array.isArray(resumeFacts.experience)
-        ? resumeFacts.experience
-            .slice(0, 4)
-            .map((j: any) => `• ${j.title || 'Role'} at ${j.company || 'Company'} (${j.duration || ''})`)
-            .join('\n')
-        : '';
-      const skills = Array.isArray(resumeFacts.skills)
-        ? resumeFacts.skills.slice(0, 25).join(', ')
-        : '';
-      const projects = Array.isArray(resumeFacts.projects)
-        ? resumeFacts.projects
-            .slice(0, 3)
-            .map((p: any) => (typeof p === 'string' ? p : p.name || p.title || ''))
-            .filter(Boolean)
-            .join(', ')
-        : '';
-
-      if (jobs || skills || projects) {
-        return `Candidate Verified Resume Facts:
-${jobs ? `Work History:\n${jobs}\n` : ''}${skills ? `Verified Skills: ${skills}\n` : ''}${projects ? `Projects: ${projects}\n` : ''}`;
-      }
-    }
-
-    if (resumeText && resumeText.trim().length > 0) {
-      return `Candidate Resume Excerpt:
-${resumeText.slice(0, 3000)}`;
-    }
-
-    return '';
+    return answers;
   }
 
   /**
@@ -834,8 +741,11 @@ ${resumeText.slice(0, 3000)}`;
     resumeFacts?: any
   ): string {
     const choiceOptions = getEffectiveFieldOptions(field);
+    const promptOptions = choiceOptions || (field.optionsComplete === false ? field.options : undefined);
     const optionsSection =
-      choiceOptions && choiceOptions.length > 0 ? formatAvailableOptionsLine(choiceOptions) : '';
+      promptOptions && promptOptions.length > 0
+        ? `${formatAvailableOptionsLine(promptOptions)}${field.optionsComplete === false ? ' (incomplete list; not exhaustive)' : ''}`
+        : '';
 
     const profileDecisionBlock = isBinaryYesNoQuestion(field)
       ? buildProfileDecisionContext(field, profile)
@@ -863,20 +773,22 @@ ${resumeText.slice(0, 3000)}`;
 5. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
 6. Respond as JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. If you are not at least 0.65 confident, set confidence below 0.65.`;
 
-    const resumeFactsBlock = this.buildResumeFactsBlock(resumeFacts, resumeText);
+    const candidateEvidence = buildQuestionRelevantEvidence(
+      field,
+      profile,
+      resumeText,
+      resumeFacts
+    );
 
     return `You are an automated assistant helping a job candidate apply for a position.
 
 Candidate Information:
 - Full Name: ${profile.clientName}
-- Current Role: ${profile.demographics?.currentRole || 'Software Engineer'}
-- Years of Experience: ${profile.demographics?.yearsOfExperience || '5+ years'}
-- Education: ${profile.education?.map((e) => `${e.degree} in ${e.fieldOfStudy} from ${e.institution} (${e.graduationYear})`).join(', ') || 'Degree on file'}
-- Location: ${profile.location}
+- Candidate evidence selected for this question:
+${candidateEvidence || '(No directly relevant candidate evidence found.)'}
 - Work Authorization (work_authorization, exact): ${profile.workAuthorization || '(not provided)'}
 - Requires Sponsorship (requires_sponsorship, exact): ${profile.requiresSponsorship === true ? 'true' : 'false'}
 ${profileDecisionBlock}
-${resumeFactsBlock}
 
 Target Job:
 - Position: ${jobContext.title}

@@ -9,6 +9,7 @@ import _pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { getProfile, updateParsedResume } from '../db/profiles.js';
 import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
 import { normalizeText } from './fingerprint.js';
+import { extractResumePhone, isPhoneNumberField } from './candidateEvidence.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -318,25 +319,20 @@ export async function resolveTier2(
     }
   }
 
-  // 2. Phone number extraction (strip +1 country code)
-  if (/\bphone\b|mobile|cell|telephone/i.test(combined)) {
-    const phoneMatch = resume.raw_text.match(/(?:\+?1[-.\s]*)?\(?\d{3}\)?[-.\s]*\d{3}[-.\s]*\d{4}\b/);
-    if (phoneMatch && phoneMatch[0]) {
-      let cleanPhone = phoneMatch[0].trim();
-      cleanPhone = cleanPhone.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
-      const digitsOnly = cleanPhone.replace(/\D/g, '');
-      if (digitsOnly.length >= 10) {
-        return {
-          fieldId: field.fieldId,
-          name: field.name,
-          type: field.type,
-          label: field.label,
-          value: cleanPhone,
-          source: 'resume_parse',
-          resolvedByTier: 2,
-          confidence: 0.95,
-        };
-      }
+  // 2. Phone number extraction from the resume contact/header section.
+  if (isPhoneNumberField(field)) {
+    const phone = extractResumePhone(resume.structured, resume.raw_text);
+    if (phone) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: phone,
+        source: 'resume_parse',
+        resolvedByTier: 2,
+        confidence: 0.95,
+      };
     }
   }
 

@@ -30,6 +30,8 @@ export interface JobQueueViewProps {
   selectedApplywizzId: string | null;
   /** Currently selected job canonical or raw URL */
   selectedJobUrl: string | null;
+  /** Return to the mobile candidate list */
+  onBack: () => void;
   /** Expand/collapse job for review only — never starts submit/dry-run */
   onSelectJob: (jobUrl: string | null) => void;
 }
@@ -40,6 +42,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   candidate,
   selectedApplywizzId,
   selectedJobUrl,
+  onBack,
   onSelectJob,
 }) => {
   const [proofViewerState, setProofViewerState] = useState<{
@@ -95,6 +98,11 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
     const owned = filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
     return filterOperatorApplicationJobs(owned);
   }, [candidate, selectedApplywizzId]);
+  const backButton = (
+    <button type="button" onClick={onBack} className="mobile-screen-back">
+      <span aria-hidden="true">←</span> Candidates
+    </button>
+  );
   const handleJobCardClick = (job: CandidateJob) => {
     const jobKey = job.canonicalUrl || job.rawUrl;
     const currentStatus = job.status || 'READY_FOR_REVIEW';
@@ -103,7 +111,9 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
       selectedJobUrl === job.rawUrl ||
       selectedJobUrl === job.canonicalUrl;
 
-    if (alreadyExpanded) {
+    const isMobile =
+      typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+    if (alreadyExpanded && !isMobile) {
       console.log(
         `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → collapse (no submit)`
       );
@@ -119,22 +129,25 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
 
   if (!candidate || !selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
     return (
-      <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
-        Loading applications for {selectedApplywizzId || 'candidate'}…
+      <div className="mobile-job-queue mobile-job-queue-message p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+        {backButton}
+        <div>Loading applications for {selectedApplywizzId || 'candidate'}…</div>
       </div>
     );
   }
 
   if (queueJobs.length === 0) {
     return (
-      <div className="p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
-        No jobs assigned for this candidate.
+      <div className="mobile-job-queue mobile-job-queue-message p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
+        {backButton}
+        <div>No jobs assigned for this candidate.</div>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#FFF5EB] border-b-2 border-[#1A1A2E] px-6 pt-3">
+    <div className="mobile-job-queue bg-[#FFF5EB] border-b-2 border-[#1A1A2E] px-6 pt-3">
+      {backButton}
       {/* Queue Header & Counter */}
       <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">
@@ -163,7 +176,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
       </div>
 
       {/* Horizontal Scrollable Tabs */}
-      <div className="flex gap-2.5 overflow-x-auto pb-3 custom-scrollbar">
+      <div className="mobile-job-list flex gap-2.5 overflow-x-auto pb-3 custom-scrollbar">
         {[...queueJobs]
           .sort((a, b) => {
             const aEdited = a.hasManualEdits ? 1 : 0;
@@ -186,7 +199,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
               key={`${jobKey}-${idx}`}
               type="button"
               onClick={() => handleJobCardClick(job)}
-              className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-xl transition-all duration-150 min-w-[230px] max-w-[280px] ${
+              className={`mobile-job-card flex-shrink-0 text-left px-3.5 py-2.5 rounded-xl transition-all duration-150 min-w-[230px] max-w-[280px] ${
                 isSelected
                   ? 'bg-[#2c2c2e] border border-[#3a3a3c]'
                   : 'bg-[#1c1c1e] border border-[#2c2c2e] hover:bg-[#2c2c2e]/60'

@@ -61,11 +61,20 @@ export function excludeUnresolvedApplicationJobs<T extends ResolutionFieldsCarri
   );
 }
 
-/** Operator application queue — all assigned rows (including SKIPPED and pre-resolve placeholders). */
+/** True when the application is auto-/operator-queued for the submission daemon. */
+export function isQueuedApplicationJob(row: { status?: string | null }): boolean {
+  return (row.status || '').trim().toUpperCase() === 'QUEUED';
+}
+
+/**
+ * Operator application queue — assigned rows excluding QUEUED (auto-applied / in submission queue).
+ * Keeps SKIPPED, READY_FOR_REVIEW, OTP/CAPTCHA, FAILED, etc. unchanged.
+ */
 export function filterOperatorApplicationJobs<T extends ResolutionFieldsCarrier & { status?: string | null }>(
   jobs: T[]
 ): T[] {
-  return Array.isArray(jobs) ? jobs : [];
+  if (!Array.isArray(jobs)) return [];
+  return jobs.filter((job) => !isQueuedApplicationJob(job));
 }
 
 export function isSkippedApplicationJob(row: { status?: string | null }): boolean {

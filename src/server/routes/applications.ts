@@ -40,7 +40,10 @@ import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboa
 import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
-import { applicationRowHasPersistedResolution } from '../../dashboard/candidateQueueFilter.js';
+import {
+  applicationRowHasPersistedResolution,
+  filterOperatorApplicationJobs,
+} from '../../dashboard/candidateQueueFilter.js';
 import { requireAuth } from '../middleware/auth.js';
 import axios from 'axios';
 
@@ -702,23 +705,25 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         res.status(500).json({ error: 'Internal server error' });
         return;
       }
-      applications = (data || []).filter((app: any) => {
-        if (!applicationRowHasPersistedResolution(app)) return false;
-        if (!adminBypass && userEmail) {
-          if (viewAsManagerEmail && teamOperatorEmails) {
-            return applicationAssignedCaAllowed(
-              app.assigned_ca_email,
-              userEmail,
-              'manager',
-              teamOperatorEmails
-            );
+      applications = filterOperatorApplicationJobs(
+        (data || []).filter((app: any) => {
+          if (!applicationRowHasPersistedResolution(app)) return false;
+          if (!adminBypass && userEmail) {
+            if (viewAsManagerEmail && teamOperatorEmails) {
+              return applicationAssignedCaAllowed(
+                app.assigned_ca_email,
+                userEmail,
+                'manager',
+                teamOperatorEmails
+              );
+            }
+            if (app.assigned_ca_email) {
+              return app.assigned_ca_email.trim().toLowerCase() === userEmail.trim().toLowerCase();
+            }
           }
-          if (app.assigned_ca_email) {
-            return app.assigned_ca_email.trim().toLowerCase() === userEmail.trim().toLowerCase();
-          }
-        }
-        return true;
-      });
+          return true;
+        })
+      );
     }
 
     const logCandidate = applywizzId ? ` candidate=${applywizzId}` : '';

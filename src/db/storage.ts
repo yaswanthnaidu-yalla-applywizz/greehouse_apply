@@ -194,9 +194,21 @@ export async function getSignedProofUrl(
       if (!error && data?.signedUrl) {
         return data.signedUrl;
       }
-    } catch {}
+      if (error) {
+        log.warn(`[Storage] Proof signed URL failed for ${bucket}/${storagePath}: ${error.message}`);
+      }
+    } catch (err: any) {
+      log.warn(`[Storage] Proof signed URL request failed for ${bucket}/${storagePath}: ${err.message}`);
+    }
   }
   return '';
+}
+
+function localProofDirectory(bucket: string): string {
+  if (bucket === PROOFS_FAILED_BUCKET) return 'proofs_failed';
+  if (bucket === PROOFS_MAIL_BUCKET) return 'proofs_mail';
+  if (bucket === 'proofs_dry_run') return 'proofs_dry_run';
+  return 'proofs';
 }
 
 /**
@@ -214,17 +226,24 @@ export async function downloadProofBuffer(
         const arrayBuf = await data.arrayBuffer();
         return Buffer.from(arrayBuf);
       }
-    } catch {}
+      if (error) {
+        log.warn(`[Storage] Proof download failed for ${bucket}/${storagePath}: ${error.message}`);
+      }
+    } catch (err: any) {
+      log.warn(`[Storage] Proof download request failed for ${bucket}/${storagePath}: ${err.message}`);
+    }
   }
 
   // Local filesystem fallback
   try {
     const filename = path.basename(storagePath);
-    const localPath = path.resolve(process.cwd(), 'output', 'proofs', filename);
+    const localPath = path.resolve(process.cwd(), 'output', localProofDirectory(bucket), filename);
     if (fs.existsSync(localPath)) {
       return fs.readFileSync(localPath);
     }
-  } catch {}
+  } catch (err: any) {
+    log.warn(`[Storage] Local proof read failed for ${bucket}/${storagePath}: ${err.message}`);
+  }
 
   return null;
 }
@@ -254,7 +273,10 @@ export async function uploadProof(
         const { data } = supabase.storage.from(PROOFS_BUCKET).getPublicUrl(storagePath);
         return data.publicUrl;
       }
-    } catch {}
+      log.warn(`[Storage] Web proof upload failed for ${storagePath}: ${error.message}`);
+    } catch (err: any) {
+      log.warn(`[Storage] Web proof upload request failed for ${storagePath}: ${err.message}`);
+    }
   }
 
   const proofDir = path.resolve(process.cwd(), 'output', 'proofs');
@@ -289,7 +311,10 @@ export async function uploadDryRunScreenshot(
         const { data } = supabase.storage.from('proofs_dry_run').getPublicUrl(storagePath);
         return data.publicUrl;
       }
-    } catch {}
+      log.warn(`[Storage] Dry-run proof upload failed for ${storagePath}: ${error.message}`);
+    } catch (err: any) {
+      log.warn(`[Storage] Dry-run proof upload request failed for ${storagePath}: ${err.message}`);
+    }
   }
 
   const dryRunDir = path.resolve(process.cwd(), 'output', 'proofs_dry_run');
@@ -326,7 +351,10 @@ export async function uploadFailedScreenshot(
         const { data } = supabase.storage.from(PROOFS_FAILED_BUCKET).getPublicUrl(storagePath);
         return data.publicUrl;
       }
-    } catch {}
+      log.warn(`[Storage] Failure proof upload failed for ${storagePath}: ${error.message}`);
+    } catch (err: any) {
+      log.warn(`[Storage] Failure proof upload request failed for ${storagePath}: ${err.message}`);
+    }
   }
 
   const failDir = path.resolve(process.cwd(), 'output', 'proofs_failed');
@@ -395,7 +423,10 @@ export async function uploadEmailProof(
         const { data } = supabase.storage.from(PROOFS_MAIL_BUCKET).getPublicUrl(storagePath);
         return data.publicUrl;
       }
-    } catch {}
+      log.warn(`[Storage] Email proof upload failed for ${storagePath}: ${error.message}`);
+    } catch (err: any) {
+      log.warn(`[Storage] Email proof upload request failed for ${storagePath}: ${err.message}`);
+    }
   }
 
   const mailProofDir = path.resolve(process.cwd(), 'output', 'proofs_mail');

@@ -28,6 +28,7 @@ export function scannedFieldsToResolvedShells(fields: ScannedField[]): ResolvedF
       isRequired: Boolean(f.isRequired),
       ...(options ? { options } : {}),
       ...(f.optionsComplete === undefined ? {} : { optionsComplete: f.optionsComplete }),
+      ...(f.metadata ? { metadata: f.metadata } : {}),
     };
   });
 }
@@ -67,10 +68,16 @@ export async function hydrateApplicationResolvedFields(
         (fieldType === 'select' || fieldType === 'radio' || fieldType === 'checkbox') &&
         (!Array.isArray(f.options) || f.options.length === 0);
       const schemaField = schemaMap.get(f.fieldId) || schemaMap.get(f.name);
+      const metadata = schemaField?.metadata
+        ? { ...schemaField.metadata, ...f.metadata }
+        : undefined;
+      const metadataChanged = Boolean(
+        metadata && JSON.stringify(metadata) !== JSON.stringify(f.metadata || {})
+      );
       const completenessChanged =
         typeof schemaField?.optionsComplete === 'boolean' &&
         f.optionsComplete !== schemaField.optionsComplete;
-      if (needsOptions || completenessChanged) {
+      if (needsOptions || completenessChanged || metadataChanged) {
         const isBool = /\b(do you|are you|have you|will you|can you|would you|is your|were you|did you)\b/i.test(
           f.label || ''
         );
@@ -86,6 +93,7 @@ export async function hydrateApplicationResolvedFields(
           ...(typeof schemaField?.optionsComplete === 'boolean'
             ? { optionsComplete: schemaField.optionsComplete }
             : {}),
+          ...(metadata ? { metadata } : {}),
         };
       }
       return f;

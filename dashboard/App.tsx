@@ -98,6 +98,9 @@ export const App: React.FC = () => {
   const [candidateDetail, setCandidateDetail] = useState<CandidateDetail | null>(null);
   const [selectedJobUrl, setSelectedJobUrl] = useState<string | null>(null);
   const [application, setApplication] = useState<any | null>(null);
+  const [mobileScreen, setMobileScreen] = useState<'candidates' | 'jobs' | 'application'>(
+    'candidates'
+  );
 
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(true);
   const [isAuthHydrating, setIsAuthHydrating] = useState<boolean>(false);
@@ -907,8 +910,17 @@ export const App: React.FC = () => {
                         <div
                           key={notif.id}
                           onClick={() => {
-                            if (notif.applywizzId) setSelectedCandidateId(notif.applywizzId);
+                            if (notif.applywizzId) {
+                              if (notif.applywizzId !== selectedCandidateId) {
+                                setCandidateDetail(null);
+                                setSelectedJobUrl(null);
+                                setApplication(null);
+                                setIsLoadingApplication(false);
+                              }
+                              setSelectedCandidateId(notif.applywizzId);
+                            }
                             if (notif.jobUrl) setSelectedJobUrl(notif.jobUrl);
+                            setMobileScreen(notif.jobUrl ? 'application' : 'jobs');
                             setIsNotifOpen(false);
                           }}
                           className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
@@ -1133,53 +1145,90 @@ export const App: React.FC = () => {
         )}
       </div>
 
-      <div className={`flex flex-1 overflow-hidden ${activeTab === 'dashboard' ? '' : 'hidden'}`}>
+      <div
+        className={`mobile-operator-workspace flex flex-1 overflow-hidden ${activeTab === 'dashboard' ? '' : 'hidden'}`}
+        data-mobile-screen={mobileScreen}
+      >
         {/* Left Pane: Candidates Directory */}
         <CandidateList
           candidates={candidates}
           selectedId={selectedCandidateId}
-          onSelectCandidate={(id) => setSelectedCandidateId((prev) => (prev === id ? null : id))}
+          onSelectCandidate={(id) => {
+            const isMobile =
+              typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+            if (isMobile && selectedCandidateId !== id) {
+              setCandidateDetail(null);
+              setSelectedJobUrl(null);
+              setApplication(null);
+            }
+            setSelectedCandidateId((prev) => (isMobile ? id : prev === id ? null : id));
+            if (isMobile) setMobileScreen('jobs');
+          }}
           isLoading={isLoadingCandidates || isAuthHydrating}
           emptyMessage={noCandidatesMessage}
           selectedDate={selectedDate}
         />
 
         {/* Right Pane: Candidate Jobs Queue & Form Renderer */}
-        <main className="flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden">
+        <main className="mobile-operator-detail flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden">
           {candidateDetail ? (
             <>
               {/* Right Top: Job Queue Tabs */}
-              <JobQueueView
-                candidate={candidateDetail}
-                selectedApplywizzId={selectedCandidateId}
-                selectedJobUrl={selectedJobUrl}
-                onSelectJob={(url) => {
-                  setSelectedJobUrl(url);
-                  if (!url) {
-                    setApplication(null);
-                    setIsLoadingApplication(false);
-                  }
-                }}
-              />
+              <div className="mobile-stage mobile-stage-jobs">
+                <JobQueueView
+                  candidate={candidateDetail}
+                  selectedApplywizzId={selectedCandidateId}
+                  selectedJobUrl={selectedJobUrl}
+                  onBack={() => setMobileScreen('candidates')}
+                  onSelectJob={(url) => {
+                    setSelectedJobUrl(url);
+                    setMobileScreen(url ? 'application' : 'jobs');
+                    if (!url) {
+                      setApplication(null);
+                      setIsLoadingApplication(false);
+                    }
+                  }}
+                />
+              </div>
 
               {/* Right Main: Form Renderer */}
-              <FormRenderer
-                key={selectedJobUrl || 'no-job'}
-                application={application}
-                isLoading={isLoadingApplication}
-                candidateName={candidateDetail.clientName}
-                apiBaseUrl={API_BASE_URL}
-                onFieldUpdate={handleFieldUpdate}
-                onStatusChange={handleStatusChange}
-              />
+              <div className="mobile-stage mobile-stage-application">
+                <FormRenderer
+                  key={selectedJobUrl || 'no-job'}
+                  application={application}
+                  isLoading={isLoadingApplication}
+                  candidateName={candidateDetail.clientName}
+                  apiBaseUrl={API_BASE_URL}
+                  onBack={() => setMobileScreen('jobs')}
+                  onFieldUpdate={handleFieldUpdate}
+                  onStatusChange={handleStatusChange}
+                />
+              </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-[#8e8e93]">
-              <div className="text-4xl mb-2">👤</div>
-              <p className="text-sm font-semibold text-[#ffffff]">No Candidate Selected</p>
-              <p className="text-xs text-[#8e8e93] mt-1 font-medium">
-                Select a candidate from the left directory to view assigned applications.
-              </p>
+            <div className="mobile-detail-empty flex-1 flex flex-col items-center justify-center text-[#8e8e93]">
+              <div className={`mobile-no-candidate-placeholder ${selectedCandidateId ? 'has-selection' : ''}`}>
+                <div className="text-4xl mb-2">👤</div>
+                <p className="text-sm font-semibold text-[#ffffff]">No Candidate Selected</p>
+                <p className="text-xs text-[#8e8e93] mt-1 font-medium">
+                  Select a candidate from the left directory to view assigned applications.
+                </p>
+              </div>
+              {selectedCandidateId && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMobileScreen(mobileScreen === 'application' ? 'jobs' : 'candidates')
+                    }
+                    className="mobile-screen-back"
+                  >
+                    <span aria-hidden="true">←</span>{' '}
+                    {mobileScreen === 'application' ? 'Applications' : 'Candidates'}
+                  </button>
+                  <p className="mobile-candidate-loading">Loading applications for candidate…</p>
+                </>
+              )}
             </div>
           )}
         </main>

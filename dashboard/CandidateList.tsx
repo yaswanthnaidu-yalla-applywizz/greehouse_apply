@@ -127,7 +127,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
                 }`}
               >
                 {/* Top Row: Initials Avatar + ID + Status */}
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="mobile-candidate-identifiers flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2">
                     <span className="w-6 h-6 rounded-full bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c] flex items-center justify-center text-[10px] font-bold">
                       {initials}
@@ -166,7 +166,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
 
                 {/* Bottom Row: Location/Email & Job Count Pill */}
                 <div className="flex items-center justify-between text-[11px] text-[#8e8e93]">
-                  <span className="truncate max-w-[130px] font-medium text-[#8e8e93]">
+                  <span className="mobile-candidate-contact truncate max-w-[130px] font-medium text-[#8e8e93]">
                     {c.email || c.location || 'Profile Synced'}
                   </span>
 

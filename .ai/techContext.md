@@ -143,8 +143,7 @@ SCANNER_JITTER_MAX_MS=6000
 INPUT_CSV_PATH=./greenhouse_only_applywizz_prod(in).csv
 OUTPUT_DIR=./output
 RESUMES_DIR=./resumes
-MAX_JOB_QUESTIONS=35                  # Submission gate: live submit requires field_count < this value (0–34)
-SUBMISSION_ELIGIBILITY_GATE_ENABLED=true  # Production boot default; Dev dashboard `/dev` can toggle until restart; always off in SANDBOX
+MAX_JOB_QUESTIONS=35                  # Jobs with 35+ scanned questions are skipped; CSV job score never blocks submission
 
 # Supabase Storage bucket names
 SUPABASE_STORAGE_BUCKET_RESUMES=resumes
@@ -188,7 +187,7 @@ PIPELINE_VERBOSE=false                # Per-URL scan + per-field resolve logs; d
 # Audit: application.submit_clicked logged on each POST /applications/:id/submit; Admin/Manager/Dev show submitClicks for IST day
 
 # Local Sandbox Mode
-SANDBOX=true                          # Run with local PostgreSQL 17 / pgvector container (docker-compose.sandbox.yml); submission eligibility gate is always off
+SANDBOX=true                          # Run with local PostgreSQL 17 / pgvector container (docker-compose.sandbox.yml)
 ```
 
 ## Deployment
@@ -251,7 +250,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Over-cap SKIPPED upserts (resolve-time only) | `src/db/skippedApplications.ts` — removed pre-resolve `ensureCandidateApplicationRows.ts` |
 | Operator queue filters | `src/dashboard/candidateQueueFilter.ts` |
 | DB DDL | `src/db/schema.sql` |
-| Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (applied 2026-09-15). **016** = `profiles.country` + `country_code` (apply in SQL Editor; missing columns block new profile creates) |
+| Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (applied 2026-09-15). **016** = `profiles.country` + `country_code` (apply in SQL Editor; missing columns block new profile creates). **027–028** = canonical application facts and repair of the stats availability cutover; 028 must be applied to existing databases. |
 | Audit / application events | `src/db/events.ts` — fail-closed if 015 tables missing |
 | Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = true`) |
 | Admin managers list stats | `src/server/adminManagerStats.ts` — `GET /api/admin/managers` uses `users.manager_email` + `profiles.ca_email` (not date-scoped rollup) |
@@ -262,6 +261,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Live submit engine (69KB) | `src/submitter/liveSubmit.ts` |
 | Playwright scanner | `src/scanner/playwrightScanner.ts` |
 | Answer resolver orchestrator | `src/resolver/answerResolver.ts` |
+| Submission question cap | `src/submission/questionLimit.ts` — no CSV-score restriction; enforces `MAX_JOB_QUESTIONS` |
 | LLM synthesizer | `src/resolver/llmSynthesizer.ts` |
 | Express server | `src/server/index.ts` |
 | **Operator UI (the one actually served)** | `dashboard/public/index.html` (auth + shell) + lazy `operator-app.jsx`; static `dashboard.css`; served at `GET /` |
