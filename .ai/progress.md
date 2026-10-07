@@ -8,7 +8,7 @@
 ### CI Failure Repair (2026-10-07)
 - [x] Restored the exported `QuestionLimitExceededError` compatibility type without reintroducing a question cap; corrected dependent TypeScript narrowing errors in submission routes.
 - [x] Added the sandbox assignment regression test to the GitHub Actions unit-test list. Full typecheck, production build, and all CI-selected unit tests pass locally.
-- [ ] Verify GitHub Actions, including the Docker container build (Docker Desktop unavailable locally).
+- [x] Verified GitHub Actions push and pull-request runs both pass all four jobs: Typecheck, Build, Unit Tests, and Container Build.
 
 ### Question Limit Removal (2026-10-07)
 - [x] Removed the 35-question limit cap per explicit user instruction: [`isWithinSubmissionQuestionLimit`](src/submission/questionLimit.ts), [`assertWithinSubmissionQuestionLimit`](src/submission/questionLimit.ts), and [`isWithinSubmissionQuestionLimitForDisplay`](src/submission/questionLimit.ts) now permit all applications regardless of question count.
