@@ -94,7 +94,7 @@ jobs:
             tests/operatorErrorMessages.test.ts \
             tests/operatorManagerMapping.test.ts \
             tests/resolverDiagnosedFixes.test.ts \
-            tests/submissionEligibilityGate.test.ts \
+            tests/questionLimit.test.ts \
             tests/upsertProfileCountry.test.ts \
             tests/zohoApiOtp.test.ts
         env:
