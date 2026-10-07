@@ -50,12 +50,14 @@ npm run dry-run              # Headful fill via src/submitter/runUserApplication
 npm run demo:doordash-headful # Headful, non-submitting DoorDash React-Select diagnostic; set RESUME_PATH optionally
 npm run submit               # Live submission CLI
 
-# Database
+# Database & Sandbox
 npm run db:migrate           # Run all pending migrations
 npm run db:backfill-company-email
-npm run db:fix-rollup        # Recompute today/yesterday daily stats rollups
+npm run db:fix-rollup        # Inspect yesterday/today canonical stats (read-only; no pruning)
 npm run backfill:profiles    # Refresh all Supabase profiles from ApplyWizz
 npm run db:clear             # Clear candidate_qa_bank answers
+npm run sandbox              # Run local Postgres sandbox environment (builds TSX dashboard, SANDBOX=true)
+npm run sandbox:fresh        # Reset local sandbox Postgres database and start fresh pipeline
 
 # Build & Prod
 npm run build                # tsc compile → dist/ + dashboard Tailwind CSS
@@ -142,7 +144,7 @@ INPUT_CSV_PATH=./greenhouse_only_applywizz_prod(in).csv
 OUTPUT_DIR=./output
 RESUMES_DIR=./resumes
 MAX_JOB_QUESTIONS=35                  # Submission gate: live submit requires field_count < this value (0–34)
-SUBMISSION_ELIGIBILITY_GATE_ENABLED=true  # Boot default; Dev dashboard `/dev` System tab toggles runtime until restart
+SUBMISSION_ELIGIBILITY_GATE_ENABLED=true  # Production boot default; Dev dashboard `/dev` can toggle until restart; always off in SANDBOX
 
 # Supabase Storage bucket names
 SUPABASE_STORAGE_BUCKET_RESUMES=resumes
@@ -172,14 +174,21 @@ ALLOWED_SIGNUP_EMAILS=
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_HTTP_REFERER=https://apply-wizz.me
 
-# Railway deployment
+# Railway deployment & Service Architecture
 RAILWAY_ENV=true                      # Disables headful mode, caps memory; also enables cooperative pipeline stop
 ENABLE_PIPELINE_STOP=false            # Allow admin ⏹ Stop + CLI SIGINT (also auto-on when NODE_ENV=development or RAILWAY_ENV)
 RESOLVER_WORKER_POOL_SIZE=3           # Parallel candidate×job resolution workers during ingest (max 5)
 INGEST_ONLY=false                     # Start server in ingest-only mode (health + ingest endpoints only, no dashboards or workers)
 SUBMISSION_POOL_SIZE=3                # Configurable submission worker pool size (default 3)
-PIPELINE_VERBOSE=false
-# Audit: application.submit_clicked logged on each POST /applications/:id/submit; Admin/Manager/Dev show submitClicks for IST day                # Per-URL scan + per-field resolve logs; default is one summary line per phase/candidate
+DASHBOARD_MODE=tsx                    # 'tsx' (Vite build dist/client) or 'html' (Babel in-browser legacy)
+WORKER_SERVICE_URL=                   # External worker service URL for Playwright dry-run / submissions (multi-service mode)
+WEB_SERVICE_URL=                      # Service 1 Railway private URL for cross-service events and callbacks
+INTERNAL_API_SECRET=                  # Shared secret for inter-service internal worker routes (/api/internal/*)
+PIPELINE_VERBOSE=false                # Per-URL scan + per-field resolve logs; default is one summary line per phase/candidate
+# Audit: application.submit_clicked logged on each POST /applications/:id/submit; Admin/Manager/Dev show submitClicks for IST day
+
+# Local Sandbox Mode
+SANDBOX=true                          # Run with local PostgreSQL 17 / pgvector container (docker-compose.sandbox.yml); submission eligibility gate is always off
 ```
 
 ## Deployment
@@ -224,10 +233,9 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | ApplyWizz S3 | `https://applywizz-prod.s3.us-east-2.amazonaws.com` | Resume PDF source |
 | ApplyWizz CA Mgmt | `https://applywizz-ca-management.vercel.app/api/ca/work-history` | Work history API |
 | Zoho Mail Reader | `https://zoho-mail-reader.onrender.com/` | OTP/email proof extraction |
-| ↳ REST (used by `zoho-connector.ts`) | `GET /api/zoho/ui/inbox?email=&limit=&start=` · `GET /api/zoho/ui/message?email=&accountId=&folderId=&messageId=` | Confirmation-email JSON |
-| ↳ Web UI (used by `zohoReader.ts`) | root `/` via Playwright | OTP lookup: **goto root + clear filter** each time, then filter by email → "Read mails". Empty user list → one `page.reload()` retry |
+| ↳ REST (used by `zoho-connector.ts` & `otpResolutionService.ts`) | `GET /api/zoho/ui/inbox?email=&limit=&start=` · `GET /api/zoho/ui/message?email=&accountId=&folderId=&messageId=` · `GET /api/zoho/ui/users` | All inbox, message body, connected users & OTP polling (pure REST API; no Playwright browser) |
 
-**Zoho connector auth model:** mailbox access is **server-side OAuth per mailbox** — no client token or session cookie is sent, and none is returned (0 cookies is expected, not a bug). An unlinked mailbox responds `HTTP 400 {"error":"Mailbox not connected","hint":"Paste a Self Client code for this user first."}`. `ZOHO_CONNECTOR_USER` / `ZOHO_CONNECTOR_PASS` only drive the Playwright UI login, which is effectively cosmetic on this deployment.
+**Zoho connector auth model:** Mailbox access is **server-side OAuth per mailbox** managed directly on Render — no client token, session cookie, or browser login is needed. Both OTP resolution and email confirmation proof resolution poll the REST API directly with configurable intervals/budgets.
 | OpenRouter | `https://openrouter.ai/api/v1` | LLM inference |
 
 ## Key File Locations
@@ -238,6 +246,7 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Central logger | `src/utils/logger.ts` — `[ISO] [LEVEL] [MODULE] message`; levels INFO/WARN/ERROR/DEBUG/HALT. `haltWithDevAlert(module, message, error?)` logs `[HALT]` + `🚨 DEV ACTION REQUIRED` and `process.exit(1)` for systemic ingest failures only |
 | Supabase client | `src/db/client.ts` |
 | Supabase key diagnostics (ingest logs) | `src/db/supabaseKeyDiagnostics.ts` |
+| Ingestion Zoho connection check | `src/services/zohoConnectionCheck.ts` — one connector snapshot per candidate-sync batch; status persistence and stored-flag fallback |
 | Empty-form hydration | `src/db/applicationFieldHydration.ts` |
 | Over-cap SKIPPED upserts (resolve-time only) | `src/db/skippedApplications.ts` — removed pre-resolve `ensureCandidateApplicationRows.ts` |
 | Operator queue filters | `src/dashboard/candidateQueueFilter.ts` |
@@ -264,3 +273,6 @@ The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboar
 | Bundled Akshitha demo | `src/dashboard/akshithaDemoFixtures.ts` |
 | Searchable select tests | `tests/searchableSelect.test.ts` |
 | All TypeScript types | `src/types/index.ts` |
+
+## Known Quirks & Dev Environment
+- **Windows workspace:** creating new files via editor fails with EEXIST mkdir — use shell or write tool instead.

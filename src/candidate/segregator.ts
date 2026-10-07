@@ -17,8 +17,9 @@ import * as fastCsv from 'fast-csv';
 import { config } from '../config/env.js';
 import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
-import { profileRowToCandidateProfile } from '../db/profiles.js';
+import { profileRowToCandidateProfile, type ProfileRow } from '../db/profiles.js';
 import { ensureSupabaseProfile } from './ensureSupabaseProfile.js';
+import { checkZohoConnectionForProfiles } from '../services/zohoConnectionCheck.js';
 import type { CandidateSegment } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
@@ -409,8 +410,8 @@ export async function segregateCandidatesByApplyWizzId(
     let fromSupabase = 0;
     let fromApi = 0;
     let skippedEnsured = 0;
-    let skippedNotZoho = 0;
     let skippedSyncFailed = 0;
+    const syncedProfiles = new Map<string, ProfileRow>();
     const queue = [...candidateIds];
     const workers: Promise<void>[] = [];
 
@@ -444,18 +445,7 @@ export async function segregateCandidatesByApplyWizzId(
           if (ensured.status === 'created') fromApi++;
           else fromSupabase++;
 
-          if (!ensured.profile.zoho_connected) {
-            segmentsMap.delete(id);
-            skippedNotZoho++;
-            if (!compact) {
-              log.info(
-                `[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected)` +
-                  (ensured.status === 'created' ? ' — profiles row was created' : '')
-              );
-            }
-            continue;
-          }
-
+          syncedProfiles.set(id.toUpperCase(), ensured.profile);
           segment.profile = profileRowToCandidateProfile(ensured.profile);
           if (ensured.profile.client_name && ensured.profile.client_name !== id) {
             segment.clientName = ensured.profile.client_name;
@@ -484,9 +474,32 @@ export async function segregateCandidatesByApplyWizzId(
     }
 
     await Promise.all(workers);
+
+    if (process.env.SANDBOX !== 'true' && syncedProfiles.size > 0) {
+      const zohoResult = await checkZohoConnectionForProfiles(Array.from(syncedProfiles.values()));
+      const connectedCount = Array.from(zohoResult.connectedByApplywizzId.values()).filter(Boolean).length;
+      let disconnectedCount = 0;
+      for (const [id, segment] of Array.from(segmentsMap.entries())) {
+        if (!segment.profile) continue;
+        const isConnected = zohoResult.connectedByApplywizzId.get(id.toUpperCase()) === true;
+        if (!isConnected) {
+          segmentsMap.delete(id);
+          disconnectedCount++;
+          if (!compact) {
+            log.info(
+              `[Segregator] ⛔ Skipping candidate ${id} (not Zoho connected${zohoResult.fallbackUsed ? ' — stored profile flag' : ' — live connector check'})`
+            );
+          }
+        }
+      }
+      log.info(
+        `[Candidate Segregator] Zoho check candidates=${syncedProfiles.size} connected=${connectedCount} disconnected=${disconnectedCount} fallback=${zohoResult.fallbackUsed}`
+      );
+    }
+
     if (compact) {
       log.info(
-        `[Candidate Segregator] profile sync candidates=${totalCandidates} kept=${segmentsMap.size} supabase=${fromSupabase} api_new=${fromApi} skipped_ensure=${skippedEnsured} skipped_not_zoho=${skippedNotZoho} sync_failed=${skippedSyncFailed}`
+        `[Candidate Segregator] profile sync candidates=${totalCandidates} kept=${segmentsMap.size} supabase=${fromSupabase} api_new=${fromApi} skipped_ensure=${skippedEnsured} sync_failed=${skippedSyncFailed}`
       );
     } else {
       log.info(

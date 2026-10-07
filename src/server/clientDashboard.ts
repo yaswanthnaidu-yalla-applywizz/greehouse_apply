@@ -5,7 +5,6 @@
 import {
   rowCreatedAtInRange,
   getISTDateRangeUtc,
-  SUBMITTED_STATUSES,
   type ApplicationRow,
   type CreatedAtRangeFilter,
 } from '../db/applications.js';
@@ -16,6 +15,12 @@ import { displayNameMapForEmails } from './authDirectory.js';
 import { listOperatorEmailsForManager } from '../db/users.js';
 import { applywizzIdsForManagerTeamProfiles } from './managerTeamScope.js';
 import { createLogger } from '../utils/logger.js';
+import {
+  getApplicationStats,
+  statusMetricsForTransition,
+  type ApplicationStatsResult,
+} from '../db/applicationStats.js';
+import { listAllDashboardUsers, listDashboardOperatorsForManager } from '../db/users.js';
 
 const log = createLogger('Client Dashboard');
 
@@ -49,12 +54,12 @@ export interface ApplicationDetail {
 export interface ManagerClientRow {
   client: string;
   applywizzId: string;
-  applications: number;
-  submitted: number;
-  completed?: number;
-  applied: number;
+  applications: number | null;
+  submitted: number | null;
+  completed?: number | null;
+  applied: number | null;
   pending: number;
-  failed: number;
+  failed: number | null;
   waitingForEmail: number;
   assignedTo: string;
   assignedToEmail: string;
@@ -81,13 +86,17 @@ export interface ClientDashboardResult {
   rows: ManagerClientRow[];
   clients: string[];
   totals: {
-    applications: number;
-    submitted: number;
-    applied: number;
-    failed: number;
+    applications: number | null;
+    submitted: number | null;
+    applied: number | null;
+    failed: number | null;
     pending: number;
     waiting_for_email: number;
   };
+  statsAvailable: boolean;
+  statsPartial: boolean;
+  statsAvailableFrom: string | null;
+  byOperator: ApplicationStatsResult['byOperator'];
   warning?: string;
 }
 
@@ -168,7 +177,8 @@ export function emptyClientDashboard(
   dateRange: ClientDashboardResult['dateRange'],
   managerEmail: string,
   ca: string,
-  warning?: string
+  warning?: string,
+  stats?: ApplicationStatsResult
 ): ClientDashboardResult {
   return {
     date,
@@ -177,7 +187,18 @@ export function emptyClientDashboard(
     managerEmail,
     rows: [],
     clients: [],
-    totals: { applications: 0, submitted: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 },
+    totals: {
+      applications: stats?.counts.total ?? (stats?.available === false ? null : 0),
+      submitted: stats?.counts.submitted ?? (stats?.available === false ? null : 0),
+      applied: stats?.counts.applied ?? (stats?.available === false ? null : 0),
+      failed: stats?.counts.failed ?? (stats?.available === false ? null : 0),
+      pending: 0,
+      waiting_for_email: 0,
+    },
+    statsAvailable: stats?.available ?? false,
+    statsPartial: stats?.partial ?? false,
+    statsAvailableFrom: stats?.availableFrom ?? null,
+    byOperator: stats?.byOperator ?? [],
     warning,
   };
 }
@@ -212,13 +233,34 @@ export async function loadClientDashboard(options: {
       return { startIso, endIso };
     })();
 
+  const applyManagerTeamScope = MANAGER_TEAM_SCOPE_ENABLED && !options.teamScopeUnrestricted;
+  let teamOperatorEmails: string[] = [];
+  if (applyManagerTeamScope) {
+    teamOperatorEmails = await listOperatorEmailsForManager(managerEmail);
+    if (teamOperatorEmails.length === 0) {
+      const stats = await getApplicationStats({
+        range: { fromDate: dateRange.from || date, toDate: dateRange.to || date },
+        scope: { managerEmail },
+        includeBreakdown: true,
+      });
+      return emptyClientDashboard(
+        date,
+        dateRange,
+        managerEmail,
+        requestedCa,
+        'No operators are assigned to this manager yet.',
+        stats
+      );
+    }
+  }
+
   let query = getDbClient()
     .from('gh_candidate_applications')
     .select('*, profiles!inner(applywizz_id, client_name, ca_email)');
   if (createdAtRange) {
     if (createdAtRange.endIso) {
       query = query.or(
-        `and(created_at.gte.${createdAtRange.startIso},created_at.lte.${createdAtRange.endIso}),and(submitted_at.gte.${createdAtRange.startIso},submitted_at.lte.${createdAtRange.endIso})`
+        `and(created_at.gte.${createdAtRange.startIso},created_at.lt.${createdAtRange.endIso}),and(submitted_at.gte.${createdAtRange.startIso},submitted_at.lt.${createdAtRange.endIso})`
       );
     } else {
       query = query.or(
@@ -228,25 +270,14 @@ export async function loadClientDashboard(options: {
   }
 
   let warning: string | undefined;
-  const applyManagerTeamScope = MANAGER_TEAM_SCOPE_ENABLED && !options.teamScopeUnrestricted;
   if (applyManagerTeamScope) {
-    const operatorEmails = await listOperatorEmailsForManager(managerEmail);
-    if (operatorEmails.length === 0) {
-      return emptyClientDashboard(
-        date,
-        dateRange,
-        managerEmail,
-        requestedCa,
-        'No operators are assigned to this manager yet.'
-      );
-    }
     const teamCandidateIds = await applywizzIdsForManagerTeamProfiles(managerEmail);
-    const emailsFormatted = operatorEmails.map((e) => `"${e}"`).join(',');
+    const emailsFormatted = teamOperatorEmails.map((e) => `"${e}"`).join(',');
     if (teamCandidateIds.length > 0) {
       const idsFormatted = teamCandidateIds.map((id) => `"${id}"`).join(',');
       query = query.or(`assigned_ca_email.in.(${emailsFormatted}),applywizz_id.in.(${idsFormatted})`);
     } else {
-      query = query.in('assigned_ca_email', operatorEmails);
+      query = query.in('assigned_ca_email', teamOperatorEmails);
     }
   }
 
@@ -256,27 +287,53 @@ export async function loadClientDashboard(options: {
 
   const rawRows = (data || []) as ManagerApplicationRow[];
   const nameMap = await displayNameMapForEmails(rawRows.map(assignedCaEmail));
+  let requestedCaEmail: string | undefined;
+  if (requestedCa.toLowerCase() !== 'all') {
+    const userRows = applyManagerTeamScope
+      ? await listDashboardOperatorsForManager(managerEmail)
+      : (await listAllDashboardUsers()).filter((user) => user.role.trim().toLowerCase() === 'operator');
+    const needle = requestedCa.toLowerCase();
+    requestedCaEmail = [
+      ...rawRows.map((row) => ({
+        email: assignedCaEmail(row),
+        name: nameMap.get(assignedCaEmail(row)) || '',
+      })),
+      ...userRows.map((user) => ({ email: user.email.trim().toLowerCase(), name: user.name || '' })),
+    ].find(({ email, name }) =>
+      email === needle || name.trim().toLowerCase() === needle || email.split('@')[0] === needle
+    )?.email;
+    if (!requestedCaEmail && needle.includes('@')) requestedCaEmail = needle;
+    if (!requestedCaEmail) throw new Error(`Unable to resolve selected career associate "${requestedCa}".`);
+  }
+
+  const stats = await getApplicationStats({
+    range: { fromDate: dateRange.from || date, toDate: dateRange.to || date },
+    scope: {
+      managerEmail: applyManagerTeamScope ? managerEmail : undefined,
+      caEmail: requestedCaEmail,
+    },
+    includeBreakdown: true,
+  });
   const grouped = new Map<string, ManagerClientRow>();
 
   for (const application of rawRows) {
-    if (application.status === 'SKIPPED') {
-      continue;
-    }
-
     const email = assignedCaEmail(application);
     const profileCa = profileCaEmail(application);
     const assignedName = nameMap.get(email) || email.split('@')[0];
     if (requestedCa.toLowerCase() !== 'all') {
-      const needle = requestedCa.toLowerCase();
-      if (email !== needle && assignedName.toLowerCase() !== needle) continue;
+      if (email !== requestedCaEmail) continue;
     }
 
     const isCreatedInRange = rowCreatedAtInRange(application, createdAtRange);
-    const submittedAt = application.submitted_at || (application.status === 'APPLIED' ? (application.proof_captured_at || application.reviewed_at || application.updated_at) : null);
+    const submittedAt = application.submitted_at || (
+      application.status === 'APPLIED' || application.status === 'EMAIL_PROOF_PENDING'
+        ? (application.proof_captured_at || application.reviewed_at || application.updated_at)
+        : null
+    );
     const isSubmittedAtInRange = Boolean(
       submittedAt &&
       submittedAt >= createdAtRange.startIso &&
-      (!createdAtRange.endIso || submittedAt <= createdAtRange.endIso)
+      (!createdAtRange.endIso || submittedAt < createdAtRange.endIso)
     );
 
     if (!isCreatedInRange && !isSubmittedAtInRange) {
@@ -284,7 +341,7 @@ export async function loadClientDashboard(options: {
     }
 
     const name = clientName(application);
-    const row = grouped.get(name) || {
+    const row = grouped.get(application.applywizz_id) || {
       client: name,
       applywizzId: application.applywizz_id,
       applications: 0,
@@ -302,30 +359,31 @@ export async function loadClientDashboard(options: {
       failedApplications: [],
       expanded_details: { submitted: [], failed: [], pending: [] },
     };
-    row.applications += 1;
+    row.applications = (row.applications ?? 0) + 1;
     row.assignedTo = assignedName || row.assignedTo;
     row.assignedToEmail = email || row.assignedToEmail;
     row.ca_email = email || row.ca_email;
     row.assigned_ca = profileCa || row.assigned_ca;
 
     const isPending = application.status === 'READY_FOR_REVIEW';
-    const isSubmitted = SUBMITTED_STATUSES.includes(application.status);
-    const isApplied = application.status === 'APPLIED' && isSubmittedAtInRange;
-    const isFailed = application.status === 'FAILED' || application.status === 'CAPTCHA_TIMEOUT';
+    const statusMetrics = statusMetricsForTransition(application.status);
+    const isSubmitted = statusMetrics.includes('submitted');
+    const isApplied = statusMetrics.includes('applied') && isSubmittedAtInRange;
+    const isFailed = statusMetrics.includes('failed');
 
     if (isApplied) {
-      row.applied += 1;
+      row.applied = (row.applied ?? 0) + 1;
     }
 
     if (isSubmitted) {
-      row.submitted += 1;
+      row.submitted = (row.submitted ?? 0) + 1;
       const detail = detailFor(application, true);
       row.submittedApplications.push(detail);
       row.expanded_details.submitted.push(detail);
     }
 
     if (isFailed) {
-      row.failed += 1;
+      row.failed = (row.failed ?? 0) + 1;
       const detail = detailFor(application, false);
       row.failedApplications.push(detail);
       row.expanded_details.failed.push(detail);
@@ -338,21 +396,81 @@ export async function loadClientDashboard(options: {
     if (isWaitingForEmail(application)) row.waitingForEmail += 1;
     row.completed = row.submitted;
     row.completedApplications = row.submittedApplications;
-    grouped.set(name, row);
+    grouped.set(application.applywizz_id, row);
+  }
+
+  const missingCandidateIds = stats.byCandidate
+    .map((candidate) => candidate.applywizzId)
+    .filter((id) => !grouped.has(id));
+  const candidateProfiles = new Map<string, { client_name?: string | null; ca_email?: string | null }>();
+  for (let i = 0; i < missingCandidateIds.length; i += 200) {
+    const { data: profiles, error: profilesError } = await getDbClient()
+      .from('profiles')
+      .select('applywizz_id, client_name, ca_email')
+      .in('applywizz_id', missingCandidateIds.slice(i, i + 200));
+    if (profilesError) throw new Error(`Unable to load historical stats profiles: ${profilesError.message}`);
+    for (const profile of profiles || []) {
+      candidateProfiles.set(profile.applywizz_id, profile);
+    }
+  }
+  const statEmails = stats.byCandidate.flatMap((candidate) => candidate.caEmails);
+  const statNameMap = await displayNameMapForEmails(statEmails);
+  for (const candidate of stats.byCandidate) {
+    const profile = candidateProfiles.get(candidate.applywizzId);
+    const caEmail = candidate.caEmails[0] || profile?.ca_email?.trim().toLowerCase() || '';
+    const assignedName = statNameMap.get(caEmail) || caEmail.split('@')[0];
+    const row = grouped.get(candidate.applywizzId) || {
+      client: profile?.client_name?.trim() || candidate.applywizzId,
+      applywizzId: candidate.applywizzId,
+      applications: 0,
+      submitted: 0,
+      applied: 0,
+      pending: 0,
+      failed: 0,
+      waitingForEmail: 0,
+      assignedTo: assignedName,
+      assignedToEmail: caEmail,
+      ca_email: caEmail,
+      assigned_ca: profile?.ca_email?.trim().toLowerCase() || '',
+      submittedApplications: [],
+      pendingApplications: [],
+      failedApplications: [],
+      expanded_details: { submitted: [], failed: [], pending: [] },
+    };
+    row.applications = candidate.total ?? 0;
+    row.submitted = candidate.submitted ?? 0;
+    row.completed = row.submitted;
+    row.applied = candidate.applied ?? 0;
+    row.failed = candidate.failed ?? 0;
+    grouped.set(candidate.applywizzId, row);
+  }
+
+  const candidateStats = new Map(stats.byCandidate.map((candidate) => [candidate.applywizzId, candidate]));
+  for (const row of grouped.values()) {
+    const candidate = candidateStats.get(row.applywizzId);
+    row.applications = stats.available ? candidate?.total ?? 0 : null;
+    row.submitted = stats.available ? candidate?.submitted ?? 0 : null;
+    row.completed = row.submitted ?? undefined;
+    row.applied = stats.available ? candidate?.applied ?? 0 : null;
+    row.failed = stats.available ? candidate?.failed ?? 0 : null;
   }
 
   const rows = Array.from(grouped.values());
-  const totals = rows.reduce(
+  const liveTotals = rows.reduce(
     (total, row) => ({
-      applications: total.applications + row.applications,
-      submitted: total.submitted + row.submitted,
-      applied: total.applied + row.applied,
-      failed: total.failed + row.failed,
       pending: total.pending + row.pending,
       waiting_for_email: total.waiting_for_email + row.waitingForEmail,
     }),
-    { applications: 0, submitted: 0, applied: 0, failed: 0, pending: 0, waiting_for_email: 0 }
+    { pending: 0, waiting_for_email: 0 }
   );
+  const totals = {
+    applications: stats.available ? stats.counts.total : null,
+    submitted: stats.available ? stats.counts.submitted : null,
+    applied: stats.available ? stats.counts.applied : null,
+    failed: stats.available ? stats.counts.failed : null,
+    pending: liveTotals.pending,
+    waiting_for_email: liveTotals.waiting_for_email,
+  };
 
   return {
     date,
@@ -362,6 +480,10 @@ export async function loadClientDashboard(options: {
     rows,
     clients: rows.map((row) => row.client),
     totals,
+    statsAvailable: stats.available,
+    statsPartial: stats.partial,
+    statsAvailableFrom: stats.availableFrom,
+    byOperator: stats.byOperator,
     warning,
   };
 }

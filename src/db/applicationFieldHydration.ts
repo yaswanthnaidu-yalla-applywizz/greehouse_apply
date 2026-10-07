@@ -27,6 +27,7 @@ export function scannedFieldsToResolvedShells(fields: ScannedField[]): ResolvedF
       confidence: 0,
       isRequired: Boolean(f.isRequired),
       ...(options ? { options } : {}),
+      ...(f.optionsComplete === undefined ? {} : { optionsComplete: f.optionsComplete }),
     };
   });
 }
@@ -65,21 +66,27 @@ export async function hydrateApplicationResolvedFields(
       const needsOptions =
         (fieldType === 'select' || fieldType === 'radio' || fieldType === 'checkbox') &&
         (!Array.isArray(f.options) || f.options.length === 0);
-      if (needsOptions) {
-        const schemaField = schemaMap.get(f.fieldId) || schemaMap.get(f.name);
+      const schemaField = schemaMap.get(f.fieldId) || schemaMap.get(f.name);
+      const completenessChanged =
+        typeof schemaField?.optionsComplete === 'boolean' &&
+        f.optionsComplete !== schemaField.optionsComplete;
+      if (needsOptions || completenessChanged) {
         const isBool = /\b(do you|are you|have you|will you|can you|would you|is your|were you|did you)\b/i.test(
           f.label || ''
         );
-        const options =
-          schemaField && Array.isArray(schemaField.options) && schemaField.options.length > 0
+        const options = needsOptions && schemaField && Array.isArray(schemaField.options) && schemaField.options.length > 0
             ? schemaField.options
-            : isBool
+            : needsOptions && isBool
             ? ['Yes', 'No']
             : undefined;
-        if (options && options.length > 0) {
-          enriched = true;
-          return { ...f, options };
-        }
+        enriched = true;
+        return {
+          ...f,
+          ...(options ? { options } : {}),
+          ...(typeof schemaField?.optionsComplete === 'boolean'
+            ? { optionsComplete: schemaField.optionsComplete }
+            : {}),
+        };
       }
       return f;
     });

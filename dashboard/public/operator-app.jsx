@@ -13,8 +13,8 @@
 
       if (activeSource === 'manual') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEF3C7] text-[#92400E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-[#0071e3]/15 text-[#0071e3] border border-[#0071e3]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#0071e3]"></span>
             <span>manual</span>
           </span>
         );
@@ -22,8 +22,8 @@
 
       if (activeSource === 'unresolved') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#FEE2E2] text-[#991B1B] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#EF4444] animate-pulse"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-[#ff453a]/15 text-[#ff453a] border border-[#ff453a]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#ff453a] animate-pulse"></span>
             <span>unresolved</span>
           </span>
         );
@@ -31,11 +31,11 @@
 
       if (activeSource === 'supabase') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#D1FAE5] text-[#065F46] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-[#0a84ff]/15 text-[#0a84ff] border border-[#0a84ff]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#0a84ff]"></span>
             <span>supabase</span>
             {confidence !== undefined && (
-              <span className="text-[10px] text-[#047857]">({(confidence * 100).toFixed(0)}%)</span>
+              <span className="text-[10px] text-[#0a84ff]/80">({(confidence * 100).toFixed(0)}%)</span>
             )}
           </span>
         );
@@ -43,8 +43,8 @@
 
       if (activeSource === 'resume_parse') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#CFFAFE] text-[#155E75] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#06B6D4]"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-[#5ac8fa]/15 text-[#5ac8fa] border border-[#5ac8fa]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#5ac8fa]"></span>
             <span>resume</span>
           </span>
         );
@@ -52,8 +52,8 @@
 
       if (activeSource === 'fuzzy_match') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#DBEAFE] text-[#1E40AF] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#3B82F6]"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-[#0a84ff]/15 text-[#0a84ff] border border-[#0a84ff]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#0a84ff]"></span>
             <span>fuzzy</span>
           </span>
         );
@@ -61,16 +61,16 @@
 
       if (activeSource === 'api') {
         return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#E0E7FF] text-[#3730A3] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#6366F1]"></span>
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-[#0a84ff]/15 text-[#0a84ff] border border-[#0a84ff]/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#0a84ff]"></span>
             <span>api</span>
           </span>
         );
       }
 
       return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#EDE9FE] text-[#5B21B6] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#8B5CF6]"></span>
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold font-mono bg-[#5ac8fa]/15 text-[#5ac8fa] border border-[#5ac8fa]/30">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#5ac8fa]"></span>
           <span>ai</span>
         </span>
       );
@@ -136,36 +136,36 @@
       switch (status) {
         case 'QUEUED':
           return (
-            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Application queued for submission daemon">
-              <span className="w-2 h-2 rounded-full border-2 border-[#9A3412] border-t-transparent animate-spin"></span>
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#30d158]/15 text-[#30d158] border border-[#30d158]/30 animate-pulse ${className}`} title="Application queued for submission daemon">
+              <span className="w-2 h-2 rounded-full border-2 border-[#30d158] border-t-transparent animate-spin"></span>
               <span>Queued</span>
             </span>
           );
         case 'CAPTCHA_REQUIRED':
           return (
-            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FEF08A] text-[#854D0E] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Manual CAPTCHA challenge requires operator intervention">
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#ff9f0a]/15 text-[#ff9f0a] border border-[#ff9f0a]/30 animate-pulse ${className}`} title="Manual CAPTCHA challenge requires operator intervention">
               <span>🤖</span>
               <span>CAPTCHA Required</span>
             </span>
           );
         case 'OTP_REQUIRED':
           return (
-            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#FED7AA] text-[#9A3412] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Candidate email verification code required">
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#ff9f0a]/15 text-[#ff9f0a] border border-[#ff9f0a]/30 animate-pulse ${className}`} title="Candidate email verification code required">
               <span>🔑</span>
               <span>OTP Required</span>
             </span>
           );
         case 'APPLYING':
           return (
-            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E88474] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Automated submission in progress">
-              <span className="w-2 h-2 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#30d158]/15 text-[#30d158] border border-[#30d158]/30 animate-pulse ${className}`} title="Automated submission in progress">
+              <span className="w-2 h-2 rounded-full border-2 border-[#30d158] border-t-transparent animate-spin"></span>
               <span>Submitting... (Live)</span>
             </span>
           );
         case 'EMAIL_PROOF_PENDING':
           return (
-            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] animate-pulse ${className}`} title="Web submission confirmed — verifying confirmation email...">
-              <span className="w-2 h-2 rounded-full border-2 border-[#0369A1] border-t-transparent animate-spin"></span>
+            <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#ff9f0a]/15 text-[#ff9f0a] border border-[#ff9f0a]/30 animate-pulse ${className}`} title="Web submission confirmed — verifying confirmation email...">
+              <span className="w-2 h-2 rounded-full border-2 border-[#ff9f0a] border-t-transparent animate-spin"></span>
               <span>Email Pending...</span>
             </span>
           );
@@ -173,48 +173,48 @@
           if (proofWebUrl && !proofEmailUrl && !proofEmailJson) {
             return (
               <span
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E0F2FE] text-[#0369A1] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#30d158]/15 text-[#30d158] border border-[#30d158]/30 ${className}`}
                 title="A-Applied: Web confirmation proof captured, email proof pending or timed out"
               >
-                <span className="w-2 h-2 rounded-full bg-[#0284C7]"></span>
+                <span className="w-2 h-2 rounded-full bg-[#30d158]"></span>
                 <span>A-Applied</span>
               </span>
             );
           }
           return (
             <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#30d158]/15 text-[#30d158] border border-[#30d158]/30 ${className}`}
               title="Applied & Verified: Both web and confirmation email proofs captured"
             >
-              <span className="w-2 h-2 rounded-full bg-[#1E4620]"></span>
+              <span className="w-2 h-2 rounded-full bg-[#30d158]"></span>
               <span>Applied &amp; Verified</span>
             </span>
           );
         case 'DRY_RUN_COMPLETE':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
-              <span className="w-2 h-2 rounded-full bg-[#1E3A5F]"></span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#3a3a3c] text-white border border-[#48484a] ${className}`}>
+              <span className="w-2 h-2 rounded-full bg-[#8e8e93]"></span>
               <span>Dry-Run Complete</span>
             </span>
           );
         case 'FAILED':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#EF4444] text-white border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
-              <span className="w-2 h-2 rounded-full bg-white"></span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#ff453a]/15 text-[#ff453a] border border-[#ff453a]/30 ${className}`}>
+              <span className="w-2 h-2 rounded-full bg-[#ff453a]"></span>
               <span>Submission Failed</span>
             </span>
           );
         case 'EXPIRED':
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#E2E8F0] text-[#475569] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#2c2c2e] text-[#8e8e93] border border-[#3a3a3c] ${className}`}>
               <span>Closed / Expired</span>
             </span>
           );
         case 'READY_FOR_REVIEW':
         default:
           return (
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono bg-[#F4D66B] text-[#5C4A0A] border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${className}`}>
-              <span className="w-2 h-2 rounded-full bg-[#5C4A0A]"></span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-mono bg-[#3a3a3c] text-white border border-[#48484a] ${className}`}>
+              <span className="w-2 h-2 rounded-full bg-[#8e8e93]"></span>
               <span>Ready for Review</span>
             </span>
           );
@@ -298,6 +298,8 @@
       const isApplying = isSubmitting || SUBMIT_FLOW_STATUSES.has(String(applicationStatus));
       const isApplied = applicationStatus === 'APPLIED';
       const isFailed = applicationStatus === 'FAILED' || applicationStatus === 'RETRY';
+      const isEmailProofPending = applicationStatus === 'EMAIL_PROOF_PENDING' || status === 'EMAIL_PROOF_PENDING';
+      const isEmailUnverified = applicationStatus === 'EMAIL_UNVERIFIED' || status === 'EMAIL_UNVERIFIED';
       const hasProofActions =
         Boolean(dryRunScreenshotUrl) ||
         Boolean(proofUrl || proofWebUrl || isApplied || isEmailUnverified || isEmailProofPending) ||
@@ -1063,6 +1065,7 @@
           )}
         </div>
       );
+    }
 
     // -------------------------------------------------------------
     // Email proof (JSON) renderer — no screenshots
@@ -4193,9 +4196,27 @@
                 </button>
                 {sessionRole() === 'dev' && (
                   <>
-                    <a href="/dev" className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB] border-l border-[#1A1A2E]/20 ml-1 pl-2">Dev</a>
-                    <a href="/admin" className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB]">Admin</a>
-                    <a href="/manager" className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB]">Manager</a>
+                    <a
+                      href="/dev"
+                      onClick={() => sessionStorage.removeItem('applywizz_dev_operator_view')}
+                      className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB] border-l border-[#1A1A2E]/20 ml-1 pl-2"
+                    >
+                      Dev
+                    </a>
+                    <a
+                      href="/admin"
+                      onClick={() => sessionStorage.removeItem('applywizz_dev_operator_view')}
+                      className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB]"
+                    >
+                      Admin
+                    </a>
+                    <a
+                      href="/manager"
+                      onClick={() => sessionStorage.removeItem('applywizz_dev_operator_view')}
+                      className="px-3 py-1 text-xs font-bold rounded text-[#1A1A2E] hover:bg-[#FAF4EB]"
+                    >
+                      Manager
+                    </a>
                   </>
                 )}
               </nav>
@@ -4250,7 +4271,7 @@
 
                   <div className="flex items-center gap-1.5 bg-[#B8D4E8] border border-[#1A1A2E] px-2.5 py-1 rounded text-xs font-mono font-bold text-[#1E3A5F] shadow-[1px_1px_0px_#1A1A2E]">
                     <span>Jobs:</span>
-                    <span>{stats.totalApplications}</span>
+                    <span>{stats.statsAvailable === false ? '—' : stats.totalApplications}</span>
                   </div>
 
                 </div>
@@ -4539,6 +4560,16 @@
                   Real-time throughput metrics, resolution tier breakdowns, and submission telemetry.
                 </p>
               </div>
+              {stats?.statsAvailable === false && (
+                <p className="mb-4 rounded border-2 border-[#1A1A2E] bg-[#FFF8D6] p-3 text-xs font-bold">
+                  Application statistics before {stats.statsAvailableFrom || 'the cutover date'} are unavailable.
+                </p>
+              )}
+              {stats?.statsAvailable !== false && stats?.statsPartial && (
+                <p className="mb-4 rounded border-2 border-[#1A1A2E] bg-[#FFF8D6] p-3 text-xs font-bold">
+                  Partial statistics: dates before {stats.statsAvailableFrom} are excluded.
+                </p>
+              )}
 
               {stats ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
@@ -4559,7 +4590,7 @@
                       Total Applications
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.totalApplications}
+                      {stats.statsAvailable === false ? '—' : stats.totalApplications}
                     </div>
                     <div className="text-[11px] font-mono text-[#1E3A5F] mt-1">
                       Active job assignments
@@ -4571,7 +4602,7 @@
                       Submitted
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.submittedCount ?? stats.submitted ?? stats.completed}
+                      {stats.statsAvailable === false ? '—' : stats.submittedCount ?? stats.submitted ?? stats.completed}
                     </div>
                     <div className="text-[11px] font-mono text-[#065F46] mt-1">
                       Applications sent to queue in the selected period
@@ -4583,7 +4614,7 @@
                       Successfully Applied
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.applied ?? 0}
+                      {stats.statsAvailable === false ? '—' : stats.applied ?? 0}
                     </div>
                     <div className="text-[11px] font-mono text-[#065F46] mt-1">
                       Confirmed by Greenhouse
@@ -4595,7 +4626,7 @@
                       Failed
                     </span>
                     <div className="text-3xl font-black text-[#1A1A2E] mt-2">
-                      {stats.failed ?? 0}
+                      {stats.statsAvailable === false ? '—' : stats.failed ?? 0}
                     </div>
                     <div className="text-[11px] font-mono text-[#991B1B] mt-1">
                       Submission errors

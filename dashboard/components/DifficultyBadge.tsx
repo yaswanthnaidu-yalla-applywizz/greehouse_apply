@@ -1,10 +1,10 @@
 /**
- * @fileoverview Difficulty Badge Component (Phase V2-UI).
+ * @fileoverview Difficulty Badge Component (Apple Music Dark Theme).
  *
- * Renders color-coded difficulty indicators matching reference mockup:
- * - Easy: Green (#9AC89A) with dark border
- * - Medium: Blue (#B8D4E8) with dark border
- * - Hard: Coral (#E88474) with dark border
+ * Renders color-coded difficulty indicators matching the design system:
+ * - Easy: Green (#30d158)
+ * - Medium: Orange/Amber (#ff9f0a)
+ * - Hard: Red (#ff453a)
  */
 
 import React from 'react';
@@ -35,7 +35,7 @@ export const DifficultyBadge: React.FC<DifficultyBadgeProps> = ({
   if (resolvedLevel === 'Easy') {
     return (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#9AC89A] text-[#1E4620] border border-[#1A1A2E] ${className}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#30d158]/15 text-[#30d158] border border-[#30d158]/30 ${className}`}
       >
         Easy
       </span>
@@ -45,7 +45,7 @@ export const DifficultyBadge: React.FC<DifficultyBadgeProps> = ({
   if (resolvedLevel === 'Medium') {
     return (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] ${className}`}
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#ff9f0a]/15 text-[#ff9f0a] border border-[#ff9f0a]/30 ${className}`}
       >
         Medium
       </span>
@@ -54,9 +54,11 @@ export const DifficultyBadge: React.FC<DifficultyBadgeProps> = ({
 
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-[#E88474] text-white border border-[#1A1A2E] ${className}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-[#ff453a]/15 text-[#ff453a] border border-[#ff453a]/30 ${className}`}
     >
       Hard
     </span>
   );
 };
+
+export default DifficultyBadge;

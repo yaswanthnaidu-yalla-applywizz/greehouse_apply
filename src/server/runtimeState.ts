@@ -27,6 +27,11 @@ const GATE_TTL_MS = 15000;
 let gateFetchInProgress: Promise<boolean> | null = null;
 
 export async function refreshSubmissionEligibilityGateFromDb(): Promise<boolean> {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    cachedGateEnabled = false;
+    lastGateFetchTime = Date.now();
+    return false;
+  }
   if (gateFetchInProgress) return gateFetchInProgress;
   gateFetchInProgress = (async () => {
     try {
@@ -58,6 +63,11 @@ export async function refreshSubmissionEligibilityGateFromDb(): Promise<boolean>
 }
 
 export function getSubmissionEligibilityGateEnabled(): boolean {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    cachedGateEnabled = false;
+    lastGateFetchTime = Date.now();
+    return false;
+  }
   const now = Date.now();
   if (cachedGateEnabled === null) {
     cachedGateEnabled = config.SUBMISSION_ELIGIBILITY_GATE_ENABLED;
@@ -69,6 +79,11 @@ export function getSubmissionEligibilityGateEnabled(): boolean {
 }
 
 export function setSubmissionEligibilityGateEnabled(enabled: boolean): void {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    cachedGateEnabled = false;
+    lastGateFetchTime = Date.now();
+    return;
+  }
   cachedGateEnabled = enabled;
   lastGateFetchTime = Date.now();
   if (isSupabaseConfigured()) {

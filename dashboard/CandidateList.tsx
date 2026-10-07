@@ -47,23 +47,23 @@ export const CandidateList: React.FC<CandidateListProps> = ({
   }, [candidates, searchTerm]);
 
   return (
-    <aside className="w-80 flex-shrink-0 bg-[#FAF4EB] border-r-2 border-[#1A1A2E] flex flex-col h-full overflow-hidden text-[#1A1A2E]">
+    <aside className="w-80 flex-shrink-0 bg-[#1c1c1e] border-r border-[#2c2c2e] flex flex-col h-full overflow-hidden text-[#ffffff]">
       {/* Search Header */}
-      <div className="p-4 border-b-2 border-[#1A1A2E] bg-[#FFF5EB] sticky top-0 z-10">
+      <div className="p-4 border-b border-[#2c2c2e] bg-[#1c1c1e] sticky top-0 z-10">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
             <span className="text-sm">👥</span>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">
               Candidates Directory
             </h2>
           </div>
-          <span className="text-xs font-mono bg-white text-[#1A1A2E] border border-[#1A1A2E] px-2 py-0.5 rounded font-bold">
+          <span className="text-xs font-mono bg-[#2c2c2e] text-[#8e8e93] border border-[#3a3a3c] px-2 py-0.5 rounded-md font-medium">
             {filteredCandidates.length} / {candidates.length}
           </span>
         </div>
 
         {selectedDate && (
-          <div className="mb-2 px-2 py-0.5 bg-[#E2F0FB] border border-[#1A1A2E] rounded text-[10px] font-mono font-bold text-[#1E3A5F] flex items-center justify-between">
+          <div className="mb-2 px-2 py-1 bg-[#2c2c2e] border border-[#3a3a3c] rounded-md text-[10px] font-mono font-medium text-[#0a84ff] flex items-center justify-between">
             <span>📅 Assigned: {selectedDate} (IST)</span>
           </div>
         )}
@@ -75,13 +75,13 @@ export const CandidateList: React.FC<CandidateListProps> = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="🔍 Search name or AWL-ID..."
-            className="w-full bg-white border-2 border-[#1A1A2E] rounded-md px-3 py-2 text-xs text-[#1A1A2E] placeholder-[#64748B] focus:outline-none focus:ring-2 focus:ring-[#E88474] transition-all font-medium"
+            className="w-full bg-[#2c2c2e] border border-[#3a3a3c] rounded-lg px-3 py-2 text-xs text-[#ffffff] placeholder-[#8e8e93] focus:outline-none focus:border-[#0a84ff] transition-all font-medium"
           />
           {searchTerm && (
             <button
               type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-2.5 text-[#64748B] hover:text-[#1A1A2E] text-xs font-bold"
+              className="absolute right-2.5 top-2.5 text-[#8e8e93] hover:text-[#ffffff] text-xs font-bold"
             >
               ✕
             </button>
@@ -92,13 +92,13 @@ export const CandidateList: React.FC<CandidateListProps> = ({
       {/* Candidate Card List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
         {isLoading ? (
-          <div className="p-6 text-center text-xs text-[#64748B] font-mono animate-pulse">
+          <div className="p-6 text-center text-xs text-[#8e8e93] font-mono animate-pulse">
             Loading candidate records...
           </div>
         ) : filteredCandidates.length === 0 ? (
-          <div className="p-6 text-center text-xs text-[#64748B]">
+          <div className="p-6 text-center text-xs text-[#8e8e93]">
             {searchTerm ? (
-              <>No candidates matching <span className="font-bold text-[#1A1A2E]">"{searchTerm}"</span></>
+              <>No candidates matching <span className="font-semibold text-[#ffffff]">"{searchTerm}"</span></>
             ) : (
               emptyMessage || 'No candidates found.'
             )}
@@ -120,57 +120,57 @@ export const CandidateList: React.FC<CandidateListProps> = ({
                 key={c.applywizzId}
                 type="button"
                 onClick={() => onSelectCandidate(c.applywizzId)}
-                className={`w-full text-left p-3 rounded-lg transition-all duration-150 relative ${
+                className={`w-full text-left p-3 rounded-xl transition-all duration-150 relative ${
                   isSelected
-                    ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] ring-1 ring-[#1A1A2E]'
-                    : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] active:translate-x-[1px] active:translate-y-[1px]'
+                    ? 'bg-[#2c2c2e] border border-[#3a3a3c]'
+                    : 'bg-[#1c1c1e] border border-[#2c2c2e] hover:bg-[#2c2c2e]/60'
                 }`}
               >
                 {/* Top Row: Initials Avatar + ID + Status */}
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-[#B8D4E8] text-[#1E3A5F] border border-[#1A1A2E] flex items-center justify-center text-[10px] font-bold">
+                    <span className="w-6 h-6 rounded-full bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c] flex items-center justify-center text-[10px] font-bold">
                       {initials}
                     </span>
-                    <span className="text-[11px] font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] border border-[#1A1A2E] px-1.5 py-0.5 rounded">
+                    <span className="text-[11px] font-mono font-medium text-[#8e8e93] bg-[#2c2c2e] border border-[#3a3a3c] px-1.5 py-0.5 rounded-md">
                       {c.applywizzId}
                     </span>
                   </div>
 
-                  {/* Status Indicator Pill (queue_status from candidate_applications) */}
+                  {/* Status Indicator Pill */}
                   {(c.queue_status === 'READY' || (!c.queue_status && c.status === 'READY')) && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#1E4620] bg-[#9AC89A] px-2 py-0.5 rounded border border-[#1A1A2E]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#1E4620] animate-pulse"></span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#30d158] bg-[#30d158]/15 px-2 py-0.5 rounded-full border border-[#30d158]/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#30d158] animate-pulse"></span>
                       Ready
                     </span>
                   )}
                   {(c.queue_status === 'IN_PROGRESS' ||
                     c.queue_status === 'NO_APPLICATIONS' ||
                     (!c.queue_status && c.status === 'PENDING')) && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#5C4A0A] bg-[#F4D66B] px-2 py-0.5 rounded border border-[#1A1A2E]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#5C4A0A]"></span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#ff9f0a] bg-[#ff9f0a]/15 px-2 py-0.5 rounded-full border border-[#ff9f0a]/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#ff9f0a]"></span>
                       {c.queue_status === 'IN_PROGRESS' ? 'In progress' : 'Pending'}
                     </span>
                   )}
                   {(c.queue_status === 'DONE' || (!c.queue_status && c.status === 'EXPIRED')) && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#475569] bg-[#E2E8F0] px-2 py-0.5 rounded border border-[#1A1A2E]">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#8e8e93] bg-[#3a3a3c] px-2 py-0.5 rounded-full border border-[#48484a]">
                       Done
                     </span>
                   )}
                 </div>
 
                 {/* Candidate Full Name */}
-                <div className="text-xs font-bold text-[#1A1A2E] truncate mb-1">
+                <div className="text-xs font-semibold text-[#ffffff] truncate mb-1">
                   {c.clientName}
                 </div>
 
                 {/* Bottom Row: Location/Email & Job Count Pill */}
-                <div className="flex items-center justify-between text-[11px] text-[#64748B]">
-                  <span className="truncate max-w-[130px] font-medium text-[#64748B]">
+                <div className="flex items-center justify-between text-[11px] text-[#8e8e93]">
+                  <span className="truncate max-w-[130px] font-medium text-[#8e8e93]">
                     {c.email || c.location || 'Profile Synced'}
                   </span>
 
-                  <span className="bg-[#FAF4EB] border border-[#1A1A2E] text-[#1A1A2E] px-2 py-0.5 rounded text-[10px] font-bold font-mono">
+                  <span className="bg-[#2c2c2e] border border-[#3a3a3c] text-[#8e8e93] px-2 py-0.5 rounded-md text-[10px] font-semibold font-mono">
                     {c.job_count ?? c.totalJobs}{' '}
                     {(c.job_count ?? c.totalJobs) === 1 ? 'Job' : 'Jobs'}
                   </span>

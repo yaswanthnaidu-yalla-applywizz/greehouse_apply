@@ -3,14 +3,14 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { getSandboxPool, isSandboxMode } from '../../db/sandboxClient.js';
 import {
   getApplication,
   getISTDateRangeUtc,
   listApplications,
-  countSubmittedApplicationsSince,
   countApplicationsByStatus,
-  getSubmissionOutcomeCounts,
 } from '../../db/applications.js';
+import { getApplicationStats } from '../../db/applicationStats.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { listApplicationEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
@@ -41,8 +41,9 @@ function parseLimit(value: unknown, fallback = 100): number {
 }
 
 devDashboardRouter.get('/submission-gate', async (_req: Request, res: Response): Promise<void> => {
-  let enabled = getSubmissionEligibilityGateEnabled();
-  if (isSupabaseConfigured()) {
+  const sandbox = isSandboxMode();
+  let enabled = sandbox ? false : getSubmissionEligibilityGateEnabled();
+  if (!sandbox && isSupabaseConfigured()) {
     try {
       const { data, error } = await getDbClient()
         .from('system_config')
@@ -59,7 +60,7 @@ devDashboardRouter.get('/submission-gate', async (_req: Request, res: Response):
   res.json({
     enabled,
     criteria: submissionGateCriteria(),
-    source: 'system_config',
+    source: sandbox ? 'sandbox_default' : 'system_config',
   });
 });
 
@@ -67,6 +68,15 @@ devDashboardRouter.patch('/submission-gate', async (req: Request, res: Response)
   const enabled = req.body?.enabled;
   if (typeof enabled !== 'boolean') {
     res.status(400).json({ error: 'Body must include boolean "enabled".' });
+    return;
+  }
+  if (isSandboxMode()) {
+    setSubmissionEligibilityGateEnabled(false);
+    res.json({
+      enabled: false,
+      criteria: submissionGateCriteria(),
+      source: 'sandbox_default',
+    });
     return;
   }
   setSubmissionEligibilityGateEnabled(enabled);
@@ -104,19 +114,24 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
       startIso,
       endIso,
     });
-    const [submitted, outcomes, queued] = await Promise.all([
-      countSubmittedApplicationsSince(startIso, undefined, endIso),
-      getSubmissionOutcomeCounts({ createdAtRange: { startIso, endIso } }),
+    const [stats, queued] = await Promise.all([
+      getApplicationStats({
+        range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+      }),
       countApplicationsByStatus('QUEUED', { startIso, endIso }),
     ]);
     res.json({
       ...(await collectHealthSnapshot()),
       submitClicks,
       submitClicksDate: parsedRange.toDate,
-      submitted,
-      submittedCount: submitted,
-      applied: outcomes.successfulApplications,
-      failed: outcomes.failedApplications,
+      totalApplications: stats.counts.total,
+      submitted: stats.counts.submitted,
+      submittedCount: stats.counts.submitted,
+      applied: stats.counts.applied,
+      failed: stats.counts.failed,
+      statsAvailable: stats.available,
+      statsPartial: stats.partial,
+      statsAvailableFrom: stats.availableFrom,
       queued,
       dateRange: serializeDateRange(parsedRange),
     });
@@ -146,7 +161,7 @@ devDashboardRouter.get('/runs', async (req: Request, res: Response): Promise<voi
       .from('gh_candidate_applications')
       .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, profiles!inner(client_name)', { count: 'exact' })
       .gte('created_at', startIso)
-      .lte('created_at', endIso)
+      .lt('created_at', endIso)
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1);
     if (status) query = query.eq('status', status);
@@ -203,7 +218,7 @@ devDashboardRouter.get('/errors', async (req: Request, res: Response): Promise<v
         .in('status', ['FAILED', 'CAPTCHA_TIMEOUT']);
       if (date) {
         const { startIso, endIso } = getISTDateRangeUtc(date);
-        query = query.gte('updated_at', startIso).lte('updated_at', endIso);
+        query = query.gte('updated_at', startIso).lt('updated_at', endIso);
       }
       const { data, error } = await query;
       if (!error && data) {
@@ -223,7 +238,7 @@ devDashboardRouter.get('/errors', async (req: Request, res: Response): Promise<v
         const end = Date.parse(endIso);
         failed = failed.filter((row) => {
           const at = Date.parse(row.updated_at || row.created_at || '');
-          return Number.isFinite(at) && at >= start && at <= end;
+          return Number.isFinite(at) && at >= start && at < end;
         });
       }
     }
@@ -402,5 +417,35 @@ devDashboardRouter.get('/applications/:id', async (req: Request, res: Response):
   } catch (error) {
     log.error('[Dev] debugger failed:', error);
     res.status(500).json({ error: 'Unable to load application debugger.' });
+  }
+});
+
+
+devDashboardRouter.get('/db/tables', async (_req: Request, res: Response): Promise<void> => {
+  if (!isSandboxMode()) { res.status(403).json({ error: 'Sandbox mode only' }); return; }
+  try {
+    const pool = getSandboxPool();
+    const result = await pool.query(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name;
+    `);
+    res.json({ tables: result.rows.map(r => r.table_name) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+devDashboardRouter.post('/db/query', async (req: Request, res: Response): Promise<void> => {
+  if (!isSandboxMode()) { res.status(403).json({ error: 'Sandbox mode only' }); return; }
+  const { query } = req.body;
+  if (!query) { res.status(400).json({ error: 'Query required' }); return; }
+  try {
+    const pool = getSandboxPool();
+    const result = await pool.query(query);
+    res.json({ rows: result.rows, command: result.command, rowCount: result.rowCount });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });

@@ -1,10 +1,12 @@
 /**
- * @fileoverview 3-Tier Answer Resolution Engine Orchestrator (Greenhouse V2).
+ * @fileoverview 5-Tier Answer Resolution Engine Orchestrator (Greenhouse V2).
  *
  * Coordinates resolution in strict waterfall sequence (100% offline during resolution):
  * - Tier 1: Supabase profiles + exact candidate_qa_bank match (source: 'supabase', tier: 1)
  * - Tier 2: Parsed resume cache / Supabase Storage PDF parse (source: 'resume_parse', tier: 2)
- * - Tier 5: Local Ollama LLM synthesis + automatic QA bank writeback (source: 'ai', tier: 5)
+ * - Tier 3: Semantic search over candidate profile facts, then candidate QA bank
+ * - Tier 4: Fuzzy search over candidate profile facts, then candidate QA bank
+ * - Tier 5: LLM synthesis + automatic QA bank writeback (source: 'ai', tier: 5)
  * - Fallback: Unresolved field (source: 'unresolved', tier: null)
  *
  * No ApplyWizz API calls are made during resolution. New candidates are onboarded at ingestion time only.
@@ -78,27 +80,33 @@ function profileIndicatesUsLocation(profile: ProfileRow | null): boolean {
 }
 
 function getFieldOptions(field: ScannedField): string[] | undefined {
-  if (Array.isArray(field.options) && field.options.length > 0) {
-    return field.options;
-  }
-  const lc = (field.label || '').toLowerCase();
-  const fieldType = String(field.type || '').toLowerCase();
-  if (fieldType === 'select' || fieldType === 'radio') {
-    if (/\b(do you|are you|have you|will you|can you|would you|is your|were you|did you)\b/i.test(lc)) {
-      return ['Yes', 'No'];
-    }
-  }
-  return field.options;
+  return getEffectiveFieldOptions(field);
 }
 
-function alignResolvedChoice(field: ScannedField, resolved: ResolvedField): ResolvedField {
-  const options = getFieldOptions(field) || resolved.options;
-  const baseWithOptions = { ...resolved, ...(options ? { options } : {}) };
+function isCountryField(field: ScannedField): boolean {
+  const combined = `${field.label} ${field.name} ${field.fieldId}`;
+  return /\bcountry\b/i.test(combined) && !/phone|dialing|calling|code/i.test(combined);
+}
+
+function alignResolvedChoice(
+  field: ScannedField,
+  resolved: ResolvedField,
+  effectiveOptions?: string[]
+): ResolvedField {
+  const options = effectiveOptions || getFieldOptions(field) || resolved.options;
+  const baseWithOptions = {
+    ...resolved,
+    ...(options ? { options } : {}),
+    ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+  };
   if (resolved.source === 'unresolved' || !resolved.value.trim()) return baseWithOptions;
   if (field.type === 'checkbox') return baseWithOptions;
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
+  if (field.optionsComplete === false) {
+    return { ...baseWithOptions, ...(field.options ? { options: field.options } : {}) };
+  }
 
-  const matched = matchChoiceOption(resolved.value, field.options);
+  const matched = matchChoiceOption(resolved.value, options);
   if (matched) return { ...baseWithOptions, value: matched };
 
   return {
@@ -113,6 +121,7 @@ function alignResolvedChoice(field: ScannedField, resolved: ResolvedField): Reso
 function alignResolvedChoiceOrNull(field: ScannedField, value: string): string | null {
   if (field.type === 'checkbox') return value;
   if (field.type !== 'select' && field.type !== 'radio') return value;
+  if (field.optionsComplete === false) return value;
   return matchChoiceOption(value, field.options);
 }
 
@@ -121,6 +130,8 @@ export function resolvePreTierField(
   profile: ProfileRow | null,
   isRequired: boolean
 ): ResolvedField | null {
+  if (/^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
+
   const options = getFieldOptions(field);
   const base = {
     fieldId: field.fieldId,
@@ -132,6 +143,7 @@ export function resolvePreTierField(
     confidence: 1.0,
     isRequired,
     ...(options ? { options } : {}),
+    ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
   };
 
   if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
@@ -150,8 +162,9 @@ export function resolvePreTierField(
     return { ...base, value: finalVal };
   }
 
-  if (/country/i.test(field.label)) {
-    const targetVal = 'United States';
+  if (isCountryField(field)) {
+    const targetVal = profile?.country?.trim();
+    if (!targetVal) return null;
     const finalVal = alignResolvedChoiceOrNull(field, targetVal);
     if (!finalVal && (field.type === 'select' || field.type === 'radio')) {
       return null;
@@ -161,7 +174,7 @@ export function resolvePreTierField(
     return { ...base, value: resolvedVal };
   }
 
-  if (/agree|certify|confirm|acknowledge|consent|above info|above information|true and correct|i hereby/i.test(field.label)) {
+  if (/\b(?:I agree|I consent|I certify|I acknowledge|by checking|by selecting|by submitting)\b/i.test(field.label)) {
     const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
     const finalVal = alignResolvedChoiceOrNull(field, targetVal);
     if (!finalVal) return null;
@@ -200,6 +213,7 @@ function resolveStructuredEeocField(
     confidence: 1.0,
     isRequired,
     ...(options ? { options } : {}),
+    ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
   };
 }
 
@@ -286,7 +300,7 @@ export class AnswerResolver {
     }
   ): Promise<ResolvedField> {
     const resolved = await this.resolveFieldRaw(applywizzId, field, context);
-    return alignResolvedChoice(field, resolved);
+    return alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field));
   }
 
   private async resolveFieldRaw(
@@ -302,8 +316,9 @@ export class AnswerResolver {
     const profile = context?.profile || (await getProfile(applywizzId));
     const jobContext = context?.jobContext || { companyName: 'Company', jobTitle: 'Position' };
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+    const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
-    const preTier = resolvePreTierField(field, profile, isRequired);
+    const preTier = resolvePreTierField(resolutionField, profile, isRequired);
     if (preTier) return preTier;
 
     // Never fill cover letters under any circumstances
@@ -322,13 +337,13 @@ export class AnswerResolver {
       };
     }
 
-    const structuredEeoc = resolveStructuredEeocField(field, profile, isRequired);
+    const structuredEeoc = resolveStructuredEeocField(resolutionField, profile, isRequired);
     if (structuredEeoc) return structuredEeoc;
 
     // ------------------------------------------------------------------------
     // Tier 1: Supabase Profile & Exact QA Bank
     // ------------------------------------------------------------------------
-    const tier1 = await resolveTier1(applywizzId, field, profile);
+    const tier1 = await resolveTier1(applywizzId, resolutionField, profile);
     if (tier1) {
       return { ...tier1, isRequired };
     }
@@ -358,7 +373,7 @@ export class AnswerResolver {
         ? context.parsedResume
         : await getOrParseResume(applywizzId);
 
-    const tier2 = await resolveTier2(applywizzId, field, parsedResume);
+    const tier2 = await resolveTier2(applywizzId, resolutionField, parsedResume);
     if (tier2) {
       log.info(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
       return { ...tier2, isRequired };
@@ -371,8 +386,10 @@ export class AnswerResolver {
     const semanticMatch = await findSemanticMatch(
       field.label,
       applywizzId,
-      field.type,
-      field.options
+      resolutionField.type,
+      resolutionField.options,
+      0.82,
+      profile
     );
     if (semanticMatch) {
       log.info(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
@@ -394,7 +411,12 @@ export class AnswerResolver {
     // ------------------------------------------------------------------------
     // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
     // ------------------------------------------------------------------------
-    const tier4 = await resolveTier3(applywizzId, field, context?.qaEntries);
+    const tier4 = await resolveTier3(
+      applywizzId,
+      resolutionField,
+      context?.qaEntries,
+      profile
+    );
     if (tier4) {
       log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
       return {
@@ -408,6 +430,11 @@ export class AnswerResolver {
     // ------------------------------------------------------------------------
     // Tier 5: Multi-provider LLM Synthesis
     // ------------------------------------------------------------------------
+    if (isCountryField(field)) {
+      log.info(`[Resolver] ❌ T5 ${field.label} — country fields are not sent to Tier 5`);
+      return this.unresolvedField(field);
+    }
+
     if (profile) {
       const tier5 = await resolveTier5(
         applywizzId,
@@ -441,6 +468,7 @@ export class AnswerResolver {
       confidence: 0,
       isRequired: Boolean(field.isRequired),
       ...(options ? { options } : {}),
+      ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
     };
   }
 
@@ -458,7 +486,7 @@ export class AnswerResolver {
     }
   ): Promise<ResolvedField> {
     const resolved = await this.resolveFieldThroughTier2Raw(applywizzId, field, context);
-    return alignResolvedChoice(field, resolved);
+    return alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field));
   }
 
   private async resolveFieldThroughTier2Raw(
@@ -473,8 +501,9 @@ export class AnswerResolver {
   ): Promise<ResolvedField> {
     const profile = context.profile || (await getProfile(applywizzId));
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+    const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
-    const preTier = resolvePreTierField(field, profile, isRequired);
+    const preTier = resolvePreTierField(resolutionField, profile, isRequired);
     if (preTier) return preTier;
 
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
@@ -492,10 +521,10 @@ export class AnswerResolver {
       };
     }
 
-    const structuredEeoc = resolveStructuredEeocField(field, profile, isRequired);
+    const structuredEeoc = resolveStructuredEeocField(resolutionField, profile, isRequired);
     if (structuredEeoc) return structuredEeoc;
 
-    const tier1 = await resolveTier1(applywizzId, field, profile);
+    const tier1 = await resolveTier1(applywizzId, resolutionField, profile);
     if (tier1) {
       return { ...tier1, isRequired };
     }
@@ -520,7 +549,7 @@ export class AnswerResolver {
         ? context.parsedResume
         : await getOrParseResume(applywizzId);
 
-    const tier2 = await resolveTier2(applywizzId, field, parsedResume);
+    const tier2 = await resolveTier2(applywizzId, resolutionField, parsedResume);
     if (tier2) {
       log.info(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
       return { ...tier2, isRequired };
@@ -533,8 +562,10 @@ export class AnswerResolver {
     const semanticMatch = await findSemanticMatch(
       field.label,
       applywizzId,
-      field.type,
-      field.options
+      resolutionField.type,
+      resolutionField.options,
+      0.82,
+      profile
     );
     if (semanticMatch) {
       log.info(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
@@ -556,7 +587,12 @@ export class AnswerResolver {
     // ------------------------------------------------------------------------
     // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
     // ------------------------------------------------------------------------
-    const tier4 = await resolveTier3(applywizzId, field, context.qaEntries);
+    const tier4 = await resolveTier3(
+      applywizzId,
+      resolutionField,
+      context.qaEntries,
+      profile
+    );
     if (tier4) {
       log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
       return {
@@ -621,9 +657,11 @@ export class AnswerResolver {
       resolvedFields.push(resolved);
 
       if (resolved.source === 'unresolved') {
-        if (profile) {
+        if (profile && !isCountryField(field)) {
           tier5Slots.push(resolvedFields.length - 1);
           tier5Pending.push(field);
+        } else if (isCountryField(field)) {
+          log.info(`[Resolver] ❌ ${field.label} — country fields are not sent to Tier 5`);
         } else {
           log.info(`[Resolver] ❌ T5 ${field.label} — unresolved`);
         }
@@ -651,7 +689,11 @@ export class AnswerResolver {
       for (let i = 0; i < chunkFields.length; i++) {
         const tier5 = batchResults[i];
         if (tier5 && tier5.value && tier5.value.trim().length > 0) {
-          const alignedTier5 = alignResolvedChoice(chunkFields[i], tier5);
+          const alignedTier5 = alignResolvedChoice(
+            chunkFields[i],
+            tier5,
+            tier5.options || getEffectiveFieldOptions(chunkFields[i])
+          );
           resolvedFields[chunkSlots[i]] = alignedTier5;
           if (alignedTier5.source === 'unresolved') {
             log.info(`[Resolver] ❌ T5 ${chunkFields[i].label} — no option match`);
@@ -665,12 +707,15 @@ export class AnswerResolver {
       }
     }
 
-    // Ensure every resolved field retains options from the scanned template
+    // Ensure every resolved field retains choice metadata from the scanned template
     for (let i = 0; i < template.fields.length; i++) {
       const field = template.fields[i];
-      const options = getFieldOptions(field);
-      if (options && resolvedFields[i]) {
-        resolvedFields[i].options = options;
+      const resolved = resolvedFields[i];
+      if (resolved) {
+        if (field.options) resolved.options = field.options;
+        if (field.optionsComplete !== undefined) {
+          resolved.optionsComplete = field.optionsComplete;
+        }
       }
     }
 

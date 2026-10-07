@@ -10,6 +10,7 @@ import {
 } from '../src/submission/submissionEligibilityGate.js';
 import {
   getSubmissionEligibilityGateEnabled,
+  refreshSubmissionEligibilityGateFromDb,
   setSubmissionEligibilityGateEnabled,
 } from '../src/server/runtimeState.js';
 
@@ -67,5 +68,21 @@ describe('submissionEligibilityGate', () => {
       isEligibleForSubmission({ csv_job_score: SUBMISSION_SCORE_MIN - 1, field_count: 5 }).eligible,
       false
     );
+  });
+
+  it('forces the gate off in sandbox mode', async () => {
+    const previousSandbox = process.env.SANDBOX;
+    process.env.SANDBOX = 'true';
+    try {
+      setSubmissionEligibilityGateEnabled(true);
+      assert.equal(getSubmissionEligibilityGateEnabled(), false);
+      assert.equal(await refreshSubmissionEligibilityGateFromDb(), false);
+    } finally {
+      if (previousSandbox === undefined) {
+        delete process.env.SANDBOX;
+      } else {
+        process.env.SANDBOX = previousSandbox;
+      }
+    }
   });
 });

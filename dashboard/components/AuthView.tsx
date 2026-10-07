@@ -348,46 +348,46 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
   // -------------------------------------------------------------
   if (signUpStep === 'mfa_enroll') {
     return (
-      <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl p-8">
+      <div className="w-full max-w-md bg-[#1c1c1e] border border-[#2c2c2e] rounded-2xl p-8">
         <div className="flex items-center justify-center gap-3 mb-6">
           <img
             src="/logo.webp"
             alt="ApplyWizz"
-            className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] object-cover bg-black"
+            className="w-10 h-10 rounded-lg border border-[#2c2c2e] object-cover bg-black"
           />
           <div>
-            <h1 className="text-xl font-black text-[#1A1A2E] tracking-tight uppercase">ApplyWizz</h1>
-            <span className="text-[11px] block font-mono text-[#64748B] font-bold tracking-wider">
+            <h1 className="text-xl font-bold text-[#ffffff] tracking-tight uppercase">ApplyWizz</h1>
+            <span className="text-[11px] block font-mono text-[#8e8e93] font-medium tracking-wider">
               Setup Microsoft Authenticator
             </span>
           </div>
         </div>
 
         <div className="space-y-4">
-          <div className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-4 text-center">
-            <p className="text-xs font-bold text-[#1A1A2E] mb-3">
-              Scan this QR code with <strong>Microsoft Authenticator</strong> on your phone:
+          <div className="bg-[#2c2c2e] border border-[#3a3a3c] rounded-xl p-4 text-center">
+            <p className="text-xs font-medium text-[#8e8e93] mb-3">
+              Scan this QR code with <strong className="text-[#ffffff]">Microsoft Authenticator</strong> on your phone:
             </p>
             {mfaQrCode ? (
               <div className="flex justify-center my-3">
                 <img
                   src={formatQrCodeSrc(mfaQrCode)}
                   alt="MFA QR Code"
-                  className="w-44 h-44 border-2 border-[#1A1A2E] rounded-xl p-1 bg-white object-contain"
+                  className="w-44 h-44 border border-[#3a3a3c] rounded-xl p-1 bg-white object-contain"
                 />
               </div>
             ) : (
-              <div className="w-44 h-44 mx-auto border-2 border-[#1A1A2E] rounded-xl flex items-center justify-center bg-gray-100 text-xs font-mono text-gray-500">
+              <div className="w-44 h-44 mx-auto border border-[#3a3a3c] rounded-xl flex items-center justify-center bg-[#1c1c1e] text-xs font-mono text-[#8e8e93]">
                 Loading QR Code...
               </div>
             )}
 
             {mfaSecret && (
               <div className="mt-2 text-left">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-[#64748B] block">
+                <span className="text-[10px] uppercase font-semibold tracking-wider text-[#8e8e93] block">
                   Manual Entry Key:
                 </span>
-                <code className="text-xs font-mono font-bold text-[#1A1A2E] break-all bg-white px-2 py-1 rounded border border-[#1A1A2E] inline-block mt-0.5">
+                <code className="text-xs font-mono font-medium text-[#ffffff] break-all bg-[#1c1c1e] px-2 py-1 rounded border border-[#3a3a3c] inline-block mt-0.5">
                   {mfaSecret}
                 </code>
               </div>
@@ -395,14 +395,14 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
           </div>
 
           {mfaError && (
-            <div className="bg-[#EF4444]/15 border-2 border-[#1A1A2E] text-[#991B1B] text-xs font-bold p-3 rounded-xl flex items-start gap-2">
+            <div className="bg-[#ff453a]/15 border border-[#ff453a]/30 text-[#ff453a] text-xs font-semibold p-3 rounded-xl flex items-start gap-2">
               <span className="text-sm">⚠️</span>
               <span>{mfaError}</span>
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1.5">
               Enter 6-Digit Code from App
             </label>
             <input
@@ -413,7 +413,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
               value={mfaTotpCode}
               onChange={(e) => setMfaTotpCode(e.target.value.replace(/\D/g, ''))}
               placeholder="000000"
-              className="w-full text-center tracking-[0.5em] text-lg font-mono font-black px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-[#1A1A2E] focus:outline-none focus:bg-white"
+              className="w-full text-center tracking-[0.5em] text-lg font-mono font-bold px-3.5 py-2.5 bg-[#2c2c2e] border border-[#3a3a3c] rounded-xl text-[#ffffff] focus:outline-none focus:border-[#0a84ff]"
             />
           </div>
 
@@ -421,7 +421,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
             type="button"
             onClick={() => handleCompleteMfaSetup()}
             disabled={mfaLoading || mfaTotpCode.length < 6}
-            className="w-full py-3 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-3 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-bold text-xs uppercase tracking-wider rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {mfaLoading ? 'Activating Authenticator...' : 'Link & Complete Setup →'}
           </button>
@@ -429,7 +429,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
           <button
             type="button"
             onClick={resetAll}
-            className="w-full py-2 text-xs font-bold text-[#64748B] hover:text-[#1A1A2E] text-center"
+            className="w-full py-2 text-xs font-medium text-[#8e8e93] hover:text-[#ffffff] text-center"
           >
             Cancel & Back to Sign In
           </button>
@@ -442,32 +442,32 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
   // Sign In & Sign Up Main Card
   // -------------------------------------------------------------
   return (
-    <div className="w-full max-w-md bg-white border-2 border-[#1A1A2E] rounded-2xl p-8">
+    <div className="w-full max-w-md bg-[#1c1c1e] border border-[#2c2c2e] rounded-2xl p-8">
       <div className="flex items-center justify-center gap-3 mb-6">
         <img
           src="/logo.webp"
           alt="ApplyWizz"
-          className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] object-cover bg-black"
+          className="w-10 h-10 rounded-lg border border-[#2c2c2e] object-cover bg-black"
         />
         <div>
-          <h1 className="text-xl font-black text-[#1A1A2E] tracking-tight uppercase">ApplyWizz</h1>
-          <span className="text-[11px] block font-mono text-[#64748B] font-bold tracking-wider">
+          <h1 className="text-xl font-bold text-[#ffffff] tracking-tight uppercase">ApplyWizz</h1>
+          <span className="text-[11px] block font-mono text-[#8e8e93] font-medium tracking-wider">
             Operator Portal
           </span>
         </div>
       </div>
 
-      <div className="flex border-2 border-[#1A1A2E] rounded-xl p-1 bg-[#FAF4EB] mb-6">
+      <div className="flex border border-[#2c2c2e] rounded-xl p-1 bg-[#141416] mb-6">
         <button
           type="button"
           onClick={() => {
             setTab('signin');
             resetAll();
           }}
-          className={`flex-1 py-2 text-xs font-black rounded-lg transition-all ${
+          className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
             tab === 'signin'
-              ? 'bg-[#E88474] text-black'
-              : 'text-[#1A1A2E] hover:bg-[#FFF5EB]'
+              ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+              : 'text-[#8e8e93] hover:text-[#ffffff]'
           }`}
         >
           Sign In
@@ -478,10 +478,10 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
             setTab('signup');
             resetAll();
           }}
-          className={`flex-1 py-2 text-xs font-black rounded-lg transition-all ${
+          className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
             tab === 'signup'
-              ? 'bg-[#E88474] text-black'
-              : 'text-[#1A1A2E] hover:bg-[#FFF5EB]'
+              ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+              : 'text-[#8e8e93] hover:text-[#ffffff]'
           }`}
         >
           Sign Up
@@ -494,21 +494,21 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
         /* ------------------------------------------------------------- */
         <form onSubmit={handleSignIn} className="space-y-4">
           {signInSuccessMsg && (
-            <div className="bg-[#9AC89A]/30 border-2 border-[#1A1A2E] text-[#1E4620] text-xs font-bold p-3 rounded-xl flex items-start gap-2">
+            <div className="bg-[#30d158]/15 border border-[#30d158]/30 text-[#30d158] text-xs font-semibold p-3 rounded-xl flex items-start gap-2">
               <span className="text-sm">✓</span>
               <span>{signInSuccessMsg}</span>
             </div>
           )}
 
           {signInError && (
-            <div className="bg-[#EF4444]/15 border-2 border-[#1A1A2E] text-[#991B1B] text-xs font-bold p-3 rounded-xl flex items-start gap-2">
+            <div className="bg-[#ff453a]/15 border border-[#ff453a]/30 text-[#ff453a] text-xs font-semibold p-3 rounded-xl flex items-start gap-2">
               <span className="text-sm">⚠️</span>
               <span>{signInError}</span>
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1.5">
               Email Address
             </label>
             <input
@@ -517,16 +517,16 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
               value={signInEmail}
               onChange={(e) => setSignInEmail(e.target.value)}
               placeholder="e.g. operator@applywizz.com"
-              className="w-full px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-xs font-medium text-[#1A1A2E] focus:outline-none focus:bg-white"
+              className="w-full px-3.5 py-2.5 bg-[#2c2c2e] border border-[#3a3a3c] rounded-xl text-xs font-medium text-[#ffffff] focus:outline-none focus:border-[#0a84ff]"
             />
           </div>
 
           <div>
             <div className="flex justify-between items-center mb-1.5">
-              <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E]">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">
                 Microsoft Authenticator Code
               </label>
-              <span className="text-[10px] font-mono font-bold text-[#E88474]">6 digits</span>
+              <span className="text-[10px] font-mono font-medium text-[#0a84ff]">6 digits</span>
             </div>
             <input
               type="text"
@@ -536,9 +536,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
               value={signInTotpCode}
               onChange={(e) => setSignInTotpCode(e.target.value.replace(/\D/g, ''))}
               placeholder="000000"
-              className="w-full text-center tracking-[0.5em] text-lg font-mono font-black px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-[#1A1A2E] focus:outline-none focus:bg-white"
+              className="w-full text-center tracking-[0.5em] text-lg font-mono font-bold px-3.5 py-2.5 bg-[#2c2c2e] border border-[#3a3a3c] rounded-xl text-[#ffffff] focus:outline-none focus:border-[#0a84ff]"
             />
-            <p className="text-[11px] font-mono text-[#64748B] mt-1.5">
+            <p className="text-[11px] font-mono text-[#8e8e93] mt-1.5">
               Enter the 6-digit code currently shown in your Microsoft Authenticator app.
             </p>
           </div>
@@ -546,7 +546,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
           <button
             type="submit"
             disabled={signInLoading}
-            className="w-full mt-2 py-3 bg-[#E88474] hover:bg-[#d67262] text-black font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full mt-2 py-3 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-bold text-xs uppercase tracking-wider rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {signInLoading ? 'Authenticating...' : 'Sign In with Authenticator →'}
           </button>
@@ -557,7 +557,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
         /* ------------------------------------------------------------- */
         <div className="space-y-4">
           {signUpError && (
-            <div className="bg-[#EF4444]/15 border-2 border-[#1A1A2E] text-[#991B1B] text-xs font-bold p-3 rounded-xl flex items-start gap-2">
+            <div className="bg-[#ff453a]/15 border border-[#ff453a]/30 text-[#ff453a] text-xs font-semibold p-3 rounded-xl flex items-start gap-2">
               <span className="text-sm">⚠️</span>
               <span>{signUpError}</span>
             </div>
@@ -567,7 +567,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
             /* Step 1: Input Email to receive Azure OTP */
             <form onSubmit={handleSendSignUpOtp} className="space-y-4">
               <div>
-                <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1.5">
                   Sign Up Email Address
                 </label>
                 <input
@@ -576,9 +576,9 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
                   value={signUpEmail}
                   onChange={(e) => setSignUpEmail(e.target.value)}
                   placeholder="e.g. operator@applywizz.com"
-                  className="w-full px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-xs font-medium text-[#1A1A2E] focus:outline-none focus:bg-white"
+                  className="w-full px-3.5 py-2.5 bg-[#2c2c2e] border border-[#3a3a3c] rounded-xl text-xs font-medium text-[#ffffff] focus:outline-none focus:border-[#0a84ff]"
                 />
-                <p className="text-[11px] font-mono text-[#64748B] mt-1.5">
+                <p className="text-[11px] font-mono text-[#8e8e93] mt-1.5">
                   We'll send a 6-digit one-time verification code to this address via Azure Communication Services.
                 </p>
               </div>
@@ -586,7 +586,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
               <button
                 type="submit"
                 disabled={signUpLoading}
-                className="w-full py-3 bg-[#1A1A2E] hover:bg-[#2A2A3E] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-[#ffffff] font-semibold text-xs uppercase tracking-wider border border-[#3a3a3c] rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {signUpLoading ? 'Sending Verification Code...' : 'Send Verification Code →'}
               </button>
@@ -594,12 +594,12 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
           ) : (
             /* Step 2: Enter Email OTP */
             <form onSubmit={handleVerifySignUpOtp} className="space-y-4">
-              <div className="bg-[#FAF4EB] border-2 border-[#1A1A2E] p-3 rounded-xl flex items-center justify-between">
+              <div className="bg-[#2c2c2e] border border-[#3a3a3c] p-3 rounded-xl flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-sm">📧</span>
                   <div>
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#64748B] block">Code sent to:</span>
-                    <span className="text-xs font-mono font-bold text-[#1A1A2E]">{signUpEmail}</span>
+                    <span className="text-[10px] uppercase font-semibold tracking-wider text-[#8e8e93] block">Code sent to:</span>
+                    <span className="text-xs font-mono font-medium text-[#ffffff]">{signUpEmail}</span>
                   </div>
                 </div>
                 <button
@@ -609,14 +609,14 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
                     setSignUpOtpCode('');
                     setSignUpError('');
                   }}
-                  className="text-[11px] font-bold text-[#E88474] hover:underline"
+                  className="text-[11px] font-semibold text-[#0a84ff] hover:underline"
                 >
                   Change
                 </button>
               </div>
 
               <div>
-                <label className="block text-xs font-black uppercase tracking-wider text-[#1A1A2E] mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1.5">
                   Enter 6-Digit Email Code
                 </label>
                 <input
@@ -628,29 +628,29 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
                   value={signUpOtpCode}
                   onChange={(e) => setSignUpOtpCode(e.target.value.replace(/\D/g, ''))}
                   placeholder="000000"
-                  className="w-full text-center tracking-[0.5em] text-lg font-mono font-black px-3.5 py-2.5 bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl text-[#1A1A2E] focus:outline-none focus:bg-white"
+                  className="w-full text-center tracking-[0.5em] text-lg font-mono font-bold px-3.5 py-2.5 bg-[#2c2c2e] border border-[#3a3a3c] rounded-xl text-[#ffffff] focus:outline-none focus:border-[#0a84ff]"
                 />
                 <div className="flex justify-between items-center mt-2">
-                  <span className="text-[11px] font-mono text-[#64748B]">Valid for 10 minutes</span>
+                  <span className="text-[11px] font-mono text-[#8e8e93]">Valid for 10 minutes</span>
                   <button
                     type="button"
                     disabled={resendCooldown > 0 || signUpLoading}
                     onClick={() => handleSendSignUpOtp()}
-                    className="text-[11px] font-bold text-[#1A1A2E] hover:text-[#E88474] underline disabled:text-gray-400 disabled:no-underline cursor-pointer disabled:cursor-not-allowed"
+                    className="text-[11px] font-semibold text-[#0a84ff] hover:underline disabled:text-[#8e8e93]/50 disabled:no-underline cursor-pointer disabled:cursor-not-allowed"
                   >
                     {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Code'}
                   </button>
                 </div>
               </div>
 
-              <p className="text-[11px] font-mono text-[#64748B]">
+              <p className="text-[11px] font-mono text-[#8e8e93]">
                 Passwords have been replaced with Microsoft Authenticator for higher security.
               </p>
 
               <button
                 type="submit"
                 disabled={signUpLoading || signUpOtpCode.length !== 6}
-                className="w-full py-3 bg-[#E88474] hover:bg-[#d67262] text-black font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-bold text-xs uppercase tracking-wider rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {signUpLoading ? 'Verifying Code...' : 'Verify & Continue to Authenticator Setup →'}
               </button>

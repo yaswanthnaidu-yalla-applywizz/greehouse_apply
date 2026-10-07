@@ -14,13 +14,23 @@ export const DevSwitcher: React.FC<DevSwitcherProps> = ({ current }) => {
     { href: '/', label: 'Operator' },
   ];
   return (
-    <nav className="flex flex-wrap items-center gap-1 bg-white border-2 border-[#1A1A2E] rounded p-1">
+    <nav className="flex flex-wrap items-center gap-1 bg-[#1c1c1e] border border-[#2c2c2e] rounded-lg p-1">
       {links.map((link) => (
         <a
           key={link.href}
           href={link.href}
-          onClick={link.href === '/' ? () => sessionStorage.setItem('applywizz_dev_operator_view', 'true') : undefined}
-          className={`px-2 py-1 text-xs font-bold rounded ${current === link.href ? 'bg-[#E88474] text-white' : 'hover:bg-[#FAF4EB]'}`}
+          onClick={() => {
+            if (link.href === '/') {
+              sessionStorage.setItem('applywizz_dev_operator_view', 'true');
+            } else {
+              sessionStorage.removeItem('applywizz_dev_operator_view');
+            }
+          }}
+          className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+            current === link.href
+              ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+              : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
+          }`}
         >
           {link.label}
         </a>

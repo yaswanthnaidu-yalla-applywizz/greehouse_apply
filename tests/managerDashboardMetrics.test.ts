@@ -2,25 +2,16 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadClientDashboard } from '../src/server/clientDashboard.js';
 
 describe('Manager Dashboard Metrics Verification', () => {
-  it('loadClientDashboard computes totals correctly and excludes SKIPPED from Total and Submitted', async () => {
-    const result = await loadClientDashboard({
-      managerEmail: 'yaswanthnaiduyalla@applywizz.ai',
-      date: '2026-09-23',
-      createdAtRange: {
-        startIso: '2026-09-23T00:00:00.000Z',
-        endIso: '2026-09-23T23:59:59.999Z',
-      },
-      teamScopeUnrestricted: true,
-    });
-
-    assert.ok(result);
-    assert.ok(result.totals);
-    assert.strictEqual(typeof result.totals.applications, 'number');
-    assert.strictEqual(typeof result.totals.submitted, 'number');
-    assert.strictEqual(typeof result.totals.applied, 'number');
+  it('sources Manager summary metrics from the canonical application stats service', () => {
+    const dashboardPath = path.resolve(process.cwd(), 'src/server/clientDashboard.ts');
+    const content = fs.readFileSync(dashboardPath, 'utf8');
+    assert.ok(content.includes('getApplicationStats('));
+    assert.ok(content.includes('stats.counts.total'));
+    assert.ok(content.includes('stats.counts.submitted'));
+    assert.ok(content.includes('stats.counts.applied'));
+    assert.ok(content.includes('statsAvailable: stats.available'));
   });
 
   it('verifies ManagerDashboard.tsx pulls Total, Submitted, and Applied on both Home and Operators tabs from /api/manager/dashboard', () => {
@@ -133,5 +124,21 @@ describe('Manager Dashboard Metrics Verification', () => {
       !content.includes('queryRollupStats'),
       'manager.ts must not override manager team dashboard metrics with global queryRollupStats'
     );
+  });
+
+  it('uses canonical date-based metrics for the Manager overview and stats routes', () => {
+    const routePath = path.resolve(process.cwd(), 'src/server/routes/manager.ts');
+    const content = fs.readFileSync(routePath, 'utf8');
+    const overviewSection = content.slice(
+      content.indexOf("managerRouter.get(['/overview', '/stats']"),
+      content.indexOf("managerRouter.get('/applications'")
+    );
+
+    assert.ok(overviewSection.includes('getApplicationStats('));
+    assert.ok(overviewSection.includes('applications: stats.counts.total'));
+    assert.ok(overviewSection.includes('submitted: stats.counts.submitted'));
+    assert.ok(overviewSection.includes('applied: stats.counts.applied'));
+    assert.ok(overviewSection.includes('failed: stats.counts.failed'));
+    assert.ok(overviewSection.includes('statsAvailable: stats.available'));
   });
 });

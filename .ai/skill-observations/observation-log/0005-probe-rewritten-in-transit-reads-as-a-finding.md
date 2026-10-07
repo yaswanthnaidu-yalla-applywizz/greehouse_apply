@@ -1,7 +1,7 @@
 ---
 id: 5
 title: "A probe rewritten in transit returns a false negative that reads as a finding"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "writing verification probes; passing code through a shell"
 date: 2026-09-15
 session_context: "Parsing an inline JSX block out of an HTML file to verify an edit had not broken it"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principle 7)"
 reference:
 ---
 
