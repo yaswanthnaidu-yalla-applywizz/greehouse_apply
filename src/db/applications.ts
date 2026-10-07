@@ -133,12 +133,12 @@ export interface ApplicationRow {
 }
 
 /**
- * Calculates UTC ISO string bounds for an Asia/Kolkata (IST, UTC+5:30) calendar date (YYYY-MM-DD).
+ * Calculates half-open UTC bounds for an Asia/Kolkata (IST, UTC+5:30) date.
  */
 export function getISTDateRangeUtc(dateStr: string): { startIso: string; endIso: string } {
   const [yyyy, mm, dd] = dateStr.split('-').map(Number);
   const startDate = new Date(Date.UTC(yyyy, mm - 1, dd, 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
-  const endDate = new Date(Date.UTC(yyyy, mm - 1, dd, 23, 59, 59, 999) - (5.5 * 60 * 60 * 1000));
+  const endDate = new Date(Date.UTC(yyyy, mm - 1, dd + 1, 0, 0, 0, 0) - (5.5 * 60 * 60 * 1000));
   return {
     startIso: startDate.toISOString(),
     endIso: endDate.toISOString(),
@@ -160,7 +160,7 @@ export async function countSubmittedApplicationsSince(
       .select('id', { count: 'exact', head: true })
       .in('status', SUBMITTED_STATUSES);
     if (startIso) query = query.or(`submitted_at.gte.${startIso},and(submitted_at.is.null,updated_at.gte.${startIso})`);
-    if (endIso) query = query.or(`submitted_at.lte.${endIso},and(submitted_at.is.null,updated_at.lte.${endIso})`);
+    if (endIso) query = query.or(`submitted_at.lt.${endIso},and(submitted_at.is.null,updated_at.lt.${endIso})`);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
@@ -192,7 +192,7 @@ export async function countAppliedApplicationsSince(
       .select('id', { count: 'exact', head: true })
       .in('status', ['APPLIED', 'EMAIL_PROOF_PENDING']);
     if (since) query = query.or(`submitted_at.gte.${since},and(submitted_at.is.null,updated_at.gte.${since})`);
-    if (endIso) query = query.or(`submitted_at.lte.${endIso},and(submitted_at.is.null,updated_at.lte.${endIso})`);
+    if (endIso) query = query.or(`submitted_at.lt.${endIso},and(submitted_at.is.null,updated_at.lt.${endIso})`);
     if (emails) query = query.in('assigned_ca_email', emails);
     const { count, error } = await query;
     if (error) {
@@ -278,7 +278,7 @@ export interface CreatedAtRangeFilter {
 
 type GteLteQuery = {
   gte(column: string, value: string): GteLteQuery;
-  lte(column: string, value: string): GteLteQuery;
+  lt(column: string, value: string): GteLteQuery;
 };
 
 export function applyCreatedAtRangeFilter<T extends GteLteQuery>(
@@ -287,7 +287,7 @@ export function applyCreatedAtRangeFilter<T extends GteLteQuery>(
 ): T {
   let q = query.gte('created_at', range.startIso) as T;
   if (range.endIso) {
-    q = q.lte('created_at', range.endIso) as T;
+    q = q.lt('created_at', range.endIso) as T;
   }
   return q;
 }
@@ -300,7 +300,7 @@ export function rowCreatedAtInRange(
   if (!ts) return false;
   const time = new Date(ts).getTime();
   if (time < new Date(range.startIso).getTime()) return false;
-  if (range.endIso && time > new Date(range.endIso).getTime()) return false;
+  if (range.endIso && time >= new Date(range.endIso).getTime()) return false;
   return true;
 }
 
@@ -1485,10 +1485,10 @@ export async function getSubmissionOutcomeCounts(options?: {
       if (createdAtRange) {
         appliedQuery = appliedQuery
           .or(`submitted_at.gte.${createdAtRange.startIso},and(submitted_at.is.null,updated_at.gte.${createdAtRange.startIso})`)
-          .or(`submitted_at.lte.${createdAtRange.endIso},and(submitted_at.is.null,updated_at.lte.${createdAtRange.endIso})`);
+          .or(`submitted_at.lt.${createdAtRange.endIso},and(submitted_at.is.null,updated_at.lt.${createdAtRange.endIso})`);
         failedQuery = failedQuery
           .or(`submitted_at.gte.${createdAtRange.startIso},and(submitted_at.is.null,updated_at.gte.${createdAtRange.startIso})`)
-          .or(`submitted_at.lte.${createdAtRange.endIso},and(submitted_at.is.null,updated_at.lte.${createdAtRange.endIso})`);
+          .or(`submitted_at.lt.${createdAtRange.endIso},and(submitted_at.is.null,updated_at.lt.${createdAtRange.endIso})`);
       }
 
       const [appliedRes, failedRes] = await Promise.all([appliedQuery, failedQuery]);
@@ -1516,7 +1516,7 @@ export async function getSubmissionOutcomeCounts(options?: {
       (!row.submitted_at ||
         new Date(row.submitted_at).getTime() < new Date(createdAtRange.startIso).getTime() ||
         (createdAtRange.endIso &&
-          new Date(row.submitted_at).getTime() > new Date(createdAtRange.endIso).getTime()))
+          new Date(row.submitted_at).getTime() >= new Date(createdAtRange.endIso).getTime()))
     ) {
       continue;
     }

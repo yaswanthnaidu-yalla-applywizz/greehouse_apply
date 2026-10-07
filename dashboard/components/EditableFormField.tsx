@@ -108,6 +108,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
 
   const getHintText = (): string => {
     const type = (field.type || '').toLowerCase();
+    if (type === 'select' && field.isRequired && field.optionsComplete === false) {
+      return 'This is a dropdown question with more options than shown. Enter the exact choice as it appears in the job application.';
+    }
     if (type === 'select' || type === 'radio' || isChoiceField) {
       return 'This is a dropdown question, please choose from the given options.';
     }
@@ -142,26 +145,27 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   const isTextarea = field.type === 'textarea';
   const fieldType = String(field.type || '').toLowerCase();
   const fieldOptions = Array.isArray(field.options) && field.options.length > 0 ? field.options : null;
-  const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions;
+  const isIncompleteChoice = fieldType === 'select' && field.isRequired && field.optionsComplete === false;
+  const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions && !isIncompleteChoice;
   const isCheckbox = fieldType === 'checkbox';
   const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
   const isUnresolved = field.source === 'unresolved';
 
   return (
     <div
-      className={`group relative p-3.5 rounded-lg bg-white transition-all ${
+      className={`group relative p-3.5 rounded-xl bg-[#1c1c1e] transition-all ${
         isUnresolved
-          ? 'border-2 border-[#EF4444]'
-          : 'border border-[#1A1A2E]'
+          ? 'border border-[#ff453a]/60'
+          : 'border border-[#2c2c2e]'
       }`}
     >
       {/* Header with Field Label and Badges */}
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <div className="flex-1">
-          <label className="text-xs font-bold text-[#1A1A2E] flex items-center gap-1.5">
+          <label className="text-xs font-semibold text-[#ffffff] flex items-center gap-1.5">
             <span>{field.label}</span>
-            {field.isRequired && <span className="text-[#EF4444] font-bold">*</span>}
-            <span className="text-[10px] font-mono text-[#64748B] font-normal">({field.type})</span>
+            {field.isRequired && <span className="text-[#ff453a] font-bold">*</span>}
+            <span className="text-[10px] font-mono text-[#8e8e93] font-normal">({field.type})</span>
           </label>
         </div>
 
@@ -177,7 +181,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               type="button"
               onClick={() => setIsEditing(true)}
               title="Click to edit field value"
-              className="opacity-60 group-hover:opacity-100 px-2 py-1 text-[#1A1A2E] hover:bg-[#FAF4EB] border border-transparent hover:border-[#1A1A2E] rounded transition text-xs flex items-center gap-1 font-medium"
+              className="opacity-60 group-hover:opacity-100 px-2 py-1 text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e] border border-transparent hover:border-[#3a3a3c] rounded-md transition text-xs flex items-center gap-1 font-medium"
             >
               <span>edit</span>
               <span aria-hidden>✏️</span>
@@ -190,12 +194,12 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       {isEditing ? (
         <div className="relative mt-1">
           {showHint && (
-            <div className="mb-1.5 flex items-center justify-between text-[11px] text-[#64748B] bg-[#FAF4EB] px-2 py-1 rounded border border-gray-200">
+            <div className="mb-1.5 flex items-center justify-between text-[11px] text-[#8e8e93] bg-[#2c2c2e] px-2.5 py-1.5 rounded-md border border-[#3a3a3c]">
               <span>💡 {getHintText()}</span>
               <button
                 type="button"
                 onClick={() => setShowHint(false)}
-                className="text-gray-400 hover:text-gray-600 font-bold ml-2"
+                className="text-[#8e8e93] hover:text-[#ffffff] font-bold ml-2"
                 title="Hide hint"
               >
                 ✕
@@ -208,7 +212,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               disabled={isSaving || isConfirming}
-              className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
+              className="w-full text-xs font-mono p-2 bg-[#2c2c2e] border border-[#3a3a3c] rounded-md focus:outline-none focus:border-[#0a84ff] transition text-[#ffffff] disabled:opacity-75"
             >
               <option value="">Select an option...</option>
               {fieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -217,7 +221,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             fieldOptions ? (
               <div className="space-y-1.5">
                 {fieldOptions.map((option) => (
-                  <label key={option} className="flex items-center gap-2 text-xs font-mono">
+                  <label key={option} className="flex items-center gap-2 text-xs font-mono text-[#ffffff]">
                     <input
                       type="checkbox"
                       checked={checkboxValues.includes(option)}
@@ -250,7 +254,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onKeyDown={handleKeyDown}
               disabled={isSaving || isConfirming}
               rows={3}
-              className="w-full text-xs font-mono p-2.5 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
+              className="w-full text-xs font-mono p-2.5 bg-[#2c2c2e] border border-[#3a3a3c] rounded-md focus:outline-none focus:border-[#0a84ff] transition text-[#ffffff] disabled:opacity-75"
             />
           ) : (
             <input
@@ -260,18 +264,18 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isSaving || isConfirming}
-              className="w-full text-xs font-mono p-2 bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-md focus:outline-none focus:ring-2 focus:ring-[#E88474] transition text-[#1A1A2E] disabled:opacity-75"
+              className="w-full text-xs font-mono p-2 bg-[#2c2c2e] border border-[#3a3a3c] rounded-md focus:outline-none focus:border-[#0a84ff] transition text-[#ffffff] disabled:opacity-75"
             />
           )}
 
           {!isConfirming ? (
-            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#2c2c2e]">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleRequestSave}
                   disabled={isSaving}
-                  className="px-3 py-1 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1"
+                  className="px-3 py-1 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-semibold text-xs rounded-md transition-all flex items-center gap-1"
                 >
                   <span>💾</span>
                   <span>Save Changes</span>
@@ -280,33 +284,33 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                   type="button"
                   onClick={handleCancelEdit}
                   disabled={isSaving}
-                  className="px-2.5 py-1 bg-white hover:bg-gray-100 text-[#1A1A2E] font-medium text-xs rounded border border-gray-300 transition-all"
+                  className="px-2.5 py-1 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-[#8e8e93] hover:text-[#ffffff] font-medium text-xs rounded-md border border-[#3a3a3c] transition-all"
                 >
                   Cancel
                 </button>
               </div>
-              <span className="text-[10px] text-[#64748B] font-mono">
+              <span className="text-[10px] text-[#8e8e93] font-mono">
                 Press Enter to save, Esc to cancel
               </span>
             </div>
           ) : (
-            <div className="mt-2.5 p-3 rounded-lg bg-[#FEF3C7] border-2 border-[#1A1A2E] animate-fadeIn">
+            <div className="mt-2.5 p-3 rounded-lg bg-[#2c2c2e] border border-[#ff9f0a]/40 animate-fadeIn">
               <div className="flex items-start gap-2">
                 <span className="text-base leading-none">⚠️</span>
                 <div className="flex-1">
-                  <p className="text-xs font-bold text-[#1A1A2E]">
+                  <p className="text-xs font-semibold text-[#ffffff]">
                     Are you sure you want to update this answer?
                   </p>
                   <div className="mt-2 text-[11px] font-mono space-y-1">
-                    <div className="text-[#64748B] flex items-baseline gap-1.5">
-                      <span className="font-semibold text-gray-500 shrink-0">Current:</span>
-                      <span className="line-through text-[#EF4444] bg-white/80 px-1.5 py-0.5 rounded border border-gray-300 break-all">
+                    <div className="text-[#8e8e93] flex items-baseline gap-1.5">
+                      <span className="font-semibold text-[#8e8e93] shrink-0">Current:</span>
+                      <span className="line-through text-[#ff453a] bg-[#1c1c1e] px-1.5 py-0.5 rounded border border-[#3a3a3c] break-all">
                         {field.value || '(empty)'}
                       </span>
                     </div>
-                    <div className="text-[#1A1A2E] flex items-baseline gap-1.5">
-                      <span className="font-semibold text-gray-700 shrink-0">New:</span>
-                      <span className="font-bold text-[#065F46] bg-white px-1.5 py-0.5 rounded border border-[#1A1A2E] break-all">
+                    <div className="text-[#ffffff] flex items-baseline gap-1.5">
+                      <span className="font-semibold text-[#8e8e93] shrink-0">New:</span>
+                      <span className="font-bold text-[#30d158] bg-[#1c1c1e] px-1.5 py-0.5 rounded border border-[#3a3a3c] break-all">
                         {value || '(empty)'}
                       </span>
                     </div>
@@ -318,7 +322,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                       type="button"
                       onClick={executeSave}
                       disabled={isSaving}
-                      className="px-3 py-1.5 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-1 disabled:opacity-50"
+                      className="px-3 py-1.5 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-semibold text-xs rounded-md transition-all flex items-center gap-1 disabled:opacity-50"
                     >
                       {isSaving ? (
                         <span>Saving...</span>
@@ -333,7 +337,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                       type="button"
                       onClick={() => setIsConfirming(false)}
                       disabled={isSaving}
-                      className="px-3 py-1.5 bg-white hover:bg-gray-100 text-[#1A1A2E] font-bold text-xs rounded border border-[#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                      className="px-3 py-1.5 bg-[#1c1c1e] hover:bg-[#2c2c2e] text-[#ffffff] font-medium text-xs rounded-md border border-[#3a3a3c] transition-all"
                     >
                       Keep Editing
                     </button>
@@ -341,12 +345,12 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                       type="button"
                       onClick={handleCancelEdit}
                       disabled={isSaving}
-                      className="px-2 py-1.5 text-xs text-[#64748B] hover:text-[#EF4444] font-medium"
+                      className="px-2 py-1.5 text-xs text-[#8e8e93] hover:text-[#ff453a] font-medium"
                     >
                       Discard & Cancel
                     </button>
                   </div>
-                  {error && <p className="mt-2 text-xs font-bold text-[#EF4444]">{error}</p>}
+                  {error && <p className="mt-2 text-xs font-semibold text-[#ff453a]">{error}</p>}
                 </div>
               </div>
             </div>
@@ -356,12 +360,12 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
         <div
           onClick={() => setIsEditing(true)}
           title="Click to edit answer"
-          className="mt-1 p-2 rounded-md bg-[#FAF4EB] border border-[#1A1A2E] hover:bg-[#F5ECE0] cursor-pointer transition text-xs font-mono break-words"
+          className="mt-1 p-2 rounded-md bg-[#2c2c2e] border border-[#3a3a3c] hover:border-[#48484a] hover:bg-[#3a3a3c]/60 cursor-pointer transition text-xs font-mono break-words"
         >
           {field.value && field.value.trim().length > 0 ? (
-            <span className="text-[#1A1A2E] font-medium">{field.value}</span>
+            <span className="text-[#ffffff] font-medium">{field.value}</span>
           ) : (
-            <span className="text-[#EF4444] font-bold italic">⚠️ Unresolved field (click to provide answer)</span>
+            <span className="text-[#ff453a] font-semibold italic">⚠️ Unresolved field (click to provide answer)</span>
           )}
         </div>
       )}

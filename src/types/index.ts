@@ -54,6 +54,8 @@ export interface ScannedField {
   isRequired: boolean;
   /** Extracted option labels/values for dropdown (select) and radio button groups */
   options?: string[];
+  /** Whether the option list is exhaustive; false means the live control must validate the answer. */
+  optionsComplete?: boolean;
   /** Optional metadata containing selector and section hierarchy */
   metadata?: ScannedFieldMetadata;
 }
@@ -261,6 +263,8 @@ export interface ResolvedField {
   value: string;
   /** Scanned form options for choice controls */
   options?: string[];
+  /** Whether options is exhaustive; false means submission must validate against the live control. */
+  optionsComplete?: boolean;
   /** Granular source attribution tag */
   source: SourceTag;
   /** Tier that resolved the answer (1-5), or null if unresolved */

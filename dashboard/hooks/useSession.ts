@@ -21,6 +21,7 @@ export const IS_ADMIN_KEY = 'applywizz_is_admin';
 export const WH_UNREACHABLE_KEY = 'applywizz_wh_unreachable';
 export const MANAGER_VIEW_AS_OPERATOR_KEY = 'applywizz_manager_view_as_operator';
 export const VIEW_AS_MANAGER_EMAIL_KEY = 'applywizz_view_as_manager_email';
+export const DEV_OPERATOR_VIEW_KEY = 'applywizz_dev_operator_view';
 
 const ROLE_BY_EMAIL: Record<string, string> = {
   'yaswanthnaiduyalla@applywizz.ai': 'dev',
@@ -142,6 +143,7 @@ export function clearSession(): void {
   try {
     sessionStorage.removeItem(MANAGER_VIEW_AS_OPERATOR_KEY);
     sessionStorage.removeItem(VIEW_AS_MANAGER_EMAIL_KEY);
+    sessionStorage.removeItem(DEV_OPERATOR_VIEW_KEY);
   } catch {}
 }
 
@@ -350,6 +352,42 @@ export async function apiFetch(
     }
   }
 
+  return response;
+}
+
+export async function apiUploadWithProgress(
+  url: string,
+  file: File,
+  onProgress: (percent: number) => void
+): Promise<Response> {
+  const send = (token: string | null): Promise<Response> => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    for (const [name, value] of Object.entries(getAuthHeaders(token))) {
+      xhr.setRequestHeader(name, value);
+    }
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onload = () => resolve(new Response(xhr.responseText, {
+      status: xhr.status,
+      statusText: xhr.statusText,
+      headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/json' },
+    }));
+    xhr.onerror = () => reject(new Error('Network error while uploading the CSV.'));
+    xhr.ontimeout = () => reject(new Error('CSV upload timed out.'));
+    xhr.timeout = 120_000;
+    xhr.send(file);
+  });
+
+  const token = await ensureSession();
+  if (!token) throw new Error('Your session has expired. Sign in again to upload a CSV.');
+  let response = await send(token);
+  if (response.status === 401 && typeof window !== 'undefined' && localStorage.getItem(REFRESH_TOKEN_KEY)) {
+    const refreshed = await refreshSession();
+    if (refreshed) response = await send(refreshed);
+  }
   return response;
 }
 

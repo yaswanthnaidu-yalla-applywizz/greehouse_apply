@@ -256,7 +256,7 @@ export async function listApplicationEvents(options: {
       query = query.in('applywizz_id', options.applywizzIds);
     }
     if (options.startIso) query = query.gte('created_at', options.startIso);
-    if (options.endIso) query = query.lte('created_at', options.endIso);
+    if (options.endIso) query = query.lt('created_at', options.endIso);
     const { data, error } = await query;
     if (error) {
       throw error;

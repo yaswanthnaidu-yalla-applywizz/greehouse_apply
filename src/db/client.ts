@@ -9,6 +9,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import config from '../config/env.js';
 import { getSupabaseKeyDiagnostics } from './supabaseKeyDiagnostics.js';
 import { createLogger, haltWithDevAlert, isMissingTableError } from '../utils/logger.js';
+import { getSandboxClient } from './sandboxClient.js';
 
 const log = createLogger('Client');
 
@@ -41,6 +42,9 @@ export function normalizeSupabaseSecret(raw: string): string {
 }
 
 export function createSupabaseServerClient(url: string, serviceKey: string): SupabaseClient {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    return getSandboxClient() as unknown as SupabaseClient;
+  }
   return createClient(url, serviceKey, {
     auth: {
       persistSession: false,
@@ -50,6 +54,12 @@ export function createSupabaseServerClient(url: string, serviceKey: string): Sup
 }
 
 export function listSupabaseKeyCandidates(): { url: string; candidates: SupabaseKeyCandidate[] } {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    return {
+      url: 'http://localhost:54321',
+      candidates: [{ source: 'SUPABASE_SERVICE_ROLE_KEY', key: 'sandbox-mock-key' }],
+    };
+  }
   const url = (config.SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
   const raw: Array<{ source: SupabaseKeyCandidate['source']; raw: string | undefined }> = [
     { source: 'SUPABASE_SERVICE_KEY', raw: config.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_KEY },
@@ -192,6 +202,9 @@ export async function assertSupabaseReady(): Promise<void> {
 
 /** Checks whether Supabase URL and Service Key are properly configured. */
 export function isSupabaseConfigured(): boolean {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    return true;
+  }
   if (process.env.FORCE_MEMORY_DB === 'true') {
     return false;
   }
@@ -201,6 +214,10 @@ export function isSupabaseConfigured(): boolean {
 
 /** One-line safe identity log for Railway (never prints the secret). */
 export function logSupabaseCredentialIdentity(context = 'Supabase'): void {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    log.info(`[${context}] Operating in LOCAL SANDBOX mode (node-postgres / applywizz_sandbox).`);
+    return;
+  }
   if (!isSupabaseConfigured()) {
     log.warn(`[${context}] Supabase not configured (missing URL or service key).`);
     return;
@@ -227,6 +244,10 @@ export function logSupabaseCredentialIdentity(context = 'Supabase'): void {
  * Throws an explicit error if SUPABASE_URL or SUPABASE_SERVICE_KEY are not configured.
  */
 export function getDbClient(): SupabaseClient {
+  if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+    return getSandboxClient() as unknown as SupabaseClient;
+  }
+
   if (supabaseClientInstance) {
     return supabaseClientInstance;
   }

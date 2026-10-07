@@ -9,8 +9,27 @@ import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
+import { matchChoiceOption } from '../utils/choiceOptions.js';
  
 const log = createLogger('Tier 1 Supabase');
+
+const US_STATE_NAMES_BY_ABBREVIATION: Record<string, string> = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
+  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
+  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
+  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
+  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+};
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
 
 /**
  * Matches target value to the closest matching option in dropdown or radio group.
@@ -66,6 +85,147 @@ function matchBestOption(targetValue: string, options?: string[], _label = targe
   return null;
 }
 
+function normalizeProfileUrl(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function findPayloadUrl(profile: ProfileRow, keys: string[]): string | null {
+  if (!profile.raw_api_payload) return null;
+  const entries = extractKeyValuePairsFromPayload(profile.raw_api_payload);
+  for (const key of keys) {
+    const normalizedKey = normalizeText(key);
+    const entry = entries.find((item) => normalizeText(item.key) === normalizedKey);
+    const value = entry ? normalizeProfileUrl(entry.value) : null;
+    if (value) return value;
+  }
+  return null;
+}
+
+function getFirstEducationDate(education: unknown[], keys: string[]): string | null {
+  const first = education[0];
+  if (!first || typeof first !== 'object') return null;
+  const record = first as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' || typeof value === 'number') {
+      const trimmed = String(value).trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return null;
+}
+
+function extractEducationMonth(value: string): string | null {
+  const namedMonth = MONTH_NAMES.find((month) => new RegExp(`\\b${month}\\b`, 'i').test(value));
+  if (namedMonth) return namedMonth;
+
+  const isoMonth = value.match(/^\d{4}[-/](\d{1,2})(?:[-/]\d{1,2})?(?:[T ].*)?$/);
+  const slashMonth = value.match(/^(\d{1,2})\/\d{4}$/);
+  const monthNumber = Number(isoMonth?.[1] ?? slashMonth?.[1]);
+  return monthNumber >= 1 && monthNumber <= 12 ? MONTH_NAMES[monthNumber - 1] : null;
+}
+
+function extractEducationYear(value: string): string | null {
+  return value.match(/\b\d{4}\b/)?.[0] ?? null;
+}
+
+function resolveEducationDateField(field: ScannedField, profile: ProfileRow): string | null {
+  const label = field.label.toLowerCase();
+  if (!/(start.*(?:date|month|year)|end.*(?:date|month|year)|graduation (?:month|year))/i.test(label)) {
+    return null;
+  }
+
+  const education = Array.isArray(profile.education) ? profile.education : [];
+  const isStart = /\bstart\b/i.test(label);
+  const isEnd = /\bend\b/i.test(label);
+  const dateKeys = isStart
+    ? ['startDate', 'start_date', 'start']
+    : isEnd
+      ? ['endDate', 'end_date', 'end', 'graduationDate', 'graduation_date']
+      : ['graduationDate', 'graduation_date', 'endDate', 'end_date', 'graduationYear', 'graduation_year'];
+  const dateValue = getFirstEducationDate(education, dateKeys);
+  if (!dateValue) return null;
+
+  const month = extractEducationMonth(dateValue);
+  const year = extractEducationYear(dateValue);
+  const wantsMonth = /\bmonth\b/i.test(label);
+  const wantsYear = /\byear\b/i.test(label);
+  if (field.type === 'select' || field.type === 'radio') {
+    if (wantsMonth) return month ? matchChoiceOption(month, field.options) : null;
+    if (wantsYear) return year ? matchChoiceOption(year, field.options) : null;
+    return (
+      (month ? matchChoiceOption(month, field.options) : null) ||
+      (year ? matchChoiceOption(year, field.options) : null)
+    );
+  }
+  if (wantsMonth) return month;
+  if (wantsYear) return year;
+  return null;
+}
+
+function extractStateValue(value: string): string {
+  const components = value.split(',').map((part) => part.trim()).filter(Boolean);
+  const fullState = [...components].reverse().find((part) =>
+    Object.values(US_STATE_NAMES_BY_ABBREVIATION).some(
+      (name) => name.toLowerCase() === part.toLowerCase()
+    )
+  );
+  if (fullState) return fullState;
+
+  const abbreviation = [...components].reverse().find((part) =>
+    /^[A-Za-z]{2}$/.test(part) && Boolean(US_STATE_NAMES_BY_ABBREVIATION[part.toUpperCase()])
+  );
+  if (abbreviation) {
+    return US_STATE_NAMES_BY_ABBREVIATION[abbreviation.toUpperCase()];
+  }
+  return value;
+}
+
+function getDegreeSubject(label: string): string | null {
+  if (!/\b(?:degree|masters?|master s|phd|doctorate)\b/i.test(label)) return null;
+  const subject = label.match(/\bin\s+(.+)$/i)?.[1]?.split(/\b(?:or|and)\b/i)[0]?.trim();
+  return subject || null;
+}
+
+function educationMatchesSubject(label: string, education: unknown[]): boolean {
+  const subject = getDegreeSubject(label);
+  if (!subject) return false;
+
+  const first = education[0];
+  if (!first || typeof first !== 'object') return false;
+  const record = first as Record<string, unknown>;
+  const candidateSubject = normalizeText(
+    `${record.fieldOfStudy ?? record.field_of_study ?? record.major ?? ''} ${record.degree ?? ''}`
+  );
+  return candidateSubject.includes(normalizeText(subject));
+}
+
+function hasSemanticYesNoOptions(options?: string[]): boolean {
+  if (!options || options.length !== 2) return false;
+  const yes = matchChoiceOption('Yes', options);
+  const no = matchChoiceOption('No', options);
+  return Boolean(yes && no && yes !== no);
+}
+
+function resolveBinaryDegreeAnswer(
+  label: string,
+  fieldType: string,
+  options: string[] | undefined,
+  education: unknown[]
+): string | null {
+  if (
+    !/\b(?:degree|masters?|master s|phd|doctorate)\b/i.test(label) ||
+    !/\bin\b/i.test(label) ||
+    (fieldType !== 'radio' && fieldType !== 'select') ||
+    !hasSemanticYesNoOptions(options)
+  ) {
+    return null;
+  }
+  return matchChoiceOption(educationMatchesSubject(label, education) ? 'Yes' : 'No', options);
+}
+
 /**
  * Resolves standard profile attributes based on field name and label heuristics.
  */
@@ -89,6 +249,9 @@ function resolveStandardProfileAttribute(
   if ((field.type === 'file' || /resume|cv\b/i.test(combined)) && !/cover/i.test(combined)) {
     return profile.resume_storage_path || `resumes/${profile.applywizz_id}_resume.pdf`;
   }
+
+  const educationDate = resolveEducationDateField(field, profile);
+  if (educationDate) return educationDate;
 
   // Phone Country / Dialing Code (must precede standard phone matching)
   if (
@@ -205,30 +368,34 @@ function resolveStandardProfileAttribute(
     return null;
   }
 
-  // LinkedIn
+  // LinkedIn or GitHub
+  if (/linkedin/i.test(combined) && /github/i.test(combined)) {
+    return (
+      normalizeProfileUrl(profile.linkedin_url) ||
+      findPayloadUrl(profile, ['github_url', 'github', 'githubUrl'])
+    );
+  }
   if (/linkedin/i.test(combined)) {
-    if (profile.linkedin_url && profile.linkedin_url.trim()) {
-      const url = profile.linkedin_url.trim();
-      return url.startsWith('http') ? url : `https://${url}`;
-    }
-    return null;
+    return normalizeProfileUrl(profile.linkedin_url);
   }
 
   // Website / Portfolio
   if (/portfolio|website|personal site|github/i.test(combined)) {
-    if (/github/i.test(combined) && profile.github_url && profile.github_url.trim()) {
-      const url = profile.github_url.trim();
-      return url.startsWith('http') ? url : `https://${url}`;
+    if (/github/i.test(combined)) {
+      return (
+        normalizeProfileUrl(profile.github_url) ||
+        findPayloadUrl(profile, ['github_url', 'github', 'githubUrl'])
+      );
     }
-    if (profile.website_url && profile.website_url.trim()) {
-      const url = profile.website_url.trim();
-      return url.startsWith('http') ? url : `https://${url}`;
-    }
-    if (profile.github_url && profile.github_url.trim()) {
-      const url = profile.github_url.trim();
-      return url.startsWith('http') ? url : `https://${url}`;
-    }
-    return null;
+    const websiteKeys = /portfolio/i.test(combined)
+      ? ['portfolio_url', 'portfolio', 'website_url', 'website']
+      : ['website', 'website_url', 'portfolio_url', 'portfolio'];
+    return (
+      normalizeProfileUrl(profile.website_url) ||
+      findPayloadUrl(profile, websiteKeys) ||
+      normalizeProfileUrl(profile.github_url) ||
+      findPayloadUrl(profile, ['github_url', 'github', 'githubUrl'])
+    );
   }
 
   // Work Authorization / Legal authorization — policy: always answer Yes regardless of visa type string.
@@ -313,6 +480,9 @@ function resolveStandardProfileAttribute(
     /(candidate location|current location|\bcity\b|\bresidence\b|\baddress\b|\bpostal code\b|\bzip code\b)/i.test(combined) ||
     (/\bstate\b/i.test(combined) && !/united states|sponsorship|visa/i.test(combined))
   ) {
+    if (/\bstate\b/i.test(combined)) {
+      return profile.location ? extractStateValue(profile.location.trim()) : null;
+    }
     return profile.location || null;
   }
 
@@ -482,7 +652,12 @@ function formatPayloadDate(value: unknown): string | null {
   return `${String(parsed.getUTCMonth() + 1).padStart(2, '0')}/${String(parsed.getUTCDate()).padStart(2, '0')}/${parsed.getUTCFullYear()}`;
 }
 
-function formatPayloadValue(value: unknown, fieldType: string, formatDate = false): string | null {
+function formatPayloadValue(
+  value: unknown,
+  fieldType: string,
+  formatDate = false,
+  formatState = false
+): string | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (formatDate) return formatPayloadDate(value);
@@ -495,7 +670,7 @@ function formatPayloadValue(value: unknown, fieldType: string, formatDate = fals
   if (fieldType === 'checkbox' && (result === 'true' || result === 'false')) {
     return result === 'true' ? 'Yes' : 'No';
   }
-  return result;
+  return formatState ? extractStateValue(result) : result;
 }
 
 function formatPayloadBoolean(value: unknown): string | null {
@@ -548,21 +723,39 @@ function resolveUsLocation(additional: Record<string, unknown>): string | null {
 export function resolveFromPayloadStructured(
   normalizedLabel: string,
   fieldType: string,
-  rawPayload: unknown
+  rawPayload: unknown,
+  fieldOptions?: string[],
+  education: unknown[] = []
 ): string | null {
-  if (!rawPayload || typeof rawPayload !== 'object') return null;
-  const payload = rawPayload as {
+  const payload = rawPayload && typeof rawPayload === 'object' ? rawPayload as {
     client?: Record<string, unknown>;
     additional_information?: Record<string, unknown>;
-  };
+    education?: unknown[];
+  } : {};
   const client = payload.client || {};
   const additional = payload.additional_information || {};
-  const match = (pattern: RegExp, value: unknown, formatDate = false): string | null =>
-    pattern.test(normalizedLabel) ? formatPayloadValue(value, fieldType, formatDate) : null;
+  const educationRecords = education.length > 0 ? education : payload.education || [];
+  const match = (
+    pattern: RegExp,
+    value: unknown,
+    formatDate = false,
+    formatState = false
+  ): string | null =>
+    pattern.test(normalizedLabel)
+      ? formatPayloadValue(value, fieldType, formatDate, formatState)
+      : null;
   const matchBoolean = (pattern: RegExp, value: unknown): string | null =>
     pattern.test(normalizedLabel) ? formatPayloadBoolean(value) : null;
   const matchUsLocation = (pattern: RegExp): string | null =>
     pattern.test(normalizedLabel) ? resolveUsLocation(additional) : null;
+  const binaryDegreeAnswer = resolveBinaryDegreeAnswer(
+    normalizedLabel,
+    fieldType,
+    fieldOptions,
+    educationRecords
+  );
+  if (binaryDegreeAnswer) return binaryDegreeAnswer;
+  if (!rawPayload || typeof rawPayload !== 'object') return null;
 
   return (
     matchUsLocation(/currently (located|based|living|residing) in (the )?us|are you (in|based in) (the )?us|us.?based|located in (the )?united states|do you (live|reside) in (the )?us/i) ??
@@ -596,7 +789,7 @@ export function resolveFromPayloadStructured(
     match(/^veteran|military status|protected veteran/, additional.veteran_status) ??
     match(/^disability|disabled status|disabled|ada|accommodation/, additional.disability_status) ??
     match(/address|street address|home address|mailing address/, additional.full_address) ??
-    match(/state of residence|current state|which state/, additional.state_of_residence) ??
+    match(/^state$|state of residence|current state|which state/, additional.state_of_residence, false, true) ??
     match(/date of birth|dob|birth date/, additional.date_of_birth, true) ??
     match(/desired (role|position|job title)|job preference|what role/, Array.isArray(client.job_role_preferences) ? client.job_role_preferences[0] : client.job_role_preferences) ??
     match(/preferred (location|city)|where.*prefer to work|work location preference/, client.location_preferences) ??
@@ -653,27 +846,27 @@ export async function resolveTier1(
     }
   }
 
-  // 2a. Check stable profiles.raw_api_payload paths
-  if (candidateProfile?.raw_api_payload) {
-    const payloadVal = resolveFromPayloadStructured(
-      normalizeText(field.label),
-      field.type,
-      candidateProfile.raw_api_payload
-    );
-    if (payloadVal !== null && payloadVal.trim().length > 0) {
-      log.info(`[Resolver] ✅ T1-STRUCT ${field.label} → "${payloadVal}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: payloadVal,
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired: Boolean(field.isRequired),
-      };
-    }
+  // 2a. Check stable profiles.raw_api_payload paths and structured education answers
+  const payloadVal = resolveFromPayloadStructured(
+    normalizeText(field.label),
+    field.type,
+    candidateProfile?.raw_api_payload,
+    field.options,
+    candidateProfile?.education
+  );
+  if (payloadVal !== null && payloadVal.trim().length > 0) {
+    log.info(`[Resolver] ✅ T1-STRUCT ${field.label} → "${payloadVal}"`);
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      type: field.type,
+      label: field.label,
+      value: payloadVal,
+      source: 'supabase',
+      resolvedByTier: 1,
+      confidence: 1.0,
+      isRequired: Boolean(field.isRequired),
+    };
   }
 
   // 2b. Check profiles.raw_api_payload JSONB for any matching key

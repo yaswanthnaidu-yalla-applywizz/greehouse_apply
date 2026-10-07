@@ -1,0 +1,2 @@
+Configuration instruction: present — AGENTS.md requires loading task-observer before the first tool call and running its Session Start Protocol.
+Harness session-start hook: none found in the workspace configuration.

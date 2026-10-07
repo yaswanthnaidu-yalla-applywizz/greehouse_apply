@@ -23,6 +23,9 @@ capacity_and_timing_math.md
 round_robin_queue_scheduler.md
 COMMANDS.md
 docs/
+!docs/
+docs/*
+!docs/architecture-flows.md
 
 # Privacy, Sensitive Data & Project Specs
 project docs/
@@ -49,6 +52,10 @@ cache/
 mailconnect/
 .cursor/
 scratch/
+
+# Local planning and irrelevant deployment notes
+to-do/
+prod_checklist.txt
 
 # Logs
 npm-debug.log*

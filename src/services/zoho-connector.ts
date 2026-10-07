@@ -624,8 +624,10 @@ export async function fetchZohoOtpViaApi(
 
     const elapsed = Date.now() - cycleStart;
     const remaining = pollIntervalMs - elapsed;
-    if (remaining > 50 && Date.now() - startTime + remaining < timeoutMs) {
-      await new Promise((resolve) => setTimeout(resolve, remaining));
+    // Guarantee at least 2500ms sleep between requests so we never spam back-to-back
+    const sleepMs = Math.max(2500, remaining);
+    if (Date.now() - startTime + sleepMs < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, sleepMs));
     }
   }
 

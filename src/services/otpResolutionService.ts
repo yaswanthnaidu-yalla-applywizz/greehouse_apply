@@ -4,7 +4,6 @@ import {
   updateStatus,
   MAX_SUBMISSION_RETRIES,
 } from '../db/applications.js';
-import { zohoReaderPool } from './zohoReader.js';
 import { fetchZohoOtpViaApi } from './zoho-connector.js';
 import { config } from '../config/env.js';
 
@@ -89,31 +88,14 @@ class OtpResolutionService {
         return;
       }
 
-      // 1. Fast REST API-based OTP polling (Instant & lightweight)
-      let result = await fetchZohoOtpViaApi({
+      // Fast REST API-based OTP polling (Instant & lightweight)
+      const result = await fetchZohoOtpViaApi({
         candidateEmail: entry.email,
         sinceTimestamp: entry.sinceTimestamp,
         companyName: application.company_name || undefined,
-        timeoutMs: Math.min(25000, config.OTP_ATTEMPT_TIMEOUT_MS),
-        pollIntervalMs: 2000,
+        timeoutMs: config.OTP_ATTEMPT_TIMEOUT_MS,
+        pollIntervalMs: 5000,
       });
-
-      // 2. Playwright fallback if REST API did not return an OTP
-      if (!result.success || !result.otp) {
-        log.info(
-          `[OTP Resolution] REST API OTP did not match, falling back to ZohoReaderPool Playwright browser for ${entry.applicationId}...`
-        );
-        const reader = await zohoReaderPool.acquireReader();
-        try {
-          result = await reader.fetchLatestOtp(entry.email, {
-            timeoutMs: config.OTP_ATTEMPT_TIMEOUT_MS,
-            sinceTimestamp: entry.sinceTimestamp,
-            companyName: application.company_name || undefined,
-          });
-        } finally {
-          zohoReaderPool.releaseReader(reader);
-        }
-      }
 
       if (result.success && result.otp) {
         const submitResult = await liveSubmit.submitOtpToPausedSession(

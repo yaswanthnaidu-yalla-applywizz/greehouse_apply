@@ -33,6 +33,7 @@ import {
 import crypto from 'crypto';
 import { upsertIngestRun } from '../db/ingestRuns.js';
 import { runStatsRollup } from '../db/statsRollup.js';
+import { selectCsvIngestionTarget } from '../candidate/csvUploadValidation.js';
 
 const log = createLogger('Storage Csv Ingestion');
 
@@ -112,6 +113,8 @@ export async function listPendingDropzoneCsvs(): Promise<{
 export async function ingestCsvFromStorage(options?: {
   runId?: string;
   triggeredBy?: string;
+  limit?: number;
+  fileName?: string;
 }): Promise<StorageIngestionResult> {
   const runId = options?.runId || crypto.randomUUID();
   const triggeredBy = options?.triggeredBy;
@@ -141,9 +144,21 @@ export async function ingestCsvFromStorage(options?: {
     log.info(`[Storage CSV Ingestion] 🔍 Checking bucket '${CSV_UPLOADS_BUCKET}' for pending CSV files...`);
   }
 
-  const { files: pendingCsvFiles, source, probeLines } = await listPendingDropzoneCsvs();
+  let pendingCsvFiles: DropzoneCsv[];
+  let source = 'storage.list';
+  let probeLines: string[] = [];
+  if (options?.fileName !== undefined) {
+    pendingCsvFiles = [];
+    source = 'explicit upload target';
+  } else {
+    const pending = await listPendingDropzoneCsvs();
+    pendingCsvFiles = pending.files;
+    source = pending.source;
+    probeLines = pending.probeLines;
+  }
 
-  if (pendingCsvFiles.length === 0) {
+  const targetFile = selectCsvIngestionTarget(options?.fileName, pendingCsvFiles);
+  if (!targetFile) {
     const probe = probeLines.join(' | ') || '(no keys probed)';
     const hint = ` Source=${source}. ${probe}`;
     const { candidates } = listSupabaseKeyCandidates();
@@ -174,7 +189,6 @@ export async function ingestCsvFromStorage(options?: {
   }
 
   const supabase = getDbClient();
-  const targetFile = pendingCsvFiles[0];
   log.info(
     `[Storage CSV Ingestion] ingest file="${targetFile.name}" source=${source} bucket=${CSV_UPLOADS_BUCKET}`
   );
@@ -263,6 +277,7 @@ export async function ingestCsvFromStorage(options?: {
     try {
       pipelineResult = await pipeline.runFullPipeline(tempFilePath, config.OUTPUT_DIR, {
         concurrency: config.WORKER_POOL_SIZE || 1,
+        limit: options?.limit,
       });
     } catch (pipelineErr) {
       if (isPipelineAbortedError(pipelineErr)) {

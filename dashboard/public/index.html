@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: https://dpwhgwdsfqzfwxlwvchp.supabase.co https://openrouter.ai;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: https://dpwhgwdsfqzfwxlwvchp.supabase.co https://openrouter.ai https://unpkg.com;">
   <link rel="icon" type="image/webp" href="/logo.webp">
   <link rel="apple-touch-icon" href="/logo.webp">
   <title>Apply Wizz</title>
@@ -21,14 +21,14 @@
       height: 6px;
     }
     .custom-scrollbar::-webkit-scrollbar-track {
-      background: #FFF5EB;
+      background: #0a0a0a;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #1A1A2E;
+      background: #2c2c2e;
       border-radius: 3px;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #E88474;
+      background: #3a3a3c;
     }
 
     @keyframes submitPopIn {
@@ -49,7 +49,7 @@
     }
   </style>
 </head>
-<body class="bg-[#FFF5EB] text-[#1A1A2E] antialiased overflow-hidden select-none font-sans">
+<body class="bg-[#0a0a0a] text-white antialiased overflow-hidden select-none font-sans">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -688,7 +688,7 @@
 
       if (!gateUser) {
         return (
-          <div className="flex items-center justify-center min-h-screen w-screen bg-[#FFF5EB] p-4 select-none font-sans">
+          <div className="flex items-center justify-center min-h-screen w-screen bg-[#0a0a0a] p-4 select-none font-sans">
             <AuthView onAuthSuccess={(user) => setGateUser(user)} />
           </div>
         );
@@ -696,8 +696,8 @@
 
       if (!operatorReady || !window.__applywizzOperatorApp) {
         return (
-          <div className="flex items-center justify-center min-h-screen w-screen bg-[#FFF5EB] p-4 select-none font-sans">
-            <p className="text-sm font-bold text-[#64748B]">Loading dashboard…</p>
+          <div className="flex items-center justify-center min-h-screen w-screen bg-[#0a0a0a] p-4 select-none font-sans">
+            <p className="text-sm font-bold text-[#8e8e93]">Loading dashboard…</p>
           </div>
         );
       }

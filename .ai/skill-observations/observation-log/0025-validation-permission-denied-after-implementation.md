@@ -1,7 +1,7 @@
 ---
 id: 25
 title: "Validation permission denial must be flushed before recovery attempts"
-status: open
+status: actioned
 type: open-source
 skill: task-observer
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "validation and tool-failure recovery"
 date: 2026-09-25
 session_context: "The implementation was complete enough for focused tests and typecheck, but three independent PowerShell validation calls were denied before any command ran."
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "already incorporated in SKILL.md flush triggers — no edit needed"
 reference: "Session validation calls for tests/searchableSelect.test.ts, npm run typecheck, and tests/dashboardDateRange.test.ts"
 ---
 

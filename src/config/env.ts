@@ -12,6 +12,9 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('Env');
 
 // Load variables from .env file into process.env
+if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+  dotenv.config({ path: '.env.sandbox' });
+}
 dotenv.config();
 
 /**
@@ -148,7 +151,7 @@ const envSchema = z.object({
   OTP_RESOLUTION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(10000),
 
   /** Per-attempt OTP lookup timeout in milliseconds */
-  OTP_ATTEMPT_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  OTP_ATTEMPT_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
 
   /** Azure Communication / Microsoft 365 Client ID */
   AZURE_CLIENT_ID: z.string().optional(),

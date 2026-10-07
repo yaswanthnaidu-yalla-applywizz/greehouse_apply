@@ -58,10 +58,7 @@ import { hydrateAdminProfilesFromWorkHistory } from '../services/adminProfileHyd
 import {
   cacheApplicationLocally,
   applyCreatedAtRangeFilter,
-  getSubmissionOutcomeCounts,
   getDashboardApplicationMetrics,
-  countSubmittedApplicationsSince,
-  countAppliedApplicationsSince,
   getApplication,
   upsertApplication,
   serializeApplicationDto,
@@ -71,7 +68,7 @@ import {
   type ApplicationRow,
   type CandidateQueueStatus,
 } from '../db/applications.js';
-import { queryRollupStats } from '../db/statsRollup.js';
+import { getApplicationStats } from '../db/applicationStats.js';
 import {
   istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
@@ -105,6 +102,8 @@ import {
   assertApplywizzZohoConnected,
   fetchZohoConnectedApplywizzIdSet,
 } from '../db/zohoConnected.js';
+import { isSandboxMode } from '../db/sandboxClient.js';
+import { isValidCsvUploadObjectName } from '../candidate/csvUploadValidation.js';
 import { SubmissionQueueDaemon } from '../submitter/queueWorker.js';
 import {
   demoApplication,
@@ -118,7 +117,6 @@ import {
   loadSecondaryDemoArtifacts,
   inMemoryDemoJobRowsForDashboard,
 } from '../dashboard/demoFixtures.js';
-import { zohoReader, zohoReaderPool } from '../services/zohoReader.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
 import type {
   CandidateJobApplication,
@@ -128,6 +126,14 @@ import type {
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Server');
+
+async function assertCandidateZohoConnectedForViewing(
+  applywizzId: string,
+  options: { isAdmin?: boolean; allowAdminDemo?: boolean }
+): Promise<{ allowed: boolean; error?: string }> {
+  if (isSandboxMode()) return { allowed: true };
+  return assertApplywizzZohoConnected(applywizzId, options);
+}
 
 const ACTIVE_CANDIDATES_LOG_INTERVAL_MS = 10 * 60 * 1000;
 const lastActiveCandidatesLogByCa = new Map<string, number>();
@@ -182,11 +188,16 @@ function applyApplicationAggregatesToSummaries(
  */
 export interface DashboardStats {
   totalCandidates: number;
-  totalApplications: number;
-  submitted: number;
-  submittedCount: number;
-  applied: number;
-  failed: number;
+  totalApplications: number | null;
+  submitted: number | null;
+  submittedCount: number | null;
+  applied: number | null;
+  failed: number | null;
+  successfulApplications: number | null;
+  failedApplications: number | null;
+  statsAvailable: boolean;
+  statsPartial: boolean;
+  statsAvailableFrom: string;
   dateRange?: {
     preset: string;
     from: string | null;
@@ -324,6 +335,11 @@ function enrichResolvedFieldsWithTemplateOptions(
         : Array.isArray(current.options)
           ? current.options
           : [],
+      ...(typeof scanned?.optionsComplete === 'boolean'
+        ? { optionsComplete: scanned.optionsComplete }
+        : typeof current.optionsComplete === 'boolean'
+          ? { optionsComplete: current.optionsComplete }
+          : {}),
     };
   });
 }
@@ -495,6 +511,13 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         res.status(403).json({ error: 'Forbidden: only admins can start the pipeline.' });
         return;
       }
+      const requestedFileName = req.body && typeof req.body === 'object' ? req.body.fileName : undefined;
+      if (requestedFileName !== undefined && (
+        typeof requestedFileName !== 'string' || !isValidCsvUploadObjectName(requestedFileName)
+      )) {
+        res.status(400).json({ error: 'Invalid CSV upload object name.' });
+        return;
+      }
 
       if (getIngestRun().running) {
         res.status(409).json({
@@ -529,7 +552,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
       try {
         const { ingestCsvFromStorage } = await import('../scanner/storageCsvIngestion.js');
-        const result = await ingestCsvFromStorage({ runId, triggeredBy: actorEmail });
+        const result = await ingestCsvFromStorage({
+          runId,
+          triggeredBy: actorEmail,
+          fileName: requestedFileName,
+        });
         setIngestRun({
           running: false,
           startedAt,
@@ -633,6 +660,35 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         return;
       }
       res.json({ ...getIngestRun(), stopEnabled: isPipelineStopEnabled() });
+    });
+
+    /**
+     * Local Sandbox Storage File Serving
+     * Serves locally uploaded resumes, proofs, and csvs in sandbox mode.
+     */
+    app.get('/api/sandbox/storage/:bucket/*', (req: Request, res: Response) => {
+      if (!isSandboxMode()) {
+        res.status(404).send('Not found');
+        return;
+      }
+      const bucket = String(req.params.bucket || '');
+      const rawParam = (req.params as any)[0];
+      const objectPath = Array.isArray(rawParam) ? rawParam.join('/') : String(rawParam || '');
+      const baseDir = process.env.SANDBOX_STORAGE_DIR
+        ? path.resolve(process.env.SANDBOX_STORAGE_DIR)
+        : path.resolve(process.cwd(), 'storage_sandbox');
+      const storageRoot = path.resolve(baseDir);
+      const fullPath = path.resolve(storageRoot, bucket, objectPath);
+      const relativePath = path.relative(storageRoot, fullPath);
+      if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+        res.status(400).send('Invalid storage path');
+        return;
+      }
+      if (fs.existsSync(fullPath)) {
+        res.sendFile(fullPath);
+      } else {
+        res.status(404).send('File not found in sandbox storage');
+      }
     });
 
     return app;
@@ -772,6 +828,128 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
     res.status(404).send('Fallback developer dashboard page not found.');
+  });
+
+  app.get('/dev/db', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
+    if (process.env.SANDBOX !== 'true') {
+      res.status(403).send('Sandbox mode only');
+      return;
+    }
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Local Database Viewer (Sandbox)</title>
+        <style>
+          body { font-family: sans-serif; padding: 20px; background: #f5f5f5; }
+          .container { display: flex; gap: 20px; height: 90vh; min-width: 0; }
+          .sidebar { box-sizing: border-box; flex: 0 0 250px; min-width: 250px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow-y: auto; }
+          .main { flex: 1 1 0; min-width: 0; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; flex-direction: column; }
+          .table-item { cursor: pointer; padding: 5px; border-radius: 4px; }
+          .table-item:hover { background: #eee; }
+          .table-item.active { background: #e0f7fa; font-weight: bold; }
+          #sql-input { width: 100%; height: 100px; margin-bottom: 10px; font-family: monospace; }
+          #sql-input, button { box-sizing: border-box; }
+          table { width: max-content; min-width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; max-width: 360px; overflow-wrap: anywhere; }
+          th { background: #f9f9f9; }
+          .json-cell { max-width: 320px; }
+          .json-cell summary { cursor: pointer; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .json-cell pre { margin: 8px 0 0; max-width: min(640px, 70vw); max-height: 360px; overflow: auto; white-space: pre; }
+          .results { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; }
+          @media (max-width: 700px) {
+            .container { height: auto; min-height: 90vh; flex-direction: column; }
+            .sidebar { flex: 0 0 auto; min-width: 0; max-height: 30vh; }
+            .main { min-height: 60vh; }
+          }
+        </style>
+      </head>
+      <body>
+        <h2>Local Database Viewer</h2>
+        <div class="container">
+          <div class="sidebar" id="table-list">Loading tables...</div>
+          <div class="main">
+            <textarea id="sql-input" placeholder="SELECT * FROM gh_users;"></textarea>
+            <button onclick="runQuery()">Run Query</button>
+            <div id="error-msg" style="color: red; margin-top: 10px;"></div>
+            <div class="results" id="results-area"></div>
+          </div>
+        </div>
+        <script>
+          async function fetchTables() {
+            try {
+              const res = await fetch('/api/dev/db/tables');
+              const data = await res.json();
+              if (data.tables) {
+                const list = document.getElementById('table-list');
+                list.innerHTML = data.tables.map(t =>
+                  '<div class="table-item" onclick="selectTable(this, \\'' + t + '\\')">' + t + '</div>'
+                ).join('');
+              }
+            } catch (e) {
+              document.getElementById('table-list').innerText = 'Error loading tables';
+            }
+          }
+          function selectTable(el, tableName) {
+            document.querySelectorAll('.table-item').forEach(i => i.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById('sql-input').value = 'SELECT * FROM "' + tableName + '" LIMIT 50;';
+            runQuery();
+          }
+          function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, character => ({
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;'
+            })[character]);
+          }
+          function formatCell(value) {
+            if (value === null) return '<i>null</i>';
+            if (typeof value === 'object') {
+              const compact = JSON.stringify(value);
+              const formatted = JSON.stringify(value, null, 2);
+              return '<details class="json-cell"><summary title="Click to expand or collapse JSON">' +
+                escapeHtml(compact) + '</summary><pre>' + escapeHtml(formatted) + '</pre></details>';
+            }
+            return escapeHtml(value);
+          }
+          async function runQuery() {
+            const query = document.getElementById('sql-input').value;
+            if (!query) return;
+            document.getElementById('error-msg').innerText = '';
+            document.getElementById('results-area').innerHTML = 'Loading...';
+            try {
+              const res = await fetch('/api/dev/db/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+              });
+              const data = await res.json();
+              if (data.error) throw new Error(data.error);
+
+              if (!data.rows || data.rows.length === 0) {
+                document.getElementById('results-area').innerHTML = '<i>0 rows returned.</i>';
+                return;
+              }
+              const cols = Object.keys(data.rows[0]);
+              let html = '<table><thead><tr>' + cols.map(c => '<th>' + escapeHtml(c) + '</th>').join('') + '</tr></thead><tbody>';
+              for (const row of data.rows) {
+                html += '<tr>' + cols.map(c => '<td>' + formatCell(row[c]) + '</td>').join('') + '</tr>';
+              }
+              html += '</tbody></table>';
+              document.getElementById('results-area').innerHTML = html;
+            } catch (e) {
+              document.getElementById('error-msg').innerText = e.message;
+              document.getElementById('results-area').innerHTML = '';
+            }
+          }
+          fetchTables();
+        </script>
+      </body>
+      </html>
+    `);
   });
 
   // Favicon / logo / other public assets. index:false so '/' stays on the guarded HTML routes.
@@ -953,7 +1131,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const unrestricted = hasUnrestrictedDashboardAccess(role) && !viewAsManagerEmail;
 
     let allowedCandidateIds: string[] | undefined = undefined;
-    let submittedOperatorEmails: string[] | undefined;
     if (!unrestricted) {
       if (!userEmail && !viewAsManagerEmail) {
         log.error('[WorkHistory] ❌ CA email missing — cannot proceed');
@@ -967,7 +1144,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           createdAtRange
         );
         allowedCandidateIds = team.candidateIds;
-        submittedOperatorEmails = team.operatorEmails;
       } else if (role === 'manager') {
         const team = await resolveTeamCandidateIdsForManager(
           userEmail!,
@@ -975,7 +1151,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           createdAtRange
         );
         allowedCandidateIds = team.candidateIds;
-        submittedOperatorEmails = team.operatorEmails;
       } else {
         const merged = await mergeWorkHistoryForIstDates({
           mode: 'ca',
@@ -983,39 +1158,24 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           dates: istDatesForWorkHistory(parsedRange),
         });
         allowedCandidateIds = merged.candidateIds;
-        submittedOperatorEmails = userEmail ? [userEmail] : [];
       }
     }
 
-    let outcomes = { failedApplications: 0 };
-    let submitted = 0;
-    let applied = 0;
-
-    if (unrestricted) {
-      const rollup = await queryRollupStats(createdAtRange.startIso, createdAtRange.endIso!);
-      outcomes.failedApplications = rollup.failed_count;
-      submitted = rollup.submitted_count;
-      applied = rollup.applied_count;
-    } else {
-      const [resOutcomes, resSubmitted, resApplied] = await Promise.all([
-        getSubmissionOutcomeCounts({
-          createdAtRange,
-          allowedCandidateIds,
-        }),
-        countSubmittedApplicationsSince(
-          createdAtRange.startIso,
-          submittedOperatorEmails,
-          createdAtRange.endIso
-        ),
-        countAppliedApplicationsSince(
-          createdAtRange.startIso,
-          submittedOperatorEmails,
-          createdAtRange.endIso
-        ),
-      ]);
-      outcomes = resOutcomes;
-      submitted = resSubmitted;
-      applied = resApplied;
+    const statsScope = unrestricted
+      ? {}
+      : viewAsManagerEmail || role === 'manager'
+        ? { managerEmail: viewAsManagerEmail || userEmail || undefined }
+        : { caEmail: userEmail || undefined };
+    let applicationStats;
+    try {
+      applicationStats = await getApplicationStats({
+        range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+        scope: statsScope,
+      });
+    } catch (error) {
+      log.error('[Stats] Failed to load canonical application statistics:', error);
+      res.status(500).json({ error: 'Unable to load application statistics.' });
+      return;
     }
 
     const metrics = await getDashboardApplicationMetrics({
@@ -1025,11 +1185,16 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
     const stats: DashboardStats = {
       totalCandidates: metrics.totalCandidates,
-      totalApplications: metrics.totalApplications,
-      submitted,
-      submittedCount: submitted,
-      applied,
-      failed: outcomes.failedApplications,
+      totalApplications: applicationStats.counts.total,
+      submitted: applicationStats.counts.submitted,
+      submittedCount: applicationStats.counts.submitted,
+      applied: applicationStats.counts.applied,
+      successfulApplications: applicationStats.counts.applied,
+      failed: applicationStats.counts.failed,
+      failedApplications: applicationStats.counts.failed,
+      statsAvailable: applicationStats.available,
+      statsPartial: applicationStats.partial,
+      statsAvailableFrom: applicationStats.availableFrom,
       dateRange: serializeDateRange(parsedRange),
     };
 
@@ -1368,7 +1533,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    const zohoGate = await assertApplywizzZohoConnected(applywizzId, {
+    const zohoGate = await assertCandidateZohoConnectedForViewing(applywizzId, {
       isAdmin: unrestricted,
       allowAdminDemo: true,
     });
@@ -1539,7 +1704,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    const zohoGate = await assertApplywizzZohoConnected(applywizzId, {
+    const zohoGate = await assertCandidateZohoConnectedForViewing(applywizzId, {
       isAdmin: unrestricted,
       allowAdminDemo: true,
     });
@@ -1740,7 +1905,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       return;
     }
 
-    const zohoJobGate = await assertApplywizzZohoConnected(applywizzId, {
+    const zohoJobGate = await assertCandidateZohoConnectedForViewing(applywizzId, {
       isAdmin: unrestricted,
       allowAdminDemo: true,
     });
@@ -2116,15 +2281,6 @@ export function startServer(
       // Start fast REST API-based OTP resolution service immediately
       otpResolutionService.start();
 
-      if (config.ZOHO_CONNECTOR_USER && config.ZOHO_CONNECTOR_PASS) {
-        void Promise.all([zohoReader.init(), zohoReaderPool.init()]).catch((err: any) => {
-          log.warn(`[Server] ⚠️ Zoho Reader background Playwright pool init error: ${err.message}`);
-        });
-      }
-    } else {
-      createLogger('ZohoReader').info(
-        '[ZohoReader] Skipping background session — queue worker disabled on this service'
-      );
     }
 
     // Launch background round-robin submission worker daemon if enabled (Phase V2-4c)
@@ -2132,8 +2288,7 @@ export function startServer(
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 2;
       log.info(
-        `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, ` +
-          `ZOHO_OTP_WORKER_POOL_SIZE=${config.ZOHO_OTP_WORKER_POOL_SIZE}, dequeue status=QUEUED)`
+        `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, dequeue status=QUEUED)`
       );
       queueDaemon = new SubmissionQueueDaemon({ concurrency });
       registerQueueDaemon(queueDaemon);
@@ -2147,8 +2302,6 @@ export function startServer(
 
   const cleanup = async () => {
     otpResolutionService.stop();
-    await zohoReaderPool.stop().catch(() => {});
-    await zohoReader.cleanup().catch(() => {});
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       // Allow in-flight Playwright workers to finish
       log.info('[Server] 🧹 Shutting down background queue daemon...');

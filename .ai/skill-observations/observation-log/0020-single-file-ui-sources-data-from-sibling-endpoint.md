@@ -1,7 +1,7 @@
-﻿---
+---
 id: 20
 title: "A one-file UI change needing data its tab's endpoint does not return must source it from a sibling endpoint - and derive count and list from the same fetch"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "implementing a UI feature under an only-edit-this-file constraint when th
 date: 2026-09-18
 session_context: "Reports Applied column + modal in dashboard/public/manager.html; GET /api/manager/reports perOperator[] carries no applied count and no job list, so the data was composed client-side from GET /api/manager/dashboard rows[].completedApplications[] filtered to status === 'APPLIED'"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principles 7/8/9) or documented as noted in weekly triage"
 reference: "dashboard/public/manager.html loadReports + AppliedModal; src/server/clientDashboard.ts detailFor(application, true) and hydrateApplicationProofUrls applied only to APPLIED rows"
 ---
 

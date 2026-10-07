@@ -382,3 +382,82 @@
 2026-09-25 session-start scan: files=15 parsed=15
 2026-09-26 deliverable flush: authoritative resolved fields implemented, operator UI dropdown hints added, sponsorship override fixed, options preserved in resolver and hydrated from templates; typecheck, build, and tests verified; no new observations.
 2026-09-26 deliverable flush: migrated OTP resolution from Playwright to fast REST API (fetchZohoOtpViaApi); tests and typecheck passed; documentation updated; no new observations.
+2026-10-05 session-start scan: files=14 parsed=14
+2026-10-05 session-start scan correction: files=15 parsed=15 (corrected preceding count)
+2026-10-05 session-start scan: files=15 parsed=15
+2026-10-05 session-end: no observations (read-only resolver failure diagnosis; no source changes)
+2026-10-05 session-start scan: files=15 parsed=15
+2026-10-05 deliverable flush: fixed resolver correctness cases; focused regression checks and typecheck passed; no observations.
+2026-10-05 session-start scan: files=11 parsed=11
+2026-10-05 deliverable flush: created docs/architecture-flows.md with six project-specific Mermaid flows; no new observations.
+2026-10-05 final deliverable checkpoint: docs/architecture-flows.md validated (six Mermaid charts; labels within six words); no new observations.
+2026-10-05 deliverable flush: fixed missing closing brace in EditableFormField causing operator-app.jsx Babel EOF parse failure; Babel/TypeScript JSX parsers and served-asset check passed; no new observations.
+2026-10-05 session-start scan: files=11 parsed=11
+2026-10-05 session-start scan: files=11 parsed=9
+2026-10-05 session-start scan correction: files=11 parsed=11 (BOM-aware)
+2026-10-05 session-end: no observations (read-only branch inventory; no source changes)
+2026-10-05 session-end: stale branch relevance checked; removed superseded V2-UI, feature/ci-pipeline, and fix/security refs; wrote GitHub/Railway settings checklist; no new observations.
+2026-10-05 grill-me alignment completed: sandbox plan agreed
+2026-10-05 deliverable flush: updated CI for main/dev and feature PRs, added isolated focused tests, Railway Docker image build, and fix/* auto-delete after merge to dev; 52 selected tests pass; typecheck/build currently blocked by concurrent sandboxClient.ts TS18048 errors; no new observations.
+2026-10-05 sandbox mode implementation delivered and verified
+2026-10-05 sandbox boot verified: fresh reset and pipeline resolution operational
+2026-10-05 grill-me round 2: root cause analysis of sandbox loop and database viewing completed
+2026-10-05 grill-me round 2 conclusion: plan aligned for root CSV auto-ingest and /dev/db explorer
+2026-10-05 — weekly review complete; 11 obs actioned; Principles 7/8/9 added to cross-cutting-principles.md
+2026-10-05 deliverable flush: removed obsolete Playwright zohoReader.ts and 15-instance browser pool; switched OTP & confirmation proof exclusively to Zoho REST API (/api/zoho/ui/inbox); no new observations
+2026-10-05 deliverable flush: tuned OTP REST polling interval to 5s with min 2.5s inter-request pause; increased timeout budget to 60s; no new observations
+2026-10-05 session-start scan
+2026-10-05 session-start scan: files=11 parsed=11
+2026-10-05 session-end: no observations (sandbox JSONB viewer and Compose diagnosis; no runtime code changes)
+2026-10-05 deliverable flush: sandbox DB viewer now pretty-prints JSONB/object cells safely; npm run typecheck passed; no new observations
+2026-10-05 port cleanup: stopped only the node.exe PID listening on 3001; verified listener cleared; no observation
+2026-10-05 deliverable flush: role switcher persistence and dev operator mode across TSX and HTML dashboards; no observations
+2026-10-05 paused investigation: sandbox scanned-job DB persistence root cause likely missing SandboxQueryBuilder.abortSignal; evidence and next steps saved to continue.txt; no runtime fix yet
+2026-10-06 session-start scan: files=11 parsed=11
+2026-10-06 deliverable flush: fixed sandbox scanned-template persistence and Phase B export error swallowing; replayed existing 10 templates and verified JSONB schemas; npm run typecheck passed; no new observations
+2026-10-06 session-start scan: files=11 parsed=11
+2026-10-06 deliverable flush: moved pgweb into Compose services so localhost:8081 is published; Docker unavailable here, so stack startup could not be verified; no new observations
+2026-10-06 checkpoint: removed obsolete documentation files tmro1, Untitled document, code-review-report, architecture-flows; preserved .ai and to-do; no observations
+2026-10-06 deliverable flush: configured pgweb with --url because DATABASE_URL was ignored; recreated container and verified PostgreSQL connection in logs plus HTTP 200 on localhost:8081; no new observations
+2026-10-06 session-end: synced all docs per AGENTS.md (AGENTS.md, projectbrief, systemPatterns, techContext, activeContext, progress, OVERVIEW); typecheck clean; no new observations
+2026-10-06 session-start scan: files=27 parsed=25
+2026-10-06 deliverable flush: fixed sandbox DB viewer sidebar sizing and JSON disclosure formatting; npm run typecheck and scoped diff check passed; no new observations
+2026-10-06 deliverable flush: candidate/job reads bypass Zoho-connected gate in sandbox only; production and submission gates preserved; npm run typecheck and scoped diff check passed; no new observations
+2026-10-06 session-start scan: files=11 parsed=11
+2026-10-06 no observations
+2026-10-06 deliverable flush: shipped direct Admin CSV upload with staged exact-file confirmation; npm run build and focused CSV validation tests pass; no new observations
+2026-10-06 session-start scan: files=11 parsed=11 suspect=0
+2026-10-06 investigation checkpoint: analyzed Greenhouse dropdown screenshots; demographic questions use separate #demographic-section and numeric IDs versus regular question id; no code change pending schema verification; no new observations
+2026-10-06 session-start scan: files=11 parsed=11
+2026-10-06 no observations
+2026-10-06 deliverable flush: fixed scanner capture of missing Greenhouse select/radio options; conditional DOM-backed Remix regression, cascading and searchable-select tests, typecheck, build and diff check pass; no new observations
+2026-10-06 no observations
+2026-10-06 deliverable flush: replaced synthetic custom-select opening with Playwright pointer interaction and added mousedown/portal regression; typecheck, build, focused browser test, and scoped diff check pass; observation 0026 actioned; sandbox retest remains outstanding
+2026-10-06 deliverable verification: user confirmed fresh sandbox fields_schema contains choices for previously missing Country, School, Degree, Gender, transgender, ethnicity, Race, Veteran Status, and Disability Status; observation 0026 actioned
+2026-10-06 deliverable flush: required-only choice enrichment and once-per-visible-field cascade probing; IMC diagnostic scan saved to output/imc_job_4908708101_scan.txt (100 School choices, partial after bounded scroll; no list payload in inspected JSON); focused regression/typecheck pass; no new observations
+2026-10-06 no observations
+2026-10-06 no observations
+2026-10-06 no observations
+2026-10-06 no observations
+2026-10-06 session-start scan: files=12 parsed=12
+2026-10-06 checkpoint: no observations (explained candidate QA bank answer-resolution flow; no code changes)
+2026-10-06 session-start scan: files=12 parsed=12
+2026-10-06 no observations
+2026-10-06 session-end: Tiers 3-4 now search candidate profile/raw-payload facts before QA bank; focused resolver tests and typecheck pass; no new observations
+2026-10-06 session-start scan: files=12 parsed=12
+2026-10-06 session-start scan: files=12 parsed=12
+2026-10-06 session-end: added batch Zoho connectivity validation to candidate ingestion with stored-status fallback; focused tests, typecheck, and build pass; no new observations
+2026-10-06 session-end: removed TSX operator dashboard Supabase/AI percentage pills and Stats cards; dashboard typecheck and production build pass; no new observations
+2026-10-06 session-start scan: files=12 parsed=12
+2026-10-06 session-start scan: files=12 parsed=12 suspect=0 (dashboard stats consistency fix)
+2026-10-06 session-end: dark-mode Apple Music retheme across all dashboards and shells; tailwindcss rebuild, typecheck, and production build pass; no new observations
+2026-10-06 session-end: stats consistency decisions clarified; plan+handover saved to to-do/plan+handove.md; implementation intentionally paused; no new observation
+2026-10-07 session-start scan: files=12 parsed=12 suspect=0 (resume stats consistency)
+2026-10-07 session-start scan: files=12 parsed=12
+2026-10-07 session-end: zero-context partial staging misapplied mixed-file hunks; full server file restaged, build/typecheck passed, observation 0027 actioned
+2026-10-07 no observations
+2026-10-07T07:18:29+05:30 session-start scan: files=12 parsed=12 suspect=0 (stats rollup lore)
+2026-10-07 no observations (explained legacy rollup and migration 027 canonical stats flow; no code changes)
+2026-10-07 no observations (troubleshot repeated migration 027 function lookup error)
+2026-10-07 checkpoint: user reports stats table/config/RLS setup and trigger creation succeeded in SQL Editor; earlier failures were SQL selection/execution, not schema qualification
+2026-10-07 session-start scan: files=12 parsed=12

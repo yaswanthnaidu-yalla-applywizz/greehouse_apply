@@ -1,7 +1,7 @@
 ---
 id: 17
 title: "A convention copied into a different control-flow context changes what a failure means"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "porting a local code idiom; control flow and error-handling context"
 date: 2026-09-18
 session_context: "Added a fire-and-forget application_events insert to getNextQueuedApplicationForRoundRobin() (RPC + fallback dequeue branches) to record QUEUED -> APPLYING"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principle 9)"
 reference: "src/db/applications.ts getNextQueuedApplicationForRoundRobin (RPC branch call, fallback branch call); src/db/events.ts insertApplicationEvent"
 ---
 

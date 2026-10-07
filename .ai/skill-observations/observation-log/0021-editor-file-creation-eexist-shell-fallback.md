@@ -1,7 +1,7 @@
-﻿---
+---
 id: 21
 title: "Editor file-creation fails with EEXIST mkdir in this workspace; create new files via shell instead of retrying"
-status: open
+status: actioned
 type: internal
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "harness tooling - file creation via the editor tool"
 date: 2026-09-18
 session_context: "Creating .tmp-verify-manager-jsx.mjs then tmp-verify-manager-jsx.mjs both failed with EEXIST: mkdir C:\\Users\\yaswa\\Dev\\greehouse_apply while same-session edits to existing files succeeded; Set-Content + node ran the same content first try"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principles 7/8/9) or documented as noted in weekly triage"
 reference: "session tool calls on C:\\Users\\yaswa\\Dev\\greehouse_apply (editor create attempts vs run_commands Set-Content)"
 ---
 

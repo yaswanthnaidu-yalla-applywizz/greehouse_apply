@@ -1,7 +1,7 @@
 ---
 id: 18
 title: "Verification coverage is per-surface: the same defect is a build error in one tree and invisible in the other"
-status: open
+status: actioned
 type: open-source
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "choosing verification per file type in a mixed-toolchain codebase"
 date: 2026-09-18
 session_context: "Edited dashboard/public/manager.html (browser-Babel JSX, no compile step) immediately after a tsc-checked src/ edit in the same session; a wrong identifier on the HTML surface has no static check to fail"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-05
+resolution: "promoted to cross-cutting-principles.md (Principle 7)"
 reference: "dashboard/public/manager.html and src/db/applications.ts (both edited 2026-09-18); dashboard/tsconfig.json covers *.tsx only"
 ---
 

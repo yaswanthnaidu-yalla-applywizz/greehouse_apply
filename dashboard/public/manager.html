@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: https://dpwhgwdsfqzfwxlwvchp.supabase.co https://openrouter.ai;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' wss: https://dpwhgwdsfqzfwxlwvchp.supabase.co https://openrouter.ai https://unpkg.com;">
   <link rel="icon" type="image/webp" href="/logo.webp">
   <link rel="apple-touch-icon" href="/logo.webp">
   <title>Apply Wizz — Manager</title>
@@ -13,7 +13,7 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="/roleAccess.js"></script>
 </head>
-<body class="bg-[#FFF5EB] text-[#1A1A2E]">
+<body class="bg-[#0a0a0a] text-white">
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useCallback } = React;
@@ -29,7 +29,20 @@
       return (
         <nav className="flex flex-wrap items-center gap-1 bg-white border-2 border-[#1A1A2E] rounded p-1">
           {links.map((link) => (
-            <a key={link.href} href={link.href} className={`px-2 py-1 text-xs font-bold rounded ${current === link.href ? 'bg-[#E88474] text-white' : 'hover:bg-[#FAF4EB]'}`}>{link.label}</a>
+            <a
+              key={link.href}
+              href={link.href}
+              onClick={() => {
+                if (link.href === '/') {
+                  sessionStorage.setItem('applywizz_dev_operator_view', 'true');
+                } else {
+                  sessionStorage.removeItem('applywizz_dev_operator_view');
+                }
+              }}
+              className={`px-2 py-1 text-xs font-bold rounded ${current === link.href ? 'bg-[#E88474] text-white' : 'hover:bg-[#FAF4EB]'}`}
+            >
+              {link.label}
+            </a>
           ))}
         </nav>
       );
@@ -67,7 +80,7 @@
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">Applied jobs</p>
                 <h3 className="text-sm font-bold break-words">{operator.name}</h3>
-                <p className="text-xs font-mono mt-1">{items.length} applied application(s)</p>
+                <p className="text-xs font-mono mt-1">{items.length} live proof detail(s) available</p>
               </div>
               <button type="button" onClick={onClose} className="font-black px-2">✕</button>
             </header>
@@ -151,13 +164,14 @@
     }
 
     function CountButton({ value, onClick, active }) {
+      if (value == null) return <span className="font-mono">—</span>;
       if (!value) return <span className="font-mono">{value ?? 0}</span>;
       return (
         <button type="button" onClick={onClick} className={`font-mono underline decoration-2 ${active ? 'text-[#E88474] font-black' : 'text-[#1E3A5F]'}`}>{value}</button>
       );
     }
 
-    function ClientTable({ rows, loading, expanded, onToggle, onEmailProof }) {
+    function ClientTable({ rows, loading, statsAvailable = true, expanded, onToggle, onEmailProof }) {
       return (
         <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-xs">
@@ -177,11 +191,11 @@
                   <React.Fragment key={row.client}>
 <tr className="border-b border-[#1A1A2E]/20">
   <td className="p-3 font-black">{row.client}</td>
-  <td className="p-3 font-mono">{row.applications}</td>
-  <td className="p-3"><CountButton value={row.submitted ?? row.completed} active={expanded === submittedKey || expanded === completedKey} onClick={() => onToggle(submittedKey)} /></td>
-  <td className="p-3 font-mono">{row.applied ?? 0}</td>
+  <td className="p-3 font-mono">{statsAvailable ? row.applications ?? 0 : '—'}</td>
+  <td className="p-3"><CountButton value={statsAvailable ? row.submitted ?? row.completed : null} active={statsAvailable && (expanded === submittedKey || expanded === completedKey)} onClick={() => { if (statsAvailable) onToggle(submittedKey); }} /></td>
+  <td className="p-3 font-mono">{statsAvailable ? row.applied ?? 0 : '—'}</td>
   <td className="p-3"><CountButton value={row.pending} active={expanded === pendingKey} onClick={() => onToggle(pendingKey)} /></td>
-  <td className="p-3"><CountButton value={row.failed} active={expanded === failedKey} onClick={() => onToggle(failedKey)} /></td>
+  <td className="p-3"><CountButton value={statsAvailable ? row.failed : null} active={statsAvailable && expanded === failedKey} onClick={() => { if (statsAvailable) onToggle(failedKey); }} /></td>
   <td className="p-3 text-[#64748B]">{row.assigned_ca || '—'}</td>
 </tr>
                     {openKey && (
@@ -284,6 +298,9 @@
       const [totals, setTotals] = useState({});
       const [submitted, setSubmitted] = useState(0);
       const [applied, setApplied] = useState(0);
+      const [statsAvailable, setStatsAvailable] = useState(true);
+      const [statsPartial, setStatsPartial] = useState(false);
+      const [statsAvailableFrom, setStatsAvailableFrom] = useState('');
       const [submitClicks, setSubmitClicks] = useState(0);
       const [submittedToday, setSubmittedToday] = useState(0);
       const [careerAssociates, setCareerAssociates] = useState([]);
@@ -332,8 +349,11 @@
           if (!res.ok) throw new Error(payload.error || 'Unable to load manager dashboard.');
           setRows(payload.rows || []);
           setTotals(payload.totals || {});
-          setSubmitted(payload.submitted ?? 0);
-          setApplied(payload.applied ?? 0);
+          setSubmitted(payload.submitted ?? (payload.statsAvailable === false ? null : 0));
+          setApplied(payload.applied ?? (payload.statsAvailable === false ? null : 0));
+          setStatsAvailable(payload.statsAvailable !== false);
+          setStatsPartial(payload.statsPartial === true);
+          setStatsAvailableFrom(payload.statsAvailableFrom || '');
           setSubmitClicks(payload.submitClicks ?? 0);
           setSubmittedToday(payload.submitted_today ?? 0);
           setWarning(payload.warning || '');
@@ -361,6 +381,9 @@
         const payload = await res.json();
         if (res.ok) {
           setOperators(payload.operators || []);
+          setStatsAvailable(payload.statsAvailable !== false);
+          setStatsPartial(payload.statsPartial === true);
+          setStatsAvailableFrom(payload.statsAvailableFrom || '');
           setOperatorError('');
         } else {
           setOperatorError(payload.error || 'Unable to load manager operators.');
@@ -382,6 +405,7 @@
         const payload = await res.json();
         if (res.ok) setReports(payload);
         setAppliedOperator(null);
+        if (!res.ok || payload.statsAvailable === false) return;
         // /api/manager/reports has no applied counts or job list, so pull applied rows
         // Pull applied details over the exact period returned by the stats endpoint.
         const start = payload.start;
@@ -401,13 +425,6 @@
             }
           }
           setAppliedByOperator(grouped);
-          setReports((prev) => ({
-            ...prev,
-            perOperator: (prev.perOperator || []).map((row) => ({
-              ...row,
-              applied: grouped[row.email] ? grouped[row.email].length : row.applied,
-            })),
-          }));
         } catch {
           // Applied column falls back to 0 if the dashboard fetch fails.
         }
@@ -602,21 +619,24 @@
             {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
             {operatorError && tab === 'operators' && <div className="mb-4 bg-[#FECACA] border-2 border-[#1A1A2E] rounded p-3 text-sm font-bold">{operatorError}</div>}
             {warning && <div className="mb-4 bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">{warning}</div>}
+            {statsAvailable === false && <div className="mb-4 bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">Application statistics before {statsAvailableFrom || 'the cutover date'} are unavailable.</div>}
+            {statsAvailable !== false && statsPartial && <div className="mb-4 bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">Partial statistics: dates before {statsAvailableFrom} are excluded.</div>}
             {loading && <p className="text-xs font-mono font-bold mb-4">Loading…</p>}
 
             {tab === 'home' && (
               <>
-<div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-  {[['Total Applications', totals.applications], ['Submitted (team)', submitted], ['Applied (team)', applied]].map(([label, val]) => (
+<div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+  {[['Total Applications', totals.applications], ['Submitted (team)', submitted], ['Applied (team)', applied], ['Failed (team)', totals.failed]].map(([label, val]) => (
     <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4 shadow-[2px_2px_0_#1A1A2E]">
       <p className="text-xs font-bold uppercase">{label}</p>
-      <p className="text-2xl font-black mt-1">{val ?? 0}</p>
+      <p className="text-2xl font-black mt-1">{statsAvailable === false ? '—' : val ?? 0}</p>
     </div>
   ))}
 </div>
                 <ClientTable
                   rows={rows}
                   loading={loading}
+                  statsAvailable={statsAvailable}
                   expanded={expanded}
                   onToggle={(key) => setExpanded(expanded === key ? null : key)}
                   onEmailProof={setEmailProof}
@@ -626,14 +646,14 @@
 
             {tab === 'operators' && (
               <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
-                <div className="grid grid-cols-3 gap-3 p-4 border-b-2 border-[#1A1A2E]">
-                  {[['Total Applications', totals.applications], ['Submitted (team)', submitted], ['Applied (team)', applied]].map(([label, val]) => (
-                    <div key={label}><p className="text-[10px] font-bold uppercase text-[#64748B]">{label}</p><p className="text-xl font-black">{val ?? 0}</p></div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 border-b-2 border-[#1A1A2E]">
+                  {[['Total Applications', totals.applications], ['Submitted (team)', submitted], ['Applied (team)', applied], ['Failed (team)', totals.failed]].map(([label, val]) => (
+                    <div key={label}><p className="text-[10px] font-bold uppercase text-[#64748B]">{label}</p><p className="text-xl font-black">{statsAvailable === false ? '—' : val ?? 0}</p></div>
                   ))}
                 </div>
                 <table className="w-full min-w-[640px] text-left text-xs">
 <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-  <tr>{['Operator', 'Status', 'Assigned', 'Submitted', 'Applied', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+  <tr>{['Operator', 'Status', 'Assigned', 'Submitted', 'Applied', 'Failed', 'Last sign-in'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
 </thead>
                   <tbody>
                     {operators.map((op) => (
@@ -643,9 +663,10 @@
     <p className="text-[#64748B] font-mono">{op.email}</p>
   </td>
   <td className="p-3 uppercase font-bold">{op.status}</td>
-  <td className="p-3 font-mono">{op.applications}</td>
-  <td className="p-3 font-mono">{op.submitted ?? op.completed ?? 0}</td>
-  <td className="p-3 font-mono">{op.applied ?? 0}</td>
+  <td className="p-3 font-mono">{statsAvailable === false ? '—' : op.applications ?? 0}</td>
+  <td className="p-3 font-mono">{statsAvailable === false ? '—' : op.submitted ?? op.completed ?? 0}</td>
+  <td className="p-3 font-mono">{statsAvailable === false ? '—' : op.applied ?? 0}</td>
+  <td className="p-3 font-mono">{statsAvailable === false ? '—' : op.failed ?? 0}</td>
   <td className="p-3 font-mono">{op.lastSignInAt ? new Date(op.lastSignInAt).toLocaleString() : '—'}</td>
 </tr>
                     ))}
@@ -673,6 +694,8 @@
 
             {tab === 'reports' && (
               <div className="space-y-4">
+                {reports.statsAvailable === false && <p className="bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">Application statistics before {reports.statsAvailableFrom || 'the cutover date'} are unavailable.</p>}
+                {reports.statsAvailable !== false && reports.statsPartial && <p className="bg-[#FEF3C7] border-2 border-[#1A1A2E] rounded p-3 text-xs font-bold">Partial statistics: dates before {reports.statsAvailableFrom} are excluded.</p>}
                 <div className="flex gap-2">
                   {['day', 'week', 'month'].map((range) => (
                     <button key={range} type="button" onClick={() => setReportRange(range)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${reportRange === range ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{range}</button>
@@ -680,20 +703,20 @@
                 </div>
                 <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Period</th><th className="p-3 font-black uppercase">Applications</th></tr></thead>
+                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr>{['Period', 'Total', 'Submitted', 'Applied', 'Failed'].map((heading) => <th key={heading} className="p-3 font-black uppercase">{heading}</th>)}</tr></thead>
                     <tbody>
                       {(reports.buckets || []).map((bucket) => (
-                        <tr key={bucket.date} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-mono">{bucket.date}</td><td className="p-3 font-mono">{bucket.applications}</td></tr>
+                        <tr key={bucket.date} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-mono">{bucket.date}</td><td className="p-3 font-mono">{bucket.total ?? bucket.applications}</td><td className="p-3 font-mono">{bucket.submitted ?? 0}</td><td className="p-3 font-mono">{bucket.applied ?? 0}</td><td className="p-3 font-mono">{bucket.failed ?? 0}</td></tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr><th className="p-3 font-black uppercase">Operator</th><th className="p-3 font-black uppercase">Applications</th><th className="p-3 font-black uppercase">Assigned</th><th className="p-3 font-black uppercase">Submitted</th><th className="p-3 font-black uppercase">Applied</th></tr></thead>
+                    <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]"><tr>{['Operator', 'Total', 'Submitted', 'Applied', 'Failed'].map((heading) => <th key={heading} className="p-3 font-black uppercase">{heading}</th>)}</tr></thead>
                     <tbody>
                       {(reports.perOperator || []).map((row) => (
-                        <tr key={row.email} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-black">{row.name}</td><td className="p-3 font-mono">{row.applications}</td><td className="p-3 font-mono">{row.apps}</td><td className="p-3 font-mono">{row.submitted ?? row.completed}</td><td className="p-3"><CountButton value={row.applied ?? 0} active={!!appliedOperator && appliedOperator.email === row.email} onClick={() => setAppliedOperator(appliedOperator && appliedOperator.email === row.email ? null : { email: row.email, name: row.name, items: appliedByOperator[row.email] || [] })} /></td></tr>
+                        <tr key={row.email} className="border-b border-[#1A1A2E]/20"><td className="p-3 font-black">{row.name}</td><td className="p-3 font-mono">{reports.statsAvailable === false ? '—' : row.applications}</td><td className="p-3 font-mono">{reports.statsAvailable === false ? '—' : row.submitted ?? row.completed}</td><td className="p-3"><CountButton value={reports.statsAvailable === false ? null : row.applied ?? 0} active={!!appliedOperator && appliedOperator.email === row.email} onClick={() => setAppliedOperator(appliedOperator && appliedOperator.email === row.email ? null : { email: row.email, name: row.name, items: appliedByOperator[row.email] || [] })} /></td><td className="p-3 font-mono">{reports.statsAvailable === false ? '—' : row.failed ?? 0}</td></tr>
                       ))}
                     </tbody>
                   </table>
