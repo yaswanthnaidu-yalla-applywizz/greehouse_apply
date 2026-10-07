@@ -21,13 +21,13 @@ import { insertApplicationEvent } from './events.js';
 import { createLogger } from '../utils/logger.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import {
-  assertEligibleForSubmission,
-  computeEligibleForSubmissionDisplay,
-  isEligibleForSubmission,
-  SubmissionEligibilityBlockedError,
-} from '../submission/submissionEligibilityGate.js';
+  assertWithinSubmissionQuestionLimit,
+  isWithinSubmissionQuestionLimit,
+  isWithinSubmissionQuestionLimitForDisplay,
+  QuestionLimitExceededError,
+} from '../submission/questionLimit.js';
 
-export { SubmissionEligibilityBlockedError };
+export { QuestionLimitExceededError };
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import {
   normalizeOperatorErrorMessage,
@@ -1200,7 +1200,7 @@ export interface ApplicationDto {
   field_count?: number | null;
   fieldCount?: number | null;
   eligibleForSubmission?: boolean;
-  submissionGateBlocked?: boolean;
+  questionLimitBlocked?: boolean;
 }
 
 /**
@@ -1327,12 +1327,10 @@ export function serializeApplicationDto(
     csvJobScore,
     field_count: fieldCount,
     fieldCount,
-    eligibleForSubmission: computeEligibleForSubmissionDisplay({
-      csv_job_score: csvJobScore,
+    eligibleForSubmission: isWithinSubmissionQuestionLimitForDisplay({
       field_count: fieldCount,
     }),
-    submissionGateBlocked: !isEligibleForSubmission({
-      csv_job_score: csvJobScore,
+    questionLimitBlocked: !isWithinSubmissionQuestionLimit({
       field_count: fieldCount,
     }).eligible,
   };
@@ -1978,7 +1976,7 @@ export async function enqueueApplication(
     throw new Error(`Application '${applicationIdOrApplywizzId}' not found to queue.`);
   }
 
-  assertEligibleForSubmission(app);
+  assertWithinSubmissionQuestionLimit(app);
 
   const previousStatus = app.status || 'READY_FOR_REVIEW';
   if (previousStatus === 'RETRY') {

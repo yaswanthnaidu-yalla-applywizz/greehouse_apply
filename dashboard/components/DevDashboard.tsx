@@ -10,15 +10,6 @@ interface DevHealthProbe {
   responseMs?: number;
 }
 
-interface DevSubmissionGate {
-  enabled: boolean;
-  criteria?: {
-    minScore: number;
-    maxScore: number;
-    maxFieldCountExclusive: number;
-  };
-}
-
 interface DevHealthSnapshot {
   totalApplications?: number | null;
   submitted?: number | null;
@@ -51,7 +42,6 @@ interface DevHealthSnapshot {
     error?: string;
     message?: string;
   };
-  submissionGate?: DevSubmissionGate;
 }
 
 interface DevRunItem {
@@ -169,8 +159,6 @@ export const DevDashboard: React.FC = () => {
   const [debug, setDebug] = useState<DevDebugPayload | null>(null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  const [submissionGate, setSubmissionGate] = useState<DevSubmissionGate | null>(null);
-  const [gateSaving, setGateSaving] = useState<boolean>(false);
 
   const loadJson = useCallback(async <T,>(url: string): Promise<T> => {
     const res = await apiFetch(url);
@@ -192,7 +180,6 @@ export const DevDashboard: React.FC = () => {
       if (tab === 'system') {
         const healthPayload = await loadJson<DevHealthSnapshot>(`/api/dev/health?range=${statsRange}`);
         setHealth(healthPayload);
-        setSubmissionGate(healthPayload.submissionGate || null);
       }
       if (tab === 'runs') {
         const params = new URLSearchParams({ date, limit: '100' });
@@ -229,34 +216,6 @@ export const DevDashboard: React.FC = () => {
     }, 30000);
     return () => clearInterval(interval);
   }, [refresh]);
-
-  const setSubmissionGateEnabled = async (enabled: boolean) => {
-    setGateSaving(true);
-    setError('');
-    try {
-      const res = await apiFetch('/api/dev/submission-gate', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-      const payload: unknown = await res.json();
-      if (!res.ok) {
-        const err = payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-          ? payload.error
-          : 'Failed to update submission gate';
-        throw new Error(err);
-      }
-      const data = payload as { enabled: boolean; criteria?: DevSubmissionGate['criteria'] };
-      setSubmissionGate({ enabled: data.enabled, criteria: data.criteria });
-      if (health) {
-        setHealth({ ...health, submissionGate: { enabled: data.enabled, criteria: data.criteria } });
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Gate update failed');
-    } finally {
-      setGateSaving(false);
-    }
-  };
 
   const openDebugger = async (id?: string) => {
     const target = (id || debugId).trim();
@@ -386,26 +345,6 @@ export const DevDashboard: React.FC = () => {
               <p>Workers running: <span className="font-semibold text-white">{String(health.workers.running)}</span> · in flight <span className="font-semibold text-white">{health.workers.inFlightCount}</span> · idle <span className="font-semibold text-white">{health.workers.idleCount}</span></p>
               <p>Ingest: <span className="font-semibold text-white">{health.ingest?.running ? 'running' : health.ingest?.error || health.ingest?.message || 'idle'}</span></p>
             </div>
-            {submissionGate && (
-              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold uppercase tracking-wider text-white">Submission eligibility gate</p>
-                    <p className="text-xs text-[#8e8e93] mt-1 max-w-xl leading-relaxed">
-                      When ON, only jobs with CSV score {submissionGate.criteria?.minScore}–{submissionGate.criteria?.maxScore} and fewer than {submissionGate.criteria?.maxFieldCountExclusive} questions can be queued or live-submitted (including operator Submit). Resets to env default on process restart.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={gateSaving}
-                    onClick={() => void setSubmissionGateEnabled(!submissionGate.enabled)}
-                    className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors ${submissionGate.enabled ? 'bg-[#30d158] text-black hover:bg-[#30d158]/90' : 'bg-[#ff453a] text-white hover:bg-[#ff453a]/90'}`}
-                  >
-                    {gateSaving ? 'Saving…' : submissionGate.enabled ? 'Gate ON — click to turn OFF' : 'Gate OFF — click to turn ON'}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         )}
 

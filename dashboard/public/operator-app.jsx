@@ -1703,7 +1703,7 @@
               const retryableFailure =
                 cardStatus === 'FAILED' &&
                 retryCount < 3 &&
-                job.submissionGateBlocked !== true;
+                job.questionLimitBlocked !== true;
               const expiredOrSkipped = cardStatus === 'EXPIRED' || cardStatus === 'SKIPPED';
               let cardChrome = isSelected
                 ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ring-1 ring-[#1A1A2E]'
@@ -1934,9 +1934,9 @@
       const isRetryableFailure =
         (currentStatus === 'FAILED' || currentStatus === 'RETRY') &&
         retryCount < 3 &&
-        application?.submissionGateBlocked !== true;
-      const isGateBlockedFailure =
-        currentStatus === 'FAILED' && application?.submissionGateBlocked === true;
+        application?.questionLimitBlocked !== true;
+      const isQuestionLimitFailure =
+        currentStatus === 'FAILED' && application?.questionLimitBlocked === true;
       const isFullFormStatus =
         currentStatus === 'APPLIED' ||
         currentStatus === 'DRY_RUN_COMPLETE' ||
@@ -2306,10 +2306,10 @@
             <div className="mb-3 bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#1A1A2E] text-[#065F46]">
               <p className="text-lg font-black">✓ Already Submitted</p>
             </div>
-          ) : currentStatus === 'FAILED' && isGateBlockedFailure ? (
+          ) : currentStatus === 'FAILED' && isQuestionLimitFailure ? (
             <div className="mb-3 bg-[#E2E8F0] border-2 border-[#475569] rounded-xl px-4 py-3 shadow-[3px_3px_0px_#475569] text-[#475569]">
               <p className="text-sm font-bold">
-                This application does not fall within our requirements to apply today
+                This application exceeds the maximum question limit and cannot be submitted
               </p>
             </div>
           ) : currentStatus === 'FAILED' || currentStatus === 'RETRY' ? (
