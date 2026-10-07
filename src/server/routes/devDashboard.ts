@@ -3,6 +3,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { getSandboxPool, isSandboxMode } from '../../db/sandboxClient.js';
 import {
   getApplication,
   getISTDateRangeUtc,
@@ -41,8 +42,9 @@ function parseLimit(value: unknown, fallback = 100): number {
 }
 
 devDashboardRouter.get('/submission-gate', async (_req: Request, res: Response): Promise<void> => {
-  let enabled = getSubmissionEligibilityGateEnabled();
-  if (isSupabaseConfigured()) {
+  const sandbox = isSandboxMode();
+  let enabled = sandbox ? false : getSubmissionEligibilityGateEnabled();
+  if (!sandbox && isSupabaseConfigured()) {
     try {
       const { data, error } = await getDbClient()
         .from('system_config')
@@ -59,7 +61,7 @@ devDashboardRouter.get('/submission-gate', async (_req: Request, res: Response):
   res.json({
     enabled,
     criteria: submissionGateCriteria(),
-    source: 'system_config',
+    source: sandbox ? 'sandbox_default' : 'system_config',
   });
 });
 
@@ -68,6 +70,15 @@ devDashboardRouter.patch('/submission-gate', async (req: Request, res: Response)
   if (typeof enabled !== 'boolean') {
     res.status(400).json({ error: 'Body must include boolean "enabled".' });
     return;
+  if (isSandboxMode()) {
+    setSubmissionEligibilityGateEnabled(false);
+    res.json({
+      enabled: false,
+      criteria: submissionGateCriteria(),
+      source: 'sandbox_default',
+    });
+    return;
+  }
   }
   setSubmissionEligibilityGateEnabled(enabled);
   if (isSupabaseConfigured()) {
@@ -402,5 +413,35 @@ devDashboardRouter.get('/applications/:id', async (req: Request, res: Response):
   } catch (error) {
     log.error('[Dev] debugger failed:', error);
     res.status(500).json({ error: 'Unable to load application debugger.' });
+  }
+});
+
+
+devDashboardRouter.get('/db/tables', async (_req: Request, res: Response): Promise<void> => {
+  if (!isSandboxMode()) { res.status(403).json({ error: 'Sandbox mode only' }); return; }
+  try {
+    const pool = getSandboxPool();
+    const result = await pool.query(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name;
+    `);
+    res.json({ tables: result.rows.map(r => r.table_name) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+devDashboardRouter.post('/db/query', async (req: Request, res: Response): Promise<void> => {
+  if (!isSandboxMode()) { res.status(403).json({ error: 'Sandbox mode only' }); return; }
+  const { query } = req.body;
+  if (!query) { res.status(400).json({ error: 'Query required' }); return; }
+  try {
+    const pool = getSandboxPool();
+    const result = await pool.query(query);
+    res.json({ rows: result.rows, command: result.command, rowCount: result.rowCount });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
   }
 });

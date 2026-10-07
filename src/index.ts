@@ -26,7 +26,7 @@ import { PlaywrightScanner } from './scanner/playwrightScanner.js';
 import { exportScannedJobs } from './scanner/exportScannedJobs.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from './candidate/segregator.js';
 import { AnswerResolver, exportResolvedApplications, resolutionSourceKey } from './resolver/answerResolver.js';
-import { createServer, loadArtifacts } from './server/index.js';
+import { startServer, loadArtifacts } from './server/index.js';
 import { createLogger, haltWithDevAlert } from './utils/logger.js';
 
 const log = createLogger('App');
@@ -112,6 +112,12 @@ export function parseCliArgs(args: string[]): CliOptions {
  */
 export async function main(): Promise<void> {
   const options = parseCliArgs(process.argv.slice(2));
+  if (String(process.env.SANDBOX).trim() === 'true' || String(process.env.SANDBOX).trim() === '1') {
+    options.skipScan = true;
+    options.skipResolve = true;
+    options.skipSync = true;
+    options.skipMigrate = true;
+  }
   const startTime = Date.now();
 
   log.info('================================================================');
@@ -137,23 +143,20 @@ export async function main(): Promise<void> {
 
   try {
     // -------------------------------------------------------------------------
+    // Step -1: Sandbox Database Initialization & Seeding
+    // -------------------------------------------------------------------------
+    if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
+      const { runSandboxMigrations } = await import('./db/sandboxClient.js');
+      await runSandboxMigrations();
+    }
+
+    // -------------------------------------------------------------------------
     // Step 0: Operator Dashboard Server Launch (Early Live Boot)
     // -------------------------------------------------------------------------
     let serverInstance: any = null;
     if (!options.skipDashboard) {
       try {
-        const app = createServer(options.outputDir);
-        serverInstance = app.listen(options.port, () => {
-          log.info(`🌐 [Live Dashboard] Server listening on http://localhost:${options.port}`);
-          log.info(`   (Operator can open the dashboard right now to watch candidates populate live)\n`);
-        });
-        serverInstance.on('error', (e: any) => {
-          if (e.code === 'EADDRINUSE') {
-            log.info(`🌐 [Live Dashboard] Port ${options.port} already running dashboard instance.\n`);
-          } else {
-            log.warn(`[Dashboard] ⚠️ ${e.message}`);
-          }
-        });
+        serverInstance = startServer(options.port);
       } catch (srvErr: any) {
         log.warn(`[Dashboard] ⚠️ Failed to boot early server: ${srvErr.message}`);
       }
@@ -193,7 +196,28 @@ export async function main(): Promise<void> {
     // Step 3: Branch 1 & Branch 2 Ingestion
     // -------------------------------------------------------------------------
     const resolvedCsv = path.resolve(process.cwd(), options.inputCsv);
-    if (!fs.existsSync(resolvedCsv)) {
+    if (String(process.env.SANDBOX).trim() === 'true' || String(process.env.SANDBOX).trim() === '1') {
+      log.info(`ℹ️ [Sandbox] Checking repository root for auto-ingest CSV...`);
+      const files = fs.readdirSync(process.cwd());
+      const csvFiles = files.filter(f => f.endsWith('.csv'));
+      if (csvFiles.length > 0) {
+        const targetCsv = csvFiles[0];
+        log.info(`📂 [Sandbox] Found ${targetCsv}. Preparing for auto-ingestion...`);
+        const targetDir = path.resolve(process.cwd(), 'storage_sandbox/csv_uploads');
+        if (!fs.existsSync(targetDir)) {
+          fs.mkdirSync(targetDir, { recursive: true });
+        }
+        const destPath = path.join(targetDir, targetCsv);
+        fs.copyFileSync(path.resolve(process.cwd(), targetCsv), destPath);
+        
+        log.info(`🚀 [Sandbox] Triggering storage CSV ingestion pipeline...`);
+        const { ingestCsvFromStorage } = await import('./scanner/storageCsvIngestion.js');
+        const limit = options.limit ?? options.maxJobs;
+        await ingestCsvFromStorage({ limit });
+      } else {
+        log.info(`ℹ️ [Sandbox] No root CSV found for auto-ingest. Waiting for operator action.`);
+      }
+    } else if (!fs.existsSync(resolvedCsv)) {
       log.info(`ℹ️ Input CSV not found at "${resolvedCsv}".`);
       log.info(`📂 Synthesizing candidate segments from local cache/profiles...`);
       const cacheProfilesDir = path.resolve(process.cwd(), 'cache/profiles');
@@ -386,12 +410,7 @@ export async function main(): Promise<void> {
     if (!options.skipDashboard) {
       if (!serverInstance) {
         log.info(`\n🚀 [Step 5/5] Launching Operator Dashboard Server on port ${options.port}...`);
-        const app = createServer(options.outputDir);
-        serverInstance = app.listen(options.port, () => {
-          log.info(`\n✅ Operator Dashboard is live and accessible at:`);
-          log.info(`   👉 http://localhost:${options.port}`);
-          log.info(`\nReady for operator review, inline editing, dry-runs, and live submissions!\n`);
-        });
+        serverInstance = startServer(options.port);
       } else {
         log.info(`\n✅ Operator Dashboard is running and ready for review:`);
         log.info(`   👉 http://localhost:${options.port}`);

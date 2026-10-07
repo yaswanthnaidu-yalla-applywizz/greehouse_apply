@@ -10,6 +10,7 @@
     "dev:dashboard": "vite dev",
     "start": "tsx src/index.ts",
     "start:sample": "tsx src/index.ts --candidate=AWL-31428 --maxJobs=10",
+    "demo": "npx tsx scripts/demo.ts",
     "demo:fixture-31428": "tsx scripts/syncDemoFixture31428.ts",
     "start:dashboard": "tsx src/server/index.ts",
     "dev": "tsx src/index.ts",
@@ -36,7 +37,9 @@
     "daemon:prod": "node dist/submitter/queueWorker.js",
     "ingest:storage": "tsx src/scanner/storageCsvIngestion.ts",
     "scan:zoho-connected": "npx tsx scripts/scanZohoConnected.ts",
-    "delete:old-jobs": "npx tsx scripts/deleteOldJobsAndApplications.ts"
+    "delete:old-jobs": "npx tsx scripts/deleteOldJobsAndApplications.ts",
+    "sandbox": "npm run build:dashboard && cross-env SANDBOX=true ENABLE_QUEUE_WORKER=true DASHBOARD_MODE=tsx tsx src/index.ts",
+    "sandbox:fresh": "npm run build:dashboard && cross-env SANDBOX=true tsx scripts/resetSandboxDb.ts && cross-env SANDBOX=true ENABLE_QUEUE_WORKER=true DASHBOARD_MODE=tsx tsx src/index.ts"
   },
   "keywords": [
     "greenhouse",
@@ -53,8 +56,10 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.116.0",
+    "@types/pg": "^8.23.1",
     "axios": "^1.7.9",
     "cors": "^2.8.5",
+    "cross-env": "^10.1.0",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
@@ -63,6 +68,7 @@
     "lru-cache": "^11.5.3",
     "openai": "^4.86.1",
     "pdf-parse": "^1.1.1",
+    "pg": "^8.23.1",
     "playwright": "^1.50.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

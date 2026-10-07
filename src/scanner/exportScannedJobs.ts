@@ -15,6 +15,7 @@ import path from 'path';
 import * as fastCsv from 'fast-csv';
 import { config } from '../config/env.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
+import { isSandboxMode } from '../db/sandboxClient.js';
 import type { ScannedJobTemplate } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
@@ -109,10 +110,12 @@ export async function exportScannedJobs(
         updated_at: new Date().toISOString(),
       }));
 
-      const { error } = await supabase
+      const query = supabase
         .from('gh_scanned_job_templates')
-        .upsert(rows, { onConflict: 'job_url' })
-        .abortSignal(AbortSignal.timeout(30000));
+        .upsert(rows, { onConflict: 'job_url' });
+      const { error } = isSandboxMode()
+        ? await query
+        : await query.abortSignal(AbortSignal.timeout(30000));
 
       if (error) {
         log.error(
