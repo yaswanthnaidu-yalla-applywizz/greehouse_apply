@@ -20,15 +20,19 @@ interface DevSubmissionGate {
 }
 
 interface DevHealthSnapshot {
-  submitted?: number;
-  submittedCount?: number;
+  totalApplications?: number | null;
+  submitted?: number | null;
+  submittedCount?: number | null;
   dateRange?: { label?: string };
   submittedMonth?: number;
   completedMonth?: number;
   submittedToday?: number;
   completedToday?: number;
-  applied?: number;
-  failed?: number;
+  applied?: number | null;
+  failed?: number | null;
+  statsAvailable?: boolean;
+  statsPartial?: boolean;
+  statsAvailableFrom?: string;
   queued?: number;
   probes?: DevHealthProbe[];
   queue: {
@@ -143,10 +147,10 @@ function formatIst(iso?: string | null): string {
 }
 
 function lightClass(status?: string): string {
-  if (status === 'ok') return 'bg-[#9AC89A]';
-  if (status === 'degraded') return 'bg-[#F4D66B]';
-  if (status === 'not_configured') return 'bg-[#E2E8F0]';
-  return 'bg-[#FECACA]';
+  if (status === 'ok') return 'bg-[#30d158]/15 border-[#30d158]/40 text-[#30d158]';
+  if (status === 'degraded') return 'bg-[#ff9f0a]/15 border-[#ff9f0a]/40 text-[#ff9f0a]';
+  if (status === 'not_configured') return 'bg-[#2c2c2e] border-[#3a3a3c] text-[#8e8e93]';
+  return 'bg-[#ff453a]/15 border-[#ff453a]/40 text-[#ff453a]';
 }
 
 export const DevDashboard: React.FC = () => {
@@ -272,15 +276,16 @@ export const DevDashboard: React.FC = () => {
   };
 
   if (authLoading) {
-    return <main className="min-h-screen p-8 text-xs font-mono font-bold bg-[#FFF5EB] text-[#1A1A2E]">Checking access…</main>;
+    return <main className="min-h-screen p-8 text-xs font-mono font-bold bg-[#0a0a0a] text-[#8e8e93]">Checking access…</main>;
   }
 
   if (!token || !isAuthorized) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-[#FFF5EB] text-[#1A1A2E]">
-        <div className="max-w-md bg-white border-2 border-[#1A1A2E] rounded-lg p-6">
-          <h1 className="text-xl font-black mb-2">Developer dashboard</h1>
-          <a href="/" className="inline-block bg-[#E88474] border-2 border-[#1A1A2E] px-4 py-2 text-sm font-bold rounded">Sign in</a>
+      <main className="min-h-screen flex items-center justify-center p-6 bg-[#0a0a0a] text-white">
+        <div className="max-w-md bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-6 shadow-2xl">
+          <h1 className="text-xl font-bold mb-2 text-white">Developer dashboard</h1>
+          <p className="text-sm text-[#8e8e93] mb-4">You do not have developer access or need to sign in.</p>
+          <a href="/" className="inline-block bg-[#0a84ff] text-white px-4 py-2 text-sm font-semibold rounded-lg hover:bg-[#0a84ff]/90 transition-colors">Sign in</a>
         </div>
       </main>
     );
@@ -299,88 +304,94 @@ export const DevDashboard: React.FC = () => {
       }));
 
   return (
-    <main className="min-h-screen p-4 md:p-8 font-sans bg-[#FFF5EB] text-[#1A1A2E]">
+    <main className="min-h-screen p-4 md:p-8 font-sans bg-[#0a0a0a] text-white">
       <div className="max-w-7xl mx-auto">
-        <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6">
+        <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end mb-6 pb-6 border-b border-[#2c2c2e]">
           <div className="flex items-center gap-3">
-            <img src="/logo.webp" alt="ApplyWizz" className="w-10 h-10 rounded-lg border-2 border-[#1A1A2E] object-cover bg-black" />
+            <img src="/logo.webp" alt="ApplyWizz" className="w-10 h-10 rounded-xl border border-[#2c2c2e] object-cover bg-black" />
             <div>
-              <p className="text-xs font-mono font-bold uppercase tracking-widest text-[#64748B]">ApplyWizz / Internals</p>
-              <h1 className="text-3xl font-black">Developer dashboard</h1>
+              <p className="text-xs font-mono font-medium uppercase tracking-widest text-[#8e8e93]">ApplyWizz / Internals</p>
+              <h1 className="text-3xl font-bold tracking-tight text-white">Developer dashboard</h1>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 items-end">
             <DevSwitcher current="/dev" />
-            <label className="text-xs font-bold uppercase">Date
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono bg-white" />
+            <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Date
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-sm font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]" />
             </label>
-            <div className="text-xs font-bold uppercase">Stats
-              <div className="mt-1 flex gap-1">
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Stats
+              <div className="mt-1 flex gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
                 {(['day', 'week', 'month'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-xs ${statsRange === range ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{range}</button>
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range}</button>
                 ))}
               </div>
             </div>
-            <button type="button" onClick={() => void refresh()} className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-2 text-xs font-bold rounded">Refresh</button>
+            <button type="button" onClick={() => void refresh()} className="bg-[#2c2c2e] border border-[#3a3a3c] px-3 py-1.5 text-xs font-semibold rounded-lg text-white hover:bg-[#3a3a3c] transition-colors">Refresh</button>
             <HeaderSignOut onSignOut={signOut} />
           </div>
         </header>
         <nav className="flex flex-wrap gap-2 mb-6">
           {tabs.map((id) => (
-            <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${tab === id ? 'bg-[#E88474] text-black' : 'bg-white'}`}>{id}</button>
+            <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border capitalize transition-colors ${tab === id ? 'bg-white text-black font-bold border-white' : 'bg-[#1c1c1e] text-[#8e8e93] border-[#2c2c2e] hover:text-white hover:bg-[#2c2c2e]'}`}>{id}</button>
           ))}
         </nav>
-        {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
-        {loading && <p className="text-xs font-mono font-bold mb-4">Loading…</p>}
+        {error && <div className="mb-4 bg-[#ff453a]/15 border border-[#ff453a]/40 rounded-xl p-3 text-sm font-bold text-[#ff453a]">{error}</div>}
+        {tab === 'system' && health?.statsAvailable === false && <div className="mb-4 bg-[#ff9f0a]/15 border border-[#ff9f0a]/40 rounded-xl p-3 text-xs font-semibold text-[#ff9f0a]">Application statistics before {health.statsAvailableFrom || 'the cutover date'} are unavailable.</div>}
+        {tab === 'system' && health?.statsAvailable !== false && health?.statsPartial && <div className="mb-4 bg-[#ff9f0a]/15 border border-[#ff9f0a]/40 rounded-xl p-3 text-xs font-semibold text-[#ff9f0a]">Partial statistics: dates before {health.statsAvailableFrom} are excluded.</div>}
+        {loading && <p className="text-xs font-mono font-medium text-[#8e8e93] mb-4">Loading…</p>}
 
         {tab === 'system' && health && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-1">
-              <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 col-span-2 md:col-span-1">
-                <p className="text-xs font-bold uppercase">Submitted</p>
-                <p className="text-2xl font-black mt-1">{health.submitted ?? health.submittedCount ?? 0}</p>
-                <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-1">
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Total Applications</p>
+                <p className="text-2xl font-black text-white mt-1">{health.statsAvailable === false ? '—' : health.totalApplications ?? 0}</p>
               </div>
-              <div className="bg-[#F4D66B] border-2 border-[#1A1A2E] rounded p-4 col-span-2 md:col-span-1">
-                <p className="text-xs font-bold uppercase">Selected period</p>
-                <p className="text-2xl font-black mt-1">{health.dateRange?.label || 'Today'}</p>
-                <p className="text-[10px] font-mono text-[#64748B] mt-1">{date}</p>
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 col-span-2 md:col-span-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Submitted</p>
+                <p className="text-2xl font-black text-white mt-1">{health.statsAvailable === false ? '—' : health.submitted ?? health.submittedCount ?? 0}</p>
+                <p className="text-[10px] font-mono text-[#8e8e93] mt-1">{date}</p>
               </div>
-              <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded p-4">
-                <p className="text-xs font-bold uppercase">Applied</p>
-                <p className="text-2xl font-black mt-1">{health.applied ?? 0}</p>
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 col-span-2 md:col-span-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Selected period</p>
+                <p className="text-2xl font-black text-white mt-1">{health.dateRange?.label || 'Today'}</p>
+                <p className="text-[10px] font-mono text-[#8e8e93] mt-1">{date}</p>
               </div>
-              <div className="bg-[#FEE2E2] border-2 border-[#1A1A2E] rounded p-4">
-                <p className="text-xs font-bold uppercase">Failed</p>
-                <p className="text-2xl font-black mt-1">{health.failed ?? 0}</p>
+              <div className="bg-[#1c1c1e] border border-[#30d158]/30 rounded-xl p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#30d158]">Applied</p>
+                <p className="text-2xl font-black text-[#30d158] mt-1">{health.statsAvailable === false ? '—' : health.applied ?? 0}</p>
               </div>
-              <div className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded p-4">
-                <p className="text-xs font-bold uppercase">Queued</p>
-                <p className="text-2xl font-black mt-1">{health.queued ?? 0}</p>
+              <div className="bg-[#1c1c1e] border border-[#ff453a]/30 rounded-xl p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#ff453a]">Failed</p>
+                <p className="text-2xl font-black text-[#ff453a] mt-1">{health.statsAvailable === false ? '—' : health.failed ?? 0}</p>
+              </div>
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Queued</p>
+                <p className="text-2xl font-black text-white mt-1">{health.queued ?? 0}</p>
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {(health.probes || []).map((probe) => (
-                <div key={probe.name} className={`border-2 border-[#1A1A2E] rounded p-4 ${lightClass(probe.status)}`}>
-                  <p className="text-xs font-bold uppercase">{probe.name}</p>
-                  <p className="text-lg font-black uppercase">{probe.status}</p>
-                  <p className="text-[11px] mt-1 break-words">{probe.detail}</p>
-                  {probe.responseMs != null && <p className="text-[10px] font-mono mt-1">{probe.responseMs}ms</p>}
+                <div key={probe.name} className={`border rounded-xl p-4 ${lightClass(probe.status)}`}>
+                  <p className="text-xs font-semibold uppercase tracking-wider">{probe.name}</p>
+                  <p className="text-lg font-black uppercase mt-1">{probe.status}</p>
+                  <p className="text-[11px] mt-1 break-words opacity-90">{probe.detail}</p>
+                  {probe.responseMs != null && <p className="text-[10px] font-mono mt-1 opacity-80">{probe.responseMs}ms</p>}
                 </div>
               ))}
             </div>
-            <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 text-xs space-y-1">
-              <p className="font-black uppercase">Live operational health</p>
-              <p>Queued {health.queue.queued} · Applying {health.queue.applying} · Stuck {health.queue.stuck} · Applied {health.queue.applied}</p>
-              <p>Workers running: {String(health.workers.running)} · in flight {health.workers.inFlightCount} · idle {health.workers.idleCount}</p>
-              <p>Ingest: {health.ingest?.running ? 'running' : health.ingest?.error || health.ingest?.message || 'idle'}</p>
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 text-xs text-[#8e8e93] space-y-1">
+              <p className="font-bold uppercase tracking-wider text-white text-xs mb-1">Live operational health</p>
+              <p>Queued <span className="font-semibold text-white">{health.queue.queued}</span> · Applying <span className="font-semibold text-white">{health.queue.applying}</span> · Stuck <span className="font-semibold text-white">{health.queue.stuck}</span> · Applied <span className="font-semibold text-white">{health.queue.applied}</span></p>
+              <p>Workers running: <span className="font-semibold text-white">{String(health.workers.running)}</span> · in flight <span className="font-semibold text-white">{health.workers.inFlightCount}</span> · idle <span className="font-semibold text-white">{health.workers.idleCount}</span></p>
+              <p>Ingest: <span className="font-semibold text-white">{health.ingest?.running ? 'running' : health.ingest?.error || health.ingest?.message || 'idle'}</span></p>
             </div>
             {submissionGate && (
-              <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 space-y-3">
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-black uppercase">Submission eligibility gate</p>
-                    <p className="text-xs text-[#64748B] mt-1 max-w-xl">
+                    <p className="text-sm font-bold uppercase tracking-wider text-white">Submission eligibility gate</p>
+                    <p className="text-xs text-[#8e8e93] mt-1 max-w-xl leading-relaxed">
                       When ON, only jobs with CSV score {submissionGate.criteria?.minScore}–{submissionGate.criteria?.maxScore} and fewer than {submissionGate.criteria?.maxFieldCountExclusive} questions can be queued or live-submitted (including operator Submit). Resets to env default on process restart.
                     </p>
                   </div>
@@ -388,7 +399,7 @@ export const DevDashboard: React.FC = () => {
                     type="button"
                     disabled={gateSaving}
                     onClick={() => void setSubmissionGateEnabled(!submissionGate.enabled)}
-                    className={`px-4 py-2 text-xs font-black border-2 border-[#1A1A2E] rounded ${submissionGate.enabled ? 'bg-[#9AC89A]' : 'bg-[#FECACA]'}`}
+                    className={`px-4 py-2 text-xs font-bold rounded-lg transition-colors ${submissionGate.enabled ? 'bg-[#30d158] text-black hover:bg-[#30d158]/90' : 'bg-[#ff453a] text-white hover:bg-[#ff453a]/90'}`}
                   >
                     {gateSaving ? 'Saving…' : submissionGate.enabled ? 'Gate ON — click to turn OFF' : 'Gate OFF — click to turn ON'}
                   </button>
@@ -400,22 +411,22 @@ export const DevDashboard: React.FC = () => {
 
         {tab === 'runs' && (
           <div className="space-y-3">
-            <input value={runStatus} onChange={(e) => setRunStatus(e.target.value)} placeholder="Status filter" className="border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm" />
-            <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
+            <input value={runStatus} onChange={(e) => setRunStatus(e.target.value)} placeholder="Status filter" className="border border-[#3a3a3c] bg-[#2c2c2e] text-white placeholder-[#8e8e93] rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#0a84ff]" />
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl overflow-x-auto">
               <table className="w-full min-w-[900px] text-left text-xs">
-                <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-                  <tr>{['ID', 'Job', 'Company', 'Operator', 'Status', 'Duration', 'Updated'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+                <thead className="bg-[#2c2c2e]/60 border-b border-[#2c2c2e] text-[#8e8e93]">
+                  <tr>{['ID', 'Job', 'Company', 'Operator', 'Status', 'Duration', 'Updated'].map((h) => <th key={h} className="p-3 font-semibold uppercase tracking-wider">{h}</th>)}</tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-[#2c2c2e]/50">
                   {runs.map((row) => (
-                    <tr key={row.id} className="border-b border-[#1A1A2E]/20">
-                      <td className="p-3"><button type="button" className="font-mono underline" onClick={() => void openDebugger(row.id)}>{row.id?.slice(0, 8)}</button></td>
-                      <td className="p-3"><a className="underline break-all" href={row.jobUrl} target="_blank" rel="noopener noreferrer">{row.jobTitle || row.jobUrl}</a></td>
-                      <td className="p-3">{row.companyName || '—'}</td>
-                      <td className="p-3 font-mono">{row.operator || '—'}</td>
-                      <td className="p-3 font-bold">{row.status}</td>
-                      <td className="p-3 font-mono">{row.durationMs != null ? `${Math.round(row.durationMs / 1000)}s` : '—'}</td>
-                      <td className="p-3 font-mono">{row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '—'}</td>
+                    <tr key={row.id} className="hover:bg-[#2c2c2e]/30 transition-colors">
+                      <td className="p-3"><button type="button" className="font-mono underline text-[#0a84ff] hover:text-[#5ac8fa]" onClick={() => void openDebugger(row.id)}>{row.id?.slice(0, 8)}</button></td>
+                      <td className="p-3"><a className="underline text-[#0a84ff] hover:text-[#5ac8fa] break-all font-medium" href={row.jobUrl} target="_blank" rel="noopener noreferrer">{row.jobTitle || row.jobUrl}</a></td>
+                      <td className="p-3 text-white">{row.companyName || '—'}</td>
+                      <td className="p-3 font-mono text-[#8e8e93]">{row.operator || '—'}</td>
+                      <td className="p-3 font-bold text-white">{row.status}</td>
+                      <td className="p-3 font-mono text-[#8e8e93]">{row.durationMs != null ? `${Math.round(row.durationMs / 1000)}s` : '—'}</td>
+                      <td className="p-3 font-mono text-[#8e8e93]">{row.updatedAt ? new Date(row.updatedAt).toLocaleString() : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -425,27 +436,27 @@ export const DevDashboard: React.FC = () => {
         )}
 
         {tab === 'errors' && (
-          <div className="bg-white border-2 border-[#1A1A2E] rounded overflow-x-auto">
+          <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl overflow-x-auto">
             <table className="w-full min-w-[800px] text-left text-xs">
-              <thead className="bg-[#FAF4EB] border-b-2 border-[#1A1A2E]">
-                <tr>{['Type', 'Message', 'Count', 'First', 'Last', 'Apps'].map((h) => <th key={h} className="p-3 font-black uppercase">{h}</th>)}</tr>
+              <thead className="bg-[#2c2c2e]/60 border-b border-[#2c2c2e] text-[#8e8e93]">
+                <tr>{['Type', 'Message', 'Count', 'First', 'Last', 'Apps'].map((h) => <th key={h} className="p-3 font-semibold uppercase tracking-wider">{h}</th>)}</tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-[#2c2c2e]/50">
                 {errors.map((row, i) => (
-                  <tr key={i} className="border-b border-[#1A1A2E]/20 align-top">
-                    <td className="p-3 font-bold">{row.errorType}</td>
-                    <td className="p-3 max-w-md break-words">{row.message}</td>
-                    <td className="p-3 font-mono">{row.count}</td>
-                    <td className="p-3 font-mono">{new Date(row.first).toLocaleString()}</td>
-                    <td className="p-3 font-mono">{new Date(row.last).toLocaleString()}</td>
+                  <tr key={i} className="hover:bg-[#2c2c2e]/30 transition-colors align-top">
+                    <td className="p-3 font-bold text-[#ff453a]">{row.errorType}</td>
+                    <td className="p-3 max-w-md break-words text-white">{row.message}</td>
+                    <td className="p-3 font-mono text-white">{row.count}</td>
+                    <td className="p-3 font-mono text-[#8e8e93]">{new Date(row.first).toLocaleString()}</td>
+                    <td className="p-3 font-mono text-[#8e8e93]">{new Date(row.last).toLocaleString()}</td>
                     <td className="p-3 font-mono">{(row.applicationIds || []).slice(0, 3).map((id) => (
-                      <button key={id} type="button" className="underline mr-2" onClick={() => void openDebugger(id)}>{id.slice(0, 8)}</button>
+                      <button key={id} type="button" className="underline text-[#0a84ff] hover:text-[#5ac8fa] mr-2" onClick={() => void openDebugger(id)}>{id.slice(0, 8)}</button>
                     ))}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!errors.length && <p className="p-6 text-center text-[#64748B]">No failed applications for this date.</p>}
+            {!errors.length && <p className="p-6 text-center text-[#8e8e93]">No failed applications for this date.</p>}
           </div>
         )}
 
@@ -458,18 +469,20 @@ export const DevDashboard: React.FC = () => {
                 ['Stuck', queue.queue.stuck],
                 ['In flight', queue.workers.idleCount],
               ].map(([label, val]) => (
-                <div key={label} className="bg-white border-2 border-[#1A1A2E] rounded p-4">
-                  <p className="text-xs font-bold uppercase">{label}</p>
-                  <p className="text-2xl font-black">{val ?? 0}</p>
+                <div key={label} className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">{label}</p>
+                  <p className="text-2xl font-black text-white mt-1">{val ?? 0}</p>
                 </div>
               ))}
             </div>
-            <p className="text-xs font-mono">Workers running={String(queue.workers.running)} idle={queue.workers.idleCount} lanes={JSON.stringify(queue.workers.laneLengths)}</p>
-            <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 text-xs">
-              <p className="font-black uppercase mb-2">Running</p>
-              {(queue.running || []).map((row) => <p key={row.id} className="font-mono">{row.id} · {row.applywizzId} · {row.status}</p>)}
-              <p className="font-black uppercase mt-4 mb-2">Pending</p>
-              {(queue.pending || []).map((row) => <p key={row.id} className="font-mono">{row.id} · {row.applywizzId} · {row.status}</p>)}
+            <p className="text-xs font-mono text-[#8e8e93]">Workers running={String(queue.workers.running)} idle={queue.workers.idleCount} lanes={JSON.stringify(queue.workers.laneLengths)}</p>
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5 text-xs">
+              <p className="font-bold uppercase tracking-wider text-white text-xs mb-2">Running</p>
+              {(queue.running || []).map((row) => <p key={row.id} className="font-mono text-[#8e8e93] py-0.5"><span className="text-white font-semibold">{row.id}</span> · {row.applywizzId} · <span className="text-[#30d158] font-bold">{row.status}</span></p>)}
+              {!(queue.running || []).length && <p className="text-[#8e8e93] italic">No running jobs</p>}
+              <p className="font-bold uppercase tracking-wider text-white text-xs mt-4 mb-2">Pending</p>
+              {(queue.pending || []).map((row) => <p key={row.id} className="font-mono text-[#8e8e93] py-0.5"><span className="text-white font-semibold">{row.id}</span> · {row.applywizzId} · {row.status}</p>)}
+              {!(queue.pending || []).length && <p className="text-[#8e8e93] italic">No pending jobs</p>}
             </div>
           </div>
         )}
@@ -477,12 +490,12 @@ export const DevDashboard: React.FC = () => {
         {tab === 'integrations' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {integrations.map((probe) => (
-              <div key={probe.name} className={`border-2 border-[#1A1A2E] rounded p-4 ${lightClass(probe.status)}`}>
-                <p className="text-xs font-bold uppercase">{probe.name}</p>
-                <p className="text-lg font-black uppercase">{probe.status}</p>
-                <p className="text-xs mt-2 break-words">{probe.detail}</p>
-                {probe.responseMs != null && <p className="text-[10px] font-mono mt-1">{probe.responseMs}ms</p>}
-                {probe.lastError && <p className="text-[11px] mt-1">{probe.lastError}</p>}
+              <div key={probe.name} className={`border rounded-xl p-4 ${lightClass(probe.status)}`}>
+                <p className="text-xs font-semibold uppercase tracking-wider">{probe.name}</p>
+                <p className="text-lg font-black uppercase mt-1">{probe.status}</p>
+                <p className="text-xs mt-2 break-words opacity-90">{probe.detail}</p>
+                {probe.responseMs != null && <p className="text-[10px] font-mono mt-1 opacity-80">{probe.responseMs}ms</p>}
+                {probe.lastError && <p className="text-[11px] mt-1 text-[#ff453a] font-mono">{probe.lastError}</p>}
               </div>
             ))}
           </div>
@@ -491,33 +504,33 @@ export const DevDashboard: React.FC = () => {
         {tab === 'debugger' && (
           <div className="space-y-4">
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void openDebugger(debugId); }}>
-              <input value={debugId} onChange={(e) => setDebugId(e.target.value)} placeholder="Application ID" className="border-2 border-[#1A1A2E] rounded px-2 py-1.5 text-sm font-mono flex-1" />
-              <button type="submit" className="bg-[#E88474] border-2 border-[#1A1A2E] px-3 py-1.5 text-xs font-bold rounded">Open</button>
+              <input value={debugId} onChange={(e) => setDebugId(e.target.value)} placeholder="Application ID" className="border border-[#3a3a3c] bg-[#2c2c2e] text-white placeholder-[#8e8e93] rounded-lg px-3 py-1.5 text-sm font-mono flex-1 focus:outline-none focus:border-[#0a84ff]" />
+              <button type="submit" className="bg-[#0a84ff] text-white px-4 py-1.5 text-xs font-bold rounded-lg hover:bg-[#0a84ff]/90 transition-colors">Open</button>
             </form>
             {app && (
-              <div className="bg-white border-2 border-[#1A1A2E] rounded p-4 text-xs space-y-2">
-                <p><span className="font-black">ID</span> {app.id}</p>
-                <p><span className="font-black">Status</span> {app.status}</p>
-                <p><span className="font-black">Client</span> {app.applywizz_id}</p>
-                <p><span className="font-black">Operator</span> {app.operatorName || app.assigned_ca_email || '—'}</p>
-                <p><span className="font-black">Manager</span> {app.manager_email || app.managerEmail || '—'}</p>
-                <p><span className="font-black">Job</span> <a className="underline break-all" href={app.job_url} target="_blank" rel="noopener noreferrer">{app.job_title || app.job_url}</a></p>
-                <p><span className="font-black">Company</span> {app.company_name || '—'}</p>
-                {app.error_message && <p className="text-[#991B1B]"><span className="font-black">Error</span> {app.error_message}</p>}
-                <p>
-                  {app.proof_web_url ? <a className="underline font-bold mr-3" href={app.proof_web_url} target="_blank" rel="noopener noreferrer">Web proof</a> : <span className="text-[#64748B] mr-3">Web proof unavailable</span>}
-                  {app.proof_email_url ? <a className="underline font-bold mr-3" href={app.proof_email_url} target="_blank" rel="noopener noreferrer">Email screenshot</a> : <span className="text-[#64748B] mr-3">Email screenshot unavailable</span>}
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5 text-xs space-y-2 text-[#8e8e93]">
+                <p><span className="font-bold text-white uppercase tracking-wider text-[10px]">ID</span> <span className="font-mono text-white ml-2">{app.id}</span></p>
+                <p><span className="font-bold text-white uppercase tracking-wider text-[10px]">Status</span> <span className="font-semibold text-white ml-2">{app.status}</span></p>
+                <p><span className="font-bold text-white uppercase tracking-wider text-[10px]">Client</span> <span className="text-white ml-2">{app.applywizz_id}</span></p>
+                <p><span className="font-bold text-white uppercase tracking-wider text-[10px]">Operator</span> <span className="text-white ml-2">{app.operatorName || app.assigned_ca_email || '—'}</span></p>
+                <p><span className="font-bold text-white uppercase tracking-wider text-[10px]">Manager</span> <span className="text-white ml-2">{app.manager_email || app.managerEmail || '—'}</span></p>
+                <p><span className="font-bold text-white uppercase tracking-wider text-[10px]">Job</span> <a className="underline text-[#0a84ff] hover:text-[#5ac8fa] break-all ml-2" href={app.job_url} target="_blank" rel="noopener noreferrer">{app.job_title || app.job_url}</a></p>
+                <p><span className="font-bold text-white uppercase tracking-wider text-[10px]">Company</span> <span className="text-white ml-2">{app.company_name || '—'}</span></p>
+                {app.error_message && <p className="text-[#ff453a]"><span className="font-bold uppercase tracking-wider text-[10px]">Error</span> <span className="ml-2 font-mono">{app.error_message}</span></p>}
+                <p className="pt-2">
+                  {app.proof_web_url ? <a className="underline font-bold text-[#5ac8fa] mr-3" href={app.proof_web_url} target="_blank" rel="noopener noreferrer">Web proof</a> : <span className="text-[#8e8e93] mr-3">Web proof unavailable</span>}
+                  {app.proof_email_url ? <a className="underline font-bold text-[#0a84ff] mr-3" href={app.proof_email_url} target="_blank" rel="noopener noreferrer">Email screenshot</a> : <span className="text-[#8e8e93] mr-3">Email screenshot unavailable</span>}
                   {app.proof_failed_url && (
-                    <span>Failed screenshot: <a className="underline font-bold" href={app.proof_failed_url} target="_blank" rel="noopener noreferrer">View</a></span>
+                    <span>Failed screenshot: <a className="underline font-bold text-[#ff453a] ml-1" href={app.proof_failed_url} target="_blank" rel="noopener noreferrer">View</a></span>
                   )}
                 </p>
                 {app.proof_email_json && (
-                  <pre className="bg-[#FAF4EB] border border-[#1A1A2E] p-3 overflow-auto max-h-48 whitespace-pre-wrap">{JSON.stringify(app.proof_email_json, null, 2)}</pre>
+                  <pre className="bg-[#141416] border border-[#2c2c2e] p-3 rounded-lg overflow-auto max-h-48 whitespace-pre-wrap font-mono text-[#8e8e93]">{JSON.stringify(app.proof_email_json, null, 2)}</pre>
                 )}
-                <h3 className="font-black uppercase pt-2">Timeline</h3>
-                {timeline.length === 0 && <p className="text-[#64748B]">{debug?.warning || 'No status changes recorded for this application yet.'}</p>}
+                <h3 className="font-bold uppercase tracking-wider text-white text-xs pt-3">Timeline</h3>
+                {timeline.length === 0 && <p className="text-[#8e8e93]">{debug?.warning || 'No status changes recorded for this application yet.'}</p>}
                 {timeline.map((row, idx) => (
-                  <p key={idx} className="font-mono">{formatIst(row.created_at)} — {row.previous_status || '—'} → {row.new_status} (by {row.actor_email || 'system'})</p>
+                  <p key={idx} className="font-mono text-[#8e8e93] text-[11px]">{formatIst(row.created_at)} — <span className="text-white">{row.previous_status || '—'}</span> → <span className="text-[#30d158] font-bold">{row.new_status}</span> (by {row.actor_email || 'system'})</p>
                 ))}
               </div>
             )}
@@ -527,44 +540,44 @@ export const DevDashboard: React.FC = () => {
         {tab === 'guide' && (
           <div className="max-w-3xl space-y-6">
             <div>
-              <h2 className="text-2xl font-black text-[#1A1A2E]">Developer Guide</h2>
-              <p className="text-xs text-[#64748B] font-mono mt-0.5">Internals, debugging, and cross-role dashboard access.</p>
+              <h2 className="text-2xl font-bold text-white">Developer Guide</h2>
+              <p className="text-xs text-[#8e8e93] font-mono mt-0.5">Internals, debugging, and cross-role dashboard access.</p>
             </div>
 
-            <section className="bg-white border-2 border-[#1A1A2E] rounded-xl p-5">
-              <h3 className="text-sm font-black uppercase tracking-wide mb-2">Access</h3>
-              <p className="text-sm text-[#1A1A2E] leading-relaxed">
-                Use the header switcher to open <span className="font-bold">Dev</span>, <span className="font-bold">Admin</span>, <span className="font-bold">Manager</span>, or <span className="font-bold">Operator</span> UIs. Dev role bypasses manager/operator API scoping when using those dashboards.
+            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-2">Access</h3>
+              <p className="text-sm text-[#8e8e93] leading-relaxed">
+                Use the header switcher to open <span className="font-semibold text-white">Dev</span>, <span className="font-semibold text-white">Admin</span>, <span className="font-semibold text-white">Manager</span>, or <span className="font-semibold text-white">Operator</span> UIs. Dev role bypasses manager/operator API scoping when using those dashboards.
               </p>
             </section>
 
-            <section className="bg-[#FFF8D6] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tabs</h3>
-              <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
-                <li><span className="font-bold">System</span> — health probes, queue and worker summary, ingest line.</li>
-                <li><span className="font-bold">Runs</span> — applications for the header date; optional status filter; click ID to open Debugger.</li>
-                <li><span className="font-bold">Errors</span> — grouped failures for the date; click app IDs to debug.</li>
-                <li><span className="font-bold">Queue</span> — live queued/applying/stuck counts and running/pending ID lists.</li>
-                <li><span className="font-bold">Integrations</span> — per-integration probe detail and last errors.</li>
-                <li><span className="font-bold">Debugger</span> — paste an application UUID for status, proofs, raw error, and timeline.</li>
+            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-3">Tabs</h3>
+              <ul className="space-y-2 text-sm text-[#8e8e93] leading-relaxed list-disc list-inside">
+                <li><span className="font-semibold text-white">System</span> — health probes, queue and worker summary, ingest line.</li>
+                <li><span className="font-semibold text-white">Runs</span> — applications for the header date; optional status filter; click ID to open Debugger.</li>
+                <li><span className="font-semibold text-white">Errors</span> — grouped failures for the date; click app IDs to debug.</li>
+                <li><span className="font-semibold text-white">Queue</span> — live queued/applying/stuck counts and running/pending ID lists.</li>
+                <li><span className="font-semibold text-white">Integrations</span> — per-integration probe detail and last errors.</li>
+                <li><span className="font-semibold text-white">Debugger</span> — paste an application UUID for status, proofs, raw error, and timeline.</li>
               </ul>
             </section>
 
-            <section className="bg-[#E2F0FB] border-2 border-[#1A1A2E] rounded-xl p-5">
-              <h3 className="text-sm font-black uppercase tracking-wide mb-3">Tips</h3>
-              <ul className="space-y-2 text-sm text-[#1A1A2E] leading-relaxed list-disc list-inside">
+            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-3">Tips</h3>
+              <ul className="space-y-2 text-sm text-[#8e8e93] leading-relaxed list-disc list-inside">
                 <li>Prefer Debugger over operator-facing messages when triaging production issues.</li>
                 <li>Date affects Runs and Errors; Queue and Integrations are live snapshots.</li>
                 <li>CSV ingest Start/Stop lives on the Admin dashboard, not here.</li>
-                <li>Reproduce submit/dry-run flows on the Operator dashboard at <span className="font-mono">/</span>.</li>
+                <li>Reproduce submit/dry-run flows on the Operator dashboard at <span className="font-mono text-white">/</span>.</li>
               </ul>
             </section>
 
-            <section className="bg-[#FAF4EB] border-2 border-[#1A1A2E] rounded-xl p-5 text-center">
-              <h3 className="text-sm font-black uppercase tracking-wide mb-2">Need help?</h3>
-              <p className="text-sm text-[#64748B] leading-relaxed">
+            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5 text-center">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-white mb-2">Need help?</h3>
+              <p className="text-sm text-[#8e8e93] leading-relaxed">
                 Contact{' '}
-                <a href="mailto:yaswanthnaiduyalla@applywizz.ai" className="font-bold text-[#1A1A2E] underline hover:text-[#E88474]">yaswanthnaiduyalla@applywizz.ai</a>{' '}
+                <a href="mailto:yaswanthnaiduyalla@applywizz.ai" className="font-semibold text-[#0a84ff] underline hover:text-[#5ac8fa]">yaswanthnaiduyalla@applywizz.ai</a>{' '}
                 on Microsoft Teams.
               </p>
             </section>

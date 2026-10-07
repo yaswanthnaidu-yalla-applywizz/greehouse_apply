@@ -27,7 +27,7 @@ function htmlTemplatePlugin(): Plugin {
     <link rel="stylesheet" href="/dashboard.css" />
     <link rel="stylesheet" href="/tokens.css" />
   </head>
-  <body class="bg-gray-900 text-gray-100 min-h-screen">
+  <body class="bg-[#FFF5EB] text-[#1A1A2E] antialiased select-none font-sans min-h-screen">
     <div id="root"></div>
     <script type="module" src="/assets/index.js"></script>
   </body>

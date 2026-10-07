@@ -376,15 +376,15 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       />
 
       {/* Compact Job Header Card */}
-      <div className="bg-white border-2 border-[#1A1A2E] rounded-xl px-4 py-3 md:px-5 md:py-3.5 mb-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b-2 border-[#1A1A2E] pb-2.5 mb-2.5">
+      <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl px-4 py-3 md:px-5 md:py-3.5 mb-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[#2c2c2e] pb-2.5 mb-2.5">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">
                 🏢 {application.companyName || application.company_name || 'Greenhouse Posting'}
               </span>
-              <span className="text-[#1A1A2E] font-bold">•</span>
-              <span className="text-[11px] font-mono font-bold text-[#1A1A2E] bg-[#FAF4EB] px-1.5 py-0.5 rounded border border-[#1A1A2E]">
+              <span className="text-[#8e8e93] font-bold">•</span>
+              <span className="text-[11px] font-mono font-medium text-[#8e8e93] bg-[#2c2c2e] px-1.5 py-0.5 rounded-md border border-[#3a3a3c]">
                 {application.applywizzId || application.applywizz_id}
               </span>
               <DifficultyBadge fieldsCount={fields.length} />
@@ -400,7 +400,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 onStatusChange={onStatusChange}
               />
             </div>
-            <h1 className="text-base md:text-lg font-bold text-[#1A1A2E] leading-tight truncate">
+            <h1 className="text-base md:text-lg font-bold text-[#ffffff] leading-tight truncate">
               {application.jobTitle || application.job_title || 'Application Form'}
             </h1>
             <a
@@ -412,14 +412,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   `[Dashboard] Job link clicked → navigation only (url: ${jobUrl})`
                 );
               }}
-              className="text-[11px] md:text-xs text-[#2563EB] hover:underline font-mono truncate max-w-md block mt-0.5 font-medium"
+              className="text-[11px] md:text-xs text-[#0a84ff] hover:underline font-mono truncate max-w-md block mt-0.5 font-medium"
             >
               {application.jobUrl || application.job_url}
             </a>
             {currentStatus === 'FAILED' &&
               (application.error_message || application.errorMessage) && (
                 <p
-                  className="mt-2 text-[11px] font-mono text-[#991B1B] bg-[#FEE2E2] border border-[#1A1A2E] rounded-lg px-2.5 py-1.5 max-w-2xl"
+                  className="mt-2 text-[11px] font-mono text-[#ff453a] bg-[#ff453a]/15 border border-[#ff453a]/30 rounded-lg px-2.5 py-1.5 max-w-2xl"
                   title="Failure reason from submission worker"
                 >
                   {application.error_message || application.errorMessage}
@@ -492,26 +492,26 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         </div>
 
         {/* Source Breakdown & Interactive Info Banner */}
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-[#FAF4EB] border border-[#1A1A2E] rounded-lg px-3 py-1.5 text-xs text-[#1A1A2E]">
-          <div className="flex items-center gap-1.5 font-medium text-[11px] md:text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-[#2c2c2e] border border-[#3a3a3c] rounded-lg px-3 py-1.5 text-xs text-[#8e8e93]">
+          <div className="flex items-center gap-1.5 font-medium text-[11px] md:text-xs text-[#8e8e93]">
             <span>✏️</span>
             <span>Operator Review — Click any field value to edit</span>
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
             {manualCount > 0 && (
-              <span className="text-[11px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-1.5 py-0.5 rounded">
+              <span className="text-[11px] font-mono font-bold text-[#0071e3] bg-[#0071e3]/15 border border-[#0071e3]/30 px-1.5 py-0.5 rounded-full">
                 {manualCount} manual
               </span>
             )}
-            <span className="text-[11px] font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-1.5 py-0.5 rounded">
+            <span className="text-[11px] font-mono font-bold text-[#0a84ff] bg-[#0a84ff]/15 border border-[#0a84ff]/30 px-1.5 py-0.5 rounded-full">
               {supabaseCount} supabase
             </span>
-            <span className="text-[11px] font-mono font-bold text-[#5B21B6] bg-[#EDE9FE] border border-[#1A1A2E] px-1.5 py-0.5 rounded">
+            <span className="text-[11px] font-mono font-bold text-[#5ac8fa] bg-[#5ac8fa]/15 border border-[#5ac8fa]/30 px-1.5 py-0.5 rounded-full">
               {aiCount} ai
             </span>
             {unresCount > 0 && (
-              <span className="text-[11px] font-mono font-bold text-white bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.5 rounded animate-pulse">
+              <span className="text-[11px] font-mono font-bold text-[#ff453a] bg-[#ff453a]/15 border border-[#ff453a]/30 px-1.5 py-0.5 rounded-full animate-pulse">
                 {unresCount} unresolved
               </span>
             )}
@@ -522,12 +522,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
       {/* Form Fields Section (Card Carousel or Full List) */}
       <div className="space-y-4">
         {fields.length === 0 ? (
-          <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-8 text-center text-[#64748B]">
-            <p className="text-sm font-bold text-[#1A1A2E]">
+          <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-8 text-center text-[#8e8e93]">
+            <p className="text-sm font-semibold text-[#ffffff]">
               No interactive form fields extracted for this job posting.
             </p>
             {currentStatus === 'EXPIRED' && (
-              <p className="text-xs text-[#EF4444] font-bold mt-1">
+              <p className="text-xs text-[#ff453a] font-semibold mt-1">
                 This job posting appears to be closed or expired.
               </p>
             )}
@@ -535,12 +535,12 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
         ) : viewMode === 'carousel' ? (
           <div className="space-y-4">
             {/* Carousel Control & Filter Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-white border-2 border-[#1A1A2E] rounded-xl p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-3">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold text-[#1A1A2E]">
+                <span className="text-xs font-mono font-medium text-[#ffffff]">
                   Field {boundedIndex + 1} of {displayFields.length}
                 </span>
-                <span className="text-xs font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-2 py-0.5 rounded">
+                <span className="text-xs font-mono font-semibold text-[#30d158] bg-[#30d158]/15 border border-[#30d158]/30 px-2 py-0.5 rounded-md">
                   {approvedFieldIds.size}/{displayFields.length} Approved
                 </span>
               </div>
@@ -549,7 +549,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 <button
                   type="button"
                   onClick={() => setFilterActionableOnly((prev) => !prev)}
-                  className="text-xs font-bold text-[#1A1A2E] hover:text-[#2563EB] bg-[#FAF4EB] border border-[#1A1A2E] px-2.5 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                  className="text-xs font-medium text-[#8e8e93] hover:text-[#ffffff] bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md transition-all"
                 >
                   {filterActionableOnly
                     ? `Showing Priority (${displayFields.length}) — Show All`
@@ -558,7 +558,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 <button
                   type="button"
                   onClick={() => setViewMode('list')}
-                  className="text-xs font-bold text-[#1A1A2E] hover:text-[#2563EB] bg-[#FAF4EB] border border-[#1A1A2E] px-2.5 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                  className="text-xs font-medium text-[#8e8e93] hover:text-[#ffffff] bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md transition-all"
                 >
                   📋 Switch to Full List
                 </button>
@@ -566,9 +566,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             </div>
 
             {/* Progress Bar */}
-            <div className="w-full bg-[#E2E8F0] h-2 rounded-full overflow-hidden border border-[#1A1A2E]/20">
+            <div className="w-full bg-[#2c2c2e] h-1.5 rounded-full overflow-hidden border border-[#3a3a3c]">
               <div
-                className="bg-[#10B981] h-full transition-all duration-300"
+                className="bg-[#30d158] h-full transition-all duration-300"
                 style={{
                   width: `${((boundedIndex + 1) / Math.max(1, displayFields.length)) * 100}%`,
                 }}
@@ -577,20 +577,20 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
             {/* Active Card in Carousel */}
             {currentField && (
-              <div className="relative bg-[#FFFDF9] border-2 border-[#1A1A2E] rounded-xl p-5">
+              <div className="relative bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#64748B]">
+                    <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-[#8e8e93]">
                       Question Card #{boundedIndex + 1}
                     </span>
                     {approvedFieldIds.has(currentField.fieldId) && (
-                      <span className="text-[10px] font-mono font-bold text-[#065F46] bg-[#D1FAE5] border border-[#1A1A2E] px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-mono font-semibold text-[#30d158] bg-[#30d158]/15 border border-[#30d158]/30 px-2 py-0.5 rounded-md">
                         ✅ Approved
                       </span>
                     )}
                   </div>
-                  <span className="text-[10px] font-mono text-[#64748B]">
-                    Shortcut: <kbd className="bg-white px-1.5 py-0.5 rounded border border-gray-300 text-[10px] font-bold">Ctrl+Enter</kbd> to Approve & Next
+                  <span className="text-[10px] font-mono text-[#8e8e93]">
+                    Shortcut: <kbd className="bg-[#2c2c2e] px-1.5 py-0.5 rounded border border-[#3a3a3c] text-[10px] font-semibold text-[#ffffff]">Ctrl+Enter</kbd> to Approve & Next
                   </span>
                 </div>
 
@@ -604,13 +604,13 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                 />
 
                 {/* Card Action Buttons */}
-                <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-[#1A1A2E]/15">
+                <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-[#2c2c2e]">
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       disabled={boundedIndex === 0}
                       onClick={() => setCarouselIndex((i) => Math.max(0, i - 1))}
-                      className="px-4 py-2 bg-white hover:bg-gray-50 text-[#1A1A2E] font-bold text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="px-4 py-2 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-[#ffffff] font-semibold text-xs uppercase tracking-wider border border-[#3a3a3c] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       ← Previous
                     </button>
@@ -618,7 +618,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                       type="button"
                       disabled={boundedIndex >= displayFields.length - 1}
                       onClick={() => setCarouselIndex((i) => Math.min(displayFields.length - 1, i + 1))}
-                      className="px-4 py-2 bg-white hover:bg-gray-50 text-[#1A1A2E] font-bold text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="px-4 py-2 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-[#ffffff] font-semibold text-xs uppercase tracking-wider border border-[#3a3a3c] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Skip →
                     </button>
@@ -628,17 +628,17 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                     <button
                       type="button"
                       onClick={handleApproveAll}
-                      className="px-4 py-2 bg-[#FAF4EB] hover:bg-[#F3ECE1] text-[#1A1A2E] font-bold text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                      className="px-4 py-2 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-[#ffffff] font-semibold text-xs uppercase tracking-wider border border-[#3a3a3c] rounded-lg transition-all"
                     >
                       Approve All
                     </button>
                     <button
                       type="button"
                       onClick={handleApproveAndNext}
-                      className="px-5 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all flex items-center gap-2"
+                      className="px-5 py-2 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-bold text-xs uppercase tracking-wider rounded-lg transition-all flex items-center gap-2"
                     >
                       <span>Approve & Next →</span>
-                      <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</span>
+                      <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded font-mono">Ctrl+↵</span>
                     </button>
                   </div>
                 </div>
@@ -647,14 +647,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
             {/* Completion Banner */}
             {approvedFieldIds.size >= displayFields.length && (
-              <div className="bg-[#D1FAE5] border-2 border-[#1A1A2E] rounded-xl p-4 flex items-center justify-between gap-4">
+              <div className="bg-[#1c1c1e] border border-[#30d158]/40 rounded-xl p-4 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">🎉</span>
                   <div>
-                    <p className="text-xs font-bold text-[#065F46]">
+                    <p className="text-xs font-semibold text-[#30d158]">
                       All {displayFields.length} review fields approved!
                     </p>
-                    <p className="text-[11px] font-medium text-[#047857]">
+                    <p className="text-[11px] font-medium text-[#8e8e93]">
                       Application verified and ready for live submission.
                     </p>
                   </div>
@@ -663,7 +663,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
                   type="button"
                   onClick={handleTriggerSubmit}
                   disabled={submitFlowActive}
-                  className="px-4 py-2 bg-[#10B981] hover:bg-[#059669] text-white font-black text-xs uppercase tracking-wider border-2 border-[#1A1A2E] rounded-xl active:translate-x-[1px] active:translate-y-[1px] transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-bold text-xs uppercase tracking-wider rounded-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {submitFlowActive ? 'Submitting...' : 'Approve & Submit Now →'}
                 </button>
@@ -672,14 +672,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           </div>
         ) : (
           <div className="space-y-3.5">
-            <div className="flex justify-between items-center bg-white border-2 border-[#1A1A2E] rounded-xl p-3">
-              <span className="text-xs font-mono font-bold text-[#1A1A2E]">
+            <div className="flex justify-between items-center bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-3">
+              <span className="text-xs font-mono font-medium text-[#ffffff]">
                 Full Form View ({fields.length} fields)
               </span>
               <button
                 type="button"
                 onClick={() => setViewMode('carousel')}
-                className="text-xs font-bold text-[#1A1A2E] hover:text-[#2563EB] bg-[#FAF4EB] border border-[#1A1A2E] px-3 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] transition-all"
+                className="text-xs font-medium text-[#8e8e93] hover:text-[#ffffff] bg-[#2c2c2e] border border-[#3a3a3c] px-3 py-1 rounded-md transition-all"
               >
                 🎴 Switch to Card Carousel
               </button>

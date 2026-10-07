@@ -76,15 +76,18 @@ export interface DashboardDateRangeMeta {
 
 export interface DashboardStats {
   totalCandidates: number;
-  totalApplications: number;
-  successfulApplications: number;
-  failedApplications: number;
+  totalApplications: number | null;
+  successfulApplications: number | null;
+  failedApplications: number | null;
   uniqueScannedJobs: number;
   totalFieldsPopulated: number;
   supabaseTaggedCount: number;
   aiTaggedCount: number;
   supabasePercentage: number;
   aiPercentage: number;
+  statsAvailable?: boolean;
+  statsPartial?: boolean;
+  statsAvailableFrom?: string;
   pipelineStatus: 'READY' | 'IDLE' | 'PROCESSING';
   dateRange?: DashboardDateRangeMeta;
 }
@@ -141,4 +144,3 @@ export interface ApplicationDetail {
   created_at?: string;
   updated_at?: string;
 }
-

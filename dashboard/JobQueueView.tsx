@@ -138,13 +138,13 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
       {/* Queue Header & Counter */}
       <div className="flex items-center justify-between mb-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+          <span className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">
             Assigned Applications Queue
           </span>
-          <span className="text-[11px] font-mono bg-[#B8D4E8] border border-[#1A1A2E] text-[#1E3A5F] px-2 py-0.5 rounded font-bold">
+          <span className="text-[11px] font-mono bg-[#2c2c2e] border border-[#3a3a3c] text-[#0a84ff] px-2 py-0.5 rounded-md font-medium">
             {queueJobs.length} Active
           </span>
-          <span className="text-[11px] font-mono bg-[#9AC89A] border border-[#1A1A2E] text-[#1E4620] px-2 py-0.5 rounded font-bold">
+          <span className="text-[11px] font-mono bg-[#30d158]/15 border border-[#30d158]/30 text-[#30d158] px-2 py-0.5 rounded-md font-medium">
             ⚡ &lt; 35 Qs
           </span>
         </div>
@@ -154,7 +154,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             href={candidate.resumeUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1E4620] hover:text-[#143015] bg-[#9AC89A] border border-[#1A1A2E] px-3 py-1 rounded active:translate-x-[1px] active:translate-y-[1px] transition-all"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#30d158] hover:text-[#ffffff] bg-[#30d158]/15 hover:bg-[#30d158]/25 border border-[#30d158]/30 px-3 py-1 rounded-md transition-all"
           >
             <span>📄</span>
             <span>Master Resume PDF</span>
@@ -186,19 +186,19 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
               key={`${jobKey}-${idx}`}
               type="button"
               onClick={() => handleJobCardClick(job)}
-              className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-lg transition-all duration-150 min-w-[230px] max-w-[280px] ${
+              className={`flex-shrink-0 text-left px-3.5 py-2.5 rounded-xl transition-all duration-150 min-w-[230px] max-w-[280px] ${
                 isSelected
-                  ? 'bg-[#FFF5EB] border-2 border-[#1A1A2E] ring-1 ring-[#1A1A2E]'
-                  : 'bg-white border border-[#1A1A2E] hover:bg-[#FFFDF9] active:translate-x-[1px] active:translate-y-[1px]'
+                  ? 'bg-[#2c2c2e] border border-[#3a3a3c]'
+                  : 'bg-[#1c1c1e] border border-[#2c2c2e] hover:bg-[#2c2c2e]/60'
               }`}
             >
               {/* Top Row: Company Initial Badge + Company Name + Difficulty */}
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5 truncate max-w-[150px]">
-                  <span className="w-5 h-5 rounded bg-[#FAF4EB] border border-[#1A1A2E] text-[10px] font-bold text-[#1A1A2E] flex items-center justify-center shrink-0">
+                  <span className="w-5 h-5 rounded bg-[#2c2c2e] border border-[#3a3a3c] text-[10px] font-bold text-[#ffffff] flex items-center justify-center shrink-0">
                     {initial}
                   </span>
-                  <span className="text-xs font-bold text-[#1A1A2E] truncate">
+                  <span className="text-xs font-semibold text-[#ffffff] truncate">
                     {cardCompany}
                   </span>
                 </div>
@@ -208,12 +208,12 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
 
               {/* Job Title & Queue Priority Badge */}
               <div className="flex items-center justify-between gap-1.5 mb-1">
-                <div className="text-xs text-[#1A1A2E] font-medium truncate">
+                <div className="text-xs text-[#8e8e93] font-medium truncate">
                   {cardTitle}
                 </div>
                 {Boolean((job as any).has_manual_edits || job.hasManualEdits) && (
                   <span
-                    className="text-[9px] font-mono font-bold text-[#92400E] bg-[#FEF3C7] border border-[#1A1A2E] px-1.5 py-0.5 rounded shrink-0"
+                    className="text-[9px] font-mono font-bold text-[#ff9f0a] bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-md shrink-0"
                     title="Application has manual operator edits and is queued last"
                   >
                     ⚠️ Edited (Queued Last)
@@ -222,15 +222,15 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
               </div>
 
               {/* Bottom Row: Status Pill & Question Count */}
-              <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#1A1A2E]/20 gap-1">
-                <span className="font-mono text-[#64748B] shrink-0">
+              <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#2c2c2e] gap-1">
+                <span className="font-mono text-[#8e8e93] shrink-0">
                   {job.fieldsCount ? `${job.fieldsCount} Qs` : 'Scanned'}
                 </span>
 
                 <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
                   {isSkippedApplicationJob(job) && (
                     <span
-                      className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded"
+                      className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full"
                       title="This job was intentionally skipped — open the card for the reason"
                     >
                       ⏭ Skipped
@@ -238,7 +238,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                   )}
                   {!isSkippedApplicationJob(job) && isUnresolvedApplicationJob(job) && (
                     <span
-                      className="text-[10px] font-mono text-white font-bold bg-[#EF4444] border border-[#1A1A2E] px-1.5 py-0.2 rounded"
+                      className="text-[10px] font-mono text-[#ff453a] font-semibold bg-[#ff453a]/15 border border-[#ff453a]/30 px-1.5 py-0.5 rounded-full"
                       title="Resolver has not finished or required fields are still unresolved"
                     >
                       ⚠️ Unresolved
@@ -260,23 +260,23 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                         }
                       }}
                       title="Click to view confirmation proof directly"
-                      className="text-[10px] font-mono text-[#1E4620] font-bold bg-[#9AC89A] hover:bg-[#88B888] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
+                      className="text-[10px] font-mono text-[#30d158] font-semibold bg-[#30d158]/15 hover:bg-[#30d158]/25 border border-[#30d158]/30 px-1.5 py-0.5 rounded-full cursor-pointer transition-all"
                     >
                       ✅ Applied
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'APPLYING' && (
-                    <span className="text-[10px] font-mono text-white font-bold bg-[#E88474] border border-[#1A1A2E] px-1.5 py-0.2 rounded animate-pulse">
+                    <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full animate-pulse">
                       ⏳ Submitting
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'DRY_RUN_COMPLETE' && (
-                    <span className="text-[10px] font-mono text-[#1E3A5F] font-bold bg-[#B8D4E8] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                    <span className="text-[10px] font-mono text-[#ffffff] font-semibold bg-[#3a3a3c] border border-[#48484a] px-1.5 py-0.5 rounded-full">
                       🚀 Dry-Run
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'OTP_REQUIRED' && (
-                    <span className="text-[10px] font-mono text-white font-bold bg-[#F59E0B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                    <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full">
                       🔒 OTP
                     </span>
                   )}
@@ -296,23 +296,23 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                         }
                       }}
                       title="Click to view failure screenshot proof directly"
-                      className="text-[10px] font-mono text-white font-bold bg-[#EF4444] hover:bg-[#DC2626] border border-[#1A1A2E] px-1.5 py-0.2 rounded cursor-pointer active:translate-x-[0.5px] active:translate-y-[0.5px] transition-all"
+                      className="text-[10px] font-mono text-[#ff453a] font-semibold bg-[#ff453a]/15 hover:bg-[#ff453a]/25 border border-[#ff453a]/30 px-1.5 py-0.5 rounded-full cursor-pointer transition-all"
                     >
                       ❌ Failed
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'READY_FOR_REVIEW' && (
-                    <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
-                      🟡 Ready
+                    <span className="text-[10px] font-mono text-[#ffffff] font-semibold bg-[#3a3a3c] border border-[#48484a] px-1.5 py-0.5 rounded-full">
+                      Ready
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'EXPIRED' && (
-                    <span className="text-[10px] font-mono text-[#475569] font-bold bg-[#E2E8F0] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                    <span className="text-[10px] font-mono text-[#8e8e93] font-semibold bg-[#2c2c2e] border border-[#3a3a3c] px-1.5 py-0.5 rounded-full">
                       Closed
                     </span>
                   )}
                   {!isSkippedApplicationJob(job) && job.status === 'PENDING' && (
-                    <span className="text-[10px] font-mono text-[#5C4A0A] font-bold bg-[#F4D66B] border border-[#1A1A2E] px-1.5 py-0.2 rounded">
+                    <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full">
                       Pending
                     </span>
                   )}

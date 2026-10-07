@@ -68,6 +68,8 @@
     return 'operator';
   }
 
+  var DEV_OPERATOR_VIEW_KEY = 'applywizz_dev_operator_view';
+
   function clearSession() {
     // TODO: migrate to HttpOnly cookies (ARCH phase)
     sessionStorage.removeItem('applywizz_auth_token');
@@ -82,6 +84,7 @@
     try {
       sessionStorage.removeItem(MANAGER_VIEW_AS_OPERATOR_KEY);
       sessionStorage.removeItem(VIEW_AS_MANAGER_EMAIL_KEY);
+      sessionStorage.removeItem(DEV_OPERATOR_VIEW_KEY);
     } catch (e) { /* ignore */ }
   }
 
