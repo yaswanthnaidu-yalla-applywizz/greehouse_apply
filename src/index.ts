@@ -209,7 +209,7 @@ export async function main(): Promise<void> {
         }
         const destPath = path.join(targetDir, targetCsv);
         fs.copyFileSync(path.resolve(process.cwd(), targetCsv), destPath);
-        
+
         log.info(`🚀 [Sandbox] Triggering storage CSV ingestion pipeline...`);
         const { ingestCsvFromStorage } = await import('./scanner/storageCsvIngestion.js');
         const limit = options.limit ?? options.maxJobs;
