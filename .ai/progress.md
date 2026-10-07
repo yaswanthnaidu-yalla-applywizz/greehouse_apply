@@ -3,7 +3,12 @@
 ### Sandbox CA Assignment
 - [x] Sandbox startup normalizes all existing profile and application CA assignments to `yaswanthnaiduyalla@applywizz.ai`; demo seeds and subsequent profile/application writes use the same assignment.
 - [x] Sandbox ingestion skips external CA mapping and assigns the dev email to each ingested AWL ID. Production CA mapping is unchanged.
-- [x] Added sandbox-versus-production regression coverage; focused tests pass. Full typecheck/build are blocked by unrelated missing exports in `src/submission/questionLimit.ts`.
+- [x] Added sandbox-versus-production regression coverage; focused tests pass.
+
+### CI Failure Repair (2026-10-07)
+- [x] Restored the exported `QuestionLimitExceededError` compatibility type without reintroducing a question cap; corrected dependent TypeScript narrowing errors in submission routes.
+- [x] Added the sandbox assignment regression test to the GitHub Actions unit-test list. Full typecheck, production build, and all CI-selected unit tests pass locally.
+- [ ] Verify GitHub Actions, including the Docker container build (Docker Desktop unavailable locally).
 
 ### Question Limit Removal (2026-10-07)
 - [x] Removed the 35-question limit cap per explicit user instruction: [`isWithinSubmissionQuestionLimit`](src/submission/questionLimit.ts), [`assertWithinSubmissionQuestionLimit`](src/submission/questionLimit.ts), and [`isWithinSubmissionQuestionLimitForDisplay`](src/submission/questionLimit.ts) now permit all applications regardless of question count.
@@ -440,7 +445,7 @@ _Last updated: 2026-10-07_
 ---
 
 ## Known Bugs / Gotchas
-- **Build/typecheck blocker — `questionLimit.ts` no longer exports `QuestionLimitExceededError`:** the current file in `HEAD` is missing an export still imported by `applications.ts`, `submissions.ts`, and `submitterPool.ts`; `npm run typecheck` and `npm run build` fail until this unrelated inconsistency is resolved.
+- **✅ FIXED — CI build/typecheck/tests failed because `questionLimit.ts` lost the `QuestionLimitExceededError` export during merge:** restored the compatibility error class while retaining unlimited question eligibility; `npm run typecheck`, `npm run build`, and the CI unit-test set pass.
 - **Historical only — invalid start-date answers in 2026-10-07 ingestion log:** pre-fix output used `01/05/1927` for `Date Available to Start?` and copied full desired-start dates into month/year components. The deterministic +7-day rule and component-field exclusion now prevent those paths; regression coverage is in `tests/resolverDiagnosedFixes.test.ts`.
 - **Stats cutover previously hid same-day captured facts (2026-10-07):** migration 027 set `available_from` to the next IST day, so the dashboard hid events already captured on the migration day. Migration 028 repairs existing configuration using the earliest recorded event date; apply it to production. Pre-trigger history remains unrecoverable.
 - **✅ FIXED — production dashboard stats migration missing (2026-10-07):** Railway logs showed `/api/dev/health` and `/api/admin/overview` failing because `gh_stats_config.available_from` was absent. Applied migration 027 in Supabase, verified both stats tables, the `available_from` value (`2026-10-08`), and the capture trigger, then the operator confirmed the production dashboard is working. The separate `gh_audit_events` RLS warning was not verified after recovery.
