@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import { getSandboxCaEmail } from './sandboxAssignment.js';
 import type { ApplyWizzCandidateProfile } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -232,10 +233,15 @@ export async function upsertProfile(
   const companyEmail =
     profile.company_email ||
     extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
+  const sandboxCaEmail = getSandboxCaEmail();
   const payload: ProfileRow = {
     ...profile,
-    ...(profile.ca_email !== undefined
-      ? { ca_email: profile.ca_email ? profile.ca_email.trim().toLowerCase() : null }
+    ...(profile.ca_email !== undefined || sandboxCaEmail
+      ? {
+          ca_email:
+            sandboxCaEmail ||
+            (profile.ca_email ? profile.ca_email.trim().toLowerCase() : null),
+        }
       : {}),
     country: profile.country ?? null,
     country_code: profile.country_code ?? null,
@@ -389,6 +395,8 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
 
       if (!error && data) {
         const row = data as ProfileRow;
+        const sandboxCaEmail = getSandboxCaEmail();
+        if (sandboxCaEmail) row.ca_email = sandboxCaEmail;
         if (isYaswanth) {
           if (!row.location) row.location = 'Hyderabad, Telangana, India';
         } else if (isAkshitha) {
@@ -430,6 +438,7 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
         resume_storage_path: profileData.localResumePath || (isAkshitha ? 'resumes/AWL-31428_resume.pdf' : null),
         raw_api_payload: profileData.demographics ? { demographics: profileData.demographics } : null,
         zoho_connected: Boolean(profileData.zoho_connected ?? profileData.zohoConnected),
+        ...(getSandboxCaEmail() ? { ca_email: getSandboxCaEmail() } : {}),
       };
     } catch {}
   }
@@ -443,6 +452,7 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
       last_name: 'Yalla',
       email: 'yaswanthnaidu004@gmail.com',
       company_email: 'yaswanthnaidu004@gmail.com',
+      ...(getSandboxCaEmail() ? { ca_email: getSandboxCaEmail() } : {}),
       location: 'Hyderabad, Telangana, India',
       linkedin_url: 'https://linkedin.com/in/yaswanth-yalla',
       work_authorization: 'US Citizen',
@@ -461,6 +471,7 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
       last_name: 'G',
       email: 'akshitha.reddy@applywizard.ai',
       company_email: 'akshitha.reddy@applywizard.ai',
+      ...(getSandboxCaEmail() ? { ca_email: getSandboxCaEmail() } : {}),
       location: 'Dallas, Texas, United States',
       linkedin_url: 'https://www.linkedin.com/in/akshitha-reddy',
       work_authorization: 'H1B',
@@ -572,20 +583,23 @@ export async function upsertProfileCaEmail(
   caEmail: string
 ): Promise<void> {
   const id = (applywizzId || '').trim();
-  const email = (caEmail || '').trim().toLowerCase();
+  const email = getSandboxCaEmail() || (caEmail || '').trim().toLowerCase() || null;
   if (!id || !email) return;
 
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const { error } = await supabase
+      let query = supabase
         .from('profiles')
         .update({
           ca_email: email,
           updated_at: new Date().toISOString(),
         })
-        .eq('applywizz_id', id)
-        .is('ca_email', null);
+        .eq('applywizz_id', id);
+      if (!getSandboxCaEmail()) {
+        query = query.is('ca_email', null);
+      }
+      const { error } = await query;
 
       if (error) {
         log.warn(`[DB] upsertProfileCaEmail error (${id}): ${error.message}`);

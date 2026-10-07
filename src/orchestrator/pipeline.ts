@@ -23,6 +23,7 @@ import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
 import { fetchCaBatchEmailMap } from '../candidate/applywizzClient.js';
 import { upsertProfileCaEmail } from '../db/profiles.js';
+import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
 import { sendCaNotificationEmails } from '../services/caNotificationEmail.js';
 import type {
@@ -256,7 +257,10 @@ export class V1Pipeline {
     log.info('[Pipeline] Phase B.5 — CA email mapping');
     try {
       const allApplywizzIds = candidateSegments.map((c) => c.applywizzId);
-      const caEmailMap = await fetchCaBatchEmailMap(allApplywizzIds);
+      const sandboxCaEmail = getSandboxCaEmail();
+      const caEmailMap = sandboxCaEmail
+        ? new Map(allApplywizzIds.map((id) => [id.toUpperCase(), sandboxCaEmail]))
+        : await fetchCaBatchEmailMap(allApplywizzIds);
       for (const [applywizzId, caEmail] of caEmailMap) {
         await upsertProfileCaEmail(applywizzId, caEmail);
         const segment = candidateSegments.find((c) => c.applywizzId.toUpperCase() === applywizzId.toUpperCase());

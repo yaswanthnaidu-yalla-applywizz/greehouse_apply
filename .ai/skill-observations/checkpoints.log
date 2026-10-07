@@ -495,3 +495,8 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 2026-10-07 session-start scan: files=14 parsed=14
 2026-10-07 deliverable flush: responsive TSX operator mobile flow shipped; dashboard typecheck/build and CSS parse pass; no new observations
 2026-10-07 checkpoint correction: prior session-start scan entry with files=0 was inaccurate; actual scan had files=14 parsed=14
+2026-10-07 session-start scan: files=14 parsed=14
+2026-10-07 | resolved PR #42 merge conflict by retaining dev question-limit removal and verifying tests
+2026-10-07 resumed session-start scan: files=14 parsed=14
+2026-10-07 deliverable flush: sandbox CA assignment implemented; focused regression tests pass; full typecheck/build blocked by pre-existing missing QuestionLimitExceededError export; no new observations
+2026-10-07 session-start scan: files=14 parsed=14
