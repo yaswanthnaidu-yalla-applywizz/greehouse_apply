@@ -44,7 +44,7 @@ import { uploadResume } from '../db/storage.js';
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
-import { assertEligibleForSubmission } from '../submission/submissionEligibilityGate.js';
+import { assertWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
 
 const log = createLogger('Live Submit');
@@ -1358,7 +1358,7 @@ export async function runLiveSubmit(
     application = applicationOrId;
   }
 
-  assertEligibleForSubmission(application);
+  assertWithinSubmissionQuestionLimit(application);
 
   // Ensure a persistent DB record exists so proof screenshots can be attached
   if (!application.id) {

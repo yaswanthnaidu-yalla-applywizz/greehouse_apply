@@ -39,11 +39,12 @@ import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnecti
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
-import { parseCsvJobScore } from '../submission/submissionEligibilityGate.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 function parseScoreFromJob(score: string | number | undefined): number | null {
-  return parseCsvJobScore(score);
+  if (score === undefined || score === '') return null;
+  const parsed = typeof score === 'number' ? score : parseFloat(score.trim());
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 const log = createLogger('Answer Resolver');

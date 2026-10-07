@@ -21,7 +21,7 @@ export interface SubmissionControlsProps {
   dryRunScreenshotUrl?: string | null;
   proofFailedUrl?: string | null;
   retryCount?: number | null;
-  submissionGateBlocked?: boolean;
+  questionLimitBlocked?: boolean;
   isSubmitting?: boolean;
   isDryRunning?: boolean;
   apiBaseUrl?: string;
@@ -52,7 +52,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   dryRunScreenshotUrl,
   proofFailedUrl,
   retryCount = 0,
-  submissionGateBlocked = false,
+  questionLimitBlocked = false,
   isSubmitting = false,
   isDryRunning = false,
   apiBaseUrl = '',
@@ -206,7 +206,7 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
     applicationStatus === 'FAILED' ||
     applicationStatus === 'RETRY');
   const canDryRun = !isApplying && !isDryRunning;
-  const canRetry = isFailed && !submissionGateBlocked && Number(retryCount || 0) < 3;
+  const canRetry = isFailed && !questionLimitBlocked && Number(retryCount || 0) < 3;
 
   const retrySubmission = async () => {
     if (!canRetry || isRetrying) return;

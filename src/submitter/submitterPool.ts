@@ -17,9 +17,9 @@ import { wsManager } from '../server/ws.js';
 import { runLiveSubmit, type LiveSubmitResult } from './liveSubmit.js';
 import { createLogger } from '../utils/logger.js';
 import {
-  isEligibleForSubmission,
-  SubmissionEligibilityBlockedError,
-} from '../submission/submissionEligibilityGate.js';
+  isWithinSubmissionQuestionLimit,
+  QuestionLimitExceededError,
+} from '../submission/questionLimit.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 
 const log = createLogger('Submitter Pool');
@@ -188,24 +188,17 @@ export class SubmitterPool {
       const { application } = work;
       const applicationId = application.id || application.applywizz_id;
       try {
-        const eligibility = isEligibleForSubmission(application);
+        const eligibility = isWithinSubmissionQuestionLimit(application);
         if (!eligibility.eligible) {
-          const message = eligibility.reason || 'Submission gate blocked this application.';
-          log.warn(
-            `[Gate TRACE] application=${applicationId} blocked=true score=${application.csv_job_score ?? 'missing'} ` +
-              `field_count=${application.field_count ?? 'missing'} reason="${message}"`
-          );
+          const message = eligibility.reason || 'Application exceeds the question limit.';
+          log.warn(`[Submitter] application=${applicationId} blocked by question limit: ${message}`);
           await updateStatus(applicationId, 'READY_FOR_REVIEW', {
             error_message: message,
             job_url: application.job_url,
           });
-          work.reject(new SubmissionEligibilityBlockedError(message));
+          work.reject(new QuestionLimitExceededError(message));
           continue;
         }
-        log.info(
-          `[Gate TRACE] application=${applicationId} blocked=false score=${application.csv_job_score ?? 'missing'} ` +
-            `field_count=${application.field_count ?? 'missing'}`
-        );
 
         await updateStatus(applicationId, 'APPLYING', {
           job_url: application.job_url,

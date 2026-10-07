@@ -110,7 +110,7 @@ function toJobRow(application: DemoApplication) {
     resolvedFields: fields,
     hasManualEdits: fields.some((field) => field.source === 'manual'),
     eligibleForSubmission: true,
-    submissionGateBlocked: false,
+    questionLimitBlocked: false,
   };
 }
 

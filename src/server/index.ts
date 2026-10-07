@@ -87,10 +87,9 @@ import {
   resolveViewAsOperatorManagerEmail,
 } from './managerTeamScope.js';
 import {
-  computeEligibleForSubmissionDisplay,
-  isEligibleForSubmission,
-  parseCsvJobScore,
-} from '../submission/submissionEligibilityGate.js';
+  isWithinSubmissionQuestionLimit,
+  isWithinSubmissionQuestionLimitForDisplay,
+} from '../submission/questionLimit.js';
 import { usersRouter } from './routes/users.js';
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import { fetchProfileListingFieldsByApplywizzIds } from '../db/profiles.js';
@@ -1651,8 +1650,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           status: appItem?.status || (template?.isExpired ? 'EXPIRED' : 'PENDING'),
           fieldsCount,
           hasManualEdits,
-          eligibleForSubmission: computeEligibleForSubmissionDisplay({
-            csv_job_score: parseCsvJobScore(job.score),
+          eligibleForSubmission: isWithinSubmissionQuestionLimitForDisplay({
             field_count: fieldsCount,
           }),
         };
@@ -1790,12 +1788,10 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           fieldsCount,
           resolved_fields: enrichResolvedFieldsWithTemplateOptions(application.resolved_fields, template),
           hasManualEdits: Boolean(application.has_manual_edits),
-          eligibleForSubmission: computeEligibleForSubmissionDisplay({
-            csv_job_score: application.csv_job_score,
+          eligibleForSubmission: isWithinSubmissionQuestionLimitForDisplay({
             field_count: application.field_count ?? fieldsCount,
           }),
-          submissionGateBlocked: !isEligibleForSubmission({
-            csv_job_score: application.csv_job_score,
+          questionLimitBlocked: !isWithinSubmissionQuestionLimit({
             field_count: application.field_count ?? fieldsCount,
           }).eligible,
         });
