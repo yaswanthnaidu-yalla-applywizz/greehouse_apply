@@ -203,6 +203,7 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
             label: groupLabel || groupName,
             isRequired: !!isReq,
             options: options,
+            optionsComplete: true,
             section: section,
             selector: 'input[type="radio"][name="' + groupName + '"]'
           });
@@ -243,6 +244,7 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
             label: label || name || id,
             isRequired: !!isReq,
             options: options,
+            optionsComplete: true,
             section: section,
             selector: id ? '#' + id : 'select[name="' + name + '"]'
           });
@@ -354,6 +356,7 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
 
     if (f.options && f.options.length > 0) {
       scannedField.options = f.options;
+      scannedField.optionsComplete = f.optionsComplete;
     }
 
     if (f.section || f.selector) {
