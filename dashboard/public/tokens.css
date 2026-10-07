@@ -287,6 +287,28 @@ small,
   letter-spacing: 0.01em;
 }
 
+.candidate-directory-scrollbar {
+  scrollbar-color: #3a3a3c #1c1c1e;
+  scrollbar-width: thin;
+}
+
+.candidate-directory-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.candidate-directory-scrollbar::-webkit-scrollbar-track {
+  background: #1c1c1e;
+}
+
+.candidate-directory-scrollbar::-webkit-scrollbar-thumb {
+  background: #3a3a3c;
+  border-radius: 3px;
+}
+
+.candidate-directory-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #30d158;
+}
+
 .mobile-stage {
   display: contents;
 }
@@ -294,6 +316,14 @@ small,
 .mobile-screen-back,
 .mobile-candidate-loading {
   display: none;
+}
+
+@media (min-width: 769px) {
+  .operator-directory-header,
+  .operator-job-queue {
+    min-height: 168px;
+    box-sizing: border-box;
+  }
 }
 
 @media (max-width: 768px) {
