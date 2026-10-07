@@ -49,7 +49,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
   return (
     <aside className="w-80 flex-shrink-0 bg-[#1c1c1e] border-r border-[#2c2c2e] flex flex-col h-full overflow-hidden text-[#ffffff]">
       {/* Search Header */}
-      <div className="p-4 border-b border-[#2c2c2e] bg-[#1c1c1e] sticky top-0 z-10">
+      <div className="operator-directory-header p-4 border-b border-[#2c2c2e] bg-[#1c1c1e] sticky top-0 z-10">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
             <span className="text-sm">👥</span>
@@ -90,7 +90,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
       </div>
 
       {/* Candidate Card List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
+      <div className="candidate-directory-scrollbar flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
         {isLoading ? (
           <div className="p-6 text-center text-xs text-[#8e8e93] font-mono animate-pulse">
             Loading candidate records...
