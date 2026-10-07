@@ -91,7 +91,10 @@ import {
   isWithinSubmissionQuestionLimitForDisplay,
 } from '../submission/questionLimit.js';
 import { usersRouter } from './routes/users.js';
-import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
+import {
+  applicationRowHasPersistedResolution,
+  filterOperatorApplicationJobs,
+} from '../dashboard/candidateQueueFilter.js';
 import { fetchProfileListingFieldsByApplywizzIds } from '../db/profiles.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../db/storage.js';
 import { isSupabaseConfigured, getDbClient, logSupabaseCredentialIdentity, resolveSupabaseCredentials, listSupabaseKeyCandidates, createSupabaseServerClient } from '../db/client.js';
@@ -1811,6 +1814,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
 
     }
+
+    jobs = filterOperatorApplicationJobs(jobs);
 
     log.info(
       `[API] GET /api/candidates/${applywizzId}/jobs (ca_email=${userEmail || 'admin'}) ` +

@@ -17,6 +17,7 @@
  */
 export type ScannedFieldType =
   | 'text'
+  | 'date'
   | 'textarea'
   | 'select'
   | 'radio'
@@ -30,6 +31,12 @@ export type ScannedFieldType =
 export interface ScannedFieldMetadata {
   /** CSS selector used by Playwright to locate the element */
   selector?: string;
+  /** Native HTML input type when available (for example, date or tel) */
+  inputType?: string;
+  /** Input placeholder captured from the live form */
+  placeholder?: string;
+  /** Form's recognizable expected date representation, when detectable */
+  expectedDateFormat?: string;
   /** Grouping section name (e.g., 'Personal Information', 'Demographics') */
   section?: string;
   /** Field identifier upon which this conditional field depends */
@@ -265,6 +272,8 @@ export interface ResolvedField {
   options?: string[];
   /** Whether options is exhaustive; false means submission must validate against the live control. */
   optionsComplete?: boolean;
+  /** Captured form-control hints for rendering and submission. */
+  metadata?: ScannedFieldMetadata;
   /** Granular source attribution tag */
   source: SourceTag;
   /** Tier that resolved the answer (1-5), or null if unresolved */

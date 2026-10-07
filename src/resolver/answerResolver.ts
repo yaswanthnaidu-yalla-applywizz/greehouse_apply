@@ -18,14 +18,21 @@ import config from '../config/env.js';
 import { getProfile, type ProfileRow } from '../db/profiles.js';
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
-import { resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
+import { isCountryField, resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { findSemanticMatch, getLastSemanticScore } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
-import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getLastLlmFailure } from './tier5LLM.js';
+import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE } from './tier5LLM.js';
 import { getEffectiveFieldOptions } from './llmSynthesizer.js';
 import { normalizeText } from './fingerprint.js';
-import { upsertApplication } from '../db/applications.js';
+import { isPhoneNumberField, resumeAnswerMatchesPhone } from './candidateEvidence.js';
+import {
+  enqueueApplication,
+  getApplicationByCandidateAndJob,
+  RESOLVE_AUTO_ENQUEUE_ELIGIBLE,
+  upsertApplication,
+} from '../db/applications.js';
+import { isWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
 import type {
   ApplicationStatus,
@@ -40,6 +47,9 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
+import { applicationNeedsOperatorReview } from './needsReview.js';
+
+export { applicationNeedsOperatorReview } from './needsReview.js';
 
 function parseScoreFromJob(score: string | number | undefined): number | null {
   if (score === undefined || score === '') return null;
@@ -84,9 +94,14 @@ function getFieldOptions(field: ScannedField): string[] | undefined {
   return getEffectiveFieldOptions(field);
 }
 
-function isCountryField(field: ScannedField): boolean {
-  const combined = `${field.label} ${field.name} ${field.fieldId}`;
-  return /\bcountry\b/i.test(combined) && !/phone|dialing|calling|code/i.test(combined);
+export function isUnsupportedUuidAnswer(field: ScannedField, answer: string): boolean {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(answer.trim())) {
+    return false;
+  }
+  if (field.options?.some((option) => normalizeText(option) === normalizeText(answer))) return false;
+  return !/\b(?:uuid|unique id|unique identifier|candidate id|application id|employee id|reference id|tracking id|id number)\b/i.test(
+    `${field.label} ${field.name} ${field.fieldId}`
+  );
 }
 
 function alignResolvedChoice(
@@ -99,8 +114,19 @@ function alignResolvedChoice(
     ...resolved,
     ...(options ? { options } : {}),
     ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+    ...(field.metadata ? { metadata: field.metadata } : {}),
   };
   if (resolved.source === 'unresolved' || !resolved.value.trim()) return baseWithOptions;
+  if (isUnsupportedUuidAnswer(field, resolved.value)) {
+    log.warn(`[Resolver] Rejected UUID-shaped answer for non-identifier field "${field.label}"`);
+    return {
+      ...baseWithOptions,
+      value: '',
+      source: 'unresolved',
+      resolvedByTier: null,
+      confidence: 0,
+    };
+  }
   if (field.type === 'checkbox') return baseWithOptions;
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
   if (field.optionsComplete === false) {
@@ -129,8 +155,12 @@ function alignResolvedChoiceOrNull(field: ScannedField, value: string): string |
 export function resolvePreTierField(
   field: ScannedField,
   profile: ProfileRow | null,
-  isRequired: boolean
+  isRequired: boolean,
+  now = new Date()
 ): ResolvedField | null {
+  const availability = resolveAvailabilityField(field, isRequired, now);
+  if (availability) return availability;
+
   if (/^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
 
   const options = getFieldOptions(field);
@@ -145,6 +175,7 @@ export function resolvePreTierField(
     isRequired,
     ...(options ? { options } : {}),
     ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+    ...(field.metadata ? { metadata: field.metadata } : {}),
   };
 
   if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
@@ -163,18 +194,6 @@ export function resolvePreTierField(
     return { ...base, value: finalVal };
   }
 
-  if (isCountryField(field)) {
-    const targetVal = profile?.country?.trim();
-    if (!targetVal) return null;
-    const finalVal = alignResolvedChoiceOrNull(field, targetVal);
-    if (!finalVal && (field.type === 'select' || field.type === 'radio')) {
-      return null;
-    }
-    const resolvedVal = finalVal || targetVal;
-    log.info(`[Resolver] ✅ T1 ${field.label} → "${resolvedVal}"`);
-    return { ...base, value: resolvedVal };
-  }
-
   if (/\b(?:I agree|I consent|I certify|I acknowledge|by checking|by selecting|by submitting)\b/i.test(field.label)) {
     const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
     const finalVal = alignResolvedChoiceOrNull(field, targetVal);
@@ -184,6 +203,77 @@ export function resolvePreTierField(
   }
 
   return null;
+}
+
+function isAvailabilityDateField(field: ScannedField): boolean {
+  const combined = `${field.label} ${field.name} ${field.fieldId}`;
+  if (/\b(?:month|year|graduation|education|school|university|employment history)\b/i.test(combined)) {
+    return false;
+  }
+  return /\b(?:date available to start|available to start|availability date|available date|desired start date|earliest start date|when can you start|when could you start)\b/i.test(
+    combined
+  ) || /^start date$/i.test(field.label.trim());
+}
+
+function formatAvailabilityDate(date: Date, format: string): string {
+  const values: Record<string, string> = {
+    YYYY: String(date.getUTCFullYear()),
+    YY: String(date.getUTCFullYear()).slice(-2),
+    MM: String(date.getUTCMonth() + 1).padStart(2, '0'),
+    M: String(date.getUTCMonth() + 1),
+    DD: String(date.getUTCDate()).padStart(2, '0'),
+    D: String(date.getUTCDate()),
+  };
+  return format.replace(/YYYY|YY|MM|M|DD|D/g, (token) => values[token] || token);
+}
+
+export function resolveAvailabilityField(
+  field: ScannedField,
+  isRequired: boolean,
+  now = new Date()
+): ResolvedField | null {
+  if (!isAvailabilityDateField(field)) return null;
+
+  const options = getFieldOptions(field);
+  let value: string | null = null;
+  if (field.type === 'select' || field.type === 'radio') {
+    if (!field.options?.length) return null;
+    const weekOptions = field.options.filter((option) =>
+      /\b(?:1|one)\s*(?:week|wk)\b|\bwithin\s+(?:a|one)\s+week\b/i.test(option)
+    );
+    if (weekOptions.length === 1) {
+      value = weekOptions[0];
+    } else {
+      const immediateOptions = field.options
+        .map((option, index) => ({ option, index }))
+        .filter(({ option }) => /^immediately\b/i.test(option.trim()));
+      if (immediateOptions.length === 1) {
+        value = field.options[immediateOptions[0].index + 1] || null;
+      }
+    }
+  } else if (field.type === 'text' || field.type === 'date' || field.metadata?.inputType === 'date') {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 7));
+    const format =
+      field.metadata?.expectedDateFormat ||
+      (field.type === 'date' || field.metadata?.inputType === 'date' ? 'YYYY-MM-DD' : 'MM/DD/YYYY');
+    value = formatAvailabilityDate(date, format);
+  }
+
+  if (!value) return null;
+  return {
+    fieldId: field.fieldId,
+    name: field.name,
+    type: field.type,
+    label: field.label,
+    value,
+    source: 'supabase',
+    resolvedByTier: 1,
+    confidence: 1,
+    isRequired,
+    ...(options ? { options } : {}),
+    ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+    ...(field.metadata ? { metadata: field.metadata } : {}),
+  };
 }
 
 function resolveStructuredEeocField(
@@ -272,15 +362,8 @@ export interface ResolutionTelemetry {
   unresolvedCount: number;
 }
 
-function getTier5FailureReason(field: ScannedField): string {
-  const options = getEffectiveFieldOptions(field);
-  if (options && options.length > 0) {
-    return 'no option match';
-  }
-  if (getLastLlmFailure()) {
-    return 'LLM parse error';
-  }
-  return 'unresolved';
+function getTier5FailureReason(): string {
+  return 'no supported answer';
 }
 
 /**
@@ -319,7 +402,7 @@ export class AnswerResolver {
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
-    const preTier = resolvePreTierField(resolutionField, profile, isRequired);
+    const preTier = resolvePreTierField(field, profile, isRequired);
     if (preTier) return preTier;
 
     // Never fill cover letters under any circumstances
@@ -350,9 +433,8 @@ export class AnswerResolver {
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
-    // If the field is NOT mandatory and wasn't found in Supabase/Profile, do NOT spend time
-    // running Tier 2 (resume parse) or Tier 5 (LLM). Leave it clean and empty.
-    if (!isRequired) {
+    // Optional fields normally stop after Tier 1; standalone country fields can still use payload evidence.
+    if (!isRequired && !isCountryField(field)) {
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -393,6 +475,26 @@ export class AnswerResolver {
       profile
     );
     if (semanticMatch) {
+      const phone = isPhoneNumberField(field)
+        ? resumeAnswerMatchesPhone(semanticMatch.value, parsedResume?.structured, parsedResume?.raw_text)
+        : semanticMatch.value;
+      if (phone) {
+        log.info(`[Resolver] ✅ T3 ${field.label} → resume phone`);
+        return {
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: phone,
+          source: 'semantic',
+          resolvedByTier: 3,
+          confidence: semanticMatch.confidence,
+          isRequired,
+        };
+      }
+      if (isPhoneNumberField(field)) {
+        log.info(`[Resolver] ❌ T3 ${field.label} — answer not verified against resume`);
+      } else {
       log.info(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
       return {
         fieldId: field.fieldId,
@@ -405,6 +507,7 @@ export class AnswerResolver {
         confidence: semanticMatch.confidence,
         isRequired,
       };
+      }
     }
     const t3Score = getLastSemanticScore().toFixed(2);
     log.info(`[Resolver] ❌ T3 ${field.label} — below similarity threshold (${t3Score})`);
@@ -419,23 +522,34 @@ export class AnswerResolver {
       profile
     );
     if (tier4) {
+      const phone = isPhoneNumberField(field)
+        ? resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text)
+        : tier4.value;
+      if (phone) {
+        log.info(`[Resolver] ✅ T4 ${field.label} → resume phone`);
+        return {
+          ...tier4,
+          value: phone,
+          resolvedByTier: 4,
+          isRequired,
+        };
+      }
+      if (isPhoneNumberField(field)) {
+        log.info(`[Resolver] ❌ T4 ${field.label} — answer not verified against resume`);
+      } else {
       log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
       return {
         ...tier4,
         resolvedByTier: 4,
         isRequired,
       };
+      }
     }
     log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
 
     // ------------------------------------------------------------------------
     // Tier 5: Multi-provider LLM Synthesis
     // ------------------------------------------------------------------------
-    if (isCountryField(field)) {
-      log.info(`[Resolver] ❌ T5 ${field.label} — country fields are not sent to Tier 5`);
-      return this.unresolvedField(field);
-    }
-
     if (profile) {
       const tier5 = await resolveTier5(
         applywizzId,
@@ -450,7 +564,7 @@ export class AnswerResolver {
       }
     }
 
-    const t5Reason = getTier5FailureReason(field);
+    const t5Reason = getTier5FailureReason();
     log.info(`[Resolver] ❌ T5 ${field.label} — ${t5Reason}`);
 
     return this.unresolvedField(field);
@@ -470,6 +584,7 @@ export class AnswerResolver {
       isRequired: Boolean(field.isRequired),
       ...(options ? { options } : {}),
       ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+      ...(field.metadata ? { metadata: field.metadata } : {}),
     };
   }
 
@@ -504,7 +619,7 @@ export class AnswerResolver {
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
-    const preTier = resolvePreTierField(resolutionField, profile, isRequired);
+    const preTier = resolvePreTierField(field, profile, isRequired);
     if (preTier) return preTier;
 
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
@@ -531,7 +646,7 @@ export class AnswerResolver {
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
-    if (!isRequired) {
+    if (!isRequired && !isCountryField(field)) {
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -658,11 +773,9 @@ export class AnswerResolver {
       resolvedFields.push(resolved);
 
       if (resolved.source === 'unresolved') {
-        if (profile && !isCountryField(field)) {
+        if (profile) {
           tier5Slots.push(resolvedFields.length - 1);
           tier5Pending.push(field);
-        } else if (isCountryField(field)) {
-          log.info(`[Resolver] ❌ ${field.label} — country fields are not sent to Tier 5`);
         } else {
           log.info(`[Resolver] ❌ T5 ${field.label} — unresolved`);
         }
@@ -702,7 +815,7 @@ export class AnswerResolver {
             log.info(`[Resolver] ✅ T5 ${chunkFields[i].label} → "${alignedTier5.value}"`);
           }
         } else {
-          const reason = getTier5FailureReason(chunkFields[i]);
+          const reason = getTier5FailureReason();
           log.info(`[Resolver] ❌ T5 ${chunkFields[i].label} — ${reason}`);
         }
       }
@@ -713,6 +826,7 @@ export class AnswerResolver {
       const field = template.fields[i];
       const resolved = resolvedFields[i];
       if (resolved) {
+        if (field.metadata) resolved.metadata = { ...field.metadata, ...resolved.metadata };
         if (field.options) resolved.options = field.options;
         if (field.optionsComplete !== undefined) {
           resolved.optionsComplete = field.optionsComplete;
@@ -893,6 +1007,19 @@ export class AnswerResolver {
           );
         } else {
           try {
+            const assignedCaEmail =
+              app.assignedCaEmail || (seg as any).assignedCaEmail || seg.profile?.ca_email || null;
+            const needsReview = applicationNeedsOperatorReview(app.resolvedFields);
+            const existing = await getApplicationByCandidateAndJob(app.applywizzId, persistJobUrl);
+            const existingStatus = existing?.status;
+            const withinQuestionLimit = isWithinSubmissionQuestionLimit({
+              field_count: questionCount,
+            }).eligible;
+            const canAutoEnqueue =
+              !needsReview &&
+              withinQuestionLimit &&
+              (!existingStatus || RESOLVE_AUTO_ENQUEUE_ELIGIBLE.has(existingStatus));
+
             await upsertApplication({
               applywizz_id: app.applywizzId,
               job_url: persistJobUrl,
@@ -901,8 +1028,25 @@ export class AnswerResolver {
               resolved_fields: app.resolvedFields,
               csv_job_score: parseScoreFromJob(job.score),
               field_count: questionCount,
-              assigned_ca_email: app.assignedCaEmail || (seg as any).assignedCaEmail || seg.profile?.ca_email || null,
+              assigned_ca_email: assignedCaEmail,
+              status: 'READY_FOR_REVIEW',
             });
+
+            if (canAutoEnqueue) {
+              try {
+                await enqueueApplication(app.applywizzId, {
+                  jobUrl: persistJobUrl,
+                  assignedCaEmail: assignedCaEmail || undefined,
+                });
+                log.info(
+                  `[Answer Resolver] Auto-queued ${app.applywizzId} ${persistJobUrl} (no required AI/unresolved fields)`
+                );
+              } catch (enqueueErr: any) {
+                log.warn(
+                  `[Answer Resolver] ⚠️ Auto-enqueue skipped for ${app.applywizzId} ${persistJobUrl}: ${enqueueErr?.message || enqueueErr}`
+                );
+              }
+            }
           } catch (dbErr: any) {
             if (isMissingTableError(dbErr)) {
               haltWithDevAlert(

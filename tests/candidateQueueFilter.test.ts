@@ -19,6 +19,24 @@ describe('candidateQueueFilter', () => {
     assert.equal(filterOperatorApplicationJobs(jobs).length, 3);
   });
 
+  it('filterOperatorApplicationJobs excludes QUEUED jobs while retaining other statuses', () => {
+    const jobs = [
+      { status: 'QUEUED', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
+      { status: 'queued', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
+      { status: 'READY_FOR_REVIEW', resolved_fields: [] },
+      { status: 'SKIPPED', resolved_fields: [] },
+      { status: 'APPLIED', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
+      { status: 'FAILED', resolved_fields: [] },
+      { status: 'OTP_REQUIRED', resolved_fields: [] },
+      { status: 'CAPTCHA_REQUIRED', resolved_fields: [] },
+      { status: 'RETRY', resolved_fields: [] },
+    ];
+    const filtered = filterOperatorApplicationJobs(jobs);
+    assert.equal(filtered.length, 7);
+    assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'QUEUED'), false);
+    assert.equal(filtered.some((j) => j.status === 'READY_FOR_REVIEW'), true);
+  });
+
   it('isOperatorFormPanelBlocked follows submittable status whitelist', () => {
     assert.equal(isOperatorFormPanelBlocked('READY_FOR_REVIEW'), false);
     assert.equal(isOperatorFormPanelBlocked('APPLIED'), false);

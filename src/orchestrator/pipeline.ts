@@ -24,6 +24,7 @@ import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../ca
 import { fetchCaBatchEmailMap } from '../candidate/applywizzClient.js';
 import { upsertProfileCaEmail } from '../db/profiles.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
+import { sendCaNotificationEmails } from '../services/caNotificationEmail.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -301,6 +302,13 @@ export class V1Pipeline {
       throw err;
     }
     throwIfPipelineAborted('Phase D');
+
+    try {
+      const runStartedAt = new Date(startTime).toISOString();
+      await sendCaNotificationEmails(runStartedAt);
+    } catch (caEmailErr: any) {
+      log.warn(`[Pipeline Phase D] ⚠️ CA notification email error: ${caEmailErr?.message || caEmailErr}`);
+    }
 
     // -------------------------------------------------------------
     // Phase E: Aggregation & Summary Metrics

@@ -106,9 +106,13 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     setIsEditing(false);
   };
 
+  const isSchoolQuestion = /\b(school|university|college)\b/i.test(
+    `${field.label} ${field.name} ${field.fieldId}`,
+  );
+
   const getHintText = (): string => {
     const type = (field.type || '').toLowerCase();
-    if (type === 'select' && field.isRequired && field.optionsComplete === false) {
+    if (type === 'select' && field.isRequired && field.optionsComplete === false && isSchoolQuestion) {
       return 'This is a dropdown question with more options than shown. Enter the exact choice as it appears in the job application.';
     }
     if (type === 'select' || type === 'radio' || isChoiceField) {
@@ -144,8 +148,17 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
 
   const isTextarea = field.type === 'textarea';
   const fieldType = String(field.type || '').toLowerCase();
+  const isAvailabilityDate =
+    /\b(?:date available to start|available to start|availability date|available date|desired start date|earliest start date|when can you start|when could you start)\b/i.test(
+      `${field.label} ${field.name} ${field.fieldId}`
+    ) || /^start date$/i.test(field.label.trim());
+  const expectedDateFormat = isAvailabilityDate
+    ? field.metadata?.expectedDateFormat ||
+      (field.type === 'date' || field.metadata?.inputType === 'date' ? 'YYYY-MM-DD' : 'MM/DD/YYYY')
+    : null;
   const fieldOptions = Array.isArray(field.options) && field.options.length > 0 ? field.options : null;
-  const isIncompleteChoice = fieldType === 'select' && field.isRequired && field.optionsComplete === false;
+  const isIncompleteChoice = fieldType === 'select' && field.isRequired &&
+    field.optionsComplete === false && isSchoolQuestion;
   const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions && !isIncompleteChoice;
   const isCheckbox = fieldType === 'checkbox';
   const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
@@ -167,6 +180,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             {field.isRequired && <span className="text-[#ff453a] font-bold">*</span>}
             <span className="text-[10px] font-mono text-[#8e8e93] font-normal">({field.type})</span>
           </label>
+          {expectedDateFormat && (
+            <p className="mt-1 text-[10px] text-[#8e8e93]">Expected date format: {expectedDateFormat}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">

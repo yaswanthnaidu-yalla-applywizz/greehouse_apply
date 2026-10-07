@@ -1,6 +1,63 @@
 # Active Context — Current Sprint State
 
-_Last updated: 2026-10-06_
+_Last updated: 2026-10-07_
+
+## Current Session Update (2026-10-07 — Question Limit Removal & Submission Gate Audit)
+
+- Removed the 35-question limit cap upon explicit user instruction: `isWithinSubmissionQuestionLimit`, `assertWithinSubmissionQuestionLimit`, and `isWithinSubmissionQuestionLimitForDisplay` in `src/submission/questionLimit.ts` and `isOverQuestionCap` in `src/db/skippedApplications.ts` now permit all applications regardless of question count. Applications will not be skipped or blocked from auto-enqueue or submission due to field count.
+- Checked submission eligibility gates: audited the codebase and confirmed that the earlier score eligibility gate (`submissionEligibilityGate.ts` / score 20–60 range) was already completely removed in commit `27eb482`. With the question limit now lifted, there are no remaining score or question gating checks on submission.
+- Updated unit tests in `tests/questionLimit.test.ts`. Full typecheck (`npm run typecheck`) and production build (`npm run build`) pass cleanly.
+
+## Current Session Update (2026-10-07 — Auto-queue Routing & CA Notification)
+
+- Implemented safe auto-queue routing at answer resolution time (`src/resolver/answerResolver.ts`): applications where no required field has `source: 'ai'`, `'unresolved'`, or missing source are auto-enqueued directly via `enqueueApplication` (assigns global `submission_order`, sets status `QUEUED`, and emits queue lifecycle event), skipping `READY_FOR_REVIEW`.
+- Applications with required fields resolved by AI or left unresolved remain `READY_FOR_REVIEW` for operator review. Applications over the 35-question limit remain `READY_FOR_REVIEW`.
+- Re-ingest status preservation: terminal and in-flight statuses (`APPLIED`, `FAILED`, `APPLYING`, `QUEUED`, `OTP_*`, `CAPTCHA_*`, `SKIPPED`, `RETRY`, `EMAIL_PROOF_PENDING`, `DRY_RUN_COMPLETE`, `EXPIRED`) in `RESOLVE_STATUS_PRESERVE` are preserved on re-ingest and never downgraded or overwritten.
+- Operator view filtering: `filterOperatorApplicationJobs` excludes `QUEUED` jobs consistently across modern Vite TSX views, legacy `operator-app.jsx`, and candidate job API endpoints (`GET /api/candidates/:id/jobs`, `GET /api/applications`). Other statuses (`READY_FOR_REVIEW`, `SKIPPED`, `FAILED`, `RETRY`, etc.) remain visible.
+- Post-ingest CA notification email: added `src/services/caNotificationEmail.ts` and hooked after Phase D in `src/orchestrator/pipeline.ts`. Emails each assigned CA an HTML summary of new `READY_FOR_REVIEW` applications created during the ingest run with client and application counts and link to `https://gh.applywizz.ai`. Supports `CA_NOTIFICATION_EMAIL_OVERRIDE` for sandbox testing. Failure is non-blocking (logs WARN).
+- Focused test suite in `tests/autoQueueAndCaNotification.test.ts` and `tests/candidateQueueFilter.test.ts` passed (19 tests). `npm run typecheck` and `npm run build` pass cleanly.
+
+## Current Session Update (2026-10-07 — Docs alignment)
+
+- Reviewed the repo's AGENTS guidance and the active `.ai` record set to confirm the documentation remains aligned with the shipped V2+ state and current sprint notes.
+- Kept this pass purely to documentation maintenance: no runtime code, schema, or deployment changes were required during the review.
+
+## Current Session Update (2026-10-07 — Proof screenshot fallback)
+
+- The reported log contains no proof URL/image route requests; its visible errors are missing application-stats migration 027 and `gh_audit_events` RLS, which do not establish the proof failure cause.
+- Confirmed a local-storage fallback mismatch: failure screenshots are written under `output/proofs_failed`, while the streaming proxy previously searched only `output/proofs`. The proxy now selects local directories by proof bucket; signed URL, cloud download, and proof-upload errors are logged with bucket/object path, and missing-object responses are logged by the endpoint.
+- Added a focused local fallback regression covering web, failure, mail, and dry-run proof buckets. Cloud-storage contents and production endpoint behavior remain unverified from the supplied log; no production data, deployment, or migration was changed.
+
+## Current Session Update (2026-10-07 — Supabase client isolation)
+
+- Storage CSV discovery may probe with the anon key, but no longer replaces the shared DB client. Downloads, audit writes, and stats reads continue through the service-role DB client, preventing RLS-hidden stats configuration and rejected audit inserts after a storage probe.
+
+## Current Session Update (2026-10-07 — OTP body-only extraction)
+
+- OTP lookup still filters inbox messages by Greenhouse sender and security-code subject, but now always fetches the matched message body for code extraction instead of attempting subject extraction first.
+- Added a regression test verifying the message-detail endpoint is called and the body code is used even when the subject contains a code-like string.
+
+## Current Session Update (2026-10-07 — Country answer integrity)
+
+- The supplied ingestion log contains no `India` answer; it logs 10 standalone `Country` fields unresolved and excluded from Tier 5.
+- Found Tier 1 fallbacks that fabricated India/US country and dialing-code values when profile data was absent, plus candidate-ID overrides. Country fields now prefer `additional_information.zip_or_country`, option-match select/radio fields, and fall through the resolver tiers on mismatch. Country mentions inside other questions are not mistaken for standalone country fields.
+- Removed the synthetic country/calling-code defaults from profile normalization and persistence. Existing stored profile values are unchanged until naturally refreshed.
+- Historical resolver signals: 57 batch LLM parse errors, 72 `no option match` labels, 91 Tier 4 misses, and 104 Tier 3 below-threshold results (overlapping counts). The old failure logger mislabeled any unresolved choice field as `no option match`; it now reports a neutral unresolved reason, and actual option mismatches are logged only after a concrete answer fails alignment. LLM batch parsing now extracts valid JSON wrapped in prose/fences and still rejects malformed output.
+- Added resume-only phone resolution (Tier 2), international prefix stripping, and validation of Tier 3–5 phone answers against the resume. Country Tier 5 receives bounded question-relevant evidence and captured choices; optional standalone Country fields continue through the waterfall too.
+- Availability answers now resolve to UTC application date + 7 days, honoring captured native/text date formats; dropdowns use a unique one-week choice or the first choice after “Immediately”. Date metadata is carried through Remix/DOM scan, hydration, and both operator views. Desired-start payload dates no longer leak full dates into month/year component fields; education dates remain month/year-specific.
+- UUID-shaped Tier 4 answers are rejected for fields that do not explicitly request identifiers. The three PDF `TT: undefined function: 21` warnings, four expired/scan-failed skips, and 18 zero-job candidate summaries had no verified defect evidence and were left unchanged. Tier 3/4 misses remain fail-closed rather than lowering similarity thresholds. Ingestion reported 200 successful and 344 unsuccessful out of 544 applications, while pipeline status itself was `SUCCESS`.
+
+## Current Session Update (2026-10-07 — Stats availability and score-independent submissions)
+
+- Diagnosed the blank Dev stats cards: migration 027 initializes `available_from` to the next IST day, while its trigger has already recorded current-day events. The dashboard therefore reports the selected date as unavailable and hides those recorded facts.
+- Migration 027 now starts availability on the migration day; migration 028 repairs existing installations to the earliest date with captured facts (or today if none exist). It does not reconstruct events from before the trigger was installed; apply migration 028 to the connected database to expose captured facts.
+- Removed the configurable score eligibility gate from the submission path, Dev controls/API, and environment config. Any CSV score now proceeds; the hard 35-question limit remains enforced.
+
+## Current Session Update (2026-10-07 — Production stats migration verification)
+
+- Railway logs initially showed that migration 027 was missing, causing stats-backed dashboard API requests to fail. The operator applied it to the connected database; a SQL check confirmed both stats tables exist, `available_from` is `2026-10-08`, and `trg_capture_gh_application_stats` exists.
+- The 2026-10-08 availability date left the 2026-10-07 dashboard blank even though same-day facts were captured; migration 028 now corrects this without fabricating pre-trigger history.
+- The operator confirmed the production dashboard endpoint now loads after applying 027; the current-day stats tiles still remained unavailable due to the future cutover. The earlier `gh_audit_events` RLS warning was separate and was not verified.
 
 ## Current Session Update (2026-10-06 — Canonical Application Statistics)
 
@@ -36,7 +93,7 @@ _Last updated: 2026-10-06_
 ## Current Session Update (2026-10-06 — Incomplete Required Choice Handling)
 
 - Required searchable selects now carry an `optionsComplete` marker from scanning through resolver, application hydration, and dashboard payloads.
-- Partial lists are not treated as exhaustive by answer matching or Tier 5 prompts. Required selects marked incomplete use text entry in the operator UI while retaining `type: "select"`; submission still requires a matching, committed live option.
+- Partial lists are not treated as exhaustive by answer matching or Tier 5 prompts. Required incomplete school/university/college selects use text entry in the operator UI; other incomplete selects keep their captured options visible. Submission still requires a matching, committed live option.
 - Added scanner, resolver, and searchable-select regressions; `npm run typecheck`, `npm run build`, and the focused tests pass.
 
 ## Current Session Update (2026-10-06 — Required-Only IMC Dropdown Diagnostic)
@@ -130,10 +187,10 @@ _Last updated: 2026-10-06_
 - Removed disparate rollup overrides and separate count queries in `/api/manager/operators`; operators table metrics now aggregate directly from client applications.
 - Parity enforced across both TSX (`dashboard/components/ManagerDashboard.tsx`) and legacy HTML (`dashboard/public/manager.html`).
 
-### 0u. Canonical Application Statistics (implementation complete locally; migration pending)
-- Migration `027_application_stats_consistency.sql` defines the cutover, transactional application facts, and global/manager/CA scopes; it intentionally does not backfill incompatible history.
+### 0u. Canonical Application Statistics (migration 027 applied; 028 cutover repair pending)
+- Migrations `027_application_stats_consistency.sql` and `028_application_stats_cutover_repair.sql` define the availability cutover, transactional application facts, and global/manager/CA scopes; they intentionally do not backfill pre-trigger history.
 - `src/db/applicationStats.ts` provides the shared IST date, status, deduplication, scope, and availability contract used by Admin/Dev, Manager dashboard/operators/reports/overview/stats, and `/api/stats`.
-- `runStatsRollup()` is now a migration guard before pruning; legacy `gh_stats_rollups` is no longer used by dashboard metric APIs. Do not deploy the new code before applying migration 027.
+- `runStatsRollup()` is now a migration guard before pruning; legacy `gh_stats_rollups` is no longer used by dashboard metric APIs. Apply migration 028 to repair the currently configured future cutover.
 
 ### 0t. Answer Resolution Quality Fixes (shipped 2026-09-23)
 - **Pre-tier Consent Rule (`answerResolver.ts`):** Added a pre-tier regex match for consent, acknowledge, certify, and agree fields, immediately resolving to the affirmative dropdown/radio option or "Yes" with confidence 1.0.
@@ -217,13 +274,13 @@ _Last updated: 2026-10-06_
 - **Proxy Header Forwarding:** `proxyToWorker` forwards `cookie`, `x-view-as`, and `x-view-as-manager-email` (when present) to preserve operator context and session cookies across services.
 - **CAPTCHA Session Proxying:** `POST /api/applications/:id/open-captcha-session` runs SEC-4 URL check first, then proxies to `WORKER_SERVICE_URL` so Playwright browser sessions run on the worker service.
 - **Cross-Service WebSocket Broadcast:** Added `POST /api/internal/ws-broadcast` on Service 1. Service 3 (worker) forwards status changes and failure alerts via HTTP POST to Service 1 when `WEB_SERVICE_URL` is set, ensuring browser clients connected to Service 1 receive real-time updates. Added `WEB_SERVICE_URL` to `.env.example` and `src/config/env.ts`.
-- **Migration 020 (`020_multi_service_state.sql`):** Applied to remote database via Supabase. Tables `ingest_runs`, `system_worker_heartbeats`, `system_config` created with RLS. Seeded `submission_eligibility_gate_enabled = true`. Backfill executed against `gh_candidate_applications`.
+- **Migration 020 (`020_multi_service_state.sql`):** Applied to remote database via Supabase. Tables `ingest_runs`, `system_worker_heartbeats`, `system_config` created with RLS. It historically seeded `submission_eligibility_gate_enabled`; the score-gate setting is now unused. Backfill executed against `gh_candidate_applications`.
 - **Worker Submissions & Dry-Run Proxying (`submissions.ts`, `env.ts`, `index.ts`):** `POST /api/applications/:id/submit`, `POST /api/applications/:id/dry-run`, `submit-otp`, and `resume-submission` proxy to `WORKER_SERVICE_URL` via `axios` with auth headers when set. Fallback to local execution if unset. Service 1 logs warning on boot if unset.
 - **Applications assigned CA fallback:** `upsertApplication()` in `src/db/applications.ts` populates `assigned_ca_email` from `profiles.ca_email` when missing.
 - **Ingest runs tracking:** `src/db/ingestRuns.ts` (`upsertIngestRun`), phase transitions A/B/C/D captured in `storageCsvIngestion.ts` and `src/server/index.ts` on start, completion, failure, and abort.
 - **Submitter pool heartbeat & health:** `submitterPool.ts` reports snapshot every 5s to `system_worker_heartbeats` (`service_name = 'submitter_pool'`), updates status to `stopped` on SIGTERM/SIGINT. `healthSnapshot.ts` queries `system_worker_heartbeats` for worker pool status.
 - **Admin Ingest Status Guard:** `adminDashboard.ts` queries `ingest_runs` and `src/server/index.ts` allows authenticated operators to read `GET /api/admin/ingest-status`.
-- **Submission eligibility gate:** `devDashboard.ts` reads/writes `system_config`. `src/server/runtimeState.ts` and `src/submission/submissionEligibilityGate.ts` read `submission_eligibility_gate_enabled` from `system_config` with a 15s in-memory TTL.
+- **Submission question limit:** CSV job score is not an eligibility condition. `src/submission/questionLimit.ts` enforces the existing 35-question cap.
 - **Candidate listing:** `src/server/index.ts` derives `resumeAvailable` from `profiles.resume_storage_path` and removes V1 artifact fallback.
 - **Manager client dashboard:** `clientDashboard.ts` team scoping includes candidates whose profiles match manager team CAs.
 - **Internal worker routes:** When `ENABLE_QUEUE_WORKER=true` in `src/server/index.ts`, mounted `POST /api/internal/applications/:id/submit-otp`, `POST /api/internal/applications/:id/resume-submission`, and `GET /api/internal/worker-status`.
@@ -296,9 +353,9 @@ _Last updated: 2026-10-06_
 - **Next:** confirm operators have `manager_email` after login; smoke-test manager `/manager` and any shared list APIs.
 - **Sign-in audit logs (shipped):** every login logs `[Auth]` upsert `{ data, error }`, manager-mapping gate, WH CA manager id + map outcome; mapping skipped if upsert fails; try multiple candidates for manager id.
 
-### 4. Submission eligibility gate (shipped — local)
-- Ingest/segregator keeps **all** CSV scores; resolver runs for all templates (incl. ≥35 fields); `csv_job_score` + `field_count` on apps (migration **019**).
-- **Gate ON** (default): only score 20–60 and `< MAX_JOB_QUESTIONS` fields may queue/live-submit. Toggle on **Dev → System** (`PATCH /api/dev/submission-gate`); operator dashboard shows all jobs + `eligibleForSubmission`.
+### 4. Submission question limit
+- CSV score never blocks queueing or live submission; the removed Dev toggle/API and `SUBMISSION_ELIGIBILITY_GATE_ENABLED` setting are obsolete.
+- `MAX_JOB_QUESTIONS=35` remains the hard cap: jobs with 35+ scanned fields are skipped, and submission rejects records with a missing or over-limit count.
 
 ### 5. Resolution engine
 - Production 5-tier waterfall: Tier 1 (Supabase QA/profile) → Tier 2 (Resume parse) → Tier 3 (Semantic vector search via `semanticSearch.ts`) → Tier 4 (Fuse.js fuzzy match via `tier3FuzzyMatch.ts`) → Tier 5 (Batched LLM synthesis via `tier5LLM.ts`).
@@ -309,7 +366,7 @@ _Last updated: 2026-10-06_
   - `finalizeLlmAnswer` includes 3-step fuzzy option fallback (normalized comparison, contains check for short options, Fuse.js threshold 0.85) before hard reject on choice fields.
 
 ## Immediate Blockers / Open Questions
-- Apply and PostgreSQL-validate migration 027 before deploying dependent code. Docker was unavailable for local PostgreSQL validation; production migration and deployment require explicit authorization.
+- Apply migration 028 to production so same-day captured facts are eligible for dashboard queries. PostgreSQL validation and production migration/deployment have not been performed in this session.
 - Operator-triggered retry is implemented locally; verify the retry button and atomic `FAILED` → `QUEUED` transition in operator smoke testing.
 - **Open question (2026-09-18):** `GET /api/manager/reports` `perOperator[].apps` is an **all-time** count (spec gave it no date predicate) while `applications` / `completed` / `approved` in the same object are **period-scoped** — confirm whether `apps` was meant to be period-scoped too; it will read as inconsistent next to its neighbours in any UI built on it — now rendered in the Reports per-operator table, so the mismatch is user-visible.
 

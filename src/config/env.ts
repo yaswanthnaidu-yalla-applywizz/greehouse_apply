@@ -168,6 +168,12 @@ const envSchema = z.object({
   /** Azure Communication Services Endpoint (Optional) */
   AZURE_COMMUNICATION_ENDPOINT: z.string().optional(),
 
+  /**
+   * When set, all post-ingest CA notification emails go to this address
+   * instead of each CA (sandbox / local testing).
+   */
+  CA_NOTIFICATION_EMAIL_OVERRIDE: z.string().optional(),
+
   /** ApplyWizz CA Management authorized emails API endpoint */
   AUTHORIZED_EMAILS_API: z.string().default('https://applywizz-ca-management.vercel.app/api/ca/emails'),
 
