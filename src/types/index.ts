@@ -284,6 +284,8 @@ export interface ResolvedField {
   isEdited?: boolean;
   /** Carried over from the scanned field; drives the required-marker in the dashboard */
   isRequired?: boolean;
+  /** Optional hint for corporate default answer injection at Tier 5 */
+  corporateDefaultHint?: string;
 }
 
 /**
@@ -300,10 +302,10 @@ export type ApplicationStatus =
   | 'RETRY'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
-  | 'CAPTCHA_TIMEOUT'
-  | 'CAPTCHA_REQUIRED'
   | 'EMAIL_PROOF_PENDING'
-  | 'SKIPPED';
+  | 'SKIPPED'
+  | 'FILTERED_OUT';
+
 
 /**
  * Segregated candidate job queue item rendered in the operator dashboard.

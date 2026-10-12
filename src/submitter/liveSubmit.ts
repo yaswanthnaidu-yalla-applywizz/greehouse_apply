@@ -1,11 +1,11 @@
 /**
- * @fileoverview Playwright Live Submission Engine with post-submit CAPTCHA/OTP detection (Phase V2-4).
+ * @fileoverview Playwright Live Submission Engine with post-submit OTP detection (Phase V2-4).
  *
  * Executes automated Greenhouse form submission:
  * 1. Launches isolated Playwright browser context
  * 2. Populates form via formFiller.ts
  * 3. Clicks the submit button
- * 4. Inspects for CAPTCHA iframes or OTP input fields (post-submit only)
+ * 4. Inspects for OTP input fields (post-submit only)
  *    - If detected: transitions status to OTP_REQUIRED and registers paused session
  * 5. Runs 30-second multi-signal completion verification (Title / DOM tokens / URL)
  * 6. On confirmation: captures full-page web proof, uploads to Supabase Storage, sets status APPLIED
@@ -15,10 +15,12 @@
 import fs from 'fs';
 import path from 'path';
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
-import { fillForm, type FormFillSummary, type FormFillerOptions } from './formFiller.js';
+import { fillForm, formatInvalidFieldLog, type FormFillSummary, type FormFillerOptions } from './formFiller.js';
 import {
   captureWebProof,
   captureFailedScreenshot,
+  captureJobFailedScreenshot,
+  captureJobOtpScreenshot,
   captureJobOpenScreenshot,
   captureJobSubmittedScreenshot,
   captureAndSaveEmailProof,
@@ -28,7 +30,7 @@ import {
   registerSubmissionSession,
   verifySubmissionSignals,
   closeSubmissionSession,
-} from './captchaResume.js';
+} from './otpSession.js';
 
 export { verifySubmissionSignals };
 import {
@@ -38,7 +40,7 @@ import {
   type ApplicationRow,
   type ApplicationStatus,
 } from '../db/applications.js';
-import { getProfile, getCompanyEmail, updateResumeStoragePath } from '../db/profiles.js';
+import { getProfile, updateResumeStoragePath } from '../db/profiles.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { uploadResume } from '../db/storage.js';
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
@@ -46,6 +48,7 @@ import { otpResolutionService } from '../services/otpResolutionService.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { assertWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
+import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 
 const log = createLogger('Live Submit');
 const RESUMES_BUCKET = 'resumes';
@@ -109,10 +112,6 @@ export interface LiveSubmitOptions extends FormFillerOptions {
   timeoutMs?: number;
   /** Target job posting URL */
   jobUrl?: string;
-  /** Optional timeout specifically for CAPTCHA resolution polling (default: 300000 = 5 min) */
-  captchaTimeoutMs?: number;
-  /** Whether to automatically poll for CAPTCHA resolution upon headful switch (default: true) */
-  autoPollCaptcha?: boolean;
 }
 
 export interface LiveSubmitResult {
@@ -125,9 +124,6 @@ export interface LiveSubmitResult {
   proofFailedUrl?: string;
   proofFailedCapturedAt?: string;
   requiresOtp?: boolean;
-  /** @deprecated Use requiresOtp */
-  requiresCaptcha?: boolean;
-  challengeType?: 'otp' | 'captcha';
   errorMessage?: string;
   retryReason?: SubmissionRetryReason;
   summary?: FormFillSummary;
@@ -145,9 +141,6 @@ export interface PausedSession {
   otpDetectedAt?: number;
   /** Whether an OTP input field was detected and must be filled to continue */
   requiresOtp?: boolean;
-  challengeType?: 'otp' | 'captcha';
-  /** Timestamp (ms) when switched to headful mode for CAPTCHA solving */
-  appliedHeadfulAt?: number;
   /** Whether OTP has multiple individual digit/character boxes */
   multiBox?: boolean;
   /** Number of OTP boxes detected if multi-box */
@@ -156,7 +149,7 @@ export interface PausedSession {
   boxSelectors?: string[];
   /** Whether a success or failure screenshot was already captured before closing */
   screenshotCaptured?: boolean;
-  /** 30-minute auto-close timer handle to prevent leaking browser processes */
+  /** 5-minute auto-close timer handle to prevent leaking browser processes */
   ttlTimer?: NodeJS.Timeout;
 }
 
@@ -176,7 +169,6 @@ export function buildOtpPauseMetadata(
   | 'otpFieldSelector'
   | 'otpDetectedAt'
   | 'requiresOtp'
-  | 'challengeType'
   | 'multiBox'
   | 'boxCount'
   | 'boxSelectors'
@@ -186,7 +178,6 @@ export function buildOtpPauseMetadata(
       otpFieldSelector: otpField.selector,
       otpDetectedAt: Date.now(),
       requiresOtp: true,
-      challengeType: 'otp',
       multiBox: otpField.multiBox,
       boxCount: otpField.boxCount,
       boxSelectors: otpField.boxSelectors,
@@ -195,7 +186,6 @@ export function buildOtpPauseMetadata(
 
   return {
     requiresOtp: false,
-    challengeType: 'captcha',
   };
 }
 
@@ -215,8 +205,6 @@ export function storePausedSession(
     applywizzId?: string;
     otpDetectedAt?: number;
     requiresOtp?: boolean;
-    challengeType?: 'otp' | 'captcha';
-    appliedHeadfulAt?: number;
     multiBox?: boolean;
     boxCount?: number;
     boxSelectors?: string[];
@@ -245,10 +233,10 @@ export function storePausedSession(
 
   const ttlTimer = setTimeout(async () => {
     log.warn(
-      `[Live Submit] ⏰ Paused session ${canonicalKey} timed out after 30m. Closing browser context...`
+      `[Live Submit] ⏰ Paused OTP session ${canonicalKey} timed out after 5m. Closing browser context...`
     );
     await clearPausedSession(canonicalKey);
-  }, 30 * 60 * 1000);
+  }, 5 * 60 * 1000);
 
   if (ttlTimer.unref) {
     ttlTimer.unref();
@@ -264,8 +252,6 @@ export function storePausedSession(
     applywizzId,
     otpDetectedAt: session.otpDetectedAt ?? pausedAt,
     requiresOtp: session.requiresOtp ?? Boolean(session.otpFieldSelector),
-    challengeType: session.challengeType ?? (session.otpFieldSelector ? 'otp' : 'captcha'),
-    appliedHeadfulAt: session.appliedHeadfulAt,
     multiBox: session.multiBox,
     boxCount: session.boxCount,
     boxSelectors: session.boxSelectors,
@@ -307,10 +293,10 @@ export function resolvePausedSession(
   return null;
 }
 
-/**
- * Removes all alias keys for a paused session and closes the browser.
- */
-export async function clearPausedSession(id: string): Promise<void> {
+export async function clearPausedSession(
+  id: string,
+  options: { captureFailureProof?: boolean } = {}
+): Promise<void> {
   const resolved = resolvePausedSession(id);
   if (!resolved) return;
 
@@ -319,14 +305,19 @@ export async function clearPausedSession(id: string): Promise<void> {
     clearTimeout(session.ttlTimer);
   }
   try {
-    if (session.page && !session.page.isClosed() && !session.screenshotCaptured) {
+    if (
+      options.captureFailureProof !== false &&
+      session.page &&
+      !session.page.isClosed() &&
+      !session.screenshotCaptured
+    ) {
       try {
         await captureFailedScreenshot(session.page, session.applicationId);
         session.screenshotCaptured = true;
       } catch {}
     }
-    await session.page.close().catch(() => {});
-    await session.browser.close().catch(() => {});
+    await session.page?.close().catch(() => {});
+    await session.browser?.close().catch(() => {});
   } finally {
     for (const [key, value] of PAUSED_SESSIONS.entries()) {
       if (value === session) {
@@ -335,22 +326,6 @@ export async function clearPausedSession(id: string): Promise<void> {
     }
   }
 }
-
-/**
- * Known CAPTCHA iframe and element selector patterns.
- */
-const CAPTCHA_SELECTORS = [
-  'iframe[src*="turnstile"]',
-  'iframe[src*="challenges.cloudflare.com"]',
-  'div.cf-turnstile',
-  'iframe[src*="recaptcha"]',
-  'iframe[title*="reCAPTCHA"]',
-  'div.g-recaptcha',
-  'iframe[src*="hcaptcha"]',
-  'div.h-captcha',
-  'iframe[src*="arkoselabs"]',
-  '[data-sitekey]',
-];
 
 const OTP_KEYWORD_PATTERN =
   /otp|verification|verify.?code|one.?time|passcode|\bpin\b|2fa|mfa|auth.?code|security.?code/i;
@@ -626,42 +601,6 @@ export async function detectOTPField(page: Page): Promise<OTPFieldDetection> {
 }
 
 /**
- * Checks if the page contains an active CAPTCHA iframe challenge.
- */
-export async function detectCaptchaIframe(
-  page: Page
-): Promise<{ detected: boolean; type?: string }> {
-  for (const selector of CAPTCHA_SELECTORS) {
-    try {
-      const loc = page.locator(selector).first();
-      const count = await loc.count();
-      if (count > 0 && (await loc.isVisible().catch(() => true))) {
-        return { detected: true, type: `captcha: ${selector}` };
-      }
-    } catch {
-      // Continue inspecting other selectors
-    }
-  }
-
-  const frames = page.frames();
-  for (const frame of frames) {
-    const frameUrl = frame.url().toLowerCase();
-    if (
-      frameUrl.includes('turnstile') ||
-      frameUrl.includes('recaptcha') ||
-      frameUrl.includes('hcaptcha') ||
-      frameUrl.includes('challenges.cloudflare.com')
-    ) {
-      return { detected: true, type: `frame: ${frameUrl}` };
-    }
-  }
-
-  return { detected: false };
-}
-
-export const detectCaptchaWidgets = detectCaptchaIframe;
-
-/**
  * Detects form filling and inline validation errors on the page after submission attempt.
  */
 export async function detectFormFillingErrors(
@@ -699,349 +638,71 @@ export async function detectFormFillingErrors(
       }
     }
 
-    // 2. Check for HTML5 invalid form inputs that blocked submission
-    const invalidInputs = page.locator('input:invalid, select:invalid, textarea:invalid');
+    // 2. Check for HTML5 invalid form inputs that blocked submission.
+    //    Exclude aria-hidden="true" inputs — these are hidden backing inputs
+    //    for Greenhouse Remix/React-Select comboboxes (class "requiredInput").
+    //    They are not real user-facing fields; the combobox fill handles them.
+    const invalidInputs = page.locator(
+      'input:invalid:not([aria-hidden="true"]):not([tabindex="-1"]), select:invalid, textarea:invalid'
+    );
     const invalidCount = await invalidInputs.count().catch(() => 0);
     if (invalidCount > 0) {
       const firstInvalid = invalidInputs.first();
-      const validationMsg = await firstInvalid.evaluate(
-        (el: HTMLInputElement) => el.validationMessage || ''
-      ).catch(() => '');
-      const fieldName =
-        (await firstInvalid.getAttribute('name').catch(() => '')) ||
-        (await firstInvalid.getAttribute('id').catch(() => '')) ||
-        'required field';
-      const detail = validationMsg ? `${fieldName} (${validationMsg})` : `${fieldName} is invalid or required`;
-      return { hasError: true, message: `Required field validation failed: ${detail}` };
+      const info = await firstInvalid.evaluate((el: HTMLElement) => {
+        const input = el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+        const val = input.value || '';
+        let labelText = '';
+        if (input.id) {
+          const l = document.querySelector(`label[for="${input.id}"]`);
+          if (l) labelText = (l.textContent || '').trim();
+        }
+        if (!labelText) {
+          const dataField = input.closest('[data-field-id]');
+          const l = dataField?.querySelector('label');
+          if (l) labelText = (l.textContent || '').trim();
+        }
+        if (!labelText) {
+          const ariaLabelledBy = input.getAttribute('aria-labelledby');
+          if (ariaLabelledBy) {
+            const ariaEl = document.getElementById(ariaLabelledBy);
+            if (ariaEl) labelText = (ariaEl.textContent || '').trim();
+          }
+        }
+        if (!labelText) {
+          const parentLabel = input.closest('label');
+          if (parentLabel) labelText = (parentLabel.textContent || '').trim();
+        }
+        if (!labelText) {
+          const container = input.closest('.field, .field-wrapper, [class*="field"], .question, tr, div');
+          const l = container?.querySelector('label, [class*="label"], .field__label');
+          if (l) labelText = (l.textContent || '').trim();
+        }
+        let optionsArr: string[] = [];
+        if (input.tagName === 'SELECT') {
+          optionsArr = Array.from((input as HTMLSelectElement).options).map(o => (o.text || '').trim()).filter(Boolean);
+        }
+        return {
+          label: labelText || input.name || input.id || 'unlabeled',
+          filled: val,
+          options: optionsArr,
+        };
+      }).catch(() => null);
+
+      const label = info?.label || 'unknown';
+      const filled = info?.filled || '';
+      const optionsArr = info?.options || [];
+      const logMsg = formatInvalidFieldLog(label, filled, optionsArr);
+      log.warn(logMsg);
+      return { hasError: true, message: logMsg };
     }
   } catch {}
 
   return { hasError: false };
 }
 
-/**
- * Checks if the page contains an active CAPTCHA challenge or OTP verification prompt.
- */
-export async function detectCaptchaOrOtp(
-  page: Page
-): Promise<{ detected: boolean; type?: string; otpField?: OTPFieldDetection }> {
-  const otpField = await detectOTPField(page);
-  if (otpField.found) {
-    return {
-      detected: true,
-      type: `otp: ${otpField.selector}`,
-      otpField,
-    };
-  }
 
-  const captcha = await detectCaptchaIframe(page);
-  if (captcha.detected) {
-    return { detected: true, type: captcha.type };
-  }
 
-  return { detected: false, otpField };
-}
 
-/** @deprecated Use detectCaptchaOrOtp */
-export const detectCaptcha = detectCaptchaOrOtp;
-
-/**
- * Switches browser from headless to headful mode at the specified URL upon CAPTCHA detection.
- * 1. Closes current headless browser
- * 2. Launches new browser with { headless: false }
- * 3. Navigates to currentUrl
- * 4. Returns { browser, page, context, appliedHeadfulAt }
- */
-export async function switchToHeadfulMode(
-  browser: Browser,
-  currentUrl: string,
-  options: { headless?: boolean } = {}
-): Promise<{ browser: Browser; context: BrowserContext; page: Page; appliedHeadfulAt: number }> {
-  log.info(`[Live Submit] 🖥️ Switching to headful browser for URL ${currentUrl}...`);
-
-  // Closes current headless browser
-  await browser.close().catch(() => {});
-
-  const appliedHeadfulAt = Date.now();
-  const isHeadless =
-    process.env.RAILWAY_ENV === 'true'
-      ? true
-      : options.headless !== undefined
-      ? options.headless
-      : false;
-
-  let newBrowser: Browser;
-  try {
-    newBrowser = await chromium.launch({
-      headless: isHeadless,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-  } catch (launchErr) {
-    haltWithDevAlert(
-      'Scanner',
-      'Playwright failed to launch — check RAILWAY_ENV and browser binary',
-      launchErr
-    );
-  }
-
-  const context = await newBrowser.newContext({
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    viewport: { width: 1280, height: 900 },
-  });
-
-  const page = await context.newPage();
-  await page.goto(currentUrl, {
-    waitUntil: 'domcontentloaded',
-    timeout: 30000,
-  });
-
-  return { browser: newBrowser, context, page, appliedHeadfulAt };
-}
-
-/**
- * Compatibility wrapper for switchBrowserToHeadful using application row.
- */
-export async function switchBrowserToHeadful(
-  application: ApplicationRow,
-  currentBrowser: Browser,
-  targetUrl: string,
-  options: { headless?: boolean } = {}
-): Promise<{ browser: Browser; context: BrowserContext; page: Page; appliedHeadfulAt: number }> {
-  log.info(
-    `[Live Submit] 🖥️ Switching to headful browser for application ${application.id || application.applywizz_id}...`
-  );
-  return switchToHeadfulMode(currentBrowser, targetUrl, options);
-}
-
-export interface PollCaptchaOptions {
-  timeoutMs?: number;
-  pollIntervalMs?: number;
-  browser?: Browser;
-}
-
-/**
- * Polls every 500ms for up to 5 minutes (or options.timeoutMs) for CAPTCHA resolution.
- * - Checks:
- *   1. CAPTCHA iframe is gone: !await page.$('iframe[src*="turnstile"]') (and recaptcha/hcaptcha)
- *   2. Submit button is enabled/clickable: await page.$('button[type="submit"]:not([disabled])')
- * - On both conditions true: auto-clicks submit button, proceeds to verification & proof capture
- * - If timeout reached: captures failure screenshot, closes browser, returns status CAPTCHA_TIMEOUT
- */
-export async function pollCaptchaSolved(
-  applicationId: string,
-  page: Page,
-  application: ApplicationRow,
-  options: PollCaptchaOptions = {}
-): Promise<LiveSubmitResult> {
-  const timeoutMs = options.timeoutMs ?? 300000;
-  const pollIntervalMs = options.pollIntervalMs ?? 500;
-  const startTime = Date.now();
-
-  log.info(
-    `[Live Submit] 🔄 Polling for CAPTCHA resolution for application ${applicationId} (every ${pollIntervalMs}ms, up to ${timeoutMs / 1000}s)...`
-  );
-
-  while (Date.now() - startTime < timeoutMs) {
-    try {
-      if (page.isClosed()) {
-        break;
-      }
-
-      // Check if CAPTCHA iframe is gone
-      const turnstile = await page.$('iframe[src*="turnstile"]').catch(() => null);
-      const recaptcha = await page.$('iframe[src*="recaptcha"]').catch(() => null);
-      const hcaptcha = await page.$('iframe[src*="hcaptcha"]').catch(() => null);
-      const cf = await page.$('iframe[src*="challenges.cloudflare.com"]').catch(() => null);
-      const captchaPresent = Boolean(turnstile || recaptcha || hcaptcha || cf);
-
-      // Check if submit button is enabled/clickable
-      const submitSelectors = [
-        'button[type="submit"]:not([disabled])',
-        'input[type="submit"]:not([disabled])',
-        '#submit_app:not([disabled])',
-        'button:has-text("Submit Application"):not([disabled])',
-        'input[value*="Submit"]:not([disabled])',
-        'button:has-text("Apply"):not([disabled])',
-        '#submit_application:not([disabled])',
-      ];
-
-      let submitBtn: Locator | null = null;
-      for (const sel of submitSelectors) {
-        const loc = page.locator(sel).first();
-        if ((await loc.count().catch(() => 0)) > 0 && (await loc.isVisible().catch(() => false))) {
-          const isDis = await loc.isDisabled().catch(() => false);
-          if (!isDis) {
-            submitBtn = loc;
-            break;
-          }
-        }
-      }
-
-      if (!captchaPresent && submitBtn) {
-        log.info(`[Live Submit] ✅ CAPTCHA solved! Auto-clicking submit button...`);
-        await submitBtn.click({ timeout: 5000 });
-
-        await page.waitForTimeout(1500);
-
-        // Check if OTP field appeared post-submit
-        const otpField = await detectOTPField(page);
-        if (otpField.found) {
-          log.warn(
-            `[Live Submit] 🔢 OTP requirement detected after CAPTCHA solve (${otpField.selector})`
-          );
-          if (application.id) {
-            await updateStatus(application.id, 'OTP_REQUIRED');
-          }
-          const sessionKey = storePausedSession(application, {
-            browser: options.browser || PAUSED_SESSIONS.get(applicationId)?.browser!,
-            page,
-            applicationId,
-            jobUrl: application.job_url,
-            ...buildOtpPauseMetadata(otpField),
-          });
-          return {
-            success: false,
-            status: 'OTP_REQUIRED',
-            applicationId: sessionKey,
-            message: 'OTP required. Enter code in dashboard.',
-            requiresOtp: true,
-            challengeType: 'otp',
-          };
-        }
-
-        // Verification signals (30s timeout)
-        const verification = await verifySubmissionSignals(page, 30000);
-        if (verification.verified) {
-          log.info(`[Live Submit] 🎉 Submission verified after CAPTCHA solve! Signal: ${verification.signal}`);
-          const proofResult = await captureWebProof(page, application);
-          if (proofResult.proofWebUrl) {
-            log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
-          }
-          if (application.id) {
-            await updateStatus(application.id, 'APPLIED', {
-              proof_web_url: proofResult.proofWebUrl,
-              proof_captured_at: proofResult.proofCapturedAt,
-            });
-          }
-
-          // Asynchronously capture confirmation email proof from Zoho Mail in the background
-          captureAndSaveEmailProof(application).catch((err: any) => {
-            log.warn(`[Live Submit] ⚠️ Background email proof capture failed: ${err.message}`);
-          });
-
-          const resolved = resolvePausedSession(applicationId);
-          if (resolved) {
-            resolved.session.screenshotCaptured = true;
-          }
-          await clearPausedSession(applicationId);
-          await closeSubmissionSession(applicationId);
-
-          return {
-            success: true,
-            status: 'APPLIED',
-            applicationId,
-            proofWebUrl: proofResult.proofWebUrl,
-            proofCapturedAt: proofResult.proofCapturedAt,
-          };
-        } else {
-          const isTimeout = /time.*out/i.test(verification.error || '');
-          const errorMsg = verification.error || 'Timeout: Submission verification timed out.';
-          if (isTimeout) {
-            log.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
-          } else {
-            log.warn(`[Live Submit] ❌ Verification failed: ${errorMsg}`);
-          }
-          let failedProofUrl: string | undefined;
-          let failedCapturedAt: string | undefined;
-          try {
-            const failed = await captureFailedScreenshot(page, application);
-            if (failed?.url) {
-              log.info(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
-              failedProofUrl = failed.proofFailedUrl || failed.url;
-              failedCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
-            }
-          } catch {}
-          if (application.id) {
-            await updateStatus(application.id, 'FAILED', {
-              error_message: errorMsg,
-              proof_failed_url: failedProofUrl,
-              proof_failed_captured_at: failedCapturedAt,
-              job_url: application.job_url,
-            });
-          }
-          await clearPausedSession(applicationId);
-          await closeSubmissionSession(applicationId);
-
-          return {
-            success: false,
-            status: 'FAILED',
-            applicationId,
-            errorMessage: errorMsg,
-            proofFailedUrl: failedProofUrl,
-            proofFailedCapturedAt: failedCapturedAt,
-          };
-        }
-      }
-    } catch {
-      // Continue polling
-    }
-
-    await page.waitForTimeout(pollIntervalMs);
-  }
-
-  // Timeout reached (5 min)
-  const timeoutMsg = 'Timeout: Session timed out after 5 minutes';
-  log.warn(`[Live Submit] ⏱️ Timeout: ${timeoutMsg} for application ${applicationId}`);
-
-  let timeoutFailedUrl: string | undefined;
-  let timeoutCapturedAt: string | undefined;
-  try {
-    if (!page.isClosed()) {
-      const failed = await captureFailedScreenshot(page, application);
-      if (failed?.url) {
-        log.info(`[Live Submit] 📸 Timeout failure screenshot URL: ${failed.url}`);
-        timeoutFailedUrl = failed.proofFailedUrl || failed.url;
-        timeoutCapturedAt = failed.proofFailedCapturedAt || failed.capturedAt;
-      }
-    }
-  } catch (err: any) {
-    log.warn(`[Live Submit] ⚠️ Pre-close failure screenshot failed: ${err.message}`);
-  }
-
-  const targetAppId = application.id || application.applywizz_id || applicationId;
-  if (targetAppId) {
-    try {
-      await updateStatus(targetAppId, 'FAILED', {
-        error_message: timeoutMsg,
-        proof_failed_url: timeoutFailedUrl,
-        proof_failed_captured_at: timeoutCapturedAt,
-        job_url: application.job_url,
-      });
-    } catch (err: any) {
-      log.warn(`[Live Submit] ⚠️ Error updating status to FAILED on timeout: ${err.message}`);
-    }
-  }
-
-  await clearPausedSession(applicationId);
-  await closeSubmissionSession(applicationId);
-
-  return {
-    success: false,
-    status: 'CAPTCHA_TIMEOUT',
-    applicationId,
-    message: timeoutMsg,
-    errorMessage: timeoutMsg,
-    proofFailedUrl: timeoutFailedUrl,
-    proofFailedCapturedAt: timeoutCapturedAt,
-  };
-}
 
 const OTP_VERIFY_SELECTORS = [
   'button[type="submit"]',
@@ -1103,7 +764,7 @@ export async function submitOtpToPausedSession(
     const detected = await detectOTPField(page);
     if (!detected.found || !detected.selector) {
       if (page && !page.isClosed()) {
-        const failed = await captureFailedScreenshot(page, application).catch(() => null);
+        const failed = await captureJobFailedScreenshot(page, application, 'otp_missing_field').catch(() => null);
         if (failed?.url) {
           log.info(`[Live Submit] 📸 OTP missing field failure screenshot URL: ${failed.url}`);
         }
@@ -1189,6 +850,8 @@ export async function submitOtpToPausedSession(
         proof_web_url: proofResult.proofWebUrl,
         proof_captured_at: proofResult.proofCapturedAt,
         job_url: application.job_url,
+      }).catch((err: any) => {
+        log.warn(`[Live Submit] ⚠️ Could not set status EMAIL_PROOF_PENDING: ${err.message}`);
       });
 
       await closeSubmissionSession(canonicalKey);
@@ -1209,6 +872,8 @@ export async function submitOtpToPausedSession(
           proof_email_captured_at: emailProof.received_at || new Date().toISOString(),
           email_proof_status: 'captured',
           job_url: application.job_url,
+        }).catch((err: any) => {
+          log.warn(`[Live Submit] ⚠️ Could not set status APPLIED: ${err.message}`);
         });
 
         return {
@@ -1386,6 +1051,16 @@ export async function runLiveSubmit(
 
   if (!(await ensureResumeAvailable(application))) {
     const errorMessage = 'Resume unavailable — could not fetch from ApplyWizz';
+    await emitFailureDiagnostic({
+      category: 'SUBMIT_RESUME_MISSING',
+      stage: 'resume_preparation',
+      reason: errorMessage,
+      applicationId: application.id || applicationId,
+      applywizzId: application.applywizz_id,
+      jobUrl: targetUrl,
+      isTerminal: true,
+      isRetryable: false,
+    }).catch(() => {});
     if (application.id) {
       await updateStatus(application.id, 'FAILED', {
         error_message: errorMessage,
@@ -1519,6 +1194,16 @@ export async function runLiveSubmit(
     if (unfilledRequiredLabels.length > 0) {
       const requiredFieldsError = `Required fields not filled: ${unfilledRequiredLabels.join(', ')}`;
       log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
+      await emitFailureDiagnostic({
+        category: 'SUBMIT_REQUIRED_FIELD_EMPTY',
+        stage: 'form_validation',
+        reason: requiredFieldsError,
+        applicationId: application.id || applicationId,
+        applywizzId: application.applywizz_id,
+        jobUrl: targetUrl,
+        isTerminal: false,
+        isRetryable: true,
+      }).catch(() => {});
       if (application.id) {
         await updateStatus(application.id, 'FAILED', {
           error_message: requiredFieldsError,
@@ -1562,6 +1247,15 @@ export async function runLiveSubmit(
     if (!submitClicked) {
       const fillErrMsg = 'Form filling error: Submit button could not be located on the application form.';
       log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+      await emitFailureDiagnostic({
+        category: 'SUBMIT_FORM_FILL_ERROR',
+        stage: 'submit_button_click',
+        reason: fillErrMsg,
+        isTerminal: false,
+        isRetryable: true,
+        applicationId: application.id || applicationId,
+        jobUrl: targetUrl,
+      });
       let failedProof: any = null;
       if (page && !page.isClosed()) {
         failedProof = await captureFailedScreenshot(page, application).catch(() => null);
@@ -1632,8 +1326,15 @@ export async function runLiveSubmit(
             `${otpField.metadata?.matchReason ? ` — ${otpField.metadata.matchReason}` : ''}`
         );
 
+        // Capture OTP challenge modal screenshot before pausing
+        await captureJobOtpScreenshot(page, application).catch(() => null);
+
         if (application.id) {
-          await updateStatus(application.id, 'OTP_REQUIRED');
+          try {
+            await updateStatus(application.id, 'OTP_REQUIRED');
+          } catch (err: any) {
+            log.warn(`[Live Submit] ⚠️ Could not set status OTP_REQUIRED: ${err.message}`);
+          }
         }
 
         const pausedAt = Date.now();
@@ -1662,7 +1363,7 @@ export async function runLiveSubmit(
         try {
           const profile = await getProfile(application.applywizz_id);
           if (profile) {
-            companyEmail = getCompanyEmail(profile);
+            companyEmail = (profile.company_email || profile.email || '').trim() || null;
           }
         } catch (profErr: any) {
           log.warn(`[Live Submit] ⚠️ Could not fetch profile for company email: ${profErr.message}`);
@@ -1672,10 +1373,11 @@ export async function runLiveSubmit(
           otpResolutionService.register({
             applicationId,
             email: companyEmail,
-            sinceTimestamp: pausedAt - 60000,
+            submitClickedAt: pausedAt,
             sessionKey,
-            attemptCount: 0,
           });
+        } else {
+          log.warn(`[Live Submit] ⚠️ No company email found for application ${applicationId}; skipping OTP registration.`);
         }
         return {
           success: false,
@@ -1686,11 +1388,20 @@ export async function runLiveSubmit(
         };
       }
 
-      // Check for form filling / validation errors on page before assuming CAPTCHA block
+      // Check for form filling / validation errors on page
       const fillError = await detectFormFillingErrors(page);
       if (fillError.hasError) {
         const fillErrMsg = `Form filling error: ${fillError.message}`;
         log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+        await emitFailureDiagnostic({
+          category: 'SUBMIT_FORM_FILL_ERROR',
+          stage: 'form_filling',
+          reason: fillErrMsg,
+          isTerminal: false,
+          isRetryable: true,
+          applicationId: application.id || applicationId,
+          jobUrl: targetUrl,
+        });
         let failedProof: any = null;
         if (page && !page.isClosed()) {
           failedProof = await captureFailedScreenshot(page, application).catch(() => null);
@@ -1720,65 +1431,6 @@ export async function runLiveSubmit(
           proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
         };
       }
-
-      // Check if submission was actually blocked:
-      // 1. Look for error message on page: pageText contains "challenge" / "verify" / "security" / "try again"
-      const hasBlockErrorMessage =
-        pageText.includes('challenge') ||
-        pageText.includes('verify') ||
-        pageText.includes('security') ||
-        pageText.includes('try again');
-
-      // 2. Check if submit button is visible and clickable again (reset state = blocked)
-      let isSubmitButtonReset = false;
-      for (const sel of submitSelectors) {
-        const btn = page.locator(sel).first();
-        if ((await btn.count().catch(() => 0)) > 0 && (await btn.isVisible().catch(() => false))) {
-          const isDis = await btn.isDisabled().catch(() => true);
-          if (!isDis) {
-            isSubmitButtonReset = true;
-            break;
-          }
-        }
-      }
-
-      // 3. Check for CAPTCHA iframe
-      const postSubmitCaptcha = await detectCaptchaIframe(page);
-
-      // Trigger ONLY on actual block:
-      // URL not changed + (error message on page OR (CAPTCHA iframe detected + submit button reset to clickable))
-      const isActuallyBlocked =
-        !urlChanged &&
-        (hasBlockErrorMessage || (postSubmitCaptcha.detected && isSubmitButtonReset));
-
-      if (isActuallyBlocked) {
-        const captchaErrorMessage = 'CAPTCHA encountered';
-        log.warn('[Submitter] 🚫 CAPTCHA detected → marked FAILED.');
-        keepSessionOpen = false;
-        const failedProof = await captureFailedScreenshot(page, application).catch(() => null);
-        screenshotCaptured = true;
-        if (application.id) {
-          await updateStatus(application.id, 'FAILED', {
-            error_message: captchaErrorMessage,
-            proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
-            proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-            job_url: application.job_url,
-          });
-        }
-        return {
-          success: false,
-          status: 'FAILED',
-          applicationId,
-          errorMessage: captchaErrorMessage,
-          summary: fillSummary,
-          proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-          proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-        };
-      } else {
-        log.info(
-          `[Live Submit] ℹ️ No actual block detected (urlChanged=${urlChanged}, buttonReset=${isSubmitButtonReset}, hasBlockError=${hasBlockErrorMessage}). Continuing to confirmation verification...`
-        );
-      }
     }
 
     // 7. Multi-Signal Completion Verification (up to 30s)
@@ -1795,6 +1447,17 @@ export async function runLiveSubmit(
         screenshotCaptured = true;
       } catch (err: any) {
         log.warn(`[liveSubmit] Proof capture failed after submit — marking APPLIED anyway: ${err.message}`);
+        await emitFailureDiagnostic({
+          category: 'SUBMIT_PROOF_CAPTURE',
+          stage: 'proof_capture',
+          reason: `Web proof screenshot capture failed: ${err?.message || String(err)}`,
+          error: err,
+          applicationId: application.id || applicationId,
+          applywizzId: application.applywizz_id,
+          jobUrl: targetUrl,
+          isTerminal: false,
+          isRetryable: true,
+        }).catch(() => {});
       }
       if (proofResult.proofWebUrl) {
         log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
@@ -1874,6 +1537,17 @@ export async function runLiveSubmit(
         log.warn(`[Live Submit] ❌ Submission verification failed: ${errorMsg} for application ${applicationId}`);
       }
 
+      await emitFailureDiagnostic({
+        category: isFormError ? 'SUBMIT_FORM_FILL_ERROR' : 'SUBMIT_CONFIRMATION_TIMEOUT',
+        stage: 'submission_confirmation',
+        reason: errorMsg,
+        isTerminal: false,
+        isRetryable: true,
+        applicationId: application.id || applicationId,
+        jobUrl: targetUrl,
+        metadata: { timeoutMs },
+      });
+
       let failedProof: any = null;
       if (page && !page.isClosed() && !screenshotCaptured) {
         failedProof = await captureFailedScreenshot(page, application).catch(() => null);
@@ -1889,7 +1563,7 @@ export async function runLiveSubmit(
           proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
           proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
           job_url: application.job_url,
-        });
+        }).catch(() => {});
       }
 
       return {
@@ -1919,6 +1593,21 @@ export async function runLiveSubmit(
     } else {
       log.error(`[Live Submit] ❌ Submission execution error for application ${applicationId}: ${finalErrMsg}`);
     }
+
+    await emitFailureDiagnostic({
+      category: isFillError
+        ? 'SUBMIT_FORM_FILL_ERROR'
+        : isTimeout
+          ? 'SUBMIT_PLAYWRIGHT_TIMEOUT'
+          : 'SUBMIT_PLAYWRIGHT_NAVIGATE',
+      stage: 'submission_execution',
+      reason: finalErrMsg,
+      error: err,
+      isTerminal: false,
+      isRetryable: true,
+      applicationId: application.id || applicationId,
+      jobUrl: targetUrl,
+    });
 
     let failedProof: any = null;
     if (page && !page.isClosed() && !screenshotCaptured) {

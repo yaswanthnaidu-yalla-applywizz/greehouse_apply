@@ -11,10 +11,8 @@ import pg from 'pg';
 import { createLogger } from '../utils/logger.js';
 import { SANDBOX_CA_EMAIL } from './sandboxAssignment.js';
 import {
-  akshithaSegment,
   akshithaTemplates,
   akshithaApplications,
-  AKSHITHA_RESUME_STORAGE_PATH,
 } from '../dashboard/akshithaDemoFixtures.js';
 
 const { Pool } = pg;
@@ -575,14 +573,14 @@ export class SandboxQueryBuilder {
 
         const sql = `UPDATE "${this.table}" SET ${setClauses.join(', ')}${where.clause} RETURNING *`;
         const res = await pool.query(sql, values);
-        return { data: res.rows, error: null };
+        return { data: res.rows, error: null, count: res.rowCount };
       }
 
       if (this.mutationType === 'delete') {
         const where = this.buildWhere(1);
         const sql = `DELETE FROM "${this.table}"${where.clause} RETURNING *`;
         const res = await pool.query(sql, where.values);
-        return { data: res.rows, error: null };
+        return { data: res.rows, error: null, count: res.rowCount };
       }
 
       // Default: SELECT
@@ -828,6 +826,12 @@ export async function runSandboxMigrations(): Promise<void> {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_api_fetch_at TIMESTAMPTZ;
   `);
 
+  // 3. Copy profiles from remote DB2 directly into local sandbox DB
+  await copyProfilesFromDb2(pool);
+
+  // 3b. Backfill profiles.zoho_connected from Zoho Mail Connector API
+  await backfillZohoConnectedProfiles(pool);
+
   // Sandbox dashboards assign every candidate and application to the dev operator.
   await pool.query(
     `UPDATE profiles SET ca_email = $1 WHERE ca_email IS DISTINCT FROM $1`,
@@ -838,47 +842,131 @@ export async function runSandboxMigrations(): Promise<void> {
     [SANDBOX_CA_EMAIL]
   );
 
-  // 3. Seed demo candidate Akshitha G (AWL-31428)
+  // 4. Seed demo job templates, applications, and auth user
   await seedSandboxDemoData();
+}
+
+/**
+ * Copies the complete profiles table from remote DB2 into the local sandbox database.
+ */
+export async function copyProfilesFromDb2(localPool: pg.Pool): Promise<void> {
+  const db2Url = process.env.DB2_DATABASE_URL;
+  if (!db2Url) {
+    throw new Error('DB2_DATABASE_URL is not set in .env.sandbox. Cannot copy profiles from DB2.');
+  }
+
+  log.info('📦 Connecting to DB2 to copy profiles table into sandbox...');
+  const remoteClient = new pg.Client({
+    connectionString: db2Url,
+    ssl: { rejectUnauthorized: false },
+  });
+
+  await remoteClient.connect();
+  try {
+    const res = await remoteClient.query('SELECT * FROM profiles ORDER BY created_at ASC;');
+    log.info(`Fetched ${res.rows.length} profiles from DB2. Copying into sandbox DB...`);
+
+    if (res.rows.length === 0) return;
+
+    const client = await localPool.connect();
+    try {
+      await client.query('BEGIN');
+      const cols = Object.keys(res.rows[0]);
+      const colNames = cols.map((c) => `"${c}"`).join(', ');
+
+      for (const row of res.rows) {
+        row.ca_email = SANDBOX_CA_EMAIL;
+        const values = cols.map((c) => {
+          const val = row[c];
+          if (val !== null && typeof val === 'object' && !(val instanceof Date)) {
+            return JSON.stringify(val);
+          }
+          return val;
+        });
+        const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+        const updateSet = cols
+          .filter((c) => c !== 'id' && c !== 'applywizz_id')
+          .map((c) => `"${c}" = EXCLUDED."${c}"`)
+          .join(', ');
+
+        await client.query(
+          `INSERT INTO profiles (${colNames}) VALUES (${placeholders})
+           ON CONFLICT (applywizz_id) DO UPDATE SET ${updateSet};`,
+          values
+        );
+      }
+      await client.query('COMMIT');
+      log.info(`✅ Successfully copied ${res.rows.length} profiles from DB2 into sandbox database.`);
+    } catch (insertErr) {
+      await client.query('ROLLBACK');
+      throw insertErr;
+    } finally {
+      client.release();
+    }
+  } finally {
+    await remoteClient.end();
+  }
+}
+
+/**
+ * Backfills profiles.zoho_connected from the Zoho Mail Reader REST API.
+ */
+export async function backfillZohoConnectedProfiles(pool: pg.Pool): Promise<number> {
+  const connectorUrl = process.env.ZOHO_CONNECTOR_URL || 'https://zoho-mail-reader.onrender.com/';
+  const url = `${connectorUrl.replace(/\/+$/, '')}/api/zoho/ui/users`;
+  log.info(`[Sandbox] 🌐 Fetching connected Zoho mailboxes from ${url}...`);
+
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) {
+      log.warn(`[Sandbox] ⚠️ Zoho connector returned HTTP ${res.status}: ${res.statusText}. Preserving copied DB2 flags.`);
+      return 0;
+    }
+
+    const data = (await res.json()) as { users?: Array<{ email: string; connected: boolean }> };
+    const connectedEmails = (data.users || [])
+      .filter((u) => u.connected && u.email)
+      .map((u) => u.email.toLowerCase().trim());
+
+    log.info(`[Sandbox] 📊 Found ${connectedEmails.length} connected mailboxes in Zoho connector.`);
+
+    // Reset zoho_connected to false first
+    await pool.query('UPDATE profiles SET zoho_connected = false');
+
+    const demoIds = ['AWL-YASWANTH', 'AWL-31428', 'AWL-YASHANTH'];
+    let count = 0;
+    if (connectedEmails.length > 0) {
+      const updateRes = await pool.query(
+        `UPDATE profiles 
+         SET zoho_connected = true 
+         WHERE LOWER(company_email) = ANY($1) 
+            OR LOWER(email) = ANY($1) 
+            OR applywizz_id = ANY($2)`,
+        [connectedEmails, demoIds]
+      );
+      count = updateRes.rowCount || 0;
+    } else {
+      const updateRes = await pool.query(
+        `UPDATE profiles SET zoho_connected = true WHERE applywizz_id = ANY($1)`,
+        [demoIds]
+      );
+      count = updateRes.rowCount || 0;
+    }
+
+    log.info(`[Sandbox] ✅ Zoho connected backfill complete: marked ${count} profiles Zoho-connected.`);
+    return count;
+  } catch (err: any) {
+    log.warn(`[Sandbox] ⚠️ Zoho connected backfill warning: ${err.message}. Preserving copied DB2 flags.`);
+    return 0;
+  }
 }
 
 export async function seedSandboxDemoData(): Promise<void> {
   const client = getSandboxClient();
-  log.info('🌱 Seeding AWL-31428 (Akshitha G) demo fixtures into Sandbox DB...');
+  log.info('🌱 Seeding demo fixtures (templates, applications, dev user) into Sandbox DB...');
 
   try {
-    // 1. Seed Profile
-    const profile = akshithaSegment.profile!;
-    await client.from('profiles').upsert(
-      {
-        applywizz_id: profile.applywizzId,
-        client_name: profile.clientName,
-        first_name: profile.firstName,
-        last_name: profile.lastName,
-        email: profile.email,
-        company_email: profile.email,
-        ca_email: SANDBOX_CA_EMAIL,
-        phone: profile.phone,
-        country: profile.country,
-        country_code: profile.countryCode,
-        location: profile.location,
-        linkedin_url: profile.linkedinUrl,
-        work_authorization: profile.workAuthorization,
-        requires_sponsorship: profile.requiresSponsorship,
-        education: profile.education,
-        work_experience: profile.workExperience,
-        resume_url: AKSHITHA_RESUME_STORAGE_PATH,
-        resume_text: 'Akshitha Reddy G - Business Analyst with 4 years experience in SQL and product analytics.',
-        resume_facts: {
-          skills: ['SQL', 'Product Analytics', 'Tableau', 'dbt'],
-          experience_years: 4,
-        },
-        zoho_connected: true,
-      },
-      { onConflict: 'applywizz_id' }
-    );
-
-    // 2. Seed Job Templates
+    // 1. Seed Job Templates
     for (const tmpl of akshithaTemplates) {
       await client.from('gh_scanned_job_templates').upsert(
         {

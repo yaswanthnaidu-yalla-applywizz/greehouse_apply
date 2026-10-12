@@ -1,3 +1,4 @@
+2026-10-11 session-start scan: context loaded from handover.md (sandbox PostgreSQL, Gmail OTP integration ready)
 2026-09-14 session-start scan: files=0 parsed=0
 2026-09-15 session-end: docs updated (progress, activeContext, systemPatterns, techContext); observation 0001 logged
 2026-09-15 session-start scan: files=1 parsed=1
@@ -328,6 +329,8 @@
 2026-09-22 deliverable flush: operator applied and failed cards now render null-safe zero values; API queries already use submitted_at with updated_at fallback; typecheck passed; no observations
 2026-09-22 checkpoint: production /api/stats requires authentication; current source returns applied/failed and cards use null-safe rendering; no observations
 2026-09-22 session-start scan: files=14
+2026-10-09 session-start scan: files=5 parsed=5 (rollback branch reconstruction)
+2026-10-09 deliverable flush: observation 0033 logged (rollback worktree restored from 7a35135 without touching dev checkout)
 2026-09-22 task end: operator map seeded from team operator list; no observations
 2026-09-22 session-start scan: files=14
 2026-09-22 task end: dashboard build/serve mismatch verified; public operator JSX is legacy HTML mode, Railway tsx serves dist/client; no observations
@@ -501,3 +504,62 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 2026-10-07 deliverable flush: sandbox CA assignment implemented; focused regression tests pass; full typecheck/build blocked by pre-existing missing QuestionLimitExceededError export; no new observations
 2026-10-07 session-start scan: files=14 parsed=14
 2026-10-07 deliverable flush: repaired CI question-limit export; local typecheck/build/CI unit suite passed; GitHub push and PR runs all green including Docker build; no new observations
+2026-10-08 session-end: full rollback to clean commit 7a35135 executed; voided migrations 029-031; logged observations 0030, 0031, 0032 (actioned); clean typecheck 0 errors
+2026-10-08 session-end: all tasks terminated, port 3001 and browsers cleared; env key precedence fixed; observations 0030, 0031, 0032 logged; session complete
+2026-10-09 session-start scan: files=18 parsed=18
+2026-10-09 session-start scan: files=18 parsed=18
+2026-10-09 deliverable flush: created root handover.md for pending rollback reconstruction; no new observations
+2026-10-09 deliverable flush: 3-day work report generated; no new observations
+2026-10-09 deliverable flush: appended Section 5 to rules.md and Rule 12 to AGENTS.md; no new observations
+2026-10-09 deliverable flush: restored 4 features (retry counter, failure diagnostics & LLM telemetry, role session expiry, captcha deprecation) without mailbox lock; created to-do/do before prod/PRE_PROD_CHECKLIST.md; typecheck and build pass; no new observations
+2026-10-09 session-start scan: files=18 parsed=18
+2026-10-09 session-start scan: files=18 parsed=18
+2026-10-09 session-start scan: files=18 parsed=18
+2026-10-09 session-start scan: files=18 parsed=18
+2026-10-09 deliverable flush: created root handover.md for pending rollback reconstruction; no new observations
+2026-10-09 session-start scan: files=19 parsed=19
+2026-10-09 checkpoint: no observations
+2026-10-10 session-start scan: files=19 parsed=0
+2026-10-10 session-start scan: files=19 parsed=19
+2026-10-10 deliverable flush: combined 25 sheets from DASHBOARD CONFIRMATION.xlsx into root dashboard_confirmation.csv (115 records); no new observations
+2026-10-10 deliverable flush: merged 124 records from Book1.xlsx into dashboard_confirmation.csv (total 239 records); no new observations
+2026-10-10 deliverable flush: cleaned CSV format per user request (removed Operator and Client Name, normalized countries to full names for Greenhouse, cleared placeholders); wrote DASHBOARD CONFIRMATION.csv; no new observations
+2026-10-10 deliverable flush: normalized all 239 locations to Greenhouse 3-part '{City}, {State/Region}, {Country}' standard; updated DASHBOARD CONFIRMATION.csv and dashboard_confirmation.csv; no new observations
+2026-10-10 deliverable flush: synced 237 profiles and inserted 3 missing profiles from ApplyWizz API into postgres-db2 profiles table without overwriting non-blank data; verified 364 total profiles; no new observations
+
+2026-10-11 session-end: auto-queue elevated to 79.5% (841/1058); phone country resolution and consent checkboxes hardened; docs updated (activeContext, progress)
+2026-10-10 session-start scan: files=19
+2026-10-10 checkpoint: deliverable-flush completed
+2026-10-11 checkpoint: architecture-planning-audit
+2026-10-11 checkpoint: comprehensive-plan-review
+2026-10-11 session-start scan: files=19
+2026-10-11 session-end checkpoint: greenhouse-submissions-hardening-complete
+2026-10-11 session-start: interviewing user on Gmail OTP endpoint integration, sandbox queue status, and submission pipeline hardening
+2026-10-11 deliverable flush: implemented fetchGmailOtpViaApi in zoho-connector.ts with safe 4s polling and integrated as primary OTP resolver with Zoho fallback in otpResolutionService.ts; unit tests passed; no new observations
+2026-10-11 session-end checkpoint: handover.md written; .ai/stats.md and activeContext.md updated; all OTP unit tests passing; ready for continuation in new chat
+2026-10-11 session closed: progress.md, activeContext.md, stats.md, and handover.md updated; all background tasks stopped; clean session exit
+2026-10-11 session-start scan: files=19 parsed=19 (debugging-and-error-recovery & root cause analysis)
+2026-10-11 deliverable flush: completed 1,058 application failure audit; updated activeContext.md, progress.md, stats.md; created claude_approval.md with 5-phase hardening plan; zero code changes made; no new observations
+2026-10-11 session-start scan: files=19 parsed=19 (continuing execution of blessings.md - Phase 2 OTP Engine)
+2026-10-11 session-end checkpoint: completed all 4 hardening phases per blessings.md (SubmitterPool backpressure + OTP domain/rate limit + Form filler unicode normalization + Tier 5 corporate defaults); 35/35 unit tests pass, typecheck clean, build clean; no new observations
+2026-10-11 deliverable flush: Phase 4 targeted verification passed (27/30 queued, 90%); full dataset re-resolution dropped READY_FOR_REVIEW to 65 (<= 80 target met); 908 queued applications actively processing in live submitter daemon across 15 concurrent lanes with SubmitterPool idle-gating and token-bucket OTP resolution; no new observations
+2026-10-11 session-start scan: files=19 parsed=19 (planning & deep diagnosis: OTP required screenshots, confirmation timeout, form fill failures, universal security code API)
+2026-10-11 deliverable flush: completed visual screenshot diagnosis across OTP, confirmation timeout, and 80 form fill failures; updated claude_approval.md with 5-phase hardening blueprint, crash guards, and failure-cause screenshot storage; zero code changes made; no new observations
+2026-10-11 deliverable flush: updated claude_approval.md with root cause analysis of 335 RETRY cluster, 143 Gmail OTP company name mismatch findings, and failure cause screenshot naming protocol; no new observations
+2026-10-11 deliverable flush: completed all 5 phases of salutations.md hardening plan (Phase 1 Process Crash Guard, Phase 2 Universal OTP routing & company normalization & failure/challenge screenshots, Phase 3 Form filler precision & fallbacks, Phase 4 Spinner-aware confirmation with 75s/90s ceiling, Phase 5 Failure cause screenshot filenames & OTP timeout error copy); 43/43 unit tests passing across all 5 phases; typecheck clean; no git commits per user constraint; no new observations
+2026-10-11 deliverable flush: implemented startup Zoho connected backfill in runSandboxMigrations() and end-to-end gating in segregator.ts (removed sandbox bypass) and applications.ts dequeue; 48/48 tests pass; typecheck clean; uncommitted working tree maintained; no new observations
+2026-10-12 session-end checkpoint: docs updated acc to AGENTS.md (activeContext.md current focus/blockers, progress.md shipped/known bugs); no new observations
+2026-10-12 session-start scan: files=19 parsed=19
+2026-10-12 no observations
+2026-10-12 session-start scan: files=19 parsed=19
+2026-10-12 deliverable flush: configured sandbox DATABASE_URL to connect to mcp postgres-db1 (grnh_db on port 5433); no new observations
+2026-10-12 session-start scan: files=19 parsed=19
+2026-10-12 session-start scan: files=19 parsed=19 (AWS Bedrock Nova 2 Lite migration plan & token tracking table)
+2026-10-12 deliverable flush: created audit.md; no new skill observations accumulated
+[2026-10-12T16:20:10+05:30] session-start: continuing AWS Bedrock Nova 2 Lite and Titan V2 embedding migration
+[2026-10-12T16:43:03+05:30] session-end: Bedrock Nova 2 Lite migration completed, Titan V2 embeddings integrated, token usage tracking active, typechecks passing
+2026-10-12 review update: updated audit.md with recent code changes, full DB migration audit, and consolidation blueprint; no new skill observations accumulated
+2026-10-12 review update: updated audit.md Technology Stack & Runtime with AWS Bedrock Nova/Titan V2, Gemini, OpenAI, OpenRouter, and Ollama; refined BUG-03 embedding adapter gap; no new skill observations accumulated
+[2026-10-12T18:14:40+05:30] session-end: OpenRouter Gemini 2.5 Flash with prompt caching, candidate cache isolation, direct cost tracking, and vector 1536 revert completed and verified.
+2026-10-12 session-start scan: files=19 parsed=19
+2026-10-12 checkpoint: dev synchronized with origin/dev, gitignore updated, vitest added, supabase env restored

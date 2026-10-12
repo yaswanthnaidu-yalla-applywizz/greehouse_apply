@@ -17,6 +17,7 @@
 import { config } from '../config/env.js';
 import type { EmailProofJson } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
+import { mailboxRateLimiter } from './mailboxRateLimiter.js';
 
 const log = createLogger('Zoho Connector');
 
@@ -46,7 +47,7 @@ interface RawZohoInboxMessage {
   subject?: string;
   from?: string;
   to?: string;
-  receivedTime: string | number;
+  receivedTime?: unknown;
   folderId?: string;
   hasAttachment?: boolean;
 }
@@ -66,7 +67,7 @@ interface RawZohoMessageResponse {
     subject?: string;
     from?: string;
     to?: string;
-    receivedTime?: string | number;
+    receivedTime?: unknown;
     textContent?: string;
     htmlContent?: string;
   };
@@ -107,6 +108,19 @@ function normalizeCompanyName(name: string): string {
     .replace(/\b(inc|llc|ltd|corp|corporation|technologies|tech|solutions|co)\b[.]?/gi, '')
     .replace(/[^a-z0-9]/g, '')
     .trim();
+}
+
+function getErrorCategory(error: unknown): string {
+  const typed =
+    error && typeof error === 'object'
+      ? (error as { name?: unknown; code?: unknown; cause?: { code?: unknown } })
+      : {};
+  const name =
+    typeof typed.name === 'string' ? typed.name.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) : 'UnknownError';
+  const codeValue = typed.code ?? typed.cause?.code;
+  const code =
+    typeof codeValue === 'string' ? codeValue.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) : '';
+  return code ? `${name}_${code}` : name;
 }
 
 /**
@@ -211,11 +225,11 @@ export async function queryZohoConfirmationEmail(
       }, accountId=${accountId || 'none'}, folderId=${data.folder?.folderId || 'none'})`
     );
     messages.forEach((m, i) => {
-      const ms = Number(m.receivedTime);
+      const ms = parseZohoReceivedTimestamp(m.receivedTime);
       log.info(
         `[Zoho Connector] 📧 [${i + 1}/${messages.length}] from="${m.from || ''}" | subject="${
           m.subject || ''
-        }" | receivedAt=${Number.isNaN(ms) || ms <= 0 ? `UNPARSEABLE(${m.receivedTime})` : new Date(ms).toISOString()}`
+        }" | receivedAt=${ms === null ? 'UNPARSEABLE' : new Date(ms).toISOString()}`
       );
     });
 
@@ -239,8 +253,8 @@ export async function queryZohoConfirmationEmail(
     let matchingReceivedMs = 0;
 
     for (const msg of messages) {
-      const receivedMs = Number(msg.receivedTime);
-      if (Number.isNaN(receivedMs) || receivedMs <= 0) {
+      const receivedMs = parseZohoReceivedTimestamp(msg.receivedTime);
+      if (receivedMs === null) {
         continue;
       }
 
@@ -444,10 +458,14 @@ export function extractOtpCodeFromText(text: string): string | null {
 
 export interface ZohoOtpApiQueryOptions {
   candidateEmail: string;
+  correlationId?: string;
   sinceTimestamp: number;
   companyName?: string;
   timeoutMs?: number;
   pollIntervalMs?: number;
+  newerThanTimestamp?: number;
+  excludedMessageIds?: string[];
+  excludedCodes?: string[];
 }
 
 export interface ZohoOtpApiResult {
@@ -455,8 +473,29 @@ export interface ZohoOtpApiResult {
   otp?: string;
   subject?: string;
   receivedAt?: string;
+  receivedAtMs?: number;
+  messageId?: string;
   errorMessage?: string;
   reason?: string;
+  reasonCode?: string;
+}
+
+export const OTP_EMAIL_CLOCK_SKEW_MS = 5_000;
+
+export function parseZohoReceivedTimestamp(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value <= 0) return null;
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  if (typeof value !== 'string' || !value.trim()) return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 /**
@@ -468,16 +507,37 @@ export async function fetchZohoOtpViaApi(
   options: ZohoOtpApiQueryOptions
 ): Promise<ZohoOtpApiResult> {
   const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
-  const sinceTimestamp = options.sinceTimestamp || Date.now() - 3 * 60 * 1000;
+  const sinceTimestamp = options.sinceTimestamp;
   const timeoutMs = options.timeoutMs ?? 30000;
   const pollIntervalMs = options.pollIntervalMs ?? 2000;
   const companyName = (options.companyName || '').trim();
+  const validEmailFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail);
 
-  if (!candidateEmail) {
+  if (!candidateEmail || !validEmailFormat) {
+    log.error(
+      `[Zoho Connector] event=otp_preflight_failed correlation_id=${options.correlationId || 'unknown'} ` +
+        `reason=INVALID_CANDIDATE_EMAIL email_present=${Boolean(candidateEmail)} ` +
+        `email_format_valid=${validEmailFormat}`
+    );
     return {
       success: false,
-      reason: 'invalid email',
-      errorMessage: 'Candidate email is required for OTP resolution.',
+      reason: candidateEmail ? 'invalid email format' : 'email unavailable',
+      reasonCode: 'INVALID_CANDIDATE_EMAIL',
+      errorMessage: candidateEmail
+        ? 'Candidate email has an invalid format for OTP resolution.'
+        : 'Candidate email is required for OTP resolution.',
+    };
+  }
+  if (!Number.isFinite(sinceTimestamp) || sinceTimestamp <= 0) {
+    log.error(
+      `[Zoho Connector] event=otp_preflight_failed correlation_id=${options.correlationId || 'unknown'} ` +
+        `reason=INVALID_SUBMIT_TIMESTAMP timestamp_finite=${Number.isFinite(sinceTimestamp)}`
+    );
+    return {
+      success: false,
+      reason: 'invalid submit timestamp',
+      reasonCode: 'INVALID_SUBMIT_TIMESTAMP',
+      errorMessage: 'A valid submit-click timestamp is required for OTP resolution.',
     };
   }
 
@@ -485,36 +545,65 @@ export async function fetchZohoOtpViaApi(
     /\/+$/,
     ''
   );
-  // Allow up to 2 minutes of clock skew before the reported challenge timestamp
-  const minTimeMs = sinceTimestamp - 2 * 60 * 1000;
+  const minTimeMs = sinceTimestamp - OTP_EMAIL_CLOCK_SKEW_MS;
+  const excludedMessageIds = new Set(options.excludedMessageIds || []);
+  const excludedCodes = new Set(options.excludedCodes || []);
   const startTime = Date.now();
   let attempt = 0;
+  let successfulInboxResponses = 0;
+  let inboxHttpErrors = 0;
+  let inboxNetworkErrors = 0;
+  let malformedInboxResponses = 0;
+  let securityCodeMessages = 0;
+  let freshSecurityCodeMessages = 0;
+  let companyMismatches = 0;
+  let detailRequestFailures = 0;
+  let staleOrInvalidTimestamps = 0;
+  let missingTimestamps = 0;
+  let staleTimestamps = 0;
+  let nonNewerTimestamps = 0;
+  let messagesWithoutCodes = 0;
+  let excludedMessageIdCount = 0;
+  let messagesWithoutIds = 0;
+  let nonGreenhouseSenders = 0;
+  let nonSecuritySubjects = 0;
+  let detailContextMissing = 0;
+  let ambiguousCompanyCandidates = false;
+  const inboxHttpStatusCounts: Record<string, number> = {};
+  const detailHttpStatusCounts: Record<string, number> = {};
+  const networkErrorCounts: Record<string, number> = {};
+  const correlation = options.correlationId || 'unknown';
 
   log.info(
-    `[Zoho Connector] ⚡ Starting fast REST OTP poll for ${candidateEmail} ` +
-      `(pollInterval=${pollIntervalMs}ms, timeout=${timeoutMs / 1000}s, since=${new Date(
-        sinceTimestamp
-      ).toLocaleTimeString()})`
+    `[Zoho Connector] event=otp_fetch_started application=${correlation} ` +
+      `poll_interval_ms=${pollIntervalMs} budget_ms=${timeoutMs} ` +
+      `submit_age_ms=${Math.max(0, Date.now() - sinceTimestamp)} company_match_enabled=${companyName.length > 2} ` +
+      `excluded_message_count=${excludedMessageIds.size} excluded_code_count=${excludedCodes.size}`
   );
 
-  while (Date.now() - startTime < timeoutMs) {
+  while (timeoutMs - (Date.now() - startTime) >= pollIntervalMs) {
     attempt++;
     const cycleStart = Date.now();
 
     try {
+      const remainingMs = Math.max(1, timeoutMs - (Date.now() - startTime));
       const inboxUrl = `${baseUrl}/api/zoho/ui/inbox?email=${encodeURIComponent(
         candidateEmail
       )}&limit=15&start=1`;
       const controller = new AbortController();
-      const fetchTimeout = setTimeout(() => controller.abort(), Math.min(10000, timeoutMs));
+      const fetchTimeout = setTimeout(() => controller.abort(), Math.min(10000, remainingMs));
 
+      await mailboxRateLimiter.acquire();
       const res = await fetch(inboxUrl, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
       }).finally(() => clearTimeout(fetchTimeout));
+      const inboxStatusKey = String(res.status);
+      inboxHttpStatusCounts[inboxStatusKey] = (inboxHttpStatusCounts[inboxStatusKey] || 0) + 1;
 
       if (res.ok) {
+        successfulInboxResponses++;
         const rawBody = await res.text();
         let data: RawZohoInboxResponse | null = null;
         try {
@@ -523,18 +612,34 @@ export async function fetchZohoOtpViaApi(
           data = null;
         }
 
-        const messages = data?.messages || [];
+        const messages = Array.isArray(data?.messages) ? data.messages : [];
+        if (!data || !Array.isArray(data.messages)) malformedInboxResponses++;
         const accountId = data?.accountId;
 
-        for (const msg of messages) {
-          const receivedMs = Number(msg.receivedTime);
-          if (Number.isNaN(receivedMs) || receivedMs < minTimeMs) {
-            continue;
-          }
+        const freshMessages: Array<{
+          otp?: string;
+          messageId: string;
+          subject: string;
+          receivedMs: number;
+          companyMatched: boolean;
+          matchTier: 1 | 2 | 3;
+          excludedCode: boolean;
+        }> = [];
 
+        for (const msg of messages) {
           const fromAddress = (msg.from || '').toLowerCase();
           const subject = msg.subject || '';
           const subjectLower = subject.toLowerCase();
+          const messageId = msg.messageId || '';
+
+          if (!messageId) {
+            messagesWithoutIds++;
+            continue;
+          }
+          if (excludedMessageIds.has(messageId)) {
+            excludedMessageIdCount++;
+            continue;
+          }
 
           // Senders that deliver Greenhouse security codes
           const isGreenhouseSender =
@@ -543,6 +648,7 @@ export async function fetchZohoOtpViaApi(
             fromAddress.includes('greenhouse');
 
           if (!isGreenhouseSender) {
+            nonGreenhouseSenders++;
             continue;
           }
 
@@ -551,94 +657,391 @@ export async function fetchZohoOtpViaApi(
             /security\s*code|\botp\b|verification\s*code|verify/i.test(subjectLower);
 
           if (!isSecurityCodeSubject) {
+            nonSecuritySubjects++;
             continue;
           }
-
-          // Optional company filter
-          if (companyName && companyName.length > 2) {
-            const normComp = normalizeCompanyName(companyName);
-            const normSub = normalizeCompanyName(subject);
-            const matchesCompany =
-              subjectLower.includes(companyName.toLowerCase()) ||
-              (normComp.length > 2 && normSub.includes(normComp));
-            if (!matchesCompany) {
-              // If company name was provided but subject explicitly names a DIFFERENT company, continue
-              log.info(
-                `[Zoho Connector] Security code subject "${subject}" did not match target company "${companyName}". Checking next.`
-              );
-              continue;
-            }
-          }
-
-          // OTP codes are read from the message body; the subject only identifies candidate emails.
-          let extractedOtp: string | null = null;
+          securityCodeMessages++;
 
           const folderId = msg.folderId || data?.folder?.folderId;
-          if (accountId && folderId && msg.messageId) {
+          let msgData: RawZohoMessageResponse | null = null;
+          if (accountId && folderId) {
             try {
               const msgQs = new URLSearchParams({
                 email: candidateEmail,
                 accountId,
                 folderId,
-                messageId: msg.messageId,
+                messageId,
               });
+              const detailController = new AbortController();
+              const detailTimeout = setTimeout(
+                () => detailController.abort(),
+                Math.min(10000, Math.max(1, timeoutMs - (Date.now() - startTime)))
+              );
               const msgRes = await fetch(`${baseUrl}/api/zoho/ui/message?${msgQs}`, {
                 method: 'GET',
                 headers: { 'Content-Type': 'application/json' },
-              });
-
+                signal: detailController.signal,
+              }).finally(() => clearTimeout(detailTimeout));
               if (msgRes.ok) {
-                const msgData = (await msgRes.json()) as RawZohoMessageResponse;
-                const bodyText =
-                  msgData.message?.textContent || stripHtml(msgData.message?.htmlContent || '');
-                extractedOtp = extractOtpCodeFromText(bodyText);
+                msgData = (await msgRes.json()) as RawZohoMessageResponse;
+              } else {
+                detailRequestFailures++;
+                const statusKey = String(msgRes.status);
+                detailHttpStatusCounts[statusKey] = (detailHttpStatusCounts[statusKey] || 0) + 1;
               }
-            } catch (bodyErr: any) {
-              log.warn(
-                `[Zoho Connector] ⚠️ Failed to fetch message detail for OTP: ${bodyErr.message}`
-              );
+            } catch (error: unknown) {
+              detailRequestFailures++;
+              const category = getErrorCategory(error);
+              networkErrorCounts[`detail_${category}`] = (networkErrorCounts[`detail_${category}`] || 0) + 1;
             }
+          } else {
+            detailRequestFailures++;
+            detailContextMissing++;
           }
 
-          if (extractedOtp) {
-            const receivedAt = new Date(receivedMs).toISOString();
-            log.info(
-              `[Zoho Connector] 🎯 Found OTP via REST API in attempt #${attempt}: ${extractedOtp} ` +
-                `(subject: "${subject}", received: ${receivedAt})`
-            );
-            return {
-              success: true,
-              otp: extractedOtp,
-              subject,
-              receivedAt,
-            };
+          const listReceivedMs = parseZohoReceivedTimestamp(msg.receivedTime);
+          const detailReceivedMs = parseZohoReceivedTimestamp(msgData?.message?.receivedTime);
+          const receivedMs = listReceivedMs ?? detailReceivedMs;
+          if (receivedMs === null) {
+            missingTimestamps++;
+            staleOrInvalidTimestamps++;
+            continue;
           }
+          if (receivedMs < minTimeMs) {
+            staleTimestamps++;
+            staleOrInvalidTimestamps++;
+            continue;
+          }
+          if (
+            options.newerThanTimestamp !== undefined &&
+            receivedMs <= options.newerThanTimestamp
+          ) {
+            nonNewerTimestamps++;
+            staleOrInvalidTimestamps++;
+            continue;
+          }
+
+          freshSecurityCodeMessages++;
+          const detailFrom = msgData?.message?.from || '';
+          const bodyText =
+            msgData?.message?.textContent || stripHtml(msgData?.message?.htmlContent || '');
+          const extractedOtp = extractOtpCodeFromText(bodyText);
+          const normalizedCompany = normalizeCompanyName(companyName);
+          const subjectMatchesCompany =
+            companyName.length > 2 &&
+            (subjectLower.includes(companyName.toLowerCase()) ||
+              (normalizedCompany.length > 2 &&
+                normalizeCompanyName(subject).includes(normalizedCompany)));
+          const bodyOrSenderMatchesCompany =
+            companyName.length > 2 &&
+            [fromAddress, detailFrom.toLowerCase(), bodyText.toLowerCase()].some(
+                (value) =>
+                  value.includes(companyName.toLowerCase()) ||
+                  (normalizedCompany.length > 2 &&
+                    normalizeCompanyName(value).includes(normalizedCompany))
+              );
+          const companyMatched = subjectMatchesCompany || bodyOrSenderMatchesCompany;
+          if (!companyMatched) companyMismatches++;
+
+          const excludedCode = Boolean(extractedOtp && excludedCodes.has(extractedOtp));
+          if (!extractedOtp || excludedCode) {
+            messagesWithoutCodes++;
+          }
+          freshMessages.push({
+            otp: extractedOtp && !excludedCode ? extractedOtp : undefined,
+            messageId,
+            subject,
+            receivedMs,
+            companyMatched,
+            matchTier: subjectMatchesCompany ? 1 : bodyOrSenderMatchesCompany ? 2 : 3,
+            excludedCode,
+          });
+        }
+
+        const companyMatches = freshMessages.filter(
+          (message) => message.companyMatched && message.otp
+        );
+        const tierCCandidates = freshMessages.filter((message) => !message.excludedCode);
+        const tierCMatches =
+          tierCCandidates.length === 1 ? tierCCandidates.filter((message) => message.otp) : [];
+        const candidates = companyMatches.length > 0 ? companyMatches : tierCMatches;
+        if (tierCCandidates.length > 1 && companyMatches.length === 0) {
+          ambiguousCompanyCandidates = true;
+        }
+        candidates.sort(
+          (left, right) =>
+            left.matchTier - right.matchTier || right.receivedMs - left.receivedMs
+        );
+        const newestMessage = candidates[0];
+        if (newestMessage) {
+          const receivedAt = new Date(newestMessage.receivedMs).toISOString();
+          log.info(
+            `[Zoho Connector] event=otp_fetch_succeeded application=${correlation} ` +
+              `polls=${attempt} elapsed_ms=${Date.now() - startTime} ` +
+              `match_tier=${newestMessage.matchTier} message_id=${newestMessage.messageId} ` +
+              `received_at=${receivedAt} message_age_ms=${Math.max(0, Date.now() - newestMessage.receivedMs)} ` +
+              `received_relative_to_submit_ms=${newestMessage.receivedMs - sinceTimestamp} ` +
+              `email_code_length=${newestMessage.otp?.length ?? 0} code=[REDACTED] ` +
+              `inbox_http_statuses=${JSON.stringify(inboxHttpStatusCounts)} ` +
+              `security_messages=${securityCodeMessages} fresh_security_messages=${freshSecurityCodeMessages} ` +
+              `company_mismatches=${companyMismatches} detail_failures=${detailRequestFailures}`
+          );
+          return {
+            success: true,
+            otp: newestMessage.otp,
+            subject: newestMessage.subject,
+            receivedAt,
+            receivedAtMs: newestMessage.receivedMs,
+            messageId: newestMessage.messageId,
+          };
         }
       } else {
-        log.warn(`[Zoho Connector] ⚠️ Inbox query returned HTTP ${res.status}`);
+        inboxHttpErrors++;
+        try {
+          await res.body?.cancel();
+        } catch {
+          // Response diagnostics use status and headers only; response bodies may contain PII.
+        }
       }
-    } catch (pollErr: any) {
-      log.warn(`[Zoho Connector] ⚠️ Poll attempt #${attempt} error: ${pollErr.message}`);
+    } catch (error: unknown) {
+      inboxNetworkErrors++;
+      const category = getErrorCategory(error);
+      networkErrorCounts[`inbox_${category}`] = (networkErrorCounts[`inbox_${category}`] || 0) + 1;
     }
 
     const elapsed = Date.now() - cycleStart;
-    const remaining = pollIntervalMs - elapsed;
-    // Guarantee at least 2500ms sleep between requests so we never spam back-to-back
-    const sleepMs = Math.max(2500, remaining);
-    if (Date.now() - startTime + sleepMs < timeoutMs) {
-      await new Promise((resolve) => setTimeout(resolve, sleepMs));
+    log.debug(
+      `[Zoho Connector] event=otp_poll_cycle application=${correlation} poll=${attempt} ` +
+        `elapsed_ms=${elapsed} inbox_ok=${successfulInboxResponses} inbox_http_errors=${inboxHttpErrors} ` +
+        `inbox_network_errors=${inboxNetworkErrors} security_messages=${securityCodeMessages} ` +
+        `fresh_security_messages=${freshSecurityCodeMessages} company_mismatches=${companyMismatches} ` +
+        `detail_failures=${detailRequestFailures}`
+    );
+    if (successfulInboxResponses > 0 && freshSecurityCodeMessages === 0) {
+      log.info(
+        `[Zoho Connector] application=${correlation} poll=${attempt} found=false reason=not_yet`
+      );
+      return {
+        success: false,
+        reason: 'not_yet',
+        reasonCode: securityCodeMessages === 0 ? 'NO_MESSAGES_SINCE_SUBMIT' : 'STALE_TIMESTAMPS_ONLY',
+        errorMessage: 'Zoho OTP not yet received.',
+      };
     }
+
+    const remainingBudget = timeoutMs - (Date.now() - startTime);
+    const sleepMs = Math.max(100, pollIntervalMs - elapsed);
+    if (remainingBudget < pollIntervalMs || remainingBudget <= sleepMs) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
 
-  const reason = 'no matching greenhouse OTP email found';
+  const reasonCode =
+    attempt === 0
+      ? 'POLL_BUDGET_EXHAUSTED'
+      : successfulInboxResponses === 0
+      ? inboxHttpErrors > 0
+        ? 'ZOHO_INBOX_HTTP_ERROR'
+        : inboxNetworkErrors > 0
+          ? 'ZOHO_INBOX_UNAVAILABLE'
+          : 'ZOHO_INBOX_INVALID_RESPONSE'
+      : securityCodeMessages === 0
+        ? 'NO_MESSAGES_SINCE_SUBMIT'
+        : freshSecurityCodeMessages === 0
+          ? 'STALE_TIMESTAMPS_ONLY'
+          : ambiguousCompanyCandidates
+            ? 'COMPANY_MISMATCH_MULTIPLE_CANDIDATES'
+            : detailRequestFailures > 0
+              ? 'DETAIL_FETCH_FAILED'
+              : messagesWithoutCodes > 0
+                ? 'NO_EXTRACTABLE_CODE'
+                : malformedInboxResponses > 0
+                  ? 'ZOHO_INBOX_INVALID_RESPONSE'
+                  : 'NO_MATCHING_OTP_EMAIL';
+  const reason = reasonCode.toLowerCase();
+  const elapsedMs = Date.now() - startTime;
   log.warn(
-    `[Zoho Connector] ⏱️ Timeout after ${Math.round(
-      (Date.now() - startTime) / 1000
-    )}s (${attempt} attempts). ${reason} for ${candidateEmail}`
+    `[Zoho Connector] event=otp_fetch_failed application=${correlation} ` +
+      `reason=${reasonCode} polls=${attempt} elapsed_ms=${elapsedMs} ` +
+      `inbox_ok=${successfulInboxResponses}, inbox_http_errors=${inboxHttpErrors}, ` +
+      `inbox_http_statuses=${JSON.stringify(inboxHttpStatusCounts)} ` +
+      `detail_http_statuses=${JSON.stringify(detailHttpStatusCounts)} ` +
+      `network_error_types=${JSON.stringify(networkErrorCounts)} ` +
+      `inbox_network_errors=${inboxNetworkErrors}, malformed_inbox=${malformedInboxResponses}, ` +
+      `security_messages=${securityCodeMessages}, fresh_security_messages=${freshSecurityCodeMessages}, ` +
+      `company_mismatches=${companyMismatches}, missing_ids=${messagesWithoutIds}, ` +
+      `excluded_ids=${excludedMessageIdCount}, non_greenhouse_senders=${nonGreenhouseSenders}, ` +
+      `non_security_subjects=${nonSecuritySubjects}, missing_detail_context=${detailContextMissing}, ` +
+      `detail_failures=${detailRequestFailures}, stale_or_invalid_timestamps=${staleOrInvalidTimestamps}, ` +
+      `missing_timestamps=${missingTimestamps}, stale_timestamps=${staleTimestamps}, ` +
+      `non_newer_timestamps=${nonNewerTimestamps}, messages_without_code=${messagesWithoutCodes}, ` +
+      `ambiguous_candidates=${ambiguousCompanyCandidates}`
   );
   return {
     success: false,
     reason,
-    errorMessage: `Timed out waiting for Greenhouse verification email for ${candidateEmail}.`,
+    reasonCode,
+    errorMessage: `Automatic OTP fetch ended with ${reasonCode}.`,
+  };
+}
+
+export interface GmailOtpApiQueryOptions {
+  candidateEmail: string;
+  companyName?: string;
+  correlationId?: string;
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  excludedCodes?: string[];
+}
+
+export interface GmailOtpApiResponse {
+  found?: boolean;
+  code?: string;
+  security_code?: string;
+  otp?: string;
+  received_at?: string;
+  message_id?: string;
+  reason?: string;
+  error?: string;
+}
+
+/**
+ * Fetch Greenhouse security code via Gmail REST API endpoint.
+ * GET /api/gmail/greenhouse-security-code?email=<candidateEmail>&company=<companyName>
+ */
+export async function fetchGmailOtpViaApi(
+  options: GmailOtpApiQueryOptions
+): Promise<ZohoOtpApiResult> {
+  const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
+  const companyName = (options.companyName || '').trim();
+  const correlation = options.correlationId || 'unknown';
+  const timeoutMs = options.timeoutMs ?? 60000;
+  const pollIntervalMs = options.pollIntervalMs ?? 10000;
+  const excludedCodes = new Set(
+    (options.excludedCodes || []).map((c) => c.trim().toLowerCase()).filter(Boolean)
+  );
+
+  const validEmailFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail);
+  if (!candidateEmail || !validEmailFormat) {
+    log.error(
+      `[Gmail Connector] event=gmail_otp_preflight_failed correlation_id=${correlation} ` +
+        `reason=INVALID_CANDIDATE_EMAIL email_present=${Boolean(candidateEmail)} ` +
+        `email_format_valid=${validEmailFormat}`
+    );
+    return {
+      success: false,
+      reason: candidateEmail ? 'invalid email format' : 'email unavailable',
+      reasonCode: 'INVALID_CANDIDATE_EMAIL',
+      errorMessage: candidateEmail
+        ? 'Candidate email has an invalid format for OTP resolution.'
+        : 'Candidate email is required for OTP resolution.',
+    };
+  }
+
+  const baseUrl = (config.ZOHO_CONNECTOR_URL || 'https://zoho-mail-reader.onrender.com/').replace(
+    /\/+$/,
+    ''
+  );
+
+  const startTime = Date.now();
+  let attempt = 0;
+
+  log.info(
+    `[Gmail Connector] event=gmail_otp_fetch_started application=${correlation} ` +
+      `email=${candidateEmail} company=${companyName} poll_interval_ms=${pollIntervalMs} budget_ms=${timeoutMs}`
+  );
+
+  while (timeoutMs - (Date.now() - startTime) >= pollIntervalMs || attempt === 0) {
+    attempt++;
+    const remainingMs = Math.max(1, timeoutMs - (Date.now() - startTime));
+    const url = new URL(`${baseUrl}/api/gmail/greenhouse-security-code`);
+    url.searchParams.set('email', candidateEmail);
+    if (companyName) {
+      url.searchParams.set('company', companyName);
+    }
+
+    try {
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), Math.min(8000, remainingMs));
+
+      await mailboxRateLimiter.acquire();
+      const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      }).finally(() => clearTimeout(fetchTimeout));
+
+      if (res.ok) {
+        const data = (await res.json()) as GmailOtpApiResponse;
+        const code = (data.code || data.security_code || data.otp || '').trim();
+
+        if (data.found && code) {
+          if (excludedCodes.has(code.toLowerCase())) {
+            log.warn(
+              `[Gmail Connector] application=${correlation} code=${code} is in excludedCodes; continuing poll`
+            );
+          } else {
+            const elapsedMs = Date.now() - startTime;
+            log.info(
+              `[Gmail Connector] event=gmail_otp_fetch_succeeded application=${correlation} ` +
+                `polls=${attempt} elapsed_ms=${elapsedMs} code_length=${code.length}`
+            );
+            return {
+              success: true,
+              otp: code,
+              messageId: data.message_id || `gmail-${Date.now()}`,
+              receivedAt: data.received_at || new Date().toISOString(),
+              receivedAtMs: data.received_at ? Date.parse(data.received_at) : Date.now(),
+            };
+          }
+        } else {
+          log.info(
+            `[Gmail Connector] application=${correlation} poll=${attempt} found=false reason=${data.reason || 'not_yet'}`
+          );
+          if (data.reason === 'mailbox_not_connected') {
+            return {
+              success: false,
+              reason: 'mailbox_not_connected',
+              reasonCode: 'GMAIL_MAILBOX_NOT_CONNECTED',
+              errorMessage: 'Candidate Gmail mailbox is not connected on Render.',
+            };
+          }
+          if (data.reason === 'not_yet' || !data.found || (data as any).received === false) {
+            return {
+              success: false,
+              reason: 'not_yet',
+              reasonCode: 'GMAIL_OTP_NOT_YET',
+              errorMessage: 'Candidate Gmail OTP not yet received.',
+            };
+          }
+        }
+      } else {
+        log.warn(
+          `[Gmail Connector] application=${correlation} poll=${attempt} status=${res.status}`
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(
+        `[Gmail Connector] application=${correlation} poll=${attempt} request_error=${msg}`
+      );
+    }
+
+    const elapsed = Date.now() - startTime;
+    if (timeoutMs - elapsed < pollIntervalMs) break;
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  const elapsedMs = Date.now() - startTime;
+  log.warn(
+    `[Gmail Connector] event=gmail_otp_fetch_timeout application=${correlation} polls=${attempt} elapsed_ms=${elapsedMs}`
+  );
+
+  return {
+    success: false,
+    reason: 'no matching gmail otp code found',
+    reasonCode: 'GMAIL_OTP_NOT_FOUND',
+    errorMessage: `Automatic Gmail OTP fetch timed out after ${elapsedMs}ms across ${attempt} poll attempts.`,
   };
 }

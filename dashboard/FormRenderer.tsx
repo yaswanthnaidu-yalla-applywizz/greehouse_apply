@@ -133,11 +133,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     currentStatus === 'APPLYING' ||
     currentStatus === 'QUEUED' ||
     currentStatus === 'OTP_REQUIRED' ||
-    currentStatus === 'CAPTCHA_REQUIRED' ||
     currentStatus === 'EMAIL_PROOF_PENDING';
   const badgeStatus: ApplicationStatus | string =
-    currentStatus === 'OTP_REQUIRED' ||
-    currentStatus === 'CAPTCHA_REQUIRED'
+    currentStatus === 'OTP_REQUIRED'
       ? 'APPLYING'
       : currentStatus;
 

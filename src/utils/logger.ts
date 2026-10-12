@@ -108,7 +108,7 @@ export function isApplyWizzUnreachableError(error: unknown): boolean {
 }
 
 /**
- * Logs a systemic halt and stops the process. Recoverable (single job / CAPTCHA / OTP) errors must not call this.
+ * Logs a systemic halt and stops the process. Recoverable (single job / OTP) errors must not call this.
  */
 export function haltWithDevAlert(module: string, message: string, error?: unknown): never {
   const cleaned = message.replace(/\s*Stopping pipeline\.?\s*$/i, '').replace(/\.\s*$/, '');

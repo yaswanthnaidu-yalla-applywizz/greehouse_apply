@@ -38,7 +38,7 @@ export interface SubmissionControlsProps {
   onViewFailureScreenshot?: () => void;
 }
 
-const SUBMIT_FLOW_STATUSES = new Set(['APPLYING', 'QUEUED', 'OTP_REQUIRED', 'CAPTCHA_REQUIRED']);
+const SUBMIT_FLOW_STATUSES = new Set(['APPLYING', 'QUEUED', 'OTP_REQUIRED']);
 
 export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   applicationId,

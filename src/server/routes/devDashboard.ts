@@ -20,6 +20,8 @@ import { displayNameMapForEmails } from '../authDirectory.js';
 import { emailsForRole } from './auth.js';
 import { fetchLinkedCaIds } from '../clientDashboard.js';
 import { createLogger } from '../../utils/logger.js';
+import { FAILURE_DIAGNOSTIC_CATEGORIES, type FailureDiagnosticPhase } from '../../types/failureDiagnostics.js';
+import { listFailureDiagnostics } from '../../db/failureDiagnostics.js';
 import {
   countAuditEventsByActionInRange,
   SUBMIT_CLICK_AUDIT_ACTION,
@@ -75,6 +77,56 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
   }
 });
 
+devDashboardRouter.get('/diagnostics', async (req: Request, res: Response): Promise<void> => {
+  const phaseValue = typeof req.query.phase === 'string' ? req.query.phase : '';
+  const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+  const applywizzId = typeof req.query.candidate === 'string' ? req.query.candidate.trim() : '';
+  const applicationId = typeof req.query.application === 'string' ? req.query.application.trim() : '';
+  const runId = typeof req.query.run === 'string' ? req.query.run.trim() : '';
+  const limit = parseLimit(req.query.limit, 50);
+  const offset = Math.max(0, Math.min(100_000, Number.parseInt(String(req.query.offset || '0'), 10) || 0));
+  const phases: FailureDiagnosticPhase[] = ['SCAN', 'SYNC', 'RESOLVE', 'SUBMIT'];
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  if (phaseValue && !phases.includes(phaseValue as FailureDiagnosticPhase)) {
+    res.status(400).json({ error: 'Invalid diagnostic phase.' });
+    return;
+  }
+  if (category && !FAILURE_DIAGNOSTIC_CATEGORIES.includes(category as (typeof FAILURE_DIAGNOSTIC_CATEGORIES)[number])) {
+    res.status(400).json({ error: 'Invalid diagnostic category.' });
+    return;
+  }
+  if (applywizzId && !/^AWL-[A-Z0-9-]{2,40}$/i.test(applywizzId)) {
+    res.status(400).json({ error: 'Invalid candidate identifier.' });
+    return;
+  }
+  if ((applicationId && !uuidPattern.test(applicationId)) || (runId && !uuidPattern.test(runId))) {
+    res.status(400).json({ error: 'Application and run filters must be UUIDs.' });
+    return;
+  }
+
+  try {
+    const result = await listFailureDiagnostics({
+      phase: phaseValue ? (phaseValue as FailureDiagnosticPhase) : undefined,
+      category: category ? (category as (typeof FAILURE_DIAGNOSTIC_CATEGORIES)[number]) : undefined,
+      applywizzId: applywizzId || undefined,
+      applicationId: applicationId || undefined,
+      runId: runId || undefined,
+      limit,
+      offset,
+    });
+    res.json({ diagnostics: result.rows, count: result.count, limit, offset });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : 'UnknownError';
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: unknown }).code || 'unknown')
+        : 'unknown';
+    log.error(`[Dev] diagnostics query failed error_name=${name} error_code=${code}`);
+    res.status(503).json({ error: 'Failure diagnostics are unavailable.' });
+  }
+});
+
 devDashboardRouter.get('/runs', async (req: Request, res: Response): Promise<void> => {
   const date = typeof req.query.date === 'string' ? req.query.date.trim() : getISTDateString();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -98,7 +150,12 @@ devDashboardRouter.get('/runs', async (req: Request, res: Response): Promise<voi
       .lt('created_at', endIso)
       .order('updated_at', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (status) query = query.eq('status', status);
+    if (status) {
+      query = query.eq('status', status);
+    } else {
+      query = query.neq('status', 'FILTERED_OUT');
+    }
+
     const { data, error, count } = await query;
     if (error) throw error;
 
@@ -149,7 +206,7 @@ devDashboardRouter.get('/errors', async (req: Request, res: Response): Promise<v
       let query = getDbClient()
         .from('gh_candidate_applications')
         .select('id, status, error_message, updated_at, created_at')
-        .in('status', ['FAILED', 'CAPTCHA_TIMEOUT']);
+        .eq('status', 'FAILED');
       if (date) {
         const { startIso, endIso } = getISTDateRangeUtc(date);
         query = query.gte('updated_at', startIso).lt('updated_at', endIso);
@@ -164,8 +221,7 @@ devDashboardRouter.get('/errors', async (req: Request, res: Response): Promise<v
 
     if (failed.length === 0 && !isSupabaseConfigured()) {
       const failedApps = await listApplications({ status: 'FAILED' });
-      const captchaTimeout = await listApplications({ status: 'CAPTCHA_TIMEOUT' });
-      failed = [...failedApps, ...captchaTimeout];
+      failed = failedApps;
       if (date) {
         const { startIso, endIso } = getISTDateRangeUtc(date);
         const start = Date.parse(startIso);

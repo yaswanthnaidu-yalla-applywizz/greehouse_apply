@@ -67,3 +67,19 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Scratch Dumps, Patches, Debug data & PII files
+scripts/*.json
+scripts/__pycache__/
+scripts/inspect*
+scripts/readSummary*
+scripts/testBedrockApiKey*
+scripts/*.py
+scripts/*.sql
+*.patch
+.playwright-mcp/
+tasks/
+audit.md
+captcha.md
+claude_approval.md
+rollback-plan.md

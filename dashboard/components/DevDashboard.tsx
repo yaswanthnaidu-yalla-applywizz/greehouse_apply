@@ -64,6 +64,24 @@ interface DevErrorItem {
   applicationIds?: string[];
 }
 
+interface DevFailureDiagnostic {
+  id: string;
+  phase: string;
+  stage: string;
+  category: string;
+  reason: string;
+  error_name: string | null;
+  error_code: string | null;
+  is_terminal: boolean;
+  is_retryable: boolean;
+  applywizz_id: string | null;
+  application_id: string | null;
+  run_id: string | null;
+  job_url_ref: string | null;
+  metadata: Record<string, string | number | boolean> | null;
+  created_at: string;
+}
+
 interface DevQueueData {
   queue: {
     queued: number;
@@ -146,13 +164,21 @@ function lightClass(status?: string): string {
 export const DevDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['dev']);
 
-  const [tab, setTab] = useState<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'guide'>('system');
+  const [tab, setTab] = useState<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'diagnostics' | 'guide'>('system');
   const [date, setDate] = useState<string>(getTodayIST);
   const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month'>('day');
   const [health, setHealth] = useState<DevHealthSnapshot | null>(null);
   const [runs, setRuns] = useState<DevRunItem[]>([]);
   const [runStatus, setRunStatus] = useState<string>('');
   const [errors, setErrors] = useState<DevErrorItem[]>([]);
+  const [diagnostics, setDiagnostics] = useState<DevFailureDiagnostic[]>([]);
+  const [diagnosticCount, setDiagnosticCount] = useState(0);
+  const [diagnosticPhase, setDiagnosticPhase] = useState('');
+  const [diagnosticCategory, setDiagnosticCategory] = useState('');
+  const [diagnosticCandidate, setDiagnosticCandidate] = useState('');
+  const [diagnosticApplication, setDiagnosticApplication] = useState('');
+  const [diagnosticRun, setDiagnosticRun] = useState('');
+  const [diagnosticOffset, setDiagnosticOffset] = useState(0);
   const [queue, setQueue] = useState<DevQueueData | null>(null);
   const [integrations, setIntegrations] = useState<DevIntegrationProbe[]>([]);
   const [debugId, setDebugId] = useState<string>('');
@@ -191,6 +217,17 @@ export const DevDashboard: React.FC = () => {
         const payload = await loadJson<{ errors?: DevErrorItem[] }>(`/api/dev/errors?date=${encodeURIComponent(date)}`);
         setErrors(payload.errors || []);
       }
+      if (tab === 'diagnostics') {
+        const params = new URLSearchParams({ limit: '50', offset: String(diagnosticOffset) });
+        if (diagnosticPhase) params.set('phase', diagnosticPhase);
+        if (diagnosticCategory.trim()) params.set('category', diagnosticCategory.trim());
+        if (diagnosticCandidate.trim()) params.set('candidate', diagnosticCandidate.trim());
+        if (diagnosticApplication.trim()) params.set('application', diagnosticApplication.trim());
+        if (diagnosticRun.trim()) params.set('run', diagnosticRun.trim());
+        const payload = await loadJson<{ diagnostics?: DevFailureDiagnostic[]; count?: number }>(`/api/dev/diagnostics?${params}`);
+        setDiagnostics(payload.diagnostics || []);
+        setDiagnosticCount(payload.count || 0);
+      }
       if (tab === 'queue') {
         const payload = await loadJson<DevQueueData>('/api/dev/queue');
         setQueue(payload);
@@ -204,7 +241,7 @@ export const DevDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, date, statsRange, token, isAuthorized, runStatus, loadJson]);
+  }, [tab, date, statsRange, token, isAuthorized, runStatus, diagnosticPhase, diagnosticCategory, diagnosticCandidate, diagnosticApplication, diagnosticRun, diagnosticOffset, loadJson]);
 
   useEffect(() => {
     void refresh();
@@ -250,8 +287,8 @@ export const DevDashboard: React.FC = () => {
     );
   }
 
-  const tabs: Array<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'guide'> =
-    ['system', 'runs', 'errors', 'queue', 'integrations', 'debugger', 'guide'];
+  const tabs: Array<'system' | 'runs' | 'errors' | 'diagnostics' | 'queue' | 'integrations' | 'debugger' | 'guide'> =
+    ['system', 'runs', 'errors', 'diagnostics', 'queue', 'integrations', 'debugger', 'guide'];
   const app = debug?.application;
   const timeline = (debug?.timeline && debug.timeline.length > 0)
     ? debug.timeline
@@ -399,6 +436,149 @@ export const DevDashboard: React.FC = () => {
           </div>
         )}
 
+        {tab === 'diagnostics' && (
+          <div className="space-y-4">
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 flex flex-wrap gap-3 items-end">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1">Phase</label>
+                <select
+                  value={diagnosticPhase}
+                  onChange={(e) => { setDiagnosticPhase(e.target.value); setDiagnosticOffset(0); }}
+                  className="bg-[#2c2c2e] border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-xs text-white"
+                >
+                  <option value="">All phases</option>
+                  <option value="scan">Scan</option>
+                  <option value="resolve">Resolve</option>
+                  <option value="submit">Submit</option>
+                  <option value="ingest">Ingest</option>
+                  <option value="system">System</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1">Category</label>
+                <input
+                  type="text"
+                  placeholder="e.g. TIMEOUT_LLM"
+                  value={diagnosticCategory}
+                  onChange={(e) => { setDiagnosticCategory(e.target.value); setDiagnosticOffset(0); }}
+                  className="bg-[#2c2c2e] border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1">Candidate ID</label>
+                <input
+                  type="text"
+                  placeholder="ApplyWizz ID"
+                  value={diagnosticCandidate}
+                  onChange={(e) => { setDiagnosticCandidate(e.target.value); setDiagnosticOffset(0); }}
+                  className="bg-[#2c2c2e] border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1">Application ID</label>
+                <input
+                  type="text"
+                  placeholder="UUID"
+                  value={diagnosticApplication}
+                  onChange={(e) => { setDiagnosticApplication(e.target.value); setDiagnosticOffset(0); }}
+                  className="bg-[#2c2c2e] border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-[#8e8e93] mb-1">Run ID</label>
+                <input
+                  type="text"
+                  placeholder="Run UUID"
+                  value={diagnosticRun}
+                  onChange={(e) => { setDiagnosticRun(e.target.value); setDiagnosticOffset(0); }}
+                  className="bg-[#2c2c2e] border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono"
+                />
+              </div>
+              <div className="text-xs text-[#8e8e93] font-mono self-center">
+                Total matching: <span className="text-white font-bold">{diagnosticCount}</span>
+              </div>
+            </div>
+
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl overflow-hidden overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[#2c2c2e] bg-[#242426] text-[#8e8e93] font-mono uppercase text-[10px] tracking-wider">
+                    <th className="p-3">Time (IST)</th>
+                    <th className="p-3">Phase / Stage</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3">Reason</th>
+                    <th className="p-3">Flags</th>
+                    <th className="p-3">Context</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#2c2c2e]">
+                  {diagnostics.map((d) => (
+                    <tr key={d.id} className="hover:bg-[#252528] transition-colors">
+                      <td className="p-3 font-mono text-[#8e8e93] whitespace-nowrap">{formatIst(d.created_at)}</td>
+                      <td className="p-3 font-mono whitespace-nowrap">
+                        <span className="text-white font-bold uppercase">{d.phase}</span>
+                        <span className="text-[#8e8e93]"> / {d.stage}</span>
+                      </td>
+                      <td className="p-3 font-mono whitespace-nowrap">
+                        <span className="bg-[#2c2c2e] border border-[#3a3a3c] text-white px-2 py-0.5 rounded text-[11px]">{d.category}</span>
+                      </td>
+                      <td className="p-3 text-white max-w-xs break-words">
+                        <div>{d.reason}</div>
+                        {(d.error_name || d.error_code) && (
+                          <div className="text-[10px] font-mono text-[#8e8e93] mt-0.5">
+                            {d.error_name}{d.error_code ? ` [${d.error_code}]` : ''}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3 font-mono whitespace-nowrap">
+                        {d.is_terminal && <span className="text-[#ff453a] font-bold mr-2">TERMINAL</span>}
+                        {d.is_retryable && <span className="text-[#30d158] font-bold">RETRYABLE</span>}
+                        {!d.is_terminal && !d.is_retryable && <span className="text-[#8e8e93]">—</span>}
+                      </td>
+                      <td className="p-3 font-mono text-[11px] whitespace-nowrap">
+                        {d.application_id && (
+                          <button
+                            type="button"
+                            className="underline text-[#0a84ff] hover:text-[#5ac8fa] block"
+                            onClick={() => void openDebugger(d.application_id!)}
+                          >
+                            app: {d.application_id.slice(0, 8)}
+                          </button>
+                        )}
+                        {d.applywizz_id && <div className="text-[#8e8e93]">cand: {d.applywizz_id}</div>}
+                        {d.run_id && <div className="text-[#8e8e93]">run: {d.run_id.slice(0, 8)}</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!diagnostics.length && <p className="p-6 text-center text-[#8e8e93]">No failure diagnostics matched the filters.</p>}
+            </div>
+
+            {diagnosticCount > 50 && (
+              <div className="flex justify-between items-center text-xs text-[#8e8e93] font-mono">
+                <button
+                  type="button"
+                  disabled={diagnosticOffset === 0}
+                  onClick={() => setDiagnosticOffset(Math.max(0, diagnosticOffset - 50))}
+                  className="bg-[#2c2c2e] border border-[#3a3a3c] px-3 py-1.5 rounded-lg text-white disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <span>Showing {diagnosticOffset + 1}–{Math.min(diagnosticCount, diagnosticOffset + 50)} of {diagnosticCount}</span>
+                <button
+                  type="button"
+                  disabled={diagnosticOffset + 50 >= diagnosticCount}
+                  onClick={() => setDiagnosticOffset(diagnosticOffset + 50)}
+                  className="bg-[#2c2c2e] border border-[#3a3a3c] px-3 py-1.5 rounded-lg text-white disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === 'queue' && queue && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -496,6 +676,7 @@ export const DevDashboard: React.FC = () => {
                 <li><span className="font-semibold text-white">System</span> — health probes, queue and worker summary, ingest line.</li>
                 <li><span className="font-semibold text-white">Runs</span> — applications for the header date; optional status filter; click ID to open Debugger.</li>
                 <li><span className="font-semibold text-white">Errors</span> — grouped failures for the date; click app IDs to debug.</li>
+                <li><span className="font-semibold text-white">Diagnostics</span> — searchable failure diagnostics telemetry (redacted, retained for 90 days).</li>
                 <li><span className="font-semibold text-white">Queue</span> — live queued/applying/stuck counts and running/pending ID lists.</li>
                 <li><span className="font-semibold text-white">Integrations</span> — per-integration probe detail and last errors.</li>
                 <li><span className="font-semibold text-white">Debugger</span> — paste an application UUID for status, proofs, raw error, and timeline.</li>

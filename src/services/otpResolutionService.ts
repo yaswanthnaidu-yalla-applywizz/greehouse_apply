@@ -4,29 +4,115 @@ import {
   updateStatus,
   MAX_SUBMISSION_RETRIES,
 } from '../db/applications.js';
-import { fetchZohoOtpViaApi } from './zoho-connector.js';
+import { fetchZohoOtpViaApi, fetchGmailOtpViaApi } from './zoho-connector.js';
 import { config } from '../config/env.js';
+import { emitFailureDiagnostic, withDiagnosticRun } from '../utils/failureDiagnostics.js';
+import { captureJobFailedScreenshot } from '../submitter/proofCapture.js';
 
 const log = createLogger('OTP Resolution');
+export const OTP_CHALLENGE_TIMEOUT_MS = 8 * 60 * 1000; // increased from 5 min to give slow email delivery more time
+const TERMINAL_OTP_FETCH_REASONS = new Set([
+  'INVALID_CANDIDATE_EMAIL',
+  'INVALID_SUBMIT_TIMESTAMP',
+  'STALE_TIMESTAMPS_ONLY',
+]);
 
 export interface OtpPendingEntry {
   applicationId: string;
   email: string;
-  sinceTimestamp: number;
+  submitClickedAt: number;
   sessionKey: string;
-  attemptCount: number;
+  diagnosticRunId?: string;
   claimed: boolean;
+  attemptedMessageIds: string[];
+  attemptedCodes: string[];
+  newestAttemptedTimestamp?: number;
 }
 
 const pendingEntries = new Map<string, OtpPendingEntry>();
 
-class OtpResolutionService {
+export function getOtpFetchRetryTransition(currentRetryCount: number): {
+  retryCount: number;
+  status: 'QUEUED' | 'FAILED';
+} {
+  const safeRetryCount =
+    Number.isInteger(currentRetryCount) && currentRetryCount >= 0 ? currentRetryCount : 0;
+  if (safeRetryCount >= MAX_SUBMISSION_RETRIES) {
+    return { retryCount: safeRetryCount, status: 'FAILED' };
+  }
+
+  const nextRetryCount = safeRetryCount + 1;
+  if (nextRetryCount >= MAX_SUBMISSION_RETRIES) {
+    return { retryCount: nextRetryCount, status: 'FAILED' };
+  }
+  return {
+    retryCount: nextRetryCount,
+    status: 'QUEUED',
+  };
+}
+
+export function isTerminalOtpFetchFailure(reasonCode: string): boolean {
+  return TERMINAL_OTP_FETCH_REASONS.has(reasonCode);
+}
+
+export function normalizeCompanyNameForOtp(companyName?: string | null): string {
+  if (!companyName) return '';
+  return companyName
+    .replace(/\s*[\(\[].*?[\)\]]/g, '')
+    .replace(/,?\s+(Inc\.?|Corp\.?|LLC\.?|Ltd\.?|Software|Robotics|Interactive|Corporation|Technologies|Solutions|Group|Holdings|Ventures)\b.*/i, '')
+    .trim();
+}
+
+export function resolveOtpEndpoint(candidateEmail: string): 'zoho' | 'gmail' {
+  const normalized = (candidateEmail || '').trim().toLowerCase();
+  if (normalized.endsWith('@gmail.com') || normalized.endsWith('@googlemail.com')) {
+    return 'gmail';
+  }
+  return 'zoho';
+}
+
+export interface OtpResolutionDeps {
+  getApplication?: typeof getApplication;
+  updateStatus?: typeof updateStatus;
+  fetchZohoOtpViaApi?: typeof fetchZohoOtpViaApi;
+  fetchGmailOtpViaApi?: typeof fetchGmailOtpViaApi;
+  resolvePausedSession?: (id: string) => { session: any; canonicalKey: string } | null;
+  submitOtpToPausedSession?: (sessionKey: string, otp: string, options?: any) => Promise<any>;
+  clearPausedSession?: (id: string, options?: { captureFailureProof?: boolean }) => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export class OtpResolutionService {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private deps: OtpResolutionDeps;
 
-  public register(entry: Omit<OtpPendingEntry, 'claimed'>): void {
-    pendingEntries.set(entry.applicationId, { ...entry, claimed: false });
-    log.info(`[OTP Resolution] Registered pending OTP for ${entry.applicationId}`);
+  constructor(customDeps?: OtpResolutionDeps) {
+    this.deps = customDeps || {};
+  }
+
+  public register(
+    entry: Omit<
+      OtpPendingEntry,
+      | 'claimed'
+      | 'attemptedMessageIds'
+      | 'attemptedCodes'
+      | 'newestAttemptedTimestamp'
+    >
+  ): OtpPendingEntry {
+    const fullEntry: OtpPendingEntry = {
+      ...entry,
+      claimed: false,
+      attemptedMessageIds: (entry as any).attemptedMessageIds || [],
+      attemptedCodes: (entry as any).attemptedCodes || [],
+    };
+    pendingEntries.set(entry.applicationId, fullEntry);
+    log.info(
+      `[OTP Resolution] event=resolver_registered application=${entry.applicationId} ` +
+        `submit_clicked_at=${new Date(entry.submitClickedAt).toISOString()} ` +
+        `budget_ms=${OTP_CHALLENGE_TIMEOUT_MS}`
+    );
+    return fullEntry;
   }
 
   public cancel(applicationId: string): void {
@@ -59,10 +145,14 @@ class OtpResolutionService {
         if (entry.claimed) return;
         entry.claimed = true;
         await this.processEntry(entry).catch((error: unknown) => {
+          const errorName = error instanceof Error ? error.name : 'UnknownError';
+          const errorCode =
+            error && typeof error === 'object' && 'code' in error
+              ? String((error as { code?: unknown }).code || 'unknown')
+              : 'unknown';
           log.error(
-            `[OTP Resolution] Unexpected failure for ${entry.applicationId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`
+            `[OTP Resolution] event=resolver_unexpected_failure application=${entry.applicationId} ` +
+              `error_name=${errorName} error_code=${errorCode}`
           );
           entry.claimed = false;
         });
@@ -70,70 +160,355 @@ class OtpResolutionService {
     );
   }
 
-  private async processEntry(entry: OtpPendingEntry): Promise<void> {
+  public async processEntry(entry: OtpPendingEntry): Promise<void> {
+    return withDiagnosticRun(entry.diagnosticRunId, () => this.processEntryInContext(entry));
+  }
+
+  public async processEntryInContext(entry: OtpPendingEntry): Promise<void> {
     const liveSubmit = await import('../submitter/liveSubmit.js');
-    if (!liveSubmit.resolvePausedSession(entry.sessionKey)) {
-      await updateStatus(entry.applicationId, 'RETRY', {
-        error_message: 'OTP session expired before resolution.',
-      }).catch(() => {});
+    const getApp = this.deps.getApplication ?? getApplication;
+    const updateStat = this.deps.updateStatus ?? updateStatus;
+    const fetchZoho = this.deps.fetchZohoOtpViaApi ?? fetchZohoOtpViaApi;
+    const fetchGmail = this.deps.fetchGmailOtpViaApi ?? fetchGmailOtpViaApi;
+    const resolveSession = this.deps.resolvePausedSession ?? liveSubmit.resolvePausedSession;
+    const submitOtpSession = this.deps.submitOtpToPausedSession ?? liveSubmit.submitOtpToPausedSession;
+    const clearSession = this.deps.clearPausedSession ?? liveSubmit.clearPausedSession;
+    const sleepFn = this.deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+
+    const application = await getApp(entry.applicationId);
+    if (!application) {
+      log.error(`[OTP Resolution] application=${entry.applicationId} outcome=cancelled reason=application_not_found`);
       this.cancel(entry.applicationId);
       return;
     }
 
-    entry.attemptCount += 1;
-    try {
-      const application = await getApplication(entry.applicationId);
-      if (!application) {
-        this.cancel(entry.applicationId);
-        return;
-      }
+    const retryCount = Number(application.retry_count ?? 0);
+    const attemptNumber = retryCount + 1;
+    const deadline = entry.submitClickedAt + OTP_CHALLENGE_TIMEOUT_MS;
+    const startedAt = Date.now();
+    let lastReason = 'NO_MATCHING_OTP_EMAIL';
+    const session = resolveSession(entry.sessionKey);
 
-      // Fast REST API-based OTP polling (Instant & lightweight)
-      const result = await fetchZohoOtpViaApi({
-        candidateEmail: entry.email,
-        sinceTimestamp: entry.sinceTimestamp,
-        companyName: application.company_name || undefined,
-        timeoutMs: config.OTP_ATTEMPT_TIMEOUT_MS,
-        pollIntervalMs: 5000,
-      });
+    if (!session) {
+      const message = '[OTP_SESSION:UNAVAILABLE] Paused browser session expired before automatic verification.';
+      await this.failPendingEntry(entry, application, retryCount, message, 'OTP_SESSION_UNAVAILABLE', undefined, updateStat, getApp);
+      this.cancel(entry.applicationId);
+      return;
+    }
 
-      if (result.success && result.otp) {
-        const submitResult = await liveSubmit.submitOtpToPausedSession(
-          entry.sessionKey,
-          result.otp,
-          { jobUrl: application.job_url }
+    // Wait 10s after OTP detection before first mailbox query
+    const elapsedSinceDetect = Date.now() - entry.submitClickedAt;
+    if (elapsedSinceDetect < 10000) {
+      await sleepFn(10000 - elapsedSinceDetect);
+    }
+
+    log.info(
+      `[OTP Resolution] event=resolver_started application=${entry.applicationId} candidate=${application.applywizz_id} ` +
+      `attempt=${attemptNumber} retry_count=${retryCount}/${MAX_SUBMISSION_RETRIES} ` +
+      `budget_ms=${OTP_CHALLENGE_TIMEOUT_MS} elapsed_from_submit_ms=${Date.now() - entry.submitClickedAt} ` +
+      `remaining_budget_ms=${Math.max(0, deadline - Date.now())} attempted_messages=${entry.attemptedMessageIds.length} started`
+    );
+
+    let currentEndpoint: 'gmail' | 'zoho' = resolveOtpEndpoint(entry.email);
+    const companyParam = normalizeCompanyNameForOtp(application.company_name) || undefined;
+
+    while (Date.now() < deadline) {
+      if (!pendingEntries.has(entry.applicationId)) return;
+      const remainingMs = deadline - Date.now();
+      log.info(
+        `[OTP Resolution] ⏳ ${entry.applicationId} elapsed=${Date.now() - entry.submitClickedAt}ms/` +
+          `${OTP_CHALLENGE_TIMEOUT_MS}ms attempt=${attemptNumber}`
+      );
+      try {
+        log.info(
+          `[OTP Resolution] application=${entry.applicationId} email=${entry.email} [OTP] routing → ${currentEndpoint}`
+        );
+
+        const result = currentEndpoint === 'gmail'
+          ? await fetchGmail({
+              candidateEmail: entry.email,
+              companyName: companyParam,
+              correlationId: entry.applicationId,
+              timeoutMs: Math.min(30000, remainingMs),
+              pollIntervalMs: 10000,
+              excludedCodes: entry.attemptedCodes,
+            })
+          : await fetchZoho({
+              candidateEmail: entry.email,
+              correlationId: entry.applicationId,
+              sinceTimestamp: entry.submitClickedAt,
+              companyName: companyParam,
+              timeoutMs: Math.min(30000, remainingMs),
+              pollIntervalMs: 10000,
+              newerThanTimestamp: entry.newestAttemptedTimestamp,
+              excludedMessageIds: entry.attemptedMessageIds,
+              excludedCodes: entry.attemptedCodes,
+            });
+
+        if (!result.success || !result.otp || !result.messageId) {
+          lastReason = result.reasonCode || 'NO_MATCHING_OTP_EMAIL';
+          log.warn(
+            `[OTP Resolution] event=otp_lookup_result application=${entry.applicationId} ` +
+              `outcome=not_found reason=${lastReason} elapsed_from_submit_ms=${Date.now() - entry.submitClickedAt} ` +
+              `lookup_elapsed_ms=${Date.now() - startedAt} remaining_budget_ms=${Math.max(0, deadline - Date.now())}`
+          );
+
+          const isNotYet =
+            result.reason === 'not_yet' ||
+            result.reasonCode === 'GMAIL_OTP_NOT_YET' ||
+            result.reasonCode === 'NO_MESSAGES_SINCE_SUBMIT' ||
+            result.reasonCode === 'STALE_TIMESTAMPS_ONLY' ||
+            result.reasonCode === 'POLL_BUDGET_EXHAUSTED' ||
+            result.reasonCode === 'GMAIL_OTP_NOT_FOUND' ||
+            (result as any).received === false ||
+            (result as any).found === false;
+
+          if (
+            currentEndpoint === 'gmail' &&
+            (result.reason === 'mailbox_not_connected' ||
+              result.reasonCode === 'GMAIL_MAILBOX_NOT_CONNECTED' ||
+              isNotYet)
+          ) {
+            log.info(
+              `[OTP Resolution] application=${entry.applicationId} Gmail returned ${result.reason || result.reasonCode}; switching to Zoho fallback`
+            );
+            currentEndpoint = 'zoho';
+            if (Date.now() + 2000 < deadline) {
+              await sleepFn(2000);
+            }
+            continue;
+          } else if (
+            currentEndpoint === 'zoho' &&
+            (result.reason === 'mailbox_not_connected' ||
+              result.reasonCode === 'ZOHO_INBOX_UNAVAILABLE' ||
+              isNotYet)
+          ) {
+            log.info(
+              `[OTP Resolution] application=${entry.applicationId} Zoho returned ${result.reason || result.reasonCode}; switching to Gmail fallback`
+            );
+            currentEndpoint = 'gmail';
+            if (Date.now() + 2000 < deadline) {
+              await sleepFn(2000);
+            }
+            continue;
+          }
+          if (isTerminalOtpFetchFailure(result.reasonCode || '')) {
+            await emitFailureDiagnostic({
+              category: 'SUBMIT_OTP_FETCH',
+              stage: 'otp_mailbox_lookup',
+              reason: 'Automatic OTP retrieval could not proceed because the mailbox lookup failed.',
+              errorCode: result.reasonCode,
+              isTerminal: true,
+              isRetryable: false,
+              applywizzId: application.applywizz_id,
+              applicationId: entry.applicationId,
+              jobUrl: application.job_url,
+              metadata: { elapsedMs: Date.now() - startedAt, reasonCode: result.reasonCode || 'unknown' },
+            });
+            await clearSession(entry.sessionKey, { captureFailureProof: false });
+            await this.failPendingEntry(
+              entry,
+              application,
+              retryCount,
+              `[OTP_FETCH:${lastReason}] Automatic OTP retrieval cannot proceed.`,
+              lastReason,
+              undefined,
+              updateStat,
+              getApp
+            );
+            this.cancel(entry.applicationId);
+            return;
+          }
+
+          // not_yet / poll timeout: wait 10s and continue until deadline
+          if (Date.now() + 10000 < deadline) {
+            await sleepFn(10000);
+          }
+          continue;
+        }
+
+        if (!pendingEntries.has(entry.applicationId)) return;
+        entry.attemptedMessageIds.push(result.messageId);
+        entry.attemptedCodes.push(result.otp);
+        if (result.receivedAtMs !== undefined) {
+          entry.newestAttemptedTimestamp = Math.max(
+            entry.newestAttemptedTimestamp ?? 0,
+            result.receivedAtMs
+          );
+        }
+        log.info(
+          `[OTP Resolution] event=otp_code_received application=${entry.applicationId} ` +
+            `message_id=${result.messageId} received_at=${result.receivedAt || 'unknown'} ` +
+            `message_age_at_submit_ms=${result.receivedAtMs === undefined ? 'unknown' : result.receivedAtMs - entry.submitClickedAt} ` +
+            `code_length=${result.otp.length} code=[REDACTED] elapsed_from_submit_ms=${Date.now() - entry.submitClickedAt}`
+        );
+        const submitResult = await submitOtpSession(entry.sessionKey, result.otp, {
+          jobUrl: application.job_url,
+        });
+        log.info(
+          `[OTP Resolution] event=otp_submission_result application=${entry.applicationId} ` +
+            `status=${submitResult.status} success=${submitResult.success} ` +
+            `elapsed_from_submit_ms=${Date.now() - entry.submitClickedAt}`
         );
         if (submitResult.status === 'APPLIED' || submitResult.status === 'EMAIL_PROOF_PENDING') {
-          await updateStatus(entry.applicationId, 'APPLIED', {
-            proof_web_url: submitResult.proofWebUrl,
-            proof_captured_at: submitResult.proofCapturedAt,
-            job_url: application.job_url,
-          }).catch(() => {});
+          log.info(
+            `[OTP Resolution] application=${entry.applicationId} outcome=success ` +
+              `status=${submitResult.status} elapsed_ms=${Date.now() - startedAt}`
+          );
           this.cancel(entry.applicationId);
           return;
         }
+        await emitFailureDiagnostic({
+          category: 'SUBMIT_OTP_SUBMISSION',
+          stage: 'otp_browser_submission',
+          reason: 'OTP verification did not complete the application submission.',
+          errorCode: submitResult.status,
+          isTerminal: true,
+          isRetryable: false,
+          applywizzId: application.applywizz_id,
+          applicationId: entry.applicationId,
+          jobUrl: application.job_url,
+        });
+        const message = `[OTP_SUBMISSION:UNVERIFIED] A fresh code was received but submission was not verified (${submitResult.status}).`;
+        await clearSession(entry.sessionKey);
+        await this.failPendingEntry(entry, application, retryCount, message, 'OTP_SUBMISSION_UNVERIFIED', undefined, updateStat, getApp);
+        this.cancel(entry.applicationId);
+        return;
+      } catch (error: unknown) {
+        if (!pendingEntries.has(entry.applicationId)) return;
+        await emitFailureDiagnostic({
+          category: 'SUBMIT_OTP_SUBMISSION',
+          stage: 'otp_browser_submission',
+          reason: 'A fresh OTP was retrieved, but browser verification failed.',
+          error,
+          isTerminal: false,
+          isRetryable: true,
+          applywizzId: application.applywizz_id,
+          applicationId: entry.applicationId,
+          jobUrl: application.job_url,
+        });
+        const errorName = error instanceof Error ? error.name : 'UnknownError';
+        const errorCode =
+          error && typeof error === 'object' && 'code' in error
+            ? String((error as { code?: unknown }).code || 'unknown')
+            : 'unknown';
+        const message = `OTP browser submission error (${errorName}; code=${errorCode}).`;
+        log.error(
+          `[OTP Resolution] event=otp_submission_exception application=${entry.applicationId} ` +
+            `error_name=${errorName} error_code=${errorCode} elapsed_from_submit_ms=${Date.now() - entry.submitClickedAt}`
+        );
+        await clearSession(entry.sessionKey);
+        await this.failPendingEntry(
+          entry,
+          application,
+          retryCount,
+          `[OTP_SUBMISSION:ERROR] ${message}`,
+          'OTP_SUBMISSION_ERROR',
+          undefined,
+          updateStat,
+          getApp
+        );
+        this.cancel(entry.applicationId);
+        return;
       }
-    } catch (error: unknown) {
-      log.warn(
-        `[OTP Resolution] Attempt failed for ${entry.applicationId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
     }
 
-    if (entry.attemptCount >= MAX_SUBMISSION_RETRIES) {
-      await updateStatus(entry.applicationId, 'RETRY', {
-        error_message: 'OTP resolution retry budget exhausted.',
-      }).catch(() => {});
+    if (!pendingEntries.has(entry.applicationId)) return;
+    const page = (session as any)?.session?.page || (session as any)?.page;
+    if (page && typeof page.isClosed === 'function' && !page.isClosed()) {
+      await captureJobFailedScreenshot(page, application, 'otp_timeout').catch(() => null);
+    }
+    await clearSession(entry.sessionKey, { captureFailureProof: false });
+    if (isTerminalOtpFetchFailure(lastReason)) {
+      const errorMessage =
+        `[OTP_FETCH:${lastReason}] No fresh OTP with valid submit-time freshness data was available.`;
+      await this.failPendingEntry(entry, application, retryCount, errorMessage, lastReason, undefined, updateStat, getApp);
       this.cancel(entry.applicationId);
       return;
     }
 
-    entry.claimed = false;
+    const nextRetryCount = retryCount + 1;
+    const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES;
+    const finalStatus: 'FAILED' | 'RETRY' = isTerminal ? 'FAILED' : 'RETRY';
+    const errorMessage =
+      `[OTP_FETCH:TIMEOUT] OTP not received within 300s (attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}); reason=${lastReason}.`;
+
+    await emitFailureDiagnostic({
+      category: 'SUBMIT_OTP_TIMEOUT',
+      stage: 'otp_mailbox_lookup',
+      reason: 'Automatic OTP retrieval exceeded the configured submit-time deadline.',
+      errorCode: lastReason,
+      isTerminal,
+      isRetryable: !isTerminal,
+      applywizzId: application.applywizz_id,
+      applicationId: entry.applicationId,
+      jobUrl: application.job_url,
+      metadata: {
+        elapsedMs: Date.now() - entry.submitClickedAt,
+        retryCount: nextRetryCount,
+        reasonCode: lastReason,
+      },
+    });
+
+    try {
+      await updateStat(entry.applicationId, finalStatus, {
+        expected_status: 'OTP_REQUIRED',
+        expected_retry_count: retryCount,
+        error_message: errorMessage,
+        retry_count: nextRetryCount,
+        job_url: application.job_url,
+      });
+    } catch (statusError: unknown) {
+      log.error(
+        `[OTP Resolution] application=${entry.applicationId} outcome=status_update_failed ` +
+          `reason=${statusError instanceof Error ? statusError.message : String(statusError)}`
+      );
+    }
+
     log.warn(
-      `[OTP Resolution] OTP attempt failed for ${entry.applicationId}; ` +
-        `attempt=${entry.attemptCount}/${MAX_SUBMISSION_RETRIES}`
+      `[OTP Resolution] application=${entry.applicationId} outcome=${finalStatus.toLowerCase()} ` +
+        `reason=${lastReason} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
+        `elapsed_ms=${Date.now() - startedAt} session=closed`
     );
+    this.cancel(entry.applicationId);
+  }
+
+  private async failPendingEntry(
+    entry: OtpPendingEntry,
+    application: NonNullable<Awaited<ReturnType<typeof getApplication>>>,
+    expectedRetryCount: number,
+    errorMessage: string,
+    reason: string,
+    nextRetryCount?: number,
+    updateStat: typeof updateStatus = updateStatus,
+    getApp: typeof getApplication = getApplication
+  ): Promise<void> {
+    try {
+      await updateStat(entry.applicationId, 'FAILED', {
+        expected_status: 'OTP_REQUIRED',
+        expected_retry_count: expectedRetryCount,
+        error_message: errorMessage,
+        retry_count: nextRetryCount,
+        job_url: application.job_url,
+      });
+      log.error(
+        `[OTP Resolution] application=${entry.applicationId} outcome=failed reason=${reason} ` +
+          `retry_count=${nextRetryCount ?? expectedRetryCount}/${MAX_SUBMISSION_RETRIES}`
+      );
+    } catch (error: unknown) {
+      const current = await getApp(entry.applicationId, application.job_url);
+      if (
+        current?.status !== 'OTP_REQUIRED' ||
+        Number(current.retry_count ?? 0) !== expectedRetryCount
+      ) {
+        log.warn(
+          `[OTP Resolution] application=${entry.applicationId} outcome=not_failed ` +
+            `reason=status_changed current_status=${current?.status || 'missing'}`
+        );
+        return;
+      }
+      throw error;
+    }
   }
 }
 

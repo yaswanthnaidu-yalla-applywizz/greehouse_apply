@@ -99,4 +99,45 @@ describe('extractOtpCodeFromText', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('fetches OTP code successfully from Gmail security code API', async () => {
+    const originalFetch = globalThis.fetch;
+    let endpointHit = false;
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes('/api/gmail/greenhouse-security-code')) {
+        endpointHit = true;
+        assert.equal(url.searchParams.get('email'), 'candidate@gmail.com');
+        assert.equal(url.searchParams.get('company'), 'Block');
+        return new Response(
+          JSON.stringify({
+            found: true,
+            email: 'candidate@gmail.com',
+            code: '948215',
+            received_at: new Date().toISOString(),
+          }),
+          { status: 200 }
+        );
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    try {
+      const { fetchGmailOtpViaApi } = await import('../src/services/zoho-connector.js');
+      const result = await fetchGmailOtpViaApi({
+        candidateEmail: 'candidate@gmail.com',
+        companyName: 'Block',
+        timeoutMs: 2000,
+        pollIntervalMs: 500,
+      });
+
+      assert.equal(endpointHit, true);
+      assert.equal(result.success, true);
+      assert.equal(result.otp, '948215');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
+

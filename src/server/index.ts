@@ -18,6 +18,10 @@ if (typeof globalThis.WebSocket === 'undefined') {
   (globalThis as any).WebSocket = WebSocket;
 }
 
+import { setupProcessCrashGuard, sweepStaleApplications } from './crashGuard.js';
+// Install top-level process crash guards immediately before any server bootstrap code
+setupProcessCrashGuard();
+
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
@@ -28,6 +32,7 @@ import { config } from '../config/env.js';
 import { resolveShortlink } from '../scanner/csvDeduplicator.js';
 import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
+import { startFailureDiagnosticsRetention } from '../services/failureDiagnosticsRetention.js';
 import { authRouter, isUserAdmin, resolveRole } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { configRouter } from './routes/config.js';
@@ -1066,18 +1071,6 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       }
     });
 
-    app.post('/api/internal/applications/:id/resume-submission', validateInternalSecret, async (req: Request, res: Response): Promise<void> => {
-      const rawId = req.params.id;
-      const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
-      try {
-        const { resumeSubmission } = await import('../submitter/captchaResume.js');
-        const result = await resumeSubmission(appId);
-        res.json(result);
-      } catch (err: any) {
-        res.status(500).json({ success: false, error: err?.message || 'Failed to resume submission' });
-      }
-    });
-
     app.get('/api/internal/worker-status', validateInternalSecret, (_req: Request, res: Response): void => {
       const daemon = getQueueDaemon();
       if (daemon) {
@@ -1728,7 +1721,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       let appQuery = getDbClient()
         .from('gh_candidate_applications')
         .select('*')
-        .eq('applywizz_id', applywizzId);
+        .eq('applywizz_id', applywizzId)
+        .neq('status', 'FILTERED_OUT');
+
       if (!unrestricted) {
         appQuery = applyCreatedAtRangeFilter(appQuery, createdAtRange);
       }
@@ -2241,6 +2236,7 @@ export function startServer(
   port: number = process.env.PORT ? parseInt(process.env.PORT, 10) : (config.PORT || 3000)
 ): ReturnType<express.Application['listen']> {
   const isIngestOnly = config.INGEST_ONLY === 'true' || process.env.INGEST_ONLY === 'true';
+  startFailureDiagnosticsRetention();
   const app = createServer();
 
   const server = app.listen(port, '0.0.0.0', () => {
@@ -2284,6 +2280,11 @@ export function startServer(
 
     }
 
+    // Sweep stale in-flight applications (OTP_REQUIRED/APPLYING >10m) on startup
+    void sweepStaleApplications().catch((err) => {
+      log.error(`[Server] Stale sweep on startup failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
     // Launch background round-robin submission worker daemon if enabled (Phase V2-4c)
     let queueDaemon: SubmissionQueueDaemon | null = null;
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
@@ -2303,6 +2304,7 @@ export function startServer(
 
   const cleanup = async () => {
     otpResolutionService.stop();
+    await sweepStaleApplications().catch(() => {});
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       // Allow in-flight Playwright workers to finish
       log.info('[Server] 🧹 Shutting down background queue daemon...');
