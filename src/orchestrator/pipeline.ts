@@ -309,7 +309,9 @@ export class V1Pipeline {
 
     try {
       const runStartedAt = new Date(startTime).toISOString();
-      await sendCaNotificationEmails(runStartedAt);
+      const pendingAutoQueue = this.resolver.getPendingAutoQueue();
+      const excludeKeys = new Set(pendingAutoQueue.map((p) => `${p.applywizzId.trim().toUpperCase()}::${p.jobUrl}`));
+      await sendCaNotificationEmails(runStartedAt, { excludeKeys });
     } catch (caEmailErr: any) {
       log.warn(`[Pipeline Phase D] ⚠️ CA notification email error: ${caEmailErr?.message || caEmailErr}`);
     }
@@ -372,6 +374,16 @@ export class V1Pipeline {
       log.info(`  - ${result.outputFiles.candidateSegmentsJson}`);
       log.info(`  - ${result.outputFiles.resolvedApplicationsJson}`);
       log.info('================================================================\n');
+    }
+
+    // -------------------------------------------------------------
+    // Post-Ingest Auto-Queue Flush
+    // -------------------------------------------------------------
+    if (this.resolver.getPendingAutoQueueCount() > 0) {
+      const count = this.resolver.getPendingAutoQueueCount();
+      log.info(`[Pipeline] Ingest run complete — flushing ${count} auto-queued applications...`);
+      const enqueued = await this.resolver.flushPendingAutoQueue();
+      log.info(`[Pipeline] ✅ Successfully auto-queued ${enqueued}/${count} applications for submission.`);
     }
 
     return result;

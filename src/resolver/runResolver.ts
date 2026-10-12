@@ -95,6 +95,13 @@ export async function main(): Promise<void> {
 
     const outputPath = await exportResolvedApplications(resolvedApps, outputDir);
 
+    if (resolver.getPendingAutoQueueCount() > 0) {
+      const count = resolver.getPendingAutoQueueCount();
+      log.info(`[Resolver Runner] Resolution run complete — flushing ${count} auto-queued applications...`);
+      const enqueued = await resolver.flushPendingAutoQueue();
+      log.info(`[Resolver Runner] ✅ Successfully auto-queued ${enqueued}/${count} applications.`);
+    }
+
     let totalFields = 0;
     let supabaseCount = 0;
     let resumeCount = 0;

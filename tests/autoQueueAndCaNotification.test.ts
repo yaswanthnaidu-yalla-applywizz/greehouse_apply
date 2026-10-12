@@ -11,6 +11,7 @@ import {
   buildCaNotificationHtml,
   sendCaNotificationEmails,
 } from '../src/services/caNotificationEmail.js';
+import { AnswerResolver } from '../src/resolver/answerResolver.js';
 
 describe('Auto-queue Routing & NeedsReview', () => {
   it('applicationNeedsOperatorReview requires review when a required field has source=ai with confidence < 0.8', () => {
@@ -174,6 +175,19 @@ describe('CA Notification Email', () => {
     assert.equal(ca2.clientCount, 1);
   });
 
+  it('groupReadyForReviewByCa filters out rows matching excludeKeys', () => {
+    const rows = [
+      { applywizz_id: 'AW-001', assigned_ca_email: 'ca1@example.com', job_url: 'https://job1' },
+      { applywizz_id: 'AW-001', assigned_ca_email: 'ca1@example.com', job_url: 'https://job2' },
+      { applywizz_id: 'AW-002', assigned_ca_email: 'ca1@example.com', job_url: 'https://job3' },
+    ];
+    const excludeKeys = new Set(['AW-001::https://job1']);
+    const summaries = groupReadyForReviewByCa(rows as any, { excludeKeys });
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0].appCount, 2);
+    assert.equal(summaries[0].clientCount, 2);
+  });
+
   it('buildCaNotificationHtml formats HTML template properly', () => {
     const html = buildCaNotificationHtml({
       caEmail: 'ca@applywizz.ai',
@@ -193,5 +207,15 @@ describe('CA Notification Email', () => {
     assert.ok(typeof result.sent === 'number');
     assert.ok(typeof result.failed === 'number');
     assert.ok(Array.isArray(result.summaries));
+  });
+});
+
+describe('Deferred Auto-queue in AnswerResolver', () => {
+  it('buffers auto-queued applications and exposes flushPendingAutoQueue', async () => {
+    const resolver = new AnswerResolver();
+    assert.equal(typeof (resolver as any).flushPendingAutoQueue, 'function');
+    assert.equal(typeof (resolver as any).getPendingAutoQueueCount, 'function');
+    assert.equal(typeof (resolver as any).getPendingAutoQueue, 'function');
+    assert.equal((resolver as any).getPendingAutoQueueCount(), 0);
   });
 });

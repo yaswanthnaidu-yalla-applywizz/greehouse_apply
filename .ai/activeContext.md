@@ -1,3 +1,23 @@
+## Current Session Update (2026-10-13 — Ingest LLM Timeout & Deferred Auto-Queue Submissions)
+
+- **Root Cause Fixes for Ingestion & Submitter Concurrency Collisions**:
+  - **OpenRouter LLM Request Timeout Resolved (`src/config/env.ts`, `src/resolver/llmSynthesizer.ts`)**:
+    - Discovered 100% of errors in `logs.1791829492497.log` were `RESOLVE_TIER5_PROVIDER_FAILURE` / `t5_batch_provider_failure` caused by hardcoded `8000ms` client timeout with 1 retry (timing out at ~16.7s) on 6–8 question batch syntheses using OpenRouter `google/gemini-2.5-flash`.
+    - Added configurable `LLM_TIMEOUT_MS` (default `30000ms`, 30s) in `src/config/env.ts` and updated OpenAI/OpenRouter client initializations in `src/resolver/llmSynthesizer.ts`.
+  - **Tier 4 UUID Rejection for Non-Identifier Fields (`src/resolver/answerResolver.ts`)**:
+    - Addressed warnings where historical QA bank UUIDs (e.g. applicant IDs) fuzzy-matched into non-identifier fields (`County`, `Additional links`).
+    - Discarded UUID-shaped QA bank answers in `resolveTier3` fuzzy search before accepting matches.
+  - **Deferred Auto-Queue Submissions (`src/resolver/answerResolver.ts`, `src/services/caNotificationEmail.ts`, `src/orchestrator/pipeline.ts`, `src/resolver/runResolver.ts`)**:
+    - Ingest previously transitioned auto-queue eligible applications immediately to `QUEUED`, triggering the background submitter daemon to spin up up to 15 concurrent Playwright Chromium instances while ingest was running, leading to container OOM and `browserContext.newPage: Target crashed` (`EAGAIN`).
+    - Decoupled resolution from immediate enqueueing. Applications are persisted initially as `READY_FOR_REVIEW` and buffered in memory (`pendingAutoQueue`).
+    - Provided buffer inspection and flush methods: `getPendingAutoQueue()`, `getPendingAutoQueueCount()`, and `flushPendingAutoQueue(): Promise<number>`.
+    - Filtered pending auto-queued applications out of CA review notification emails (`sendCaNotificationEmails` / `groupReadyForReviewByCa`) via `excludeKeys` (`${applywizz_id}::${job_url}`).
+    - Flushed buffered applications to `QUEUED` in `Pipeline.run()` only after Phase E completes and in `runResolver.ts`.
+  - **Verification**:
+    - Full TypeScript typecheck clean (0 errors).
+    - Unit test suite clean: 48 vitest tests, all node tests passed.
+    - Code review approved with 0 Critical / 0 Important findings.
+
 ## Current Session Update (2026-10-12 — Remote DB Profiles Data Audit, Resume PDF Extraction & Normalization)
 
 - **Comprehensive Profile Data Audit & Anomaly Identification (`scripts/auditProfileAnomalies.cjs`)**:
