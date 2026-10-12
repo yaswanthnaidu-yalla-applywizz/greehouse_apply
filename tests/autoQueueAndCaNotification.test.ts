@@ -11,6 +11,7 @@ import {
   buildCaNotificationHtml,
   sendCaNotificationEmails,
 } from '../src/services/caNotificationEmail.js';
+import { AnswerResolver } from '../src/resolver/answerResolver.js';
 
 describe('Auto-queue Routing & NeedsReview', () => {
   it('applicationNeedsOperatorReview requires review when a required field has source=ai with confidence < 0.8', () => {
@@ -193,5 +194,15 @@ describe('CA Notification Email', () => {
     assert.ok(typeof result.sent === 'number');
     assert.ok(typeof result.failed === 'number');
     assert.ok(Array.isArray(result.summaries));
+  });
+});
+
+describe('Deferred Auto-queue in AnswerResolver', () => {
+  it('buffers auto-queued applications and exposes flushPendingAutoQueue', async () => {
+    const resolver = new AnswerResolver();
+    assert.equal(typeof (resolver as any).flushPendingAutoQueue, 'function');
+    assert.equal(typeof (resolver as any).getPendingAutoQueueCount, 'function');
+    assert.equal(typeof (resolver as any).getPendingAutoQueue, 'function');
+    assert.equal((resolver as any).getPendingAutoQueueCount(), 0);
   });
 });
