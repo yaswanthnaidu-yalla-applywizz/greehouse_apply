@@ -43,7 +43,8 @@ export function groupReadyForReviewByCa(
 
   for (const row of rows) {
     if (options?.excludeKeys && options.excludeKeys.size > 0 && row.applywizz_id && row.job_url) {
-      if (options.excludeKeys.has(`${row.applywizz_id}::${row.job_url}`)) {
+      const normalizedKey = `${String(row.applywizz_id).trim().toUpperCase()}::${row.job_url}`;
+      if (options.excludeKeys.has(normalizedKey)) {
         continue;
       }
     }

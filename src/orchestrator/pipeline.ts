@@ -310,7 +310,7 @@ export class V1Pipeline {
     try {
       const runStartedAt = new Date(startTime).toISOString();
       const pendingAutoQueue = this.resolver.getPendingAutoQueue();
-      const excludeKeys = new Set(pendingAutoQueue.map((p) => `${p.applywizzId}::${p.jobUrl}`));
+      const excludeKeys = new Set(pendingAutoQueue.map((p) => `${p.applywizzId.trim().toUpperCase()}::${p.jobUrl}`));
       await sendCaNotificationEmails(runStartedAt, { excludeKeys });
     } catch (caEmailErr: any) {
       log.warn(`[Pipeline Phase D] ⚠️ CA notification email error: ${caEmailErr?.message || caEmailErr}`);
