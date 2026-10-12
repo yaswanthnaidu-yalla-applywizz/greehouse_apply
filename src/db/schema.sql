@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     education JSONB DEFAULT '[]'::jsonb,                -- Array<{ institution, degree, fieldOfStudy, graduationYear }>
     work_experience JSONB DEFAULT '[]'::jsonb,          -- Array<{ company, title, startDate, endDate, description }>
     resume_url TEXT,                                     -- Original ApplyWizz remote resume download URL
+    resume_storage_path TEXT,                            -- Supabase Storage resume object path (e.g. resumes/AWL-31428_resume.pdf)
     resume_text TEXT,                                    -- Full parsed text from resume
     resume_facts JSONB DEFAULT '{}'::jsonb,             -- Structured facts (skills, experience, projects)
     raw_api_payload JSONB,                               -- Full API response stored for debugging & demographics

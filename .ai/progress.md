@@ -1,3 +1,54 @@
+### Remote Supabase DB Profile Contact Normalization & Resume Backfill (2026-10-12 Complete)
+- [x] **Profile Data Anomaly Audit (`scripts/auditProfileAnomalies.cjs`):**
+  - Audited all 370 profiles in remote Supabase DB (`postgres-db2`, project `rrqsqakctbrhqcoqavoj`).
+  - Found 156 empty locations, 209 empty phones, 156 empty countries, 235 empty country codes.
+  - Identified 28 rows with US State names in `country` column, 17 rows with non-3-part locations, and 1 invalid phone (< 10 digits).
+- [x] **Resume PDF Download, Contact Extraction & 3-Part Location Normalization (`scripts/backfillProfileDataFromPayloadAndResume.cjs`):**
+  - Integrated `docs/DASHBOARD CONFIRMATION.csv` priority for operator-verified candidates.
+  - Downloaded and parsed candidate resume PDFs on-the-fly from AWS S3 via `axios` + `pdf-parse`, extracting contact numbers and updating `resume_text`.
+  - Normalized all candidate locations to canonical 3-part Greenhouse format (`City, State, Country`).
+  - Fixed all state-in-country anomalies (28 -> 0) and mapped country dialing codes.
+  - Verified final remote DB metrics via MCP `postgres-db2.query`:
+    - `with_location`: **369 / 370** (100% of candidates; 1 is test account `CASCADE-TEST-1`)
+    - `with_phone`: **369 / 370**
+    - `with_country`: **369 / 370**
+    - `with_country_code`: **369 / 370**
+    - `with_linkedin`: **246 / 369** (extracted from CSV, CRM payloads, and PDF `/URI` hyperlinks; remaining 123 candidates only have portfolio apps and no LinkedIn on file)
+    - `non_3part_location`: **0** (100% compliant with Greenhouse `City, State, Country` format)
+    - `state_in_country`: **0** (100% resolved)
+    - `phone_invalid`: **0** (fixed `AWL-36169` to `+353 89 953 9166`)
+
+### Production Log Error Fixes (2026-10-12 Complete)
+- [x] **Process CrashGuard Table Name (`src/server/crashGuard.ts`):**
+  - Updated queries from `candidate_applications` to `gh_candidate_applications`.
+- [x] **Singleton Supabase Client Poisoning Resolved (`src/server/routes/auth.ts`):**
+  - Isolated OTP verification with ephemeral client `createEphemeralAuthClient()`, protecting `service_role` authorization context on `getDbClient()`.
+  - Resolved `gh_audit_events` RLS insertion error and false "Application stats are not initialized; apply migration 027_application_stats_consistency.sql" 500 errors.
+- [x] **Profiles `resume_storage_path` Fallback & Migration (`src/db/profiles.ts`, `src/db/schema.sql`, `033_add_profiles_resume_storage_path.sql`):**
+  - Applied migration `033_add_profiles_resume_storage_path.sql` directly to remote Supabase DB (`postgres-db2`) via MCP.
+  - Backfilled existing candidate profiles and reloaded PostgREST schema cache (`NOTIFY pgrst, 'reload schema'`).
+  - Added fallback query to `resume_url` when `resume_storage_path` is missing from database schema, eliminating repeated warnings on `/api/candidates`.
+- [x] **WorkHistory Multi-Page Pacing & Universal Network Error Retry (`src/services/workHistoryClient.ts`):**
+  - Added 250ms inter-page delay (`WORK_HISTORY_PAGE_INTERVAL_MS`).
+  - Added browser-like headers (`User-Agent`, `Accept`).
+  - Added retry logic for transient HTTP statuses (429, 403, 5xx) and universal error retries on connection resets/DNS blips.
+  - Added graceful fallback to accumulated records if late pages fail.
+
+### Remote Supabase DB Profile Sync, Dashboard Confirmation, Zoho & CA Email Backfill (2026-10-12 Complete)
+- [x] **Missing Profiles Identified & Migrated:**
+  - Audited local sandbox DB (365 profiles) vs remote Supabase DB (`postgres-db2`, 244 profiles).
+  - Migrated and inserted all 126 missing candidate profiles into remote `profiles`, bringing remote profile count to **370**.
+- [x] **Candidate Profile Location, Phone, LinkedIn Extraction & 3-Part Normalization:**
+  - Implemented `scripts/backfillProfileDataFromPayloadAndResume.cjs` extracting missing values from `raw_api_payload` and `resume_text`.
+  - Normalized candidate locations to canonical 3-part Greenhouse format (`City, State, Country`).
+  - Remote DB profile stats: `with_location: 342`, `with_phone: 282`, `with_country: 342`, `with_linkedin: 235`, `with_github: 79`, `with_ca_email: 370`.
+- [x] **Zoho Connected Status Backfilled:**
+  - Polled active mailboxes from `https://zoho-mail-reader.onrender.com/api/zoho/ui/users`.
+  - Backfilled `zoho_connected` on remote DB: **254 candidates marked `true`**, 116 marked `false`.
+- [x] **CA Email Assignments Backfilled:**
+  - Paginated ApplyWizz CA work history API (`https://applywizz-ca-management.vercel.app/api/ca/work-history`, 83 pages / 8,266 records).
+  - Assigned CA email across all **370 / 370 profiles** (100% coverage, 0 missing).
+
 ### Greenhouse Combobox Backing Input Validation & OTP Budget Hardening (2026-10-12 Complete)
 - [x] **Remix / React-Select Hidden Backing Input Exclusion (`src/submitter/liveSubmit.ts`):**
   - Updated HTML5 invalid selector to exclude hidden backing inputs (`input:invalid:not([aria-hidden="true"]):not([tabindex="-1"])`), preventing false-positive form fill errors on Greenhouse Remix jobs (e.g., IMC).

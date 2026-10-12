@@ -563,3 +563,15 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 [2026-10-12T18:14:40+05:30] session-end: OpenRouter Gemini 2.5 Flash with prompt caching, candidate cache isolation, direct cost tracking, and vector 1536 revert completed and verified.
 2026-10-12 session-start scan: files=19 parsed=19
 2026-10-12 checkpoint: dev synchronized with origin/dev, gitignore updated, vitest added, supabase env restored
+2026-10-12 session-start scan: files=19 parsed=19
+2026-10-12 session-end: missing AWLs (126) migrated to remote Supabase DB (total 370); dashboard confirmation, zoho_connected (254 true), and ca_email (370/370) fully backfilled; no new skill observations
+2026-10-12 checkpoint: fixed crashGuard table name (gh_candidate_applications), isolated auth verifyOtp client, handled profiles resume_storage_path, throttled work history multi-page fetch; actioned observation 0028
+2026-10-12 checkpoint: applied migration 033 (profiles.resume_storage_path) to Supabase postgres-db2 via MCP and reloaded PostgREST schema cache
+2026-10-12 deliverable flush: backfilled docs/DASHBOARD CONFIRMATION.csv across remote DB profiles; with_location increased 116 -> 333, with_phone 48 -> 265, with_country -> 239; 100% of CSV candidates populated; no new observations
+2026-10-12 deliverable flush: extracted and normalized 3-part locations, phones, and LinkedIn URLs from raw payloads and resumes across empty columns; with_location 342/370, with_phone 282/370, with_country 342/370; no new observations
+2026-10-12 session-end: completed comprehensive backfill on remote DB (postgres-db2); fixed wrong country (states -> US: 28 -> 0), normalized locations to strict 3-part Greenhouse format (non-3part: 17 -> 0), extracted phones from resume PDFs and payloads (with_phone: 161 -> 369/370), populated country_code (135 -> 369/370); no new observations
+2026-10-12 verification checkpoint: verified all 370 profiles on remote Supabase DB (postgres-db2); phone 369/369 valid (100%), country_code 369/369 valid (100%), country 369/369 valid (100%), location 369/369 canonical 3-part (100%), linkedin_url 246/369 populated (extracted from PDF /URI hyperlinks + CSV + CRM payload; remaining 123 candidates have no LinkedIn on file, only Vercel portfolio apps); 0 invalid values across all 5 columns
+2026-10-12 session-start scan: files=0 parsed=0
+2026-10-12 checkpoint: complete profile backfill and verification deliverable flush
+2026-10-12 checkpoint: formatted missing profile data CSV into awl id, data needed, enter values here
+2026-10-12 checkpoint: filtered missing profile data CSV to only active clients from api

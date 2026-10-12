@@ -10,6 +10,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { createClient } from '@supabase/supabase-js';
 import { getDbClient, getSupabaseServerApiKey, isSupabaseConfigured } from '../../db/client.js';
 import { config } from '../../config/env.js';
 import { sendOtpEmail } from '../../services/azureEmail.js';
@@ -28,6 +29,20 @@ import { normalizeAppRole } from './requireRole.js';
 const log = createLogger('Auth');
 
 export const authRouter = Router();
+
+/**
+ * Ephemeral Supabase client for user OTP/session verification.
+ * Never uses getDbClient() singleton to prevent poisoning server service_role privileges with user session JWTs.
+ */
+function createEphemeralAuthClient() {
+  const url = (config.SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+  return createClient(url, getSupabaseServerApiKey(), {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
 
 const AUTHORIZED_EMAILS_API = config.AUTHORIZED_EMAILS_API || 'https://applywizz-ca-management.vercel.app/api/ca/emails';
 
@@ -589,7 +604,8 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
       return;
     }
 
-    const { data: sessionData, error: sessionError } = await supabase.auth.verifyOtp({
+    const ephemeralAuth = createEphemeralAuthClient();
+    const { data: sessionData, error: sessionError } = await ephemeralAuth.auth.verifyOtp({
       email: normalizedEmail,
       token: linkData.properties.email_otp,
       type: 'magiclink',
@@ -751,7 +767,8 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const { data: sessionData, error: sessionError } = await supabase.auth.verifyOtp({
+    const ephemeralAuth = createEphemeralAuthClient();
+    const { data: sessionData, error: sessionError } = await ephemeralAuth.auth.verifyOtp({
       email: normalizedEmail,
       token: linkData.properties.email_otp,
       type: 'magiclink',
