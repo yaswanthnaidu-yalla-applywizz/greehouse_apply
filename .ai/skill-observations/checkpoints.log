@@ -575,3 +575,7 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 2026-10-12 checkpoint: complete profile backfill and verification deliverable flush
 2026-10-12 checkpoint: formatted missing profile data CSV into awl id, data needed, enter values here
 2026-10-12 checkpoint: filtered missing profile data CSV to only active clients from api
+2026-10-12 session-start scan: files=19 parsed=19
+2026-10-13 session-start scan: files=19 parsed=19
+2026-10-13 checkpoint: no observations accumulated
+2026-10-13 session-end: OpenRouter timeout 30s + deferred auto-queue flushing + Tier 4 UUID rejection shipped; docs updated; no new skill observations
