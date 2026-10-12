@@ -78,6 +78,7 @@ const WORK_HISTORY_MAX_ATTEMPTS = 3;
 const WORK_HISTORY_RETRY_BACKOFF_MS = 2000;
 /** ApplyWizz work-history default page size (matches CA Management API). */
 const WORK_HISTORY_PAGE_SIZE = 50;
+const WORK_HISTORY_PAGE_INTERVAL_MS = 250;
 
 const CA_EMAIL_DATE_CACHE_TTL_MS = 60_000;
 
@@ -120,14 +121,28 @@ async function fetchWorkHistoryWithRetry(
   for (let attempt = 1; attempt <= WORK_HISTORY_MAX_ATTEMPTS; attempt++) {
     log.info(`[WorkHistory] Fetching ${fullUrl}`);
     try {
-      const response = await fetch(fullUrl, { signal: AbortSignal.timeout(timeoutMs) });
+      const response = await fetch(fullUrl, {
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        },
+      });
+      if ((response.status === 429 || response.status === 403 || response.status >= 500) && attempt < WORK_HISTORY_MAX_ATTEMPTS) {
+        lastReason = `HTTP ${response.status}`;
+        log.warn(
+          `[WorkHistory] Failed ${fullUrl}: ${lastReason} (retry ${attempt + 1}/${WORK_HISTORY_MAX_ATTEMPTS} in ${WORK_HISTORY_RETRY_BACKOFF_MS * attempt}ms)`
+        );
+        await sleep(WORK_HISTORY_RETRY_BACKOFF_MS * attempt);
+        continue;
+      }
       return { ok: true, response };
     } catch (err: unknown) {
       lastReason = err instanceof Error ? err.message : String(err);
       const timedOut = isFetchTimeoutError(err);
-      if (timedOut && attempt < WORK_HISTORY_MAX_ATTEMPTS) {
+      if (attempt < WORK_HISTORY_MAX_ATTEMPTS) {
         log.warn(
-          `[WorkHistory] Failed ${fullUrl}: ${lastReason} (timeout, retry ${attempt + 1}/${WORK_HISTORY_MAX_ATTEMPTS} in ${WORK_HISTORY_RETRY_BACKOFF_MS}ms)`
+          `[WorkHistory] Failed ${fullUrl}: ${lastReason}${timedOut ? ' (timeout)' : ''} (retry ${attempt + 1}/${WORK_HISTORY_MAX_ATTEMPTS} in ${WORK_HISTORY_RETRY_BACKOFF_MS}ms)`
         );
         await sleep(WORK_HISTORY_RETRY_BACKOFF_MS);
         continue;
@@ -213,27 +228,29 @@ async function fetchAllWorkHistoryPages(
 
   if (totalPages > 1) {
     for (let page = 2; page <= totalPages; page++) {
+      await sleep(WORK_HISTORY_PAGE_INTERVAL_MS);
       const pageUrl = `${urlWithoutPage}${sep}page=${page}&pageSize=${effectivePageSize}`;
       const pageOutcome = await fetchWorkHistoryWithRetry(pageUrl, timeoutMs);
       if (!pageOutcome.ok) {
-        return null;
+        log.warn(`[WorkHistory] Failed fetching page ${page} of ${displayTotalPages}, continuing with ${allRecords.length} accumulated records`);
+        return allRecords;
       }
       const pageRes = pageOutcome.response;
       if (!pageRes.ok) {
-        log.warn(`[WorkHistory] Failed ${pageUrl}: HTTP ${pageRes.status}`);
-        return null;
+        log.warn(`[WorkHistory] Failed ${pageUrl}: HTTP ${pageRes.status}, continuing with ${allRecords.length} accumulated records`);
+        return allRecords;
       }
       let pageData: any;
       try {
         pageData = await pageRes.json();
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        log.warn(`[WorkHistory] Failed ${pageUrl}: ${message}`);
-        return null;
+        log.warn(`[WorkHistory] Failed ${pageUrl}: ${message}, continuing with ${allRecords.length} accumulated records`);
+        return allRecords;
       }
       if (!pageData || !Array.isArray(pageData.records)) {
-        log.warn(`[WorkHistory] Failed ${pageUrl}: invalid response body (expected records array)`);
-        return null;
+        log.warn(`[WorkHistory] Failed ${pageUrl}: invalid response body (expected records array), continuing with ${allRecords.length} accumulated records`);
+        return allRecords;
       }
       allRecords.push(...pageData.records);
       log.info(`Work history: fetched page ${page} of ${displayTotalPages}`);

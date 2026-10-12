@@ -88,7 +88,7 @@ export async function sweepStaleApplications(
   try {
     const supabase = getDbClient();
     const { data, error } = await supabase
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .select('id, status, updated_at')
       .in('status', ['OTP_REQUIRED', 'APPLYING'])
       .lt('updated_at', cutoff.toISOString());
@@ -104,7 +104,7 @@ export async function sweepStaleApplications(
 
     const ids = data.map((row: { id: string }) => row.id);
     const { error: updateError } = await supabase
-      .from('candidate_applications')
+      .from('gh_candidate_applications')
       .update({
         status: 'QUEUED',
         updated_at: new Date().toISOString(),
