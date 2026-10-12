@@ -112,8 +112,32 @@ async function runTests() {
   const resT3 = await resolveTier3('AWL-TEST', fuzzyField, mockQAEntries);
   assert(resT3 !== null, 'Tier 3 matches fuzzy question label in QA bank');
   assert(resT3?.source === 'fuzzy_match', 'Tier 3 returns source: "fuzzy_match"');
-  assert(resT3?.resolvedByTier === 3, 'Tier 3 returns resolvedByTier: 3');
+  assert(resT3?.resolvedByTier === 4, 'Tier 3 (Tier 4 fuzzy) returns resolvedByTier: 4');
   assert(resT3?.value === '15 days', 'Tier 3 returns cached answer value');
+
+  // --------------------------------------------------------------------------
+  // Test 4b: Tier 4 UUID rejection for non-identifier fields
+  // --------------------------------------------------------------------------
+  const mockUuidQAEntries = [
+    {
+      question_fingerprint: 'uuid1234567890ab',
+      question_label: 'Additional links',
+      field_type: 'text',
+      value: '9cdcf3c8-7333-4db0-a06e-65488ec80b4b',
+      source: 'ai' as const,
+    },
+  ];
+  const nonIdField: ScannedField = {
+    fieldId: 'additional_links',
+    name: 'additional_links',
+    type: 'text',
+    label: 'Additional links',
+    isRequired: false,
+  };
+  const testResolver = new AnswerResolver();
+  const resUuidFuzzy = await testResolver.resolveField('AWL-TEST', nonIdField, { qaEntries: mockUuidQAEntries as any });
+  assert(resUuidFuzzy.value !== '9cdcf3c8-7333-4db0-a06e-65488ec80b4b', 'Resolver rejects UUID-shaped answer for non-identifier field');
+  assert(resUuidFuzzy.resolvedByTier !== 4, 'Resolver does not resolve to Tier 4 with UUID answer');
 
   // --------------------------------------------------------------------------
   // Test 5: Orchestrator Waterfall & Unresolved Fallback

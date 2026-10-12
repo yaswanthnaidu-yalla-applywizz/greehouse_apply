@@ -529,27 +529,27 @@ export class AnswerResolver {
       profile
     );
     if (tier4) {
-      const phone = isPhoneNumberField(field)
-        ? resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text)
-        : tier4.value;
-      if (phone) {
-        log.info(`[Resolver] ✅ T4 ${field.label} → resume phone`);
+      if (isUnsupportedUuidAnswer(field, tier4.value)) {
+        log.info(`[Resolver] ❌ T4 ${field.label} — rejected UUID answer for non-identifier field`);
+      } else if (isPhoneNumberField(field)) {
+        const phone = resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text);
+        if (phone) {
+          log.info(`[Resolver] ✅ T4 ${field.label} → resume phone`);
+          return {
+            ...tier4,
+            value: phone,
+            resolvedByTier: 4,
+            isRequired,
+          };
+        }
+        log.info(`[Resolver] ❌ T4 ${field.label} — answer not verified against resume`);
+      } else {
+        log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
         return {
           ...tier4,
-          value: phone,
           resolvedByTier: 4,
           isRequired,
         };
-      }
-      if (isPhoneNumberField(field)) {
-        log.info(`[Resolver] ❌ T4 ${field.label} — answer not verified against resume`);
-      } else {
-      log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
-      return {
-        ...tier4,
-        resolvedByTier: 4,
-        isRequired,
-      };
       }
     }
     log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
@@ -705,12 +705,16 @@ export class AnswerResolver {
       profile
     );
     if (tier4) {
-      log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
-      return {
-        ...tier4,
-        resolvedByTier: 4,
-        isRequired,
-      };
+      if (isUnsupportedUuidAnswer(field, tier4.value)) {
+        log.info(`[Resolver] ❌ T4 ${field.label} — rejected UUID answer for non-identifier field`);
+      } else {
+        log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
+        return {
+          ...tier4,
+          resolvedByTier: 4,
+          isRequired,
+        };
+      }
     }
     log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
 
