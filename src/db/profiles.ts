@@ -350,10 +350,23 @@ export async function fetchProfileListingFieldsByApplywizzIds(
   if (ids.length === 0 || !isSupabaseConfigured()) return out;
 
   try {
-    const { data, error } = await getDbClient()
+    let { data, error } = await getDbClient()
       .from('profiles')
       .select('applywizz_id, client_name, email, company_email, location, resume_storage_path')
       .in('applywizz_id', ids);
+    if (error && error.message.includes('resume_storage_path')) {
+      const fallback = await getDbClient()
+        .from('profiles')
+        .select('applywizz_id, client_name, email, company_email, location, resume_url')
+        .in('applywizz_id', ids);
+      if (!fallback.error && fallback.data) {
+        data = fallback.data.map((row: any) => ({
+          ...row,
+          resume_storage_path: row.resume_url || null,
+        }));
+        error = null;
+      }
+    }
     if (error) {
       log.warn(`[Profiles] listing batch failed: ${error.message}`);
       return out;
