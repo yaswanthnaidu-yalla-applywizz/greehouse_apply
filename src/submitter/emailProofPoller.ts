@@ -76,7 +76,7 @@ export class EmailProofPoller {
         }
 
         // Proof capture only runs on a web-confirmed submission (EMAIL_PROOF_PENDING).
-        // While the application is still in the OTP / CAPTCHA flow the inbox only holds
+        // While the application is still in the OTP flow the inbox only holds
         // security-code mail, which must never be captured as proof.
         if (currentApp.status !== 'EMAIL_PROOF_PENDING') {
           log.info(

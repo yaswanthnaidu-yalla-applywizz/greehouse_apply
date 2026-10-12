@@ -1,5 +1,10 @@
 (function (root) {
-  var SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+  // Session TTLs: 8 hours for operators (hard cap); 7 days for staff (dev, admin, manager).
+  // STORAGE EXCEPTION: applywizz_session_expires_at and applywizz_session_login_at stay in localStorage
+  // (exception to SEC-9 sessionStorage migration) so the 8-hour operator cap survives tab close/reopen.
+  var OPERATOR_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+  var STAFF_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+  var SESSION_TTL_MS = OPERATOR_SESSION_TTL_MS;
   var REFRESH_SKEW_MS = 2 * 60 * 1000;
   var AUTH_SKIP = /\/api\/auth\/(login|refresh|send-signup-otp|verify-signup-otp|register|verify-email)(?:\?|$)/;
   var MANAGER_VIEW_AS_OPERATOR_KEY = 'applywizz_manager_view_as_operator';
@@ -77,6 +82,7 @@
     localStorage.removeItem('applywizz_auth_token');
     localStorage.removeItem('applywizz_refresh_token');
     localStorage.removeItem('applywizz_session_expires_at');
+    localStorage.removeItem('applywizz_session_login_at');
     localStorage.removeItem('applywizz_auth_user');
     localStorage.removeItem('applywizz_wh_unreachable');
     localStorage.removeItem('applywizz_is_admin');
@@ -101,23 +107,28 @@
       localStorage.setItem('applywizz_refresh_token', refresh);
     }
     if (data.user) localStorage.setItem('applywizz_auth_user', JSON.stringify(data.user));
-    if (renewExpiry) {
-      var ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : SESSION_TTL_MS;
-      localStorage.setItem('applywizz_session_expires_at', String(Date.now() + ttlMs));
-    }
+
     var email = (data.user && data.user.email) || data.email || sessionUserEmail();
+    var resolvedRole = data.role ? persistRole(data.role) : (resolveRoleFromEmail(email) ? persistRole(resolveRoleFromEmail(email)) : sessionRole());
+
+    if (renewExpiry) {
+      var loginAt = Number(data.sessionLoginAt || data.session_login_at) || Date.now();
+      localStorage.setItem('applywizz_session_login_at', String(loginAt));
+      var defaultTtl = resolvedRole === 'operator' ? OPERATOR_SESSION_TTL_MS : STAFF_SESSION_TTL_MS;
+      var ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : defaultTtl;
+      localStorage.setItem('applywizz_session_expires_at', String(loginAt + ttlMs));
+    }
+
     if (data.role) {
-      var serverRole = persistRole(data.role);
       if (data.user) {
         try {
-          var merged = Object.assign({}, data.user, { role: serverRole, email: String(email || data.user.email || '').trim().toLowerCase() });
+          var merged = Object.assign({}, data.user, { role: resolvedRole, email: String(email || data.user.email || '').trim().toLowerCase() });
           localStorage.setItem('applywizz_auth_user', JSON.stringify(merged));
         } catch (e) { /* ignore */ }
       }
-      return serverRole;
+      return resolvedRole;
     }
-    var fromEmail = resolveRoleFromEmail(email);
-    if (fromEmail) return persistRole(fromEmail);
+    if (resolveRoleFromEmail(email)) return resolvedRole;
     return sessionRole();
   }
 
@@ -177,15 +188,21 @@
     var refreshToken = sessionStorage.getItem('applywizz_refresh_token') || localStorage.getItem('applywizz_refresh_token');
     if (!refreshToken) return Promise.resolve(false);
 
+    var loginAt = Number(localStorage.getItem('applywizz_session_login_at') || 0);
+
     refreshInFlight = nativeFetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: refreshToken }),
+      body: JSON.stringify({
+        refreshToken: refreshToken,
+        sessionLoginAt: loginAt,
+      }),
     })
       .then(function (res) {
         return res.json().then(function (data) {
-          if (!res.ok || !data.token) {
+          if (!res.ok || !data.token || data.error === 'session_expired') {
             clearSession();
+            redirectToLogin();
             return false;
           }
           persistSession(data, false);

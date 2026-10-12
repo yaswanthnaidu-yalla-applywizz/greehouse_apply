@@ -13,14 +13,32 @@ import {
 } from '../src/services/caNotificationEmail.js';
 
 describe('Auto-queue Routing & NeedsReview', () => {
-  it('applicationNeedsOperatorReview requires review when a required field has source=ai', () => {
+  it('applicationNeedsOperatorReview requires review when a required field has source=ai with confidence < 0.8', () => {
     const fields = [
       { isRequired: true, source: 'supabase' },
-      { isRequired: true, source: 'ai' },
+      { isRequired: true, source: 'ai', confidence: 0.7 },
       { isRequired: false, source: 'resume_parse' },
     ];
     assert.equal(applicationNeedsOperatorReview(fields), true);
   });
+
+  it('applicationNeedsOperatorReview does NOT require review when a required field has source=ai with confidence >= 0.8', () => {
+    const fields = [
+      { isRequired: true, source: 'supabase' },
+      { isRequired: true, source: 'ai', confidence: 0.9 },
+      { isRequired: false, source: 'resume_parse' },
+    ];
+    assert.equal(applicationNeedsOperatorReview(fields), false);
+  });
+
+  it('applicationNeedsOperatorReview requires review when a salary question is answered negatively', () => {
+    const fields = [
+      { isRequired: true, source: 'supabase' },
+      { isRequired: true, source: 'ai', confidence: 0.9, label: 'Does the listed salary meet expectations?', value: 'No' },
+    ];
+    assert.equal(applicationNeedsOperatorReview(fields), true);
+  });
+
 
   it('applicationNeedsOperatorReview requires review when a required field has source=unresolved', () => {
     const fields = [
@@ -80,8 +98,6 @@ describe('Status Preservation & Auto-enqueue Eligibility', () => {
       'APPLYING',
       'QUEUED',
       'OTP_REQUIRED',
-      'CAPTCHA_TIMEOUT',
-      'CAPTCHA_REQUIRED',
       'SKIPPED',
       'RETRY',
       'EMAIL_PROOF_PENDING',

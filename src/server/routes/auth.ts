@@ -115,10 +115,20 @@ export function emailsForRole(role: Exclude<AppRole, 'operator'>): string[] {
     .map(([email]) => email);
 }
 
-/** Dashboard session stays valid for 6 hours via refresh_token rotation. */
-export const SESSION_TTL_SECONDS = 60 * 60 * 6;
+/** Session lifetimes: 8 hours for operators (hard cap); 7 days for staff (dev, admin, manager). */
+export const OPERATOR_SESSION_TTL_SECONDS = 8 * 60 * 60; // 28,800s
+export const STAFF_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 604,800s
+export const SESSION_TTL_SECONDS = OPERATOR_SESSION_TTL_SECONDS; // Backwards compatibility alias
 
-function tokensFromAuthPayload(
+export function sessionTtlForRole(role?: AppRole | string | null): number {
+  const normalized = normalizeAppRole(role);
+  if (normalized === 'dev' || normalized === 'admin' || normalized === 'manager') {
+    return STAFF_SESSION_TTL_SECONDS;
+  }
+  return OPERATOR_SESSION_TTL_SECONDS;
+}
+
+export function tokensFromAuthPayload(
   payload: {
     access_token?: string;
     refresh_token?: string;
@@ -126,21 +136,36 @@ function tokensFromAuthPayload(
     session?: { access_token?: string; refresh_token?: string; expires_in?: number };
   } | null | undefined,
   fallbackAccess?: string,
-): { token: string; refreshToken: string | null; expiresIn: number; sessionTtlSeconds: number } {
-  const nested = payload?.session;
-  return {
-    token: nested?.access_token || payload?.access_token || fallbackAccess || '',
-    refreshToken: nested?.refresh_token || payload?.refresh_token || null,
-    expiresIn: nested?.expires_in || payload?.expires_in || 3600,
-    sessionTtlSeconds: SESSION_TTL_SECONDS,
-  };
-}
-
-async function refreshSupabaseSession(refreshToken: string): Promise<{
+  role?: AppRole | string | null,
+  sessionLoginAt?: number,
+): {
   token: string;
   refreshToken: string | null;
   expiresIn: number;
   sessionTtlSeconds: number;
+  sessionLoginAt: number;
+} {
+  const nested = payload?.session;
+  const loginAt = typeof sessionLoginAt === 'number' && sessionLoginAt > 0 ? sessionLoginAt : Date.now();
+  return {
+    token: nested?.access_token || payload?.access_token || fallbackAccess || '',
+    refreshToken: nested?.refresh_token || payload?.refresh_token || null,
+    expiresIn: nested?.expires_in || payload?.expires_in || 3600,
+    sessionTtlSeconds: sessionTtlForRole(role),
+    sessionLoginAt: loginAt,
+  };
+}
+
+async function refreshSupabaseSession(
+  refreshToken: string,
+  role?: AppRole | string | null,
+  sessionLoginAt?: number,
+): Promise<{
+  token: string;
+  refreshToken: string | null;
+  expiresIn: number;
+  sessionTtlSeconds: number;
+  sessionLoginAt: number;
 }> {
   const res = await fetch(`${config.SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
     method: 'POST',
@@ -155,7 +180,7 @@ async function refreshSupabaseSession(refreshToken: string): Promise<{
   if (!res.ok) {
     throw new Error(data.msg || data.error_description || data.error || 'Session refresh failed.');
   }
-  return tokensFromAuthPayload(data);
+  return tokensFromAuthPayload(data, undefined, role, sessionLoginAt);
 }
 
 /** Org-wide operator access (ingest, hydrate, no CA filter). Missing email is never admin. */
@@ -798,7 +823,7 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 
     res.json({
       success: true,
-      ...tokensFromAuthPayload(verifyData, tempToken),
+      ...tokensFromAuthPayload(verifyData, tempToken, role),
       user: sessionUser,
       role,
       homePath: homePathForRole(role),
@@ -946,7 +971,7 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
 
     res.json({
       success: true,
-      ...tokensFromAuthPayload(verifyData, token),
+      ...tokensFromAuthPayload(verifyData, token, role),
       user: attachResolvedRole(verifyData.user || { email: userEmail }, userEmail),
       role,
       homePath: homePathForRole(role),
@@ -1011,6 +1036,9 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
     (typeof req.body?.refresh_token === 'string' && req.body.refresh_token.trim()) ||
     '';
 
+  const rawLoginAt = req.body?.sessionLoginAt ?? req.body?.session_login_at;
+  const sessionLoginAt = typeof rawLoginAt === 'number' ? rawLoginAt : Number(rawLoginAt) || 0;
+
   if (!refreshToken) {
     res.status(400).json({ error: 'refreshToken is required.' });
     return;
@@ -1022,13 +1050,41 @@ authRouter.post('/refresh', async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const tokens = await refreshSupabaseSession(refreshToken);
+    const tokens = await refreshSupabaseSession(refreshToken, undefined, sessionLoginAt);
     if (!tokens.token) {
       res.status(401).json({ error: 'Unauthorized: Invalid or expired session token.' });
       return;
     }
 
-    res.json({ success: true, ...tokens });
+    // Determine user role from refreshed token to enforce role-specific session policy
+    const supabase = getDbClient();
+    const { data: userData } = await supabase.auth.getUser(tokens.token);
+    const user = userData?.user;
+    const appMeta = user?.app_metadata as Record<string, unknown> | undefined;
+    const jwtRole = appMeta?.role ?? (user as { role?: unknown })?.role;
+    const role = resolveEffectiveAppRole(user?.email, jwtRole);
+
+    // Operator hard cap enforcement: 8 hours (28,800s) from login
+    if (role === 'operator' && sessionLoginAt > 0) {
+      const elapsedMs = Date.now() - sessionLoginAt;
+      if (elapsedMs > OPERATOR_SESSION_TTL_SECONDS * 1000) {
+        res.status(401).json({
+          error: 'session_expired',
+          message: 'Your session has expired. Please log in again.',
+        });
+        return;
+      }
+    }
+
+    // Attach role-specific TTL to response
+    const roleTtlSeconds = sessionTtlForRole(role);
+    res.json({
+      success: true,
+      ...tokens,
+      sessionTtlSeconds: roleTtlSeconds,
+      sessionLoginAt: sessionLoginAt > 0 ? sessionLoginAt : tokens.sessionLoginAt,
+      role,
+    });
   } catch (err: any) {
     res.status(401).json({ error: err.message || 'Unauthorized: Invalid or expired session token.' });
   }

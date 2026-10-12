@@ -28,6 +28,8 @@ function persistAuthSession(data: {
   refreshToken?: string;
   refresh_token?: string;
   sessionTtlSeconds?: number;
+  sessionLoginAt?: number;
+  session_login_at?: number;
   role?: string;
   user?: { role?: string; email?: string };
   isAdmin?: boolean;
@@ -35,9 +37,6 @@ function persistAuthSession(data: {
   if (data.token) localStorage.setItem('applywizz_auth_token', data.token);
   const refresh = data.refreshToken || data.refresh_token;
   if (refresh) localStorage.setItem('applywizz_refresh_token', refresh);
-  const ttlMs =
-    Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : 7 * 24 * 60 * 60 * 1000;
-  localStorage.setItem('applywizz_session_expires_at', String(Date.now() + ttlMs));
   const role = (() => {
     const email = String(data.user?.email || '').trim().toLowerCase();
     if (email === 'yaswanthnaiduyalla@applywizz.ai') return 'dev';
@@ -45,6 +44,13 @@ function persistAuthSession(data: {
     if (email === 'balaji@applywizz.ai' || email === 'ramakrishnaa.tejavath@applywizz.ai') return 'manager';
     return String(data.role || data.user?.role || 'operator').trim().toLowerCase();
   })();
+
+  const loginAt = Number(data.sessionLoginAt || data.session_login_at) || Date.now();
+  localStorage.setItem('applywizz_session_login_at', String(loginAt));
+
+  const defaultTtlMs = role === 'operator' ? 8 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+  const ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : defaultTtlMs;
+  localStorage.setItem('applywizz_session_expires_at', String(loginAt + ttlMs));
   localStorage.setItem('applywizz_role', role);
   if (role === 'admin' || role === 'dev') {
     localStorage.setItem('applywizz_is_admin', 'true');

@@ -15,7 +15,10 @@ const log = createLogger('Env');
 if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
   dotenv.config({ path: '.env.sandbox' });
 }
-dotenv.config();
+const envConfig = dotenv.config();
+if (envConfig.parsed?.OPENROUTER_API_KEY) {
+  process.env.OPENROUTER_API_KEY = envConfig.parsed.OPENROUTER_API_KEY;
+}
 
 /**
  * Zod schema defining required and optional environment variables with strict validation rules.
@@ -31,7 +34,31 @@ const envSchema = z.object({
   APPLYWIZZ_API_URL: z.string().default('https://www.apply-wizz.me/api/get-client-details?applywizz_id='),
 
   /** Selected LLM provider for synthesis */
-  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama']).default('ollama'),
+  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama', 'bedrock']).default('openrouter'),
+
+  /** AWS Region for Bedrock */
+  AWS_REGION: z.string().default('us-east-1'),
+
+  /** AWS Bedrock API key (Bearer token) */
+  BEDROCK_API_KEY: z.string().optional(),
+
+  /** Standard AWS bearer token environment variable for Bedrock */
+  AWS_BEARER_TOKEN_BEDROCK: z.string().optional(),
+
+  /** AWS IAM Access Key ID (optional if using BEDROCK_API_KEY) */
+  AWS_ACCESS_KEY_ID: z.string().optional(),
+
+  /** AWS IAM Secret Access Key (optional if using BEDROCK_API_KEY) */
+  AWS_SECRET_ACCESS_KEY: z.string().optional(),
+
+  /** AWS Bedrock Model ID / Inference Profile ID */
+  BEDROCK_MODEL_ID: z.string().default('us.amazon.nova-2-lite-v1:0'),
+
+  /** AWS Bedrock Embedding Model ID */
+  BEDROCK_EMBEDDING_MODEL_ID: z.string().default('amazon.titan-embed-text-v2:0'),
+
+  /** Enable AWS Bedrock Prompt Caching */
+  BEDROCK_ENABLE_PROMPT_CACHING: z.coerce.boolean().default(true),
 
   /** Ollama Base URL */
   OLLAMA_BASE_URL: z.string().default('http://127.0.0.1:11434/v1'),
@@ -43,7 +70,7 @@ const envSchema = z.object({
   OPENROUTER_API_KEY: z.string().optional(),
 
   /** OpenRouter Model ID */
-  OPENROUTER_MODEL: z.string().default('google/gemma-4-26b-a4b-it:free'),
+  OPENROUTER_MODEL: z.string().default('google/gemini-2.5-flash'),
 
   /** Generic LLM API key fallback */
   LLM_API_KEY: z.string().optional(),
@@ -234,6 +261,23 @@ if (!process.env.JWT_SECRET && rawEnv.NODE_ENV === 'production') {
  * @returns The active LLM API key string, or empty string if not configured
  */
 function resolveLlmApiKey(env: typeof rawEnv): string {
+  const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
+  const effectiveProvider = (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || env.LLM_PROVIDER;
+
+  if (effectiveProvider === 'bedrock') {
+    const key = (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || process.env.AWS_BEARER_TOKEN_BEDROCK || '').trim();
+    if (key) return key;
+    if (env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID) return 'aws-iam';
+    return '';
+  }
+
+  if (isSandbox) {
+    const key = (env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || '').trim();
+    if (!key) {
+      log.warn('⚠️ OPENROUTER_API_KEY is missing in sandbox mode.');
+    }
+    return key;
+  }
   if (env.LLM_PROVIDER === 'ollama') {
     return 'ollama';
   }
@@ -250,17 +294,26 @@ function resolveLlmApiKey(env: typeof rawEnv): string {
     return env.OPENAI_API_KEY.trim();
   }
   // Auto-fallback: check if any key exists
+  if (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK) {
+    return (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK)!.trim();
+  }
   if (env.OPENROUTER_API_KEY) return env.OPENROUTER_API_KEY.trim();
   if (env.GEMINI_API_KEY) return env.GEMINI_API_KEY.trim();
   if (env.OPENAI_API_KEY) return env.OPENAI_API_KEY.trim();
   return '';
 }
 
+const isSandboxEnv = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
+
 /**
  * Strongly-typed application configuration object.
  */
 export const config = {
   ...rawEnv,
+  LLM_PROVIDER: (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || rawEnv.LLM_PROVIDER,
+  OPENROUTER_MODEL: isSandboxEnv
+    ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
+    : rawEnv.OPENROUTER_MODEL,
   /** Active LLM API key resolved from LLM_API_KEY or provider-specific keys */
   ACTIVE_LLM_API_KEY: resolveLlmApiKey(rawEnv),
   /** Active Azure / Microsoft 365 Tenant ID */

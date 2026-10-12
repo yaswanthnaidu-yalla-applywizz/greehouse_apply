@@ -40,8 +40,6 @@ const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
   'FAILED',
   'EXPIRED',
   'OTP_REQUIRED',
-  'CAPTCHA_TIMEOUT',
-  'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
 ];
 
@@ -630,7 +628,9 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
     if (isSupabaseConfigured()) {
       let query = getDbClient()
         .from('gh_candidate_applications')
-        .select('id, applywizz_id, status, created_at');
+        .select('id, applywizz_id, status, created_at')
+        .neq('status', 'FILTERED_OUT');
+
       if (scoped.ids) query = query.in('applywizz_id', scoped.ids);
       query = applyCreatedAtRangeFilter(query, createdAtRange);
       const { data, error } = await query;

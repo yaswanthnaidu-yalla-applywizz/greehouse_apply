@@ -43,9 +43,44 @@ import {
   validateCsvUpload,
 } from '../../candidate/csvUploadValidation.js';
 
+import { cleanupExpiredFailureDiagnostics } from '../../services/failureDiagnosticsRetention.js';
+
 const log = createLogger('Admin Dashboard');
 
 export const adminDashboardRouter = Router();
+
+adminDashboardRouter.post('/cleanup-diagnostics', async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthenticatedRequest;
+  if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
+    res.status(403).json({ error: 'Admin access required.' });
+    return;
+  }
+
+  const preview = req.body?.preview === true;
+  const confirm = req.body?.confirm === true;
+  if (preview === confirm) {
+    res.status(400).json({ error: 'Send exactly one of preview=true or confirm=true.' });
+    return;
+  }
+
+  try {
+    const result = await cleanupExpiredFailureDiagnostics({ dryRun: preview });
+    res.json({
+      dryRun: preview,
+      cutoff: result.cutoff,
+      expiredCount: result.expiredCount,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : 'UnknownError';
+    const code =
+      error && typeof error === 'object' && 'code' in error
+        ? String((error as { code?: unknown }).code || 'unknown')
+        : 'unknown';
+    log.error(`[Admin] failure diagnostics cleanup failed error_name=${name} error_code=${code}`);
+    res.status(503).json({ error: 'Failure diagnostics cleanup is unavailable.' });
+  }
+});
 
 const csvUploadBody = express.raw({ type: 'application/octet-stream', limit: MAX_CSV_UPLOAD_BYTES });
 
@@ -131,8 +166,6 @@ const APPLICATION_STATUSES: readonly ApplicationStatus[] = [
   'FAILED',
   'EXPIRED',
   'OTP_REQUIRED',
-  'CAPTCHA_TIMEOUT',
-  'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
   'SKIPPED',
 ];
@@ -360,7 +393,12 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
       .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, proof_web_url, proof_email_url, proof_email_json, proof_captured_at, profiles(client_name, ca_email)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
-    if (status) query = query.eq('status', status);
+    if (status) {
+      query = query.eq('status', status);
+    } else {
+      query = query.neq('status', 'FILTERED_OUT');
+    }
+
     if (date) {
       const { startIso, endIso } = getISTDateRangeUtc(date);
       query = query.gte('created_at', startIso).lt('created_at', endIso);

@@ -28,11 +28,10 @@ describe('candidateQueueFilter', () => {
       { status: 'APPLIED', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
       { status: 'FAILED', resolved_fields: [] },
       { status: 'OTP_REQUIRED', resolved_fields: [] },
-      { status: 'CAPTCHA_REQUIRED', resolved_fields: [] },
       { status: 'RETRY', resolved_fields: [] },
     ];
     const filtered = filterOperatorApplicationJobs(jobs);
-    assert.equal(filtered.length, 7);
+    assert.equal(filtered.length, 6);
     assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'QUEUED'), false);
     assert.equal(filtered.some((j) => j.status === 'READY_FOR_REVIEW'), true);
   });

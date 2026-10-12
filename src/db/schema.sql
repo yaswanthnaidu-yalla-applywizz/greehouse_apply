@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS gh_candidate_applications (
     status TEXT NOT NULL DEFAULT 'READY_FOR_REVIEW'
         CHECK (status IN (
             'READY_FOR_REVIEW',
+            'APPROVED',
             'DRY_RUN_COMPLETE',
             'QUEUED',
             'APPLYING',
@@ -103,10 +104,11 @@ CREATE TABLE IF NOT EXISTS gh_candidate_applications (
             'RETRY',
             'EXPIRED',
             'OTP_REQUIRED',
-            'CAPTCHA_TIMEOUT',
             'EMAIL_PROOF_PENDING',
-            'SKIPPED'
+            'SKIPPED',
+            'FILTERED_OUT'
         )),
+
     submission_order INTEGER,                            -- Global FIFO sequence number for daemon queue
     retry_count INTEGER NOT NULL DEFAULT 0,              -- Manual retry attempts used
     assigned_ca_email TEXT,                              -- Assigned Campus Ambassador email for user isolation
@@ -200,3 +202,31 @@ CREATE POLICY "Allow storage access to proofs_mail" ON storage.objects
     FOR ALL
     USING (bucket_id = 'proofs_mail')
     WITH CHECK (bucket_id = 'proofs_mail');
+
+-- ============================================================================
+-- 8. gh_application_token_usage — Application Token & Cost Tracking
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS gh_application_token_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    applywizz_id TEXT NOT NULL,
+    job_url TEXT NOT NULL,
+    role TEXT NOT NULL,
+    application_id UUID REFERENCES gh_candidate_applications(id) ON DELETE SET NULL,
+    model TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    token_cost NUMERIC(12, 6) NOT NULL DEFAULT 0.000000,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_application_token_usage UNIQUE (applywizz_id, job_url, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gh_token_usage_applywizz ON gh_application_token_usage(applywizz_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_gh_token_usage_date ON gh_application_token_usage(date DESC);
+CREATE INDEX IF NOT EXISTS idx_gh_token_usage_application_id ON gh_application_token_usage(application_id);
+

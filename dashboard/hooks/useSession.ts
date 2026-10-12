@@ -8,13 +8,15 @@
 import { useState, useEffect } from 'react';
 import type { AuthUser } from '../components/AuthView.js';
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const OPERATOR_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const STAFF_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const REFRESH_SKEW_MS = 5 * 60 * 1000; // 5 minutes before expiry
 const AUTH_SKIP = /\/api\/auth\/(login|refresh|send-signup-otp|verify-signup-otp|register|verify-email)(?:\?|$)/;
 
 export const TOKEN_KEY = 'applywizz_auth_token';
 export const REFRESH_TOKEN_KEY = 'applywizz_refresh_token';
 export const EXPIRES_AT_KEY = 'applywizz_session_expires_at';
+export const LOGIN_AT_KEY = 'applywizz_session_login_at';
 export const USER_KEY = 'applywizz_auth_user';
 export const ROLE_KEY = 'applywizz_role';
 export const IS_ADMIN_KEY = 'applywizz_is_admin';
@@ -136,6 +138,7 @@ export function clearSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(EXPIRES_AT_KEY);
+  localStorage.removeItem(LOGIN_AT_KEY);
   localStorage.removeItem(USER_KEY);
   localStorage.removeItem(WH_UNREACHABLE_KEY);
   localStorage.removeItem(IS_ADMIN_KEY);
@@ -153,24 +156,30 @@ export function persistSession(data: any, renewExpiry = false): string {
   const refresh = data.refreshToken || data.refresh_token;
   if (refresh) localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
   if (data.user) localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-  if (renewExpiry) {
-    const ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : WEEK_MS;
-    localStorage.setItem(EXPIRES_AT_KEY, String(Date.now() + ttlMs));
-  }
+
   const email = (data.user && data.user.email) || data.email || sessionUserEmail();
+  const effectiveRole = data.role ? persistRole(data.role) : (resolveRoleFromEmail(email) ? persistRole(resolveRoleFromEmail(email)) : sessionRole());
+
+  if (renewExpiry) {
+    const loginAt = Number(data.sessionLoginAt || data.session_login_at) || Date.now();
+    localStorage.setItem(LOGIN_AT_KEY, String(loginAt));
+    const defaultTtl = effectiveRole === 'operator' ? OPERATOR_SESSION_TTL_MS : STAFF_SESSION_TTL_MS;
+    const ttlMs = Number(data.sessionTtlSeconds) > 0 ? Number(data.sessionTtlSeconds) * 1000 : defaultTtl;
+    localStorage.setItem(EXPIRES_AT_KEY, String(loginAt + ttlMs));
+  }
+
   if (data.role) {
-    const serverRole = persistRole(data.role);
     if (data.user) {
       try {
         const merged = {
           ...data.user,
-          role: serverRole,
+          role: effectiveRole,
           email: String(email || data.user.email || '').trim().toLowerCase(),
         };
         localStorage.setItem(USER_KEY, JSON.stringify(merged));
       } catch {}
     }
-    return serverRole;
+    return effectiveRole;
   }
   const fromEmail = resolveRoleFromEmail(email);
   if (fromEmail) return persistRole(fromEmail);
@@ -187,17 +196,25 @@ export async function refreshSession(): Promise<string | null> {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
   if (!refreshToken) return null;
 
+  const loginAt = Number(localStorage.getItem(LOGIN_AT_KEY) || 0);
+
   refreshInFlight = (async () => {
     try {
       const apiBaseUrl = typeof window !== 'undefined' ? window.location.origin : '';
       const res = await fetch(`${apiBaseUrl}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({
+          refreshToken,
+          sessionLoginAt: loginAt,
+        }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.token) {
+      if (!res.ok || !data.token || data.error === 'session_expired') {
         clearSession();
+        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+          window.location.replace('/');
+        }
         return null;
       }
       persistSession(data, false);

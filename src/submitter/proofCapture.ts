@@ -6,6 +6,8 @@
  * persistent proof URL and timestamp in `candidate_applications`.
  */
 
+import fs from 'fs';
+import path from 'path';
 import type { Page } from 'playwright';
 import {
   uploadProof,
@@ -194,6 +196,128 @@ export async function captureFailedScreenshot(
     proofFailedCapturedAt: capturedAt,
     capturedAt,
     url: proofFailedUrl,
+    proofUrl: proofFailedUrl,
+  };
+}
+
+export function sanitizeFailureCause(cause?: string): string {
+  if (!cause) return 'unknown';
+  return cause.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'unknown';
+}
+
+/**
+ * Captures an OTP challenge screenshot ({applicationId}_otp_challenge.png)
+ * and saves to output/proofs.
+ */
+export async function captureJobOtpScreenshot(
+  page: Page,
+  application: ApplicationRow | string
+): Promise<{ url: string; capturedAt: string }> {
+  const capturedAt = new Date().toISOString();
+  const storageKey = resolveStorageKey(application);
+
+  if (page.isClosed()) {
+    return { url: '', capturedAt };
+  }
+
+  await page.waitForTimeout(500).catch(() => {});
+
+  const screenshotBuffer = await page
+    .screenshot({
+      fullPage: true,
+      type: 'png',
+    })
+    .catch(() => null);
+
+  if (!screenshotBuffer) {
+    return { url: '', capturedAt };
+  }
+
+  const proofDir = path.resolve(process.cwd(), 'output', 'proofs');
+  if (!fs.existsSync(proofDir)) {
+    fs.mkdirSync(proofDir, { recursive: true });
+  }
+  const filename = `${storageKey}_otp_challenge.png`;
+  const localPath = path.join(proofDir, filename);
+  fs.writeFileSync(localPath, screenshotBuffer);
+  const fileUrl = `file://${localPath}`;
+  log.info(`[Proof Capture] 📸 OTP challenge screenshot saved: ${fileUrl}`);
+
+  return { url: fileUrl, capturedAt };
+}
+
+/**
+ * Captures a contextual failure screenshot ({applicationId}_failed_{sanitizedCause}.png)
+ * and uploads it to storage / proofs_failed.
+ */
+export async function captureJobFailedScreenshot(
+  page: Page,
+  application: ApplicationRow | string,
+  failureCause?: string
+): Promise<FailedProofCaptureResult> {
+  const capturedAt = new Date().toISOString();
+  const storageKey = resolveStorageKey(application);
+  const appRef = resolveApplicationRef(application);
+
+  if (page.isClosed()) {
+    return {
+      proofFailedUrl: '',
+      proofFailedCapturedAt: capturedAt,
+      capturedAt,
+      url: '',
+      proofUrl: '',
+    };
+  }
+
+  await page.waitForTimeout(500).catch(() => {});
+
+  const screenshotBuffer = await page
+    .screenshot({
+      fullPage: true,
+      type: 'png',
+    })
+    .catch(() => null);
+
+  if (!screenshotBuffer) {
+    return {
+      proofFailedUrl: '',
+      proofFailedCapturedAt: capturedAt,
+      capturedAt,
+      url: '',
+      proofUrl: '',
+    };
+  }
+
+  const sanitizedCause = sanitizeFailureCause(failureCause);
+  const failDir = path.resolve(process.cwd(), 'output', 'proofs_failed');
+  if (!fs.existsSync(failDir)) {
+    fs.mkdirSync(failDir, { recursive: true });
+  }
+  const filename = `${storageKey}_failed_${sanitizedCause}.png`;
+  const localPath = path.join(failDir, filename);
+  fs.writeFileSync(localPath, screenshotBuffer);
+  const fileUrl = `file://${localPath}`;
+
+  let proofFailedUrl = fileUrl;
+  try {
+    const uploaded = await uploadFailedScreenshot(storageKey, screenshotBuffer);
+    if (uploaded && !uploaded.startsWith('file://')) {
+      proofFailedUrl = uploaded;
+    }
+  } catch {
+    // local fallback already saved
+  }
+
+  const attached = await attachFailedProofToApplication(appRef, proofFailedUrl, capturedAt);
+  if (attached) {
+    log.info(`[Proof Capture] 📸 Failure screenshot saved for application ${storageKey}: ${proofFailedUrl}`);
+  }
+
+  return {
+    proofFailedUrl,
+    proofFailedCapturedAt: capturedAt,
+    capturedAt,
+    url: fileUrl,
     proofUrl: proofFailedUrl,
   };
 }

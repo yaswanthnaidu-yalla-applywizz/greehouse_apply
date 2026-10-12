@@ -30,6 +30,7 @@ import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { enrichMissingChoiceOptions } from './liveChoiceOptions.js';
+import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 
 const log = createLogger('Playwright Scanner');
 
@@ -316,7 +317,15 @@ export class PlaywrightScanner {
             '--disable-gpu',
           ],
         });
-      } catch (launchErr) {
+      } catch (launchErr: any) {
+        await emitFailureDiagnostic({
+          category: 'SCAN_PLAYWRIGHT_LAUNCH',
+          stage: 'browser_launch',
+          reason: `Playwright browser launch failed: ${launchErr?.message || String(launchErr)}`,
+          error: launchErr,
+          isTerminal: true,
+          isRetryable: false,
+        }).catch(() => {});
         haltWithDevAlert(
           'Scanner',
           'Playwright failed to launch — check RAILWAY_ENV and browser binary',
@@ -697,6 +706,24 @@ export class PlaywrightScanner {
       if (!compactLogs) {
         log.warn(`[Playwright Scanner] ⚠️ Error scanning ${url}: ${error.message}`);
       }
+      const isTimeout = /time.*out/i.test(error?.message || '');
+      const isNav = /net::|navigation|resolve|dns|load/i.test(error?.message || '');
+      const category = isTimeout
+        ? 'SCAN_PLAYWRIGHT_TIMEOUT'
+        : isNav
+          ? 'SCAN_PLAYWRIGHT_NAVIGATE'
+          : 'SCAN_FIELD_EXTRACTION';
+
+      await emitFailureDiagnostic({
+        category,
+        stage: 'url_scan',
+        reason: error?.message || 'Error scanning job posting URL',
+        error,
+        jobUrl: url,
+        isTerminal: false,
+        isRetryable: true,
+      }).catch(() => {});
+
       template.isExpired = true;
       return template;
     }

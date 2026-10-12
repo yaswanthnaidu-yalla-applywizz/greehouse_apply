@@ -167,23 +167,58 @@ function extractStateValue(value: string): string {
   return value;
 }
 
-function getDegreeSubject(label: string): string | null {
-  if (!/\b(?:degree|masters?|master s|phd|doctorate)\b/i.test(label)) return null;
-  const subject = label.match(/\bin\s+(.+)$/i)?.[1]?.split(/\b(?:or|and)\b/i)[0]?.trim();
-  return subject || null;
+function getDegreeSubjects(label: string): string[] {
+  if (!/\b(?:degree|masters?|master|bachelors?|bachelor|phd|doctorate)\b/i.test(label)) return [];
+  const inMatch = /\bin\s+/i.exec(label);
+  if (!inMatch) return [];
+  const subjectPart = label.substring(inMatch.index + inMatch[0].length).trim();
+  if (!subjectPart) return [];
+  // Strip trailing phrases like 'or related field', 'or related', 'or equivalent'
+  const cleaned = subjectPart
+    .replace(/\b(?:or|and)?\s*(?:related|equivalent)(?:\s+(?:field|degree|area|discipline))?$/i, '')
+    .trim();
+  // Split on commas, 'or', 'and', '/'
+  const rawTokens = cleaned
+    .split(/,|\/|\b(?:or|and)\b/i)
+    .map((t) => t.replace(/[?.:;!]+$/, '').trim())
+    .filter(Boolean);
+  const results: string[] = [];
+  for (const token of rawTokens) {
+    const norm = normalizeText(token);
+    if (norm.length > 1 && !/^(a|an|the|field|related|equivalent|related field)$/i.test(norm)) {
+      results.push(norm);
+    }
+  }
+  // Also check if any known technical field is contained
+  if (results.length === 0 || cleaned.includes('computer science')) {
+    if (cleaned.includes('computer science') && !results.includes('computer science')) {
+      results.push('computer science');
+    }
+    if (cleaned.includes('data science') && !results.includes('data science')) {
+      results.push('data science');
+    }
+  }
+  return results;
 }
 
 function educationMatchesSubject(label: string, education: unknown[]): boolean {
-  const subject = getDegreeSubject(label);
-  if (!subject) return false;
+  const subjects = getDegreeSubjects(label);
+  if (subjects.length === 0) return false;
 
-  const first = education[0];
-  if (!first || typeof first !== 'object') return false;
-  const record = first as Record<string, unknown>;
-  const candidateSubject = normalizeText(
-    `${record.fieldOfStudy ?? record.field_of_study ?? record.major ?? ''} ${record.degree ?? ''}`
-  );
-  return candidateSubject.includes(normalizeText(subject));
+  for (const item of education) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const candidateSubject = normalizeText(
+      `${record.fieldOfStudy ?? record.field_of_study ?? record.major ?? ''} ${record.degree ?? ''}`
+    );
+    if (!candidateSubject) continue;
+    for (const sub of subjects) {
+      if (candidateSubject.includes(sub) || sub.includes(candidateSubject)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function hasSemanticYesNoOptions(options?: string[]): boolean {
@@ -200,14 +235,18 @@ function resolveBinaryDegreeAnswer(
   education: unknown[]
 ): string | null {
   if (
-    !/\b(?:degree|masters?|master s|phd|doctorate)\b/i.test(label) ||
+    !/\b(?:degree|masters?|master|bachelors?|bachelor|phd|doctorate)\b/i.test(label) ||
     !/\bin\b/i.test(label) ||
     (fieldType !== 'radio' && fieldType !== 'select') ||
     !hasSemanticYesNoOptions(options)
   ) {
     return null;
   }
-  return matchChoiceOption(educationMatchesSubject(label, education) ? 'Yes' : 'No', options);
+  if (educationMatchesSubject(label, education)) {
+    return matchChoiceOption('Yes', options);
+  }
+  // If negative or uncertain, return null so downstream tiers (Tier 2 Resume, Tier 5 LLM) can inspect full context.
+  return null;
 }
 
 /**
@@ -241,10 +280,12 @@ function resolveStandardProfileAttribute(
     normName === 'phone_country' ||
     normId === 'phone_country_code' ||
     normName === 'phone_country_code' ||
+    normId === 'country' ||
+    normName === 'country' ||
     /phone.*country|country.*phone/i.test(combined)
   ) {
-    const targetCountry = profile.country?.trim();
-    const targetCode = profile.country_code?.trim();
+    const targetCountry = profile.country?.trim() || (profile.location?.toLowerCase().includes('united states') ? 'United States' : null);
+    const targetCode = profile.country_code?.trim() || (targetCountry === 'United States' ? '+1' : null);
     if (!targetCountry && !targetCode) return null;
     if (field.options && field.options.length > 0) {
       const countryMatch = targetCountry
@@ -257,6 +298,7 @@ function resolveStandardProfileAttribute(
     }
     return targetCountry || null;
   }
+
 
   // Calling Code / Dialing Code
   if (
@@ -411,19 +453,24 @@ function resolveStandardProfileAttribute(
     return matchBestOption('No', field.options, field.label);
   }
 
-  // Consent / Terms & Conditions / Privacy Policy / Declarations / Acknowledgment (Always "Yes")
+  // Consent / Terms & Conditions / Privacy Policy / Arbitration / Declarations / Acknowledgment (Always "Yes")
   if (
-    /(terms and conditions|terms & conditions|terms of service|terms of use|privacy policy|certify|acknowledge|declaration|accurate and true|attest|background check|disclaimer)/i.test(
+    /(terms and conditions|terms & conditions|terms of service|terms of use|privacy policy|privacy notice|certify|acknowledge|declaration|accurate and true|attest|background check|disclaimer|arbitrat|agreement to arbitrate|please check this box|want to proceed|check this box if you want to proceed)/i.test(
       combined
     ) ||
+    normId.includes('37471261002') ||
+    normName.includes('37471261002') ||
+    normId.includes('37872860002') ||
+    normName.includes('37872860002') ||
     (/\bagree\b/i.test(combined) && !/disagree|restrict|non-compete|non compete/i.test(normLabel)) ||
     (/\bconsent\b/i.test(combined) && !/restrict/i.test(normLabel))
   ) {
     if (field.type === 'checkbox') {
       return 'true';
     }
-    return matchBestOption('Yes', field.options, field.label);
+    return matchBestOption('Yes', field.options, field.label) || 'Yes';
   }
+
 
   // Relocation / same-city willingness (binary Yes/No — must precede city/location heuristics)
   if (
@@ -945,7 +992,43 @@ export async function resolveTier1(
     // Ignore QA bank lookup error
   }
 
+  // Tier 1 miss: detect corporate default trivia pattern and attach hint
+  const hint = getCorporateDefaultHint(field.label, candidateProfile);
+  if (hint) {
+    (field as any).corporateDefaultHint = hint;
+  }
+
   return null;
+}
+
+export const CORPORATE_DEFAULT_PATTERNS: Array<{
+  pattern: RegExp;
+  defaultHint: string;
+}> = [
+  { pattern: /interview(ed)?.*(before|previously|us|here)/i, defaultHint: 'No' },
+  { pattern: /hear about us|referral source|how did you (find|learn)/i, defaultHint: 'LinkedIn or the first job board option available' },
+  { pattern: /arbitration|dispute resolution|binding agreement|waive.*jury/i, defaultHint: 'Yes / agree / checked' },
+  { pattern: /AI.*(policy|agreement|tool)|use of AI/i, defaultHint: 'Yes / agree / checked' },
+  { pattern: /^county$/i, defaultHint: 'Derive from candidate city/state location' },
+];
+
+export function getCorporateDefaultHint(
+  fieldLabel: string,
+  profile?: ProfileRow | null
+): string | null {
+  const trimmed = (fieldLabel || '').trim();
+  const match = CORPORATE_DEFAULT_PATTERNS.find((p) => p.pattern.test(trimmed));
+  if (!match) return null;
+
+  if (/^county$/i.test(trimmed)) {
+    const loc =
+      profile?.location ||
+      ((profile as any)?.city ? `${(profile as any).city || ''}, ${(profile as any).state || ''}`.trim() : '');
+    if (loc) {
+      return `Derive from candidate city/state location: "${loc}"`;
+    }
+  }
+  return match.defaultHint;
 }
 
 export default resolveTier1;

@@ -76,6 +76,15 @@ export async function assertApplywizzZohoConnected(
   }
 
   if (!isProfileZohoConnected(profile)) {
+    const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+    await emitFailureDiagnostic({
+      category: 'SYNC_ZOHO_CHECK',
+      stage: 'zoho_verification',
+      reason: OperatorErrors.ZOHO_NOT_CONNECTED,
+      applywizzId: id,
+      isTerminal: false,
+      isRetryable: true,
+    }).catch(() => {});
     return {
       allowed: false,
       error: OperatorErrors.ZOHO_NOT_CONNECTED,
