@@ -1146,8 +1146,6 @@ export class AnswerResolver {
     log.info(
       `[Answer Resolver] resolution summary questions=${totalQuestions} resolved=${totalQuestions - unresolvedQuestions} unresolved=${unresolvedQuestions} resolved_by_category=supabase:${questionsByCategory.supabase},resume:${questionsByCategory.resume},semantic:${questionsByCategory.semantic},fuzzy:${questionsByCategory.fuzzy},llm:${questionsByCategory.llm},other:${questionsByCategory.other} auto_queued=${autoQueuedApplications} ready_for_review=${readyForReviewApplications} filtered_out=${filteredOutApplications}`
     );
-
-
     if (compact) {
       log.info(
         `[Answer Resolver] resolve complete applications=${applications.length} successful=${totalSuccessful} unsuccessful=${totalUnsuccessful}`
