@@ -44,8 +44,29 @@ export async function upsertTemplate(
       if (!error && data) {
         return data as TemplateRow;
       }
+      if (error) {
+        const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+        await emitFailureDiagnostic({
+          category: 'SCAN_TEMPLATE_PERSIST',
+          stage: 'template_persistence',
+          reason: `Failed to persist job template: ${error.message}`,
+          error,
+          jobUrl: template.job_url,
+          isTerminal: false,
+          isRetryable: true,
+        }).catch(() => {});
+      }
     } catch (err: any) {
-      // Fall through to local fallback
+      const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+      await emitFailureDiagnostic({
+        category: 'SCAN_TEMPLATE_PERSIST',
+        stage: 'template_persistence',
+        reason: `Failed to persist job template: ${err?.message || String(err)}`,
+        error: err,
+        jobUrl: template.job_url,
+        isTerminal: false,
+        isRetryable: true,
+      }).catch(() => {});
     }
   }
 

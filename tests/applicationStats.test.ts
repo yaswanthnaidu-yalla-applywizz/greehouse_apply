@@ -21,7 +21,6 @@ describe('application statistics contract', () => {
     assert.deepEqual(statusMetricsForTransition('EMAIL_PROOF_PENDING'), ['submitted', 'applied']);
     assert.deepEqual(statusMetricsForTransition('FAILED'), ['submitted', 'failed']);
     assert.deepEqual(statusMetricsForTransition('RETRY'), ['submitted']);
-    assert.deepEqual(statusMetricsForTransition('CAPTCHA_TIMEOUT'), ['submitted']);
   });
 
   it('resolves global, manager, CA, and manager-plus-CA scopes', () => {

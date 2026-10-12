@@ -398,16 +398,25 @@ async function run(): Promise<void> {
     resolveFromPayloadStructured(degreeLabel, 'radio', null, ['Yes', 'No'], [
       { degree: 'Master of Science', fieldOfStudy: 'Computer Science' },
     ]),
-    'No',
-    'binary degree question rejects a different subject'
+    null,
+    'binary degree question cascades to downstream tiers (returns null) on non-match'
   );
   assertEqual(
     resolveFromPayloadStructured(degreeLabel, 'radio', null, ['Yes', 'No'], [
       { degree: 'Master of Science', fieldOfStudy: 'Computer Science' },
       { degree: 'Master of Engineering', fieldOfStudy: 'Engineering' },
     ]),
-    'No',
-    'binary degree question uses the first education record'
+    'Yes',
+    'binary degree question checks all candidate education records'
+  );
+
+  const csDegreeLabel = normalizeText('Do you have a Bachelors/Masters in Computer Science, Data Science or related field?');
+  assertEqual(
+    resolveFromPayloadStructured(csDegreeLabel, 'radio', null, ['Yes', 'No'], [
+      { degree: 'Master of Science', fieldOfStudy: 'Computer Science' },
+    ]),
+    'Yes',
+    'multi-subject degree query (question_18896285008) resolves Yes for Computer Science candidate'
   );
   assertEqual(
     resolveFromPayloadStructured(degreeLabel, 'radio', null, ['Engineering', 'Computer Science'], [

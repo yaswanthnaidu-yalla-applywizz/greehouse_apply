@@ -330,6 +330,30 @@ async function runSearchableSelectTests(): Promise<void> {
       console.log('  ✅ Incomplete searchable choice resolves live and fails closed when absent');
     });
 
+    await withMockPage(`<!DOCTYPE html><form id="application_form">
+      <div class="select-shell">
+        <label for="country">Country</label>
+        <input id="country" role="combobox" aria-label="United States (+1)" value="" />
+        <input type="hidden" class="requiredInput" value="+1" required />
+      </div>
+    </form>`, async (url) => {
+      const page = await browser!.newPage();
+      await page.goto(url);
+      const result = await fillSingleField(page, {
+        fieldId: 'country',
+        name: 'country',
+        type: 'select',
+        label: 'Country',
+        value: 'United States',
+        isRequired: true,
+        metadata: { selector: '#country', section: 'Phone' },
+        source: 'profile',
+      }, 'TEST', []);
+      assert(result.success, 'An already-selected United States phone-country control should be accepted');
+      await page.close();
+      console.log('  ✅ Preselected United States phone-country control is verified');
+    });
+
     console.log('\n✅ All searchable select tests passed.');
   } finally {
     await browser?.close();

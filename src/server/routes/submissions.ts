@@ -3,29 +3,22 @@
  *
  * Endpoints:
  * - POST /api/applications/:id/dry-run: Triggers headful dry-run form filling and captures screenshot
- * - POST /api/applications/:id/submit: Triggers live automated submission with CAPTCHA check
- * - POST /api/applications/:id/open-captcha-session: Opens a headful browser for manual CAPTCHA solving
+ * - POST /api/applications/:id/submit: Triggers live automated submission
  * - POST /api/applications/:id/submit-otp: Fills OTP on paused session and completes submission
- * - POST /api/applications/:id/resume-submission: Resumes paused submission after manual CAPTCHA solving
  * - GET  /api/applications/:id/proof: Retrieves web proof screenshot URL and timestamp
  */
 
 import { Router, Request, Response } from 'express';
 import axios from 'axios';
 import { config } from '../../config/env.js';
-import { chromium } from 'playwright';
 import { runDryRun } from '../../submitter/dryRun.js';
 import {
   runLiveSubmit,
   resolvePausedSession,
-  storePausedSession,
-  clearPausedSession,
   submitOtpToPausedSession,
 } from '../../submitter/liveSubmit.js';
-import { verifySubmissionSignals, registerSubmissionSession } from '../../submitter/captchaResume.js';
-import { captureWebProof, captureFailedScreenshot, captureAndSaveEmailProof } from '../../submitter/proofCapture.js';
+import { captureAndSaveEmailProof } from '../../submitter/proofCapture.js';
 import { emailProofPoller } from '../../submitter/emailProofPoller.js';
-import { fillForm } from '../../submitter/formFiller.js';
 import {
   getApplication,
   getApplicationByCandidateAndJob,
@@ -94,21 +87,6 @@ async function ensureZohoConnectedForApplication(
   }
 
   return true;
-}
-
-const SUBMIT_SELECTORS = [
-  'button[type="submit"]',
-  'input[type="submit"]',
-  '#submit_app',
-  'button:has-text("Submit Application")',
-  'input[value*="Submit"]',
-  'button:has-text("Apply")',
-  '#submit_application',
-];
-
-async function closePausedSession(applicationId: string): Promise<void> {
-  await clearPausedSession(applicationId);
-  log.info(`[Submissions Router] 🧹 Cleaned up paused session for application ${applicationId}`);
 }
 
 function getWorkerServiceUrl(): string {
@@ -247,7 +225,7 @@ submissionsRouter.post('/:id/dry-run', async (req: Request, res: Response): Prom
 
 /**
  * POST /api/applications/:id/submit
- * Triggers a live automated submission with CAPTCHA detection.
+ * Triggers a live automated submission with OTP detection.
  */
 submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promise<void> => {
   const rawId = req.params.id;
@@ -382,8 +360,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         status: result.status,
         applicationId: result.applicationId,
         requiresOtp: true,
-        requiresCaptcha: result.requiresOtp ?? result.requiresCaptcha,
-        message: 'CAPTCHA or OTP challenge detected after submit. Please solve manually in the browser and call /resume-submission.',
+        message: 'OTP verification required. Enter code in dashboard or call /api/applications/:id/submit-otp.',
         summary: result.summary,
       });
     } else if (result.status === 'QUEUED') {
@@ -435,135 +412,6 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
 });
 
 /**
- * POST /api/applications/:id/open-captcha-session
- * Opens a headful Playwright browser for the paused CAPTCHA session so the operator can solve it manually.
- */
-submissionsRouter.post('/:id/open-captcha-session', async (req: Request, res: Response): Promise<void> => {
-  const rawId = req.params.id;
-  const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
-  const timeoutMs = req.body?.timeoutMs ?? 30000;
-
-  if (process.env.RAILWAY_ENV === 'true') {
-    res.status(400).json({
-      success: false,
-      error: 'Headful CAPTCHA solving is not supported in headless production environment.',
-    });
-    return;
-  }
-
-  try {
-    const application = await getApplication(appId, req.body?.jobUrl);
-    if (!application) {
-      res.status(404).json({
-        success: false,
-        error: `Application '${appId}' not found.`,
-      });
-      return;
-    }
-
-    const targetUrl = application.job_url;
-    let url: URL;
-    try {
-      url = new URL(targetUrl);
-    } catch {
-      res.status(400).json({ error: 'Invalid job URL' });
-      return;
-    }
-    const isGreenhouse = /(^|\.)greenhouse\.io$/i.test(url.hostname) || url.hostname === 'grnh.se';
-    if (!isGreenhouse) {
-      res.status(400).json({ error: 'Invalid job URL' });
-      return;
-    }
-
-    if (await proxyToWorker(req, res, `/api/applications/${encodeURIComponent(appId)}/open-captcha-session`)) {
-      return;
-    }
-
-    const hadExistingSession = Boolean(resolvePausedSession(appId));
-    await closePausedSession(appId);
-
-    let browser: any = null;
-    let context: any = null;
-    let page: any = null;
-
-    try {
-      browser = await chromium.launch({
-        headless: false,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-        ],
-      });
-
-      context = await browser.newContext({
-        userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        viewport: { width: 1280, height: 900 },
-      });
-
-      page = await context.newPage();
-
-      log.info(
-        `[Submissions Router] 🌐 Opening headful CAPTCHA browser for ${application.applywizz_id} → ${targetUrl}`
-      );
-      await page.goto(targetUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: timeoutMs,
-      });
-
-      await fillForm(page, application, {
-        minJitterMs: 300,
-        maxJitterMs: 800,
-        timeoutMs: 5000,
-      });
-      await page.waitForTimeout(500);
-
-      const sessionKey = storePausedSession(application, {
-        browser,
-        page,
-        jobUrl: targetUrl,
-        requiresOtp: false,
-      });
-
-      registerSubmissionSession({
-        applicationId: sessionKey,
-        browser,
-        context,
-        page,
-        application,
-        startedAt: Date.now(),
-      });
-
-      if (application.id) {
-        await updateStatus(application.id, 'OTP_REQUIRED');
-      }
-
-      res.status(200).json({
-        status: 'BROWSER_OPENED',
-        applicationId: sessionKey,
-        recreated: !hadExistingSession,
-      });
-    } catch (innerErr: any) {
-      if (page && !page.isClosed()) {
-        await captureFailedScreenshot(page, application).catch(() => {});
-        await page.close().catch(() => {});
-      }
-      if (context) await context.close().catch(() => {});
-      if (browser) await browser.close().catch(() => {});
-      throw innerErr;
-    }
-  } catch (err: unknown) {
-    log.error(`[Submissions Router] ❌ Open CAPTCHA session route error for ${appId}:`, err);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-    });
-  }
-});
-
-/**
  * POST /api/applications/:id/submit-otp
  * Fills the OTP field on a paused session, submits verification, and completes if confirmed.
  */
@@ -601,15 +449,15 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
       jobUrl: req.body?.jobUrl,
     });
 
-    if (result.status === 'APPLIED') {
-      await updateStatus(appId, 'APPLIED', {
+    if (result.status === 'APPLIED' || result.status === 'EMAIL_PROOF_PENDING') {
+      await updateStatus(appId, result.status, {
         proof_web_url: result.proofUrl || result.proofWebUrl,
         proof_captured_at: result.proofCapturedAt,
         job_url: req.body?.jobUrl,
       }).catch(() => {});
 
       res.status(200).json({
-        status: 'APPLIED',
+        status: result.status,
         proofUrl: result.proofUrl,
         proofWebUrl: result.proofWebUrl,
         proofCapturedAt: result.proofCapturedAt,
@@ -656,171 +504,6 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
       status: 'FAILED',
       applicationId: appId,
       error: errMessage || 'OTP submission failed.',
-    });
-  }
-});
-
-/**
- * POST /api/applications/:id/resume-submission
- * Resumes a submission paused at OTP_REQUIRED after operator manual CAPTCHA/OTP resolution.
- */
-submissionsRouter.post('/:id/resume-submission', async (req: Request, res: Response): Promise<void> => {
-  const rawId = req.params.id;
-  const appId = Array.isArray(rawId) ? rawId[0] : String(rawId || '');
-  const timeoutMs = req.body?.timeoutMs ?? 30000;
-
-  if (await proxyToWorker(req, res, `/api/internal/applications/${encodeURIComponent(appId)}/resume-submission`)) {
-    return;
-  }
-
-  try {
-    const resolvedSession = resolvePausedSession(appId);
-    if (!resolvedSession) {
-      res.status(404).json({
-        success: false,
-        error: `No paused CAPTCHA session found for application '${appId}'. Click "Open Browser for CAPTCHA" first.`,
-      });
-      return;
-    }
-
-    const application = await getApplication(appId, req.body?.jobUrl);
-    if (!application) {
-      res.status(404).json({
-        success: false,
-        error: `Application '${appId}' not found.`,
-      });
-      return;
-    }
-
-    const { page } = resolvedSession.session;
-    const sessionKey = resolvedSession.canonicalKey;
-
-    log.info(`[Submissions Router] ▶️ Resuming submission for application ${sessionKey}...`);
-
-    if (application.id) {
-      await updateStatus(application.id, 'APPLYING');
-    }
-
-    let submitClicked = false;
-    for (const sel of SUBMIT_SELECTORS) {
-      const btn = page.locator(sel).first();
-      if ((await btn.count()) > 0 && (await btn.isVisible())) {
-        await btn.click({ timeout: 5000 });
-        submitClicked = true;
-        log.info(`[Submissions Router] 🖱️ Clicked submit button (${sel})`);
-        break;
-      }
-    }
-
-    if (!submitClicked) {
-      const errorMsg = 'Submit button not found or not visible on resumed page.';
-      let failedProof: any = null;
-      if (page && !page.isClosed()) {
-        failedProof = await captureFailedScreenshot(page, application || sessionKey).catch(() => null);
-      }
-      if (application.id) {
-        await updateStatus(application.id, 'FAILED', {
-          error_message: errorMsg,
-          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
-          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-          job_url: application.job_url,
-        });
-      }
-      await closePausedSession(sessionKey);
-      res.status(500).json({
-        success: false,
-        status: 'FAILED',
-        applicationId: sessionKey,
-        error: errorMsg,
-        proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-        proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-      });
-      return;
-    }
-
-    const verification = await verifySubmissionSignals(page, timeoutMs);
-
-    if (verification.verified) {
-      log.info(`[Submissions Router] ✅ Confirmation verified via signal: ${verification.signal}`);
-
-      const proofResult = await captureWebProof(page, application);
-
-      if (application.id) {
-        await updateStatus(application.id, 'APPLIED');
-      }
-
-      await closePausedSession(sessionKey);
-
-      res.status(200).json({
-        success: true,
-        status: 'APPLIED',
-        applicationId: sessionKey,
-        proofWebUrl: proofResult.proofWebUrl,
-        proofCapturedAt: proofResult.proofCapturedAt,
-      });
-      return;
-    }
-
-    const errorMsg =
-      verification.error || 'Submission confirmation signals not detected within 30 seconds.';
-    log.warn(`[Submissions Router] ❌ Verification failed: ${errorMsg}`);
-
-    let failedProof: any = null;
-    if (page && !page.isClosed()) {
-      failedProof = await captureFailedScreenshot(page, application || sessionKey).catch(() => null);
-    }
-
-    if (application.id) {
-      await updateStatus(application.id, 'FAILED', {
-        error_message: errorMsg,
-        proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
-        proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-        job_url: application.job_url,
-      });
-    }
-
-    await closePausedSession(sessionKey);
-
-    res.status(500).json({
-      success: false,
-      status: 'FAILED',
-      applicationId: sessionKey,
-      error: errorMsg,
-      proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-      proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-    });
-  } catch (err: unknown) {
-    const errMessage = err instanceof Error ? err.message : String(err);
-    log.error(`[Submissions Router] ❌ Resume route error for ${appId}:`, err);
-
-    let errProof: Awaited<ReturnType<typeof captureFailedScreenshot>> | null = null;
-    try {
-      const resolved = resolvePausedSession(appId);
-      if (resolved?.session?.page && !resolved.session.page.isClosed()) {
-        errProof = await captureFailedScreenshot(resolved.session.page, appId).catch(() => null);
-      }
-    } catch {}
-
-    try {
-      const application = await getApplication(appId, req.body?.jobUrl);
-      if (application?.id) {
-        await updateStatus(application.id, 'FAILED', {
-          error_message: errMessage,
-          proof_failed_url: errProof?.proofFailedUrl || errProof?.url,
-          proof_failed_captured_at: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
-          job_url: application.job_url,
-        });
-      }
-    } catch {}
-
-    await closePausedSession(appId);
-
-    res.status(500).json({
-      success: false,
-      status: 'FAILED',
-      error: 'Internal server error',
-      proofFailedUrl: errProof?.proofFailedUrl || errProof?.url,
-      proofFailedCapturedAt: errProof?.proofFailedCapturedAt || errProof?.capturedAt,
     });
   }
 });

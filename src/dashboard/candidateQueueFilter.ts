@@ -36,7 +36,10 @@ export function filterJobsForCandidate<T extends JobWithOptionalOwner>(
 
 /** Legacy helper — prefer showing all queue rows and badge SKIPPED/unresolved in the UI. */
 export function excludeSkippedApplicationJobs<T extends { status?: string | null }>(jobs: T[]): T[] {
-  return jobs.filter((job) => (job.status || '').toUpperCase() !== 'SKIPPED');
+  return jobs.filter((job) => {
+    const s = (job.status || '').toUpperCase();
+    return s !== 'SKIPPED' && s !== 'FILTERED_OUT';
+  });
 }
 
 type ResolutionFieldsCarrier = {
@@ -66,16 +69,22 @@ export function isQueuedApplicationJob(row: { status?: string | null }): boolean
   return (row.status || '').trim().toUpperCase() === 'QUEUED';
 }
 
+/** True when the application was filtered out due to excessive AI/unresolved fields. */
+export function isFilteredOutApplicationJob(row: { status?: string | null }): boolean {
+  return (row.status || '').trim().toUpperCase() === 'FILTERED_OUT';
+}
+
 /**
- * Operator application queue — assigned rows excluding QUEUED (auto-applied / in submission queue).
- * Keeps SKIPPED, READY_FOR_REVIEW, OTP/CAPTCHA, FAILED, etc. unchanged.
+ * Operator application queue — assigned rows excluding QUEUED (auto-applied) and FILTERED_OUT.
+ * Keeps SKIPPED, READY_FOR_REVIEW, OTP_REQUIRED, FAILED, etc. unchanged.
  */
 export function filterOperatorApplicationJobs<T extends ResolutionFieldsCarrier & { status?: string | null }>(
   jobs: T[]
 ): T[] {
   if (!Array.isArray(jobs)) return [];
-  return jobs.filter((job) => !isQueuedApplicationJob(job));
+  return jobs.filter((job) => !isQueuedApplicationJob(job) && !isFilteredOutApplicationJob(job));
 }
+
 
 export function isSkippedApplicationJob(row: { status?: string | null }): boolean {
   return (row.status || '').trim().toUpperCase() === 'SKIPPED';

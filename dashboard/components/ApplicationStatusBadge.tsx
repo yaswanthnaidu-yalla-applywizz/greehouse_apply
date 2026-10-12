@@ -57,7 +57,6 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
       status === 'APPLYING' ||
       status === 'QUEUED' ||
       status === 'OTP_REQUIRED' ||
-      status === 'CAPTCHA_REQUIRED' ||
       status === 'EMAIL_PROOF_PENDING' ||
       status === 'FAILED';
     const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
@@ -125,7 +124,6 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         </span>
       );
 
-    case 'CAPTCHA_REQUIRED':
     case 'OTP_REQUIRED':
     case 'APPLYING':
       return (
@@ -202,16 +200,6 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
         </span>
       );
 
-    case 'CAPTCHA_TIMEOUT':
-      return (
-        <span
-          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#ff9f0a]/15 text-[#ff9f0a] border border-[#ff9f0a]/30 ${className}`}
-          title="Session timed out after 5 minutes"
-        >
-          <span className="w-2 h-2 rounded-full bg-[#ff9f0a]"></span>
-          <span>Timeout</span>
-        </span>
-      );
 
     case 'READY_FOR_REVIEW':
     default:

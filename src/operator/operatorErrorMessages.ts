@@ -30,9 +30,16 @@ export const OperatorErrors = {
   GENERIC_SUPPORT: 'Please contact support for assistance with this application.',
   RESOLUTION_PENDING:
     "We haven't finished answering this job's questions yet. Please check back shortly.",
+  OTP_TIMEOUT:
+    'OTP verification code not received within the allowed window. Application will be retried automatically.',
+  GMAIL_OTP_NOT_FOUND:
+    'Gmail security code not found. Check that the mailbox is connected on Render.',
+  GMAIL_MAILBOX_NOT_CONNECTED:
+    'Candidate Gmail mailbox is not connected. Set up OAuth on Render for this account.',
 } as const;
 
-const FRIENDLY_PREFIX = /^(This job|Your email|We couldn't|We're|Please|Network error|This submission|This application)/i;
+const FRIENDLY_PREFIX =
+  /^(This job|Your email|We couldn't|We're|Please|Network error|This submission|This application|OTP verification code|Gmail security code|Candidate Gmail mailbox)/i;
 
 function isNetworkError(message: string): boolean {
   return /network error|econnrefused|etimedout|econnreset|enotfound|fetch failed|socket hang up|abort(ed)?|timed out|timeout/i.test(
@@ -108,6 +115,15 @@ export function normalizeOperatorErrorMessage(
   }
   if (/verification timed out|submission verification timed out|form submission timed out/i.test(msg)) {
     return OperatorErrors.VERIFICATION_TIMEOUT;
+  }
+  if (/gmail_otp_not_found/i.test(msg)) {
+    return OperatorErrors.GMAIL_OTP_NOT_FOUND;
+  }
+  if (/mailbox_not_connected/i.test(msg)) {
+    return OperatorErrors.GMAIL_MAILBOX_NOT_CONNECTED;
+  }
+  if (/otp_fetch.*timeout|zoho_inbox_unavailable|poll_budget_exhausted/i.test(msg)) {
+    return OperatorErrors.OTP_TIMEOUT;
   }
   if (isNetworkError(msg)) return OperatorErrors.NETWORK;
   if (/otp solve failed|otp submission verification failed/i.test(msg)) {
