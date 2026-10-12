@@ -175,6 +175,19 @@ describe('CA Notification Email', () => {
     assert.equal(ca2.clientCount, 1);
   });
 
+  it('groupReadyForReviewByCa filters out rows matching excludeKeys', () => {
+    const rows = [
+      { applywizz_id: 'AW-001', assigned_ca_email: 'ca1@example.com', job_url: 'https://job1' },
+      { applywizz_id: 'AW-001', assigned_ca_email: 'ca1@example.com', job_url: 'https://job2' },
+      { applywizz_id: 'AW-002', assigned_ca_email: 'ca1@example.com', job_url: 'https://job3' },
+    ];
+    const excludeKeys = new Set(['AW-001::https://job1']);
+    const summaries = groupReadyForReviewByCa(rows as any, { excludeKeys });
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0].appCount, 2);
+    assert.equal(summaries[0].clientCount, 2);
+  });
+
   it('buildCaNotificationHtml formats HTML template properly', () => {
     const html = buildCaNotificationHtml({
       caEmail: 'ca@applywizz.ai',
