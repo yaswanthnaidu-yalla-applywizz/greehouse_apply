@@ -392,6 +392,12 @@ function getTier5FailureReason(): string {
  * Orchestrator running the 3-tier Supabase-only waterfall resolution engine.
  */
 export class AnswerResolver {
+  private pendingAutoQueue: Array<{
+    applywizzId: string;
+    jobUrl: string;
+    assignedCaEmail?: string;
+  }> = [];
+
   /**
    * Resolves a single scanned form field through the 3-tier waterfall.
    */
@@ -529,27 +535,27 @@ export class AnswerResolver {
       profile
     );
     if (tier4) {
-      const phone = isPhoneNumberField(field)
-        ? resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text)
-        : tier4.value;
-      if (phone) {
-        log.info(`[Resolver] ✅ T4 ${field.label} → resume phone`);
+      if (isUnsupportedUuidAnswer(field, tier4.value)) {
+        log.info(`[Resolver] ❌ T4 ${field.label} — rejected UUID answer for non-identifier field`);
+      } else if (isPhoneNumberField(field)) {
+        const phone = resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text);
+        if (phone) {
+          log.info(`[Resolver] ✅ T4 ${field.label} → resume phone`);
+          return {
+            ...tier4,
+            value: phone,
+            resolvedByTier: 4,
+            isRequired,
+          };
+        }
+        log.info(`[Resolver] ❌ T4 ${field.label} — answer not verified against resume`);
+      } else {
+        log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
         return {
           ...tier4,
-          value: phone,
           resolvedByTier: 4,
           isRequired,
         };
-      }
-      if (isPhoneNumberField(field)) {
-        log.info(`[Resolver] ❌ T4 ${field.label} — answer not verified against resume`);
-      } else {
-      log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
-      return {
-        ...tier4,
-        resolvedByTier: 4,
-        isRequired,
-      };
       }
     }
     log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
@@ -705,12 +711,16 @@ export class AnswerResolver {
       profile
     );
     if (tier4) {
-      log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
-      return {
-        ...tier4,
-        resolvedByTier: 4,
-        isRequired,
-      };
+      if (isUnsupportedUuidAnswer(field, tier4.value)) {
+        log.info(`[Resolver] ❌ T4 ${field.label} — rejected UUID answer for non-identifier field`);
+      } else {
+        log.info(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
+        return {
+          ...tier4,
+          resolvedByTier: 4,
+          isRequired,
+        };
+      }
     }
     log.info(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
 
@@ -850,6 +860,7 @@ export class AnswerResolver {
     segments: CandidateSegment[],
     templates: ScannedJobTemplate[]
   ): Promise<CandidateJobApplication[]> {
+    this.pendingAutoQueue = [];
     const templateMap = new Map<string, ScannedJobTemplate>();
     for (const t of templates) {
       templateMap.set(t.jobUrl, t);
@@ -1047,23 +1058,15 @@ export class AnswerResolver {
                 `[Answer Resolver] 🚫 Filtered out ${app.applywizzId} ${persistJobUrl} (ai_count=${aiCount} unresolved_required=${unresCount} > 3)`
               );
             } else if (canAutoEnqueue) {
-              try {
-                await enqueueApplication(app.applywizzId, {
-                  jobUrl: persistJobUrl,
-                  assignedCaEmail: assignedCaEmail || undefined,
-                });
-                autoQueuedApplications++;
-                log.info(
-                  `[Answer Resolver] Auto-queued ${app.applywizzId} ${persistJobUrl} (no required AI/unresolved fields)`
-                );
-              } catch (enqueueErr: any) {
-                if (persistedApplication.status === 'READY_FOR_REVIEW') {
-                  readyForReviewApplications++;
-                }
-                log.warn(
-                  `[Answer Resolver] ⚠️ Auto-enqueue skipped for ${app.applywizzId} ${persistJobUrl}: ${enqueueErr?.message || enqueueErr}`
-                );
-              }
+              autoQueuedApplications++;
+              this.pendingAutoQueue.push({
+                applywizzId: app.applywizzId,
+                jobUrl: persistJobUrl,
+                assignedCaEmail: assignedCaEmail || undefined,
+              });
+              log.info(
+                `[Answer Resolver] Marked for post-ingest auto-queue: ${app.applywizzId} ${persistJobUrl} (no required AI/unresolved fields)`
+              );
             } else if (persistedApplication.status === 'READY_FOR_REVIEW') {
               readyForReviewApplications++;
             }
@@ -1153,6 +1156,37 @@ export class AnswerResolver {
     }
 
     return applications;
+  }
+
+  public getPendingAutoQueue(): Array<{ applywizzId: string; jobUrl: string; assignedCaEmail?: string }> {
+    return [...this.pendingAutoQueue];
+  }
+
+  public getPendingAutoQueueCount(): number {
+    return this.pendingAutoQueue.length;
+  }
+
+  public async flushPendingAutoQueue(): Promise<number> {
+    const queue = [...this.pendingAutoQueue];
+    this.pendingAutoQueue = [];
+    let enqueuedCount = 0;
+    for (const item of queue) {
+      try {
+        await enqueueApplication(item.applywizzId, {
+          jobUrl: item.jobUrl,
+          assignedCaEmail: item.assignedCaEmail,
+        });
+        enqueuedCount++;
+        log.info(
+          `[Answer Resolver] Auto-queued ${item.applywizzId} ${item.jobUrl} (post-ingest flush)`
+        );
+      } catch (enqueueErr: any) {
+        log.warn(
+          `[Answer Resolver] ⚠️ Post-ingest auto-enqueue skipped for ${item.applywizzId} ${item.jobUrl}: ${enqueueErr?.message || enqueueErr}`
+        );
+      }
+    }
+    return enqueuedCount;
   }
 }
 

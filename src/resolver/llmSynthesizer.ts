@@ -530,7 +530,7 @@ export class LLMSynthesizer {
         this.openaiClient = new OpenAI({
           baseURL: config.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
           apiKey: this.apiKey,
-          timeout: 8000,
+          timeout: config.LLM_TIMEOUT_MS,
           maxRetries: 1,
           defaultHeaders: {
             'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
@@ -542,7 +542,7 @@ export class LLMSynthesizer {
     } else if (this.provider === 'openai') {
       this.modelName = options.modelName ?? 'gpt-4o-mini';
       if (this.apiKey) {
-        this.openaiClient = new OpenAI({ apiKey: this.apiKey, timeout: 8000, maxRetries: 1 });
+        this.openaiClient = new OpenAI({ apiKey: this.apiKey, timeout: config.LLM_TIMEOUT_MS, maxRetries: 1 });
       }
     } else {
       this.modelName = options.modelName ?? 'gemini-2.5-flash';
