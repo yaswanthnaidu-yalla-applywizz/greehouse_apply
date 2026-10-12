@@ -28,16 +28,26 @@ export type CaNotificationSendResult = {
 type ReviewAppRow = {
   applywizz_id?: string | null;
   assigned_ca_email?: string | null;
+  job_url?: string | null;
 };
 
 /**
  * Groups READY_FOR_REVIEW rows by assigned CA email.
- * Skips null/empty CA emails.
+ * Skips null/empty CA emails and optionally excludes specified application keys.
  */
-export function groupReadyForReviewByCa(rows: ReviewAppRow[]): CaNotificationSummary[] {
+export function groupReadyForReviewByCa(
+  rows: ReviewAppRow[],
+  options?: { excludeKeys?: Set<string> }
+): CaNotificationSummary[] {
   const byCa = new Map<string, { clients: Set<string>; appCount: number }>();
 
   for (const row of rows) {
+    if (options?.excludeKeys && options.excludeKeys.size > 0 && row.applywizz_id && row.job_url) {
+      if (options.excludeKeys.has(`${row.applywizz_id}::${row.job_url}`)) {
+        continue;
+      }
+    }
+
     const caEmail = String(row.assigned_ca_email || '')
       .trim()
       .toLowerCase();
@@ -94,7 +104,10 @@ function resolveRecipient(caEmail: string): string {
  * After Phase D: email each CA with new READY_FOR_REVIEW apps created this run.
  * Failures are logged; this never throws to the pipeline.
  */
-export async function sendCaNotificationEmails(runStartedAt: string | Date): Promise<CaNotificationSendResult> {
+export async function sendCaNotificationEmails(
+  runStartedAt: string | Date,
+  options?: { excludeKeys?: Set<string> }
+): Promise<CaNotificationSendResult> {
   const empty: CaNotificationSendResult = { summaries: [], sent: 0, skipped: 0, failed: 0 };
   const runStartedAtIso = runStartedAt instanceof Date ? runStartedAt.toISOString() : String(runStartedAt);
 
@@ -113,7 +126,7 @@ export async function sendCaNotificationEmails(runStartedAt: string | Date): Pro
     const supabase = getDbClient();
     const { data, error } = await supabase
       .from('gh_candidate_applications')
-      .select('applywizz_id, assigned_ca_email')
+      .select('applywizz_id, assigned_ca_email, job_url')
       .eq('status', 'READY_FOR_REVIEW')
       .gte('created_at', runStartedAtIso);
 
@@ -127,7 +140,7 @@ export async function sendCaNotificationEmails(runStartedAt: string | Date): Pro
     return empty;
   }
 
-  const summaries = groupReadyForReviewByCa(rows);
+  const summaries = groupReadyForReviewByCa(rows, options);
   if (summaries.length === 0) {
     log.info('[CA Notification] No READY_FOR_REVIEW apps with assigned CAs this run — skip');
     return empty;
