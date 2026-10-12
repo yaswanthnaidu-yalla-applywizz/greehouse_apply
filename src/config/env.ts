@@ -81,6 +81,9 @@ const envSchema = z.object({
   /** OpenAI API key */
   OPENAI_API_KEY: z.string().optional(),
 
+  /** Timeout in milliseconds for LLM provider API requests (default: 30000) */
+  LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+
   /** Navigation and interaction timeout in milliseconds for Playwright */
   PLAYWRIGHT_TIMEOUT: z.coerce.number().int().positive().default(30000),
 

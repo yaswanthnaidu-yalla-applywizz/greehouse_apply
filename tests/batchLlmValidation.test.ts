@@ -3,6 +3,7 @@
  */
 
 import { LLMSynthesizer, matchExactOption } from '../src/resolver/llmSynthesizer.js';
+import { config } from '../src/config/env.js';
 import type { ScannedField } from '../src/types/index.js';
 
 async function runTests() {
@@ -22,6 +23,7 @@ async function runTests() {
 
   assert(matchExactOption('Yes', ['Yes', 'No']) === 'Yes', 'matchExactOption accepts Yes');
   assert(matchExactOption('maybe', ['Yes', 'No']) === null, 'matchExactOption rejects non-option');
+  assert((config as any).LLM_TIMEOUT_MS === 30000, 'config.LLM_TIMEOUT_MS defaults to 30000');
 
   const synthesizer = new LLMSynthesizer({ provider: 'openai', apiKey: '' });
   const profile = {
