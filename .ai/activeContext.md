@@ -1,3 +1,44 @@
+## Current Session Update (2026-10-12 — Remote DB Profiles Data Audit, Resume PDF Extraction & Normalization)
+
+- **Comprehensive Profile Data Audit & Anomaly Identification (`scripts/auditProfileAnomalies.cjs`)**:
+  - Audited all 370 profiles in the remote Supabase database (`postgres-db2`, project `rrqsqakctbrhqcoqavoj`):
+    - **Empty Fields Identified**: `location`: 156, `phone`: 209, `country`: 156, `country_code`: 235.
+    - **Root Cause of Empty Fields**: Early ingestion only parsed resume facts into `resume_facts` (skills, education, experience) and left top-level profile contact fields empty. Candidates' raw contact data was stored in `raw_api_payload` (`additional_information` & `client`: `full_address`, `state_of_residence`, `primary_phone`, `callable_phone`). For 60 candidates, phones in CRM were dummy values (`'+'`), but their S3 resume PDFs contained verified phone numbers.
+    - **Wrong / Anomalous Values Identified**:
+      - `country`: 28 rows had a US State name (e.g. `'Texas'`, `'Missouri'`, `'New Jersey'`, `'California'`, `'Ohio'`) instead of `'United States'`.
+      - `location`: 17 rows had non-canonical formats (`'Onsite'`, `'Missouri, United States'`, `'Dublin'`, `'Manor park'`, `'Buckinghamshire'`).
+      - `phone`: 1 row had `< 10 digits` (`'899539166'`).
+- **Comprehensive 3-Part Normalization & Live Backfill (`scripts/backfillProfileDataFromPayloadAndResume.cjs`)**:
+  - Integrated `docs/DASHBOARD CONFIRMATION.csv` priority for operator-verified contact details.
+  - Built waterfall parser for `raw_api_payload` and implemented on-the-fly S3 resume PDF download and parsing via `axios` + `pdf-parse`. Extracted missing phone numbers directly from candidate resumes and saved `resume_text`.
+  - Normalized all candidate locations to canonical 3-part Greenhouse format (`City, State, Country`).
+  - Replaced US State names in `country` with `'United States'` and mapped dialing codes to `country_code` (`+1`, `+44`, `+353`, `+61`, `+91`).
+  - Executed live updates via Supabase port 6543 (transaction pooler).
+  - **Final Verified Results Across 370 Remote DB Profiles**:
+    - `with_location`: **369 / 370** (100% of real candidates; remaining 1 is dummy test account `CASCADE-TEST-1`)
+    - `with_phone`: **369 / 370** (100% of real candidates)
+    - `with_country`: **369 / 370** (100% of real candidates)
+    - `with_linkedin`: **246 / 369** (extracted from CSV, CRM payloads, and PDF `/URI` hyperlinks; remaining 123 candidates only have Vercel portfolio apps and no LinkedIn on file)
+    - `non_3part_location`: **0** (100% compliant with Greenhouse `City, State, Country` requirement)
+    - `state_in_country`: **0** (100% resolved)
+    - `phone_invalid`: **0** (100% valid; fixed `AWL-36169` to `+353 89 953 9166`)
+
+## Current Session Update (2026-10-12 — Remote DB Profiles Sync, Dashboard Confirmation, Zoho & CA Email Backfill)
+
+- **Remote Supabase DB (`postgres-db2`) Profiles Synchronization**:
+  - Identified **126 missing AWL IDs** in remote DB compared to local sandbox DB (365 in sandbox vs 244 in remote).
+  - Migrated and inserted all 126 missing candidate profiles into remote `profiles` table, bringing total remote profiles to **370**.
+- **Candidate Profile Location, Phone, LinkedIn Extraction & 3-Part Normalization**:
+  - Implemented `scripts/backfillProfileDataFromPayloadAndResume.cjs` extracting missing values from `raw_api_payload` and `resume_text`.
+  - Normalized all candidate locations to canonical 3-part Greenhouse format (`City, State, Country`).
+  - Remote DB profile stats: `with_location: 342`, `with_phone: 282`, `with_country: 342`, `with_linkedin: 235`, `with_github: 79`, `with_ca_email: 370`.
+- **Zoho Connected Status Backfill**:
+  - Fetched all active mailboxes from `https://zoho-mail-reader.onrender.com/api/zoho/ui/users`.
+  - Backfilled `zoho_connected` on remote DB: **254 candidates marked `true`**, 116 marked `false`.
+- **CA Email Assignment Backfill**:
+  - Paginated through ApplyWizz CA work history (`https://applywizz-ca-management.vercel.app/api/ca/work-history`, 83 pages / 8,266 records).
+  - Successfully mapped and updated `ca_email` across all **370 / 370 profiles** (100% coverage, 0 missing).
+
 ## Current Session Update (2026-10-12 — OpenRouter Gemini 2.5 Flash with Prompt Caching, Direct Token Cost & 1536 Vector Revert)
 
 - **OpenRouter Primary LLM Integration with Google Gemini 2.5 Flash (`google/gemini-2.5-flash`)**:
