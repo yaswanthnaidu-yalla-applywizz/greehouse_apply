@@ -123,6 +123,7 @@ OPENROUTER_API_KEY=
 OPENROUTER_MODEL=
 GEMINI_API_KEY=
 OPENAI_API_KEY=
+LLM_TIMEOUT_MS=30000                  # Request timeout in ms for OpenRouter / OpenAI clients (default 30000)
 
 # Server
 PORT=3001

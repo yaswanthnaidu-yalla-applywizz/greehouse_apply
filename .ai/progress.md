@@ -1,3 +1,16 @@
+### Ingest LLM Timeout & Deferred Auto-Queue Submissions (2026-10-13 Complete)
+- [x] **Configurable LLM Timeout (`src/config/env.ts`, `src/resolver/llmSynthesizer.ts`):**
+  - Added `LLM_TIMEOUT_MS` environment variable (default 30,000ms), replacing the hardcoded 8,000ms client timeout in OpenRouter / OpenAI SDK client initializations.
+  - Eliminated `RESOLVE_TIER5_PROVIDER_FAILURE` timeouts on 6–8 question batch syntheses with `google/gemini-2.5-flash`.
+- [x] **Tier 4 UUID Rejection for Non-Identifier Fields (`src/resolver/answerResolver.ts`):**
+  - Discarded UUID-shaped QA bank answers in `resolveTier3` fuzzy search before accepting matches, preventing false-positive matches of historical applicant IDs into fields like County or Additional links.
+- [x] **Deferred Auto-Queue Submissions (`src/resolver/answerResolver.ts`):**
+  - Decoupled resolution from immediate enqueueing. Applications resolved during ingest persist initially as `READY_FOR_REVIEW` and buffer in memory (`pendingAutoQueue`).
+  - Added public buffer accessors `getPendingAutoQueue()`, `getPendingAutoQueueCount()`, and `flushPendingAutoQueue(): Promise<number>`.
+- [x] **CA Notification Filtering & Post-Ingest Flush (`src/services/caNotificationEmail.ts`, `src/orchestrator/pipeline.ts`, `src/resolver/runResolver.ts`):**
+  - Updated `groupReadyForReviewByCa` and `sendCaNotificationEmails` with `excludeKeys` (`${applywizz_id}::${job_url}`) to omit pending auto-enqueued applications from CA review notification emails.
+  - Added post-ingest auto-queue flush in `Pipeline.run()` after Phase E completes and in `runResolver.ts`, ensuring background submitters do not compete with ingestion for browser and memory resources.
+
 ### Remote Supabase DB Profile Contact Normalization & Resume Backfill (2026-10-12 Complete)
 - [x] **Profile Data Anomaly Audit (`scripts/auditProfileAnomalies.cjs`):**
   - Audited all 370 profiles in remote Supabase DB (`postgres-db2`, project `rrqsqakctbrhqcoqavoj`).
