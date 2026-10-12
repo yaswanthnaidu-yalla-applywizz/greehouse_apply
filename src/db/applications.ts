@@ -35,6 +35,7 @@ import {
   OperatorErrors,
   statusShouldPersistOperatorError,
 } from '../operator/operatorErrorMessages.js';
+import { assertApplywizzZohoConnected } from './zohoConnected.js';
 
 const log = createLogger('Applications');
 
@@ -49,10 +50,10 @@ export type ApplicationStatus =
   | 'RETRY'
   | 'EXPIRED'
   | 'OTP_REQUIRED'
-  | 'CAPTCHA_TIMEOUT'
-  | 'CAPTCHA_REQUIRED'
   | 'EMAIL_PROOF_PENDING'
-  | 'SKIPPED';
+  | 'SKIPPED'
+  | 'FILTERED_OUT';
+
 
 export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
 
@@ -63,18 +64,15 @@ export const SUBMITTED_STATUSES: ApplicationStatus[] = [
   'FAILED',
   'RETRY',
   'OTP_REQUIRED',
-  'CAPTCHA_TIMEOUT',
-  'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
 ];
 
-export const FAILED_EQUIVALENT_STATUSES: ApplicationStatus[] = ['FAILED', 'RETRY', 'CAPTCHA_TIMEOUT'];
+export const FAILED_EQUIVALENT_STATUSES: ApplicationStatus[] = ['FAILED', 'RETRY'];
 
 export const IN_FLIGHT_STATUSES: ApplicationStatus[] = [
   'QUEUED',
   'APPLYING',
   'OTP_REQUIRED',
-  'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
 ];
 
@@ -84,8 +82,6 @@ export const QUEUE_DONE_STATUSES: ApplicationStatus[] = [
   'RETRY',
   'EXPIRED',
   'OTP_REQUIRED',
-  'CAPTCHA_TIMEOUT',
-  'CAPTCHA_REQUIRED',
   'EMAIL_PROOF_PENDING',
   'SKIPPED',
 ];
@@ -99,8 +95,6 @@ export const RESOLVE_STATUS_PRESERVE: ReadonlySet<ApplicationStatus> = new Set([
   'APPLYING',
   'QUEUED',
   'OTP_REQUIRED',
-  'CAPTCHA_TIMEOUT',
-  'CAPTCHA_REQUIRED',
   'SKIPPED',
   'RETRY',
   'EMAIL_PROOF_PENDING',
@@ -719,6 +713,8 @@ export type UpdateStatusExtra =
       error_message?: string | null;
       job_url?: string | null;
       retry_count?: number | null;
+      expected_status?: ApplicationStatus;
+      expected_retry_count?: number;
     };
 
 const OPERATOR_WORKLOAD_STATUSES: ApplicationStatus[] = ['READY_FOR_REVIEW', 'APPROVED'];
@@ -824,6 +820,8 @@ export async function updateStatus(
     if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
     if (extra.retry_count !== undefined) updatePayload.retry_count = extra.retry_count;
   }
+  const expectedStatus = extra && typeof extra === 'object' ? extra.expected_status : undefined;
+  const expectedRetryCount = extra && typeof extra === 'object' ? extra.expected_retry_count : undefined;
 
   if (status === 'APPLIED') {
     updatePayload.submitted_at = new Date().toISOString();
@@ -864,28 +862,75 @@ export async function updateStatus(
         .select('id');
       let updateRes;
       if (isUuid) {
-        updateRes = await query.eq('id', id);
+        let guardedQuery = query.eq('id', id);
+        if (expectedStatus) guardedQuery = guardedQuery.eq('status', expectedStatus);
+        if (expectedRetryCount !== undefined) guardedQuery = guardedQuery.eq('retry_count', expectedRetryCount);
+        updateRes = await guardedQuery;
       } else if (targetJobUrl) {
-        updateRes = await query.eq('applywizz_id', cleanApplywizz).eq('job_url', targetJobUrl);
+        let guardedQuery = query.eq('applywizz_id', cleanApplywizz).eq('job_url', targetJobUrl);
+        if (expectedStatus) guardedQuery = guardedQuery.eq('status', expectedStatus);
+        if (expectedRetryCount !== undefined) guardedQuery = guardedQuery.eq('retry_count', expectedRetryCount);
+        updateRes = await guardedQuery;
       } else {
-        updateRes = await query.eq('applywizz_id', cleanApplywizz);
+        let guardedQuery = query.eq('applywizz_id', cleanApplywizz);
+        if (expectedStatus) guardedQuery = guardedQuery.eq('status', expectedStatus);
+        if (expectedRetryCount !== undefined) guardedQuery = guardedQuery.eq('retry_count', expectedRetryCount);
+        updateRes = await guardedQuery;
       }
       if (updateRes?.error) {
         log.error(`[DB] updateStatus Supabase error (${id}, ${status}):`, updateRes.error.message);
+        const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+        await emitFailureDiagnostic({
+          category: 'SUBMIT_STATUS_PERSIST',
+          stage: 'status_persistence',
+          reason: `Failed to persist application status ${status}: ${updateRes.error.message}`,
+          error: updateRes.error,
+          applicationId: isUuid ? id : undefined,
+          applywizzId: isUuid ? undefined : cleanApplywizz,
+          jobUrl: targetJobUrl,
+          isTerminal: false,
+          isRetryable: true,
+        }).catch(() => {});
         throw updateRes.error;
       }
       if (!updateRes?.data || updateRes.data.length === 0) {
-        const error = new Error(`No application row updated for ${id}`);
+        const error = new Error(
+          expectedStatus || expectedRetryCount !== undefined
+            ? `Application ${id} no longer matches the expected state; refusing the ${status} transition.`
+            : `No application row updated for ${id}`
+        );
         log.error(`[DB] updateStatus Supabase update matched no rows (${id}, ${status})`);
         throw error;
       }
     } catch (err: any) {
       log.error(`[DB] updateStatus exception (${id}, ${status}):`, err);
-      throw err;
+      const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+      await emitFailureDiagnostic({
+        category: 'SUBMIT_STATUS_PERSIST',
+        stage: 'status_persistence',
+        reason: `Failed to persist application status ${status}: ${err?.message || String(err)}`,
+        error: err,
+        applicationId: isUuid ? id : undefined,
+        applywizzId: isUuid ? undefined : cleanApplywizz,
+        jobUrl: targetJobUrl,
+        isTerminal: false,
+        isRetryable: true,
+      }).catch(() => {});
+      // If Supabase failed due to network / ENOTFOUND, allow memory fallback to update status
+      const isNetworkErr = /fetch failed|getaddrinfo|ENOTFOUND|ECONNREFUSED/i.test(err?.message || '');
+      if (!isNetworkErr) {
+        throw err;
+      }
     }
   }
 
   const existing = memoryApplications.get(id);
+  if (expectedStatus && existing?.status !== expectedStatus) {
+    throw new Error(`Application ${id} is no longer ${expectedStatus}; refusing the ${status} transition.`);
+  }
+  if (expectedRetryCount !== undefined && Number(existing?.retry_count ?? 0) !== expectedRetryCount) {
+    throw new Error(`Application ${id} retry counter changed; refusing the ${status} transition.`);
+  }
   if (existing) {
     memoryApplications.set(id, { ...existing, ...updatePayload });
   }
@@ -1523,7 +1568,7 @@ export async function getSubmissionOutcomeCounts(options?: {
       let failedQuery = supabase
         .from('gh_candidate_applications')
         .select('*', { count: 'exact', head: true })
-        .in('status', ['FAILED', 'CAPTCHA_TIMEOUT']);
+        .eq('status', 'FAILED');
 
       if (allowedSet && options?.allowedCandidateIds) {
         appliedQuery = appliedQuery.in('applywizz_id', options.allowedCandidateIds);
@@ -1976,8 +2021,8 @@ export async function recoverStaleApplyingApplications(
   const { data, error } = await getDbClient()
     .from('gh_candidate_applications')
     .update({
-      status: 'RETRY',
-      error_message: 'Submission worker lease expired while applying. Operator retry required.',
+      status: 'QUEUED',
+      error_message: null,
       updated_at: new Date().toISOString(),
     })
     .eq('status', 'APPLYING')
@@ -2019,7 +2064,14 @@ export async function logQueueStatusChange(
  */
 export async function enqueueApplication(
   applicationIdOrApplywizzId: string,
-  options: { assignedCaEmail?: string; jobUrl?: string } = {}
+  options: {
+    assignedCaEmail?: string;
+    jobUrl?: string;
+    expectedStatus?: ApplicationStatus;
+    expectedRetryCount?: number;
+    retryCount?: number;
+    errorMessage?: string;
+  } = {}
 ): Promise<{ submissionOrder: number; application: ApplicationRow }> {
   const app = await getApplication(applicationIdOrApplywizzId, options.jobUrl);
   if (!app) {
@@ -2029,6 +2081,17 @@ export async function enqueueApplication(
   assertWithinSubmissionQuestionLimit(app);
 
   const previousStatus = app.status || 'READY_FOR_REVIEW';
+  if (options.expectedStatus && previousStatus !== options.expectedStatus) {
+    throw new Error(
+      `Application '${applicationIdOrApplywizzId}' is ${previousStatus}; expected ${options.expectedStatus} before queueing.`
+    );
+  }
+  if (
+    options.expectedRetryCount !== undefined &&
+    Number(app.retry_count ?? 0) !== options.expectedRetryCount
+  ) {
+    throw new Error(`Application '${applicationIdOrApplywizzId}' retry counter changed before queueing.`);
+  }
   if (previousStatus === 'RETRY') {
     throw new Error('Application is awaiting explicit operator retry and cannot be submitted again.');
   }
@@ -2073,39 +2136,47 @@ export async function enqueueApplication(
     assigned_ca_email: options.assignedCaEmail || app.assigned_ca_email || null,
     updated_at: new Date().toISOString(),
   };
+  if (options.retryCount !== undefined) updatePayload.retry_count = options.retryCount;
+  if (options.errorMessage !== undefined) updatePayload.error_message = options.errorMessage;
 
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(app.id || '');
-      let queueRes;
+      let query = supabase
+        .from('gh_candidate_applications')
+        .update(updatePayload);
       if (isUuid) {
-        queueRes = await supabase
-          .from('gh_candidate_applications')
-          .update(updatePayload)
-          .eq('id', app.id);
+        query = query.eq('id', app.id);
       } else {
-        queueRes = await supabase
-          .from('gh_candidate_applications')
-          .update(updatePayload)
-          .eq('applywizz_id', app.applywizz_id)
-          .eq('job_url', app.job_url);
+        query = query.eq('applywizz_id', app.applywizz_id).eq('job_url', app.job_url);
       }
-      if (queueRes?.error) {
-        log.error(`[DB] enqueueApplication Supabase error:`, queueRes.error.message);
-      } else {
-        const { insertApplicationEvent } = await import('./events.js');
-        void insertApplicationEvent({
-          applicationId: app.id || '',
-          applywizzId: app.applywizz_id,
-          jobUrl: app.job_url,
-          fromStatus: previousStatus ?? null,
-          toStatus: 'QUEUED',
-          actorEmail: options.assignedCaEmail ?? null,
-        });
+      if (options.expectedStatus) query = query.eq('status', options.expectedStatus);
+      if (options.expectedRetryCount !== undefined) query = query.eq('retry_count', options.expectedRetryCount);
+      const queueRes = await query.select('id');
+      if (queueRes.error) {
+        throw new Error(`enqueueApplication Supabase error: ${queueRes.error.message}`);
       }
+      if (
+        (options.expectedStatus || options.expectedRetryCount !== undefined) &&
+        (!queueRes.data || queueRes.data.length === 0)
+      ) {
+        throw new Error(
+          `Application '${applicationIdOrApplywizzId}' changed status before expected queue transition.`
+        );
+      }
+      const { insertApplicationEvent } = await import('./events.js');
+      void insertApplicationEvent({
+        applicationId: app.id || '',
+        applywizzId: app.applywizz_id,
+        jobUrl: app.job_url,
+        fromStatus: previousStatus ?? null,
+        toStatus: 'QUEUED',
+        actorEmail: options.assignedCaEmail ?? null,
+      });
     } catch (err: any) {
       log.warn(`[DB] Could not update application to QUEUED in Supabase: ${err.message}`);
+      throw err;
     }
   }
 
@@ -2169,6 +2240,24 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
         .maybeSingle();
 
       if (!error && data) {
+        const applywizzId = data.applywizz_id;
+        const gate = await assertApplywizzZohoConnected(applywizzId, { allowAdminDemo: true });
+        if (!gate.allowed) {
+          log.warn(
+            `[Queue] ⛔ Candidate ${applywizzId} is not Zoho connected. Setting application ${data.id} to READY_FOR_REVIEW.`
+          );
+          await supabase
+            .from('gh_candidate_applications')
+            .update({
+              status: 'READY_FOR_REVIEW',
+              error_message: gate.error || OperatorErrors.ZOHO_NOT_CONNECTED,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', data.id)
+            .eq('status', 'QUEUED');
+          return null;
+        }
+
         const updateRes = await supabase
           .from('gh_candidate_applications')
           .update({

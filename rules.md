@@ -118,3 +118,14 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 \*\*These guidelines are working if:\*\* fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+
+
+## 5. Protect the Success Rate
+
+**When failure rate is ≤ 25% and caused by data faults or retryable conditions — do not touch the code.**
+
+- Diagnose *why* failures occurred before any code change is proposed.
+- Classify failures: data fault (wrong/missing input), retryable (OTP timeout, transient network), or genuine code bug.
+- Only code bugs justify code changes. Data faults and retryables are fixed by data correction or operator retry — never by editing the resolver, form filler, or submission engine.
+- If a change is proposed to fix a minority failure class, explicitly state the estimated risk to the majority success class. If that risk is non-zero and unquantifiable, do not make the change.
+- **Precedent:** An 80% success rate was destroyed by editing code to fix a 16% location-error (data fault) failure class. This must not happen again.

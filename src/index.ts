@@ -198,10 +198,18 @@ export async function main(): Promise<void> {
     const resolvedCsv = path.resolve(process.cwd(), options.inputCsv);
     if (String(process.env.SANDBOX).trim() === 'true' || String(process.env.SANDBOX).trim() === '1') {
       log.info(`ℹ️ [Sandbox] Checking repository root for auto-ingest CSV...`);
-      const files = fs.readdirSync(process.cwd());
-      const csvFiles = files.filter(f => f.endsWith('.csv'));
-      if (csvFiles.length > 0) {
-        const targetCsv = csvFiles[0];
+      const specifiedCsv = process.env.SANDBOX_INPUT_CSV || (options.inputCsv && !options.inputCsv.includes('candidates.csv') ? options.inputCsv : null);
+      let targetCsv: string | null = null;
+
+      if (specifiedCsv && fs.existsSync(path.resolve(process.cwd(), specifiedCsv))) {
+        targetCsv = path.basename(specifiedCsv);
+      } else {
+        const files = fs.readdirSync(process.cwd());
+        const csvFiles = files.filter(f => f.endsWith('.csv') && !f.toLowerCase().includes('confirmation'));
+        targetCsv = csvFiles.length > 0 ? csvFiles[0] : (files.find(f => f.endsWith('.csv')) || null);
+      }
+
+      if (targetCsv) {
         log.info(`📂 [Sandbox] Found ${targetCsv}. Preparing for auto-ingestion...`);
         const targetDir = path.resolve(process.cwd(), 'storage_sandbox/csv_uploads');
         if (!fs.existsSync(targetDir)) {

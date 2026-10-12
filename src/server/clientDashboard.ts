@@ -256,7 +256,9 @@ export async function loadClientDashboard(options: {
 
   let query = getDbClient()
     .from('gh_candidate_applications')
-    .select('*, profiles!inner(applywizz_id, client_name, ca_email)');
+    .select('*, profiles!inner(applywizz_id, client_name, ca_email)')
+    .neq('status', 'FILTERED_OUT');
+
   if (createdAtRange) {
     if (createdAtRange.endIso) {
       query = query.or(

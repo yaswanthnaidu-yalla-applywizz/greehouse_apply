@@ -12,7 +12,9 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai';
+import { ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import { config } from '../config/env.js';
+import { getBedrockClient } from '../services/bedrockClient.js';
 import type {
   ApplyWizzCandidateProfile,
   ResolvedField,
@@ -20,11 +22,100 @@ import type {
 } from '../types/index.js';
 import { haltWithDevAlert, createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
+import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { buildQuestionRelevantEvidence } from './candidateEvidence.js';
 
 const log = createLogger('LLM Synthesizer');
 
 let firstProviderCallChecked = false;
+
+export interface LlmProviderErrorDiagnostics {
+  errorName?: string;
+  statusCode?: number;
+  errorCode?: string;
+  errorType?: string;
+  requestId?: string;
+  parameter?: string;
+  retryAfter?: string;
+  message: string;
+}
+
+function safeDiagnosticString(value: unknown, maxLength = 240): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return value
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(?:sk-(?:or-v1-|proj-|live-)?|AIza)[A-Za-z0-9_-]{12,}\b/gi, '[REDACTED_KEY]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[REDACTED_EMAIL]')
+    .replace(/https?:\/\/\S+/gi, '[REDACTED_URL]')
+    .slice(0, maxLength);
+}
+
+function readErrorHeader(headers: unknown, name: string): string | undefined {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const candidate = headers as { get?: (headerName: string) => unknown } & Record<string, unknown>;
+  const value =
+    typeof candidate.get === 'function'
+      ? candidate.get(name)
+      : candidate[name] ?? candidate[name.toLowerCase()];
+  return safeDiagnosticString(value, 80);
+}
+
+export function getLlmProviderErrorDiagnostics(err: unknown): LlmProviderErrorDiagnostics {
+  const error =
+    err && typeof err === 'object'
+      ? (err as {
+          name?: unknown;
+          message?: unknown;
+          status?: unknown;
+          statusCode?: unknown;
+          code?: unknown;
+          type?: unknown;
+          param?: unknown;
+          request_id?: unknown;
+          requestId?: unknown;
+          headers?: unknown;
+          response?: { status?: unknown; headers?: unknown };
+          error?: Record<string, unknown>;
+        })
+      : {};
+  const nested = error.error && typeof error.error === 'object' ? error.error : {};
+  const rawStatus = error.status ?? error.statusCode ?? error.response?.status;
+  const statusCode =
+    typeof rawStatus === 'number'
+      ? rawStatus
+      : typeof rawStatus === 'string' && /^\d{3}$/.test(rawStatus)
+        ? Number(rawStatus)
+        : undefined;
+  const headers = error.headers ?? error.response?.headers;
+  return {
+    errorName: safeDiagnosticString(error.name, 80),
+    statusCode,
+    errorCode: safeDiagnosticString(error.code ?? nested.code, 100),
+    errorType: safeDiagnosticString(error.type ?? nested.type, 100),
+    requestId: safeDiagnosticString(error.request_id ?? error.requestId ?? nested.request_id, 100),
+    parameter: safeDiagnosticString(error.param ?? nested.param, 100),
+    retryAfter:
+      readErrorHeader(headers, 'retry-after-ms') ??
+      readErrorHeader(headers, 'retry-after'),
+    message: safeDiagnosticString(error.message ?? (err instanceof Error ? err.message : String(err))) || 'Provider request failed without an error message.',
+  };
+}
+
+function formatProviderErrorDiagnostics(diagnostics: LlmProviderErrorDiagnostics): string {
+  return [
+    diagnostics.statusCode !== undefined ? `http_status=${diagnostics.statusCode}` : undefined,
+    diagnostics.errorName ? `error_name=${diagnostics.errorName}` : undefined,
+    diagnostics.errorCode ? `error_code=${diagnostics.errorCode}` : undefined,
+    diagnostics.errorType ? `error_type=${diagnostics.errorType}` : undefined,
+    diagnostics.parameter ? `parameter=${diagnostics.parameter}` : undefined,
+    diagnostics.requestId ? `request_id=${diagnostics.requestId}` : undefined,
+    diagnostics.retryAfter ? `retry_after=${diagnostics.retryAfter}` : undefined,
+    `message="${diagnostics.message}"`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
 
 function haltIfFirstProviderCallFailed(reachedProvider: boolean): void {
   if (firstProviderCallChecked) return;
@@ -55,14 +146,28 @@ export interface BatchQuestion {
   options?: string[];
   optionsComplete?: boolean;
   candidateEvidence?: string;
+  corporateDefaultHint?: string;
+}
+
+export interface BatchSynthesizeResult {
+  answers: string[];
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    totalTokens: number;
+    cost?: number;
+    model: string;
+  };
 }
 
 /**
  * Options configuring the LLMSynthesizer.
  */
 export interface LLMSynthesizerOptions {
-  /** Active LLM provider ('openrouter' | 'gemini' | 'openai' | 'ollama') */
-  provider?: 'openrouter' | 'gemini' | 'openai' | 'ollama';
+  /** Active LLM provider ('openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock') */
+  provider?: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock';
   /** LLM API Key override */
   apiKey?: string;
   /** Model name override */
@@ -154,18 +259,18 @@ export function inferYesNoFromProfile(
   }
 
   if (
-    /(previously.*employed|worked for|former employee|non-compete|non compete|restrict.*employment|felony|terminated)/i.test(
+    /(previously.*employed|worked for|worked at|former employee|interviewed.*before|interviewed.*previously|internal employee|relative.*employ|family.*employ|non-compete|non compete|restrict.*employment|felony|terminated)/i.test(
       combined
     )
   ) {
     return 'No';
   }
 
-  if (/(terms and conditions|privacy policy|certify|acknowledge|background check)/i.test(combined)) {
+  if (/(terms and conditions|privacy policy|privacy notice|certify|acknowledge|background check|arbitrat|agreement to arbitrate)/i.test(combined)) {
     return 'Yes';
   }
 
-  if (/(willing to relocate|open to relocate|relocation|in the same city|same city as)/i.test(combined)) {
+  if (/(willing to relocate|open to relocate|relocation|in the same city|same city as|in-person|in one of our offices|hybrid)/i.test(combined)) {
     const willing = profile.demographics?.willingToRelocate !== false;
     return willing ? 'Yes' : 'No';
   }
@@ -387,7 +492,7 @@ export function matchFuzzyOption(text: string, options?: string[]): string | nul
  * Tier 2 Answer Synthesizer invoking OpenRouter, Google Gemini, or OpenAI.
  */
 export class LLMSynthesizer {
-  private readonly provider: 'openrouter' | 'gemini' | 'openai' | 'ollama';
+  private readonly provider: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock';
   private readonly apiKey: string;
   private readonly modelName: string;
   private geminiClient: GoogleGenerativeAI | null = null;
@@ -399,10 +504,19 @@ export class LLMSynthesizer {
    * @param options - Configuration overrides.
    */
   constructor(options: LLMSynthesizerOptions = {}) {
-    this.provider = options.provider ?? config.LLM_PROVIDER;
+    const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
+    const chosenProvider = options.provider ?? config.LLM_PROVIDER;
+    // In sandbox, prefer openrouter unless bedrock is explicitly requested/configured
+    this.provider = (isSandbox && chosenProvider !== 'bedrock') ? 'openrouter' : chosenProvider;
     this.apiKey = options.apiKey ?? config.ACTIVE_LLM_API_KEY;
 
-    if (this.provider === 'ollama') {
+    if (isSandbox && !this.apiKey && this.provider !== 'bedrock') {
+      log.error('❌ Sandbox mode requires OPENROUTER_API_KEY. Ollama fallback is completely disabled.');
+    }
+
+    if (this.provider === 'bedrock') {
+      this.modelName = options.modelName ?? config.BEDROCK_MODEL_ID ?? 'us.amazon.nova-2-lite-v1:0';
+    } else if (this.provider === 'ollama') {
       this.modelName = options.modelName ?? config.OLLAMA_MODEL ?? 'llama3.1:latest';
       this.openaiClient = new OpenAI({
         baseURL: config.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1',
@@ -421,6 +535,7 @@ export class LLMSynthesizer {
           defaultHeaders: {
             'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
             'X-Title': 'Greenhouse Automation Operator',
+            'X-OpenRouter-Cache': 'true',
           },
         });
       }
@@ -430,11 +545,15 @@ export class LLMSynthesizer {
         this.openaiClient = new OpenAI({ apiKey: this.apiKey, timeout: 8000, maxRetries: 1 });
       }
     } else {
-      this.modelName = options.modelName ?? 'gemini-1.5-flash';
+      this.modelName = options.modelName ?? 'gemini-2.5-flash';
       if (this.apiKey) {
         this.geminiClient = new GoogleGenerativeAI(this.apiKey);
       }
     }
+  }
+
+  public getProviderDiagnostics(): { provider: string; model: string } {
+    return { provider: this.provider, model: this.modelName };
   }
 
   /**
@@ -477,10 +596,59 @@ export class LLMSynthesizer {
       ? 'You are an automated job application assistant. You MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.'
       : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
 
-    // If API key is configured or provider is ollama, execute real LLM call
-    if (this.apiKey || this.provider === 'ollama') {
+    // If API key is configured or provider is bedrock or ollama, execute real LLM call
+    if (this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock') {
+      let failureDiagnosticEmitted = false;
       try {
         let providerReached = false;
+
+        if (this.provider === 'bedrock') {
+          const client = getBedrockClient();
+          const command = new ConverseCommand({
+            modelId: this.modelName,
+            system: [{ text: systemMessage }],
+            messages: [
+              {
+                role: 'user',
+                content: [{ text: prompt }],
+              },
+            ],
+            inferenceConfig: {
+              maxTokens: 300,
+              temperature: 0.2,
+            },
+          });
+
+          const startedAt = Date.now();
+          const response = await client.send(command);
+          providerReached = true;
+          haltIfFirstProviderCallFailed(true);
+
+          const outputText = response.output?.message?.content?.[0]?.text?.trim() || '';
+          const cleaned = cleanLLMOutput(outputText);
+          log.debug(
+            `[LLM Provider] event=request_completed operation=single provider=bedrock ` +
+              `model=${this.modelName} elapsed_ms=${Date.now() - startedAt} content_chars=${cleaned.length}`
+          );
+
+          if (cleaned && cleaned.length > 0) {
+            try {
+              return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+            } catch (error) {
+              await emitFailureDiagnostic({
+                category: 'RESOLVE_TIER5_PARSE',
+                stage: 'single_response_parse',
+                reason: 'Tier 5 Bedrock returned a response that could not be parsed into a valid answer.',
+                error,
+                isTerminal: false,
+                isRetryable: true,
+              });
+              failureDiagnosticEmitted = true;
+              throw error;
+            }
+          }
+        }
+
         if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
           let rawAnswer = '';
           const candidateModels =
@@ -495,6 +663,7 @@ export class LLMSynthesizer {
           const uniqueModels = Array.from(new Set(candidateModels));
 
           for (const modelId of uniqueModels) {
+            const modelStartedAt = Date.now();
             try {
               const completion = await this.openaiClient.chat.completions.create({
                 model: modelId,
@@ -512,20 +681,52 @@ export class LLMSynthesizer {
 
               const content = completion?.choices?.[0]?.message?.content?.trim();
               const cleaned = cleanLLMOutput(content || '');
+              log.debug(
+                `[LLM Provider] event=request_completed operation=single provider=${this.provider} ` +
+                  `model=${modelId} elapsed_ms=${Date.now() - modelStartedAt} ` +
+                  `content_chars=${cleaned.length} finish_reason=${completion?.choices?.[0]?.finish_reason || 'none'}`
+              );
               if (cleaned && cleaned.length > 0) {
                 rawAnswer = cleaned;
                 break;
               }
 
-            } catch (modelErr: any) {
-              // Try fallback model
+            } catch (modelErr: unknown) {
+              await emitFailureDiagnostic({
+                category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
+                stage: 'single_model_request',
+                reason: 'A configured Tier 5 language-model request failed.',
+                error: modelErr,
+                isTerminal: false,
+                isRetryable: true,
+              });
+              failureDiagnosticEmitted = true;
+              const diagnostics = getLlmProviderErrorDiagnostics(modelErr);
+              log.warn(
+                `[LLM Provider] event=request_failed operation=single provider=${this.provider} ` +
+                  `model=${modelId} elapsed_ms=${Date.now() - modelStartedAt} ` +
+                  `${formatProviderErrorDiagnostics(diagnostics)} fallback=next_model`
+              );
             }
           }
 
           haltIfFirstProviderCallFailed(providerReached);
 
           if (rawAnswer && rawAnswer.length > 0) {
-            return this.finalizeLlmAnswer(rawAnswer, field, profile, jobContext, choiceOptions);
+            try {
+              return this.finalizeLlmAnswer(rawAnswer, field, profile, jobContext, choiceOptions);
+            } catch (error) {
+              await emitFailureDiagnostic({
+                category: 'RESOLVE_TIER5_PARSE',
+                stage: 'single_response_parse',
+                reason: 'Tier 5 returned a response that could not be parsed into a valid answer.',
+                error,
+                isTerminal: false,
+                isRetryable: true,
+              });
+              failureDiagnosticEmitted = true;
+              throw error;
+            }
           }
         }
 
@@ -537,7 +738,20 @@ export class LLMSynthesizer {
           const content = result.response.text().trim();
           const cleaned = cleanLLMOutput(content);
           if (cleaned && cleaned.length > 0) {
-            return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+            try {
+              return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+            } catch (error) {
+              await emitFailureDiagnostic({
+                category: 'RESOLVE_TIER5_PARSE',
+                stage: 'single_response_parse',
+                reason: 'Tier 5 returned a response that could not be parsed into a valid answer.',
+                error,
+                isTerminal: false,
+                isRetryable: true,
+              });
+              failureDiagnosticEmitted = true;
+              throw error;
+            }
           }
         }
 
@@ -545,6 +759,20 @@ export class LLMSynthesizer {
           haltIfFirstProviderCallFailed(providerReached);
         }
       } catch (err: any) {
+        if (!failureDiagnosticEmitted) {
+          await emitFailureDiagnostic({
+            category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
+            stage: 'single_provider_request',
+            reason: 'Tier 5 language-model request failed.',
+            error: err,
+            isTerminal: false,
+            isRetryable: true,
+          });
+        }
+        log.warn(
+          `[LLM Provider] event=request_failed operation=single provider=${this.provider} ` +
+            `model=${this.modelName} ${formatProviderErrorDiagnostics(getLlmProviderErrorDiagnostics(err))}`
+        );
         haltIfFirstProviderCallFailed(false);
       }
     }
@@ -645,33 +873,18 @@ export class LLMSynthesizer {
   /**
    * Resolves multiple questions in one provider request for a candidate/job pair.
    */
+  /**
+   * Resolves multiple questions in one provider request for a candidate/job pair.
+   */
   public async synthesizeBatchAnswers(
     questions: BatchQuestion[],
     _resumeText: string,
     jobDescription: string,
     _profile?: ApplyWizzCandidateProfile
-  ): Promise<string[]> {
-    if (questions.length === 0) return [];
+  ): Promise<BatchSynthesizeResult> {
+    if (questions.length === 0) return { answers: [] };
 
-    const prompt = `Resolve every numbered job application question using only the candidate evidence and job description.
-Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
-
-For any question with a complete Options list provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate. If a choice list is marked incomplete, do not treat the captured options as exhaustive; return a concise exact choice supported by candidate data or NONE.
-
-Job description:
-${jobDescription.slice(0, 12000)}
-
-Questions:
-${questions
-      .map((question, index) => {
-        const opts =
-          question.options && question.options.length > 0
-            ? ` ${question.optionsComplete === false ? 'Captured options (incomplete)' : 'Options'}: ${question.options.join(' | ')}`
-            : '';
-        const completenessHint = question.optionsComplete === false ? ' [choice options incomplete]' : '';
-        return `${index}. [${question.type}] ${question.label}${completenessHint}${opts}${question.value ? ` (existing value: ${question.value})` : ''}\nCandidate evidence:\n${question.candidateEvidence || '(No directly relevant candidate evidence found.)'}`;
-      })
-      .join('\n')}`;
+    const prompt = buildBatchPrompt(questions, jobDescription, _profile);
     const systemMessage = `You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order. Example: ["answer 1", "answer 2"]. NEVER return markdown or explanatory text.
 
 PROFILE DATA RULE: The Candidate Profile section below contains factual data about the candidate. For any question whose answer exists in the profile (gender, race, ethnicity, veteran status, disability status, salary, education, experience, location, authorization), use the EXACT value from the profile. Never answer "No" or "N/A" for demographic fields — the candidate has already provided these values.
@@ -684,13 +897,75 @@ OPTION RULE: For select/radio/checkbox fields with complete options provided, re
 
 US LOCATION RULE: If asked whether the candidate is currently located in the US, and the profile shows state_of_residence or zip_or_country containing a US state or "United States", answer Yes.`;
 
-    if (!(this.apiKey || this.provider === 'ollama')) {
+    if (!(this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock')) {
       throw new Error('No LLM provider credentials configured.');
     }
 
     let raw = '';
+    let batchUsage: BatchSynthesizeResult['usage'] = undefined;
+    const requestStartedAt = Date.now();
     try {
-      if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
+      if (this.provider === 'bedrock') {
+        const client = getBedrockClient();
+        const enablePromptCaching = config.BEDROCK_ENABLE_PROMPT_CACHING !== false;
+
+        // Structured system blocks with candidate profile and prompt cache checkpoint
+        const candidateProfileSummary = _profile ? JSON.stringify({
+          clientName: _profile.clientName,
+          email: _profile.email,
+          phone: _profile.phone,
+          location: _profile.location || '',
+          workAuthorization: _profile.workAuthorization,
+          requiresSponsorship: _profile.requiresSponsorship,
+          demographics: _profile.demographics,
+        }) : '';
+
+        const systemBlocks: any[] = [{ text: systemMessage }];
+        if (candidateProfileSummary) {
+          systemBlocks.push({ text: `Candidate Profile:\n${candidateProfileSummary}` });
+        }
+        if (enablePromptCaching) {
+          systemBlocks.push({ cachePoint: { type: 'default' } });
+        }
+
+        const command = new ConverseCommand({
+          modelId: this.modelName,
+          system: systemBlocks,
+          messages: [
+            {
+              role: 'user',
+              content: [{ text: prompt }],
+            },
+          ],
+          inferenceConfig: {
+            maxTokens: Math.max(500, questions.length * 150),
+            temperature: 0.2,
+          },
+        });
+
+        const response = await client.send(command);
+        haltIfFirstProviderCallFailed(true);
+        raw = response.output?.message?.content?.[0]?.text || '';
+
+        const usageData = response.usage as any;
+        if (usageData) {
+          batchUsage = {
+            promptTokens: usageData.inputTokens || 0,
+            completionTokens: usageData.outputTokens || 0,
+            cacheReadTokens: usageData.cacheReadInputTokenCount || 0,
+            cacheWriteTokens: usageData.cacheWriteInputTokenCount || 0,
+            totalTokens: usageData.totalTokens || ((usageData.inputTokens || 0) + (usageData.outputTokens || 0)),
+            model: this.modelName,
+          };
+        }
+
+        log.debug(
+          `[LLM Provider] event=request_completed operation=batch provider=bedrock ` +
+            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+            `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
+            `cached_tokens=${batchUsage?.cacheReadTokens ?? 0} completion_tokens=${batchUsage?.completionTokens ?? 0}`
+        );
+      } else if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
         const completion = await this.openaiClient.chat.completions.create({
           model: this.modelName,
           messages: [{ role: 'system', content: systemMessage }, { role: 'user', content: prompt }],
@@ -699,39 +974,93 @@ US LOCATION RULE: If asked whether the candidate is currently located in the US,
         });
         haltIfFirstProviderCallFailed(true);
         raw = completion?.choices?.[0]?.message?.content || '';
+        const usageData = completion?.usage as any;
+        if (usageData) {
+          const cachedTokens = usageData.prompt_tokens_details?.cached_tokens || 0;
+          const directCost = typeof usageData.cost === 'number' ? usageData.cost : undefined;
+          batchUsage = {
+            promptTokens: usageData.prompt_tokens || 0,
+            completionTokens: usageData.completion_tokens || 0,
+            cacheReadTokens: cachedTokens,
+            cacheWriteTokens: usageData.prompt_tokens_details?.cache_write_tokens || 0,
+            totalTokens: usageData.total_tokens || ((usageData.prompt_tokens || 0) + (usageData.completion_tokens || 0)),
+            cost: directCost,
+            model: this.modelName,
+          };
+        }
+        log.debug(
+          `[LLM Provider] event=request_completed operation=batch provider=${this.provider} ` +
+            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+            `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
+            `cached_tokens=${batchUsage?.cacheReadTokens ?? 0} cost=${batchUsage?.cost !== undefined ? `$${batchUsage.cost.toFixed(6)}` : 'n/a'} ` +
+            `finish_reason=${completion?.choices?.[0]?.finish_reason || 'none'}`
+        );
       } else if (this.provider === 'gemini' && this.geminiClient) {
         const model = this.geminiClient.getGenerativeModel({ model: this.modelName });
         const result = await model.generateContent(`${systemMessage}\n\n${prompt}`);
         haltIfFirstProviderCallFailed(true);
         raw = result.response.text();
+        const usageMetadata = result.response.usageMetadata;
+        if (usageMetadata) {
+          batchUsage = {
+            promptTokens: usageMetadata.promptTokenCount || 0,
+            completionTokens: usageMetadata.candidatesTokenCount || 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            totalTokens: usageMetadata.totalTokenCount || 0,
+            model: this.modelName,
+          };
+        }
+        log.debug(
+          `[LLM Provider] event=request_completed operation=batch provider=${this.provider} ` +
+            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+            `content_chars=${raw.length}`
+        );
       } else {
         haltIfFirstProviderCallFailed(false);
         throw new Error(`LLM provider ${this.provider} is unavailable.`);
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      await emitFailureDiagnostic({
+        category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
+        stage: 'batch_provider_request',
+        reason: 'Tier 5 batch language-model request failed.',
+        error: err,
+        isTerminal: false,
+        isRetryable: true,
+        metadata: { matchCount: questions.length },
+      });
+      log.warn(
+        `[LLM Provider] event=request_failed operation=batch provider=${this.provider} ` +
+          `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+          `${formatProviderErrorDiagnostics(getLlmProviderErrorDiagnostics(err))}`
+      );
       haltIfFirstProviderCallFailed(false);
       throw err;
     }
 
     const answers = parseBatchAnswerResponse(raw, questions.length);
     if (!answers) {
+      await emitFailureDiagnostic({
+        category: 'RESOLVE_TIER5_PARSE',
+        stage: 'batch_response_parse',
+        reason: 'Tier 5 returned a batch response with an invalid answer structure.',
+        isTerminal: false,
+        isRetryable: true,
+        metadata: { contentChars: raw.length, matchCount: questions.length },
+      });
       log.error(
-        `[Resolver] LLM Parse Error: batch response did not contain a valid JSON array (${raw.length} characters); all questions left unresolved.`
+        `[Resolver] event=t5_batch_parse_failure provider=${this.provider} model=${this.modelName} ` +
+          `batch_size=${questions.length} response_chars=${raw.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+          'expected_shape=json_array answers=0'
       );
-      return questions.map(() => '');
+      return { answers: questions.map(() => ''), usage: batchUsage };
     }
-    return answers;
+    return { answers, usage: batchUsage };
   }
 
   /**
    * Constructs a structured prompt passing candidate background and question schema.
-   *
-   * @param field - Scanned question.
-   * @param profile - Candidate profile.
-   * @param resumeText - Resume text excerpt.
-   * @param jobContext - Target position context.
-   * @param resumeFacts - Structured resume facts object.
-   * @returns Structured prompt string for the LLM.
    */
   private constructPrompt(
     field: ScannedField,
@@ -740,65 +1069,7 @@ US LOCATION RULE: If asked whether the candidate is currently located in the US,
     jobContext: JobContext,
     resumeFacts?: any
   ): string {
-    const choiceOptions = getEffectiveFieldOptions(field);
-    const promptOptions = choiceOptions || (field.optionsComplete === false ? field.options : undefined);
-    const optionsSection =
-      promptOptions && promptOptions.length > 0
-        ? `${formatAvailableOptionsLine(promptOptions)}${field.optionsComplete === false ? ' (incomplete list; not exhaustive)' : ''}`
-        : '';
-
-    const profileDecisionBlock = isBinaryYesNoQuestion(field)
-      ? buildProfileDecisionContext(field, profile)
-      : '';
-
-    const incompleteChoice = field.type === 'select' && field.optionsComplete === false;
-    const instructions = incompleteChoice
-      ? `Instructions:
-1. This is a dropdown with an incomplete scanned option list; the full option list is not provided.
-2. Return only one concise exact choice label supported by candidate information, in the format expected by the dropdown (for example, a full school name).
-3. Do not invent or assume candidate information. If no supported answer is available, return NONE.`
-      : isBinaryYesNoQuestion(field)
-      ? `Instructions:
-1. Use the exact requires_sponsorship and work_authorization values from the profile. Do not guess.
-2. You MUST respond with exactly one of the provided options, no other text.`
-      : choiceOptions && choiceOptions.length > 0
-        ? `Instructions:
-1. You MUST respond with exactly one of these options, no other text.
-2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.`
-        : `Strict Instructions:
-1. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile.
-2. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
-3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer". Always cite their ACTUAL past companies, verified project names, or specific tools found in their resume.
-4. If the candidate's resume does not mention the exact requested tool/technology, write honestly: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
-5. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
-6. Respond as JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. If you are not at least 0.65 confident, set confidence below 0.65.`;
-
-    const candidateEvidence = buildQuestionRelevantEvidence(
-      field,
-      profile,
-      resumeText,
-      resumeFacts
-    );
-
-    return `You are an automated assistant helping a job candidate apply for a position.
-
-Candidate Information:
-- Full Name: ${profile.clientName}
-- Candidate evidence selected for this question:
-${candidateEvidence || '(No directly relevant candidate evidence found.)'}
-- Work Authorization (work_authorization, exact): ${profile.workAuthorization || '(not provided)'}
-- Requires Sponsorship (requires_sponsorship, exact): ${profile.requiresSponsorship === true ? 'true' : 'false'}
-${profileDecisionBlock}
-
-Target Job:
-- Position: ${jobContext.title}
-- Company: ${jobContext.company}
-
-Question to Answer:
-- Question Label: "${field.label}"
-- Input Type: ${field.type}${optionsSection}
-
-${instructions}`;
+    return buildSinglePrompt(field, profile, resumeText, jobContext, resumeFacts);
   }
 
   /**
@@ -883,4 +1154,176 @@ ${instructions}`;
 
     return '';
   }
+}
+
+export function buildBatchPrompt(
+  questions: BatchQuestion[],
+  jobDescription: string,
+  profile?: ApplyWizzCandidateProfile | any | null
+): string {
+  const hasCorporateDefaults = questions.some((q) => Boolean(q.corporateDefaultHint));
+
+  let corporateDefaultsBlock = '';
+  if (hasCorporateDefaults) {
+    let locationStr = '{city}, {state}';
+    if (profile) {
+      locationStr =
+        (profile as any).location ||
+        ((profile as any).city ? `${(profile as any).city || ''}, ${(profile as any).state || ''}`.trim() : '') ||
+        '{city}, {state}';
+    }
+
+    corporateDefaultsBlock = `
+## Corporate Default Rules
+When a question matches these patterns and no resume evidence exists, use the default answer below.
+Map the default to the closest available option in the form — do NOT answer literally if the form
+has no matching option (return null instead).
+
+- "Have you interviewed here before?" → default: "No"
+- "How did you hear about us?" → default: LinkedIn or first job board option
+  Priority: linkedin > job board > online > website > indeed > glassdoor > other
+  Pick the first option that contains a keyword from this list. If none match, pick the first non-empty option.
+- Arbitration / policy agreements → default: agree / yes / checked
+- "County" → derive from candidate city/state: "${locationStr}"
+`;
+  }
+
+  let candidateHeaderBlock = '';
+  if (profile) {
+    const candidateData = {
+      applywizzId: profile.applywizzId || 'N/A',
+      clientName: profile.clientName || '',
+      email: profile.email || '',
+      phone: profile.phone || '',
+      location: profile.location || '',
+      workAuthorization: profile.workAuthorization || '',
+      requiresSponsorship: profile.requiresSponsorship === true ? 'true' : 'false',
+      demographics: profile.demographics || {},
+    };
+    candidateHeaderBlock = `## Candidate Profile Context
+- Candidate ApplyWizz ID: ${candidateData.applywizzId}
+- Candidate Name: ${candidateData.clientName}
+- Work Authorization: ${candidateData.workAuthorization}
+- Requires Sponsorship: ${candidateData.requiresSponsorship}
+- Location: ${candidateData.location}
+- Demographics: ${JSON.stringify(candidateData.demographics)}
+
+`;
+  }
+
+  const prompt = `${candidateHeaderBlock}Resolve every numbered job application question using only the candidate evidence and job description.
+Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
+
+For any question with a complete Options list provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate. If a choice list is marked incomplete, do not treat the captured options as exhaustive; return a concise exact choice supported by candidate data or NONE.
+${corporateDefaultsBlock}
+Job description:
+${jobDescription.slice(0, 12000)}
+
+Questions:
+${questions
+    .map((question, index) => {
+      const opts =
+        question.options && question.options.length > 0
+          ? ` ${question.optionsComplete === false ? 'Captured options (incomplete)' : 'Options'}: ${question.options.join(' | ')}`
+          : '';
+      const completenessHint = question.optionsComplete === false ? ' [choice options incomplete]' : '';
+      const hintLine = question.corporateDefaultHint
+        ? `\nCorporate default hint: ${question.corporateDefaultHint}`
+        : '';
+      return `${index}. [${question.type}] ${question.label}${completenessHint}${opts}${question.value ? ` (existing value: ${question.value})` : ''}${hintLine}\nCandidate evidence:\n${question.candidateEvidence || '(No directly relevant candidate evidence found.)'}`;
+    })
+    .join('\n')}`;
+
+  return prompt;
+}
+
+export function buildSinglePrompt(
+  field: ScannedField,
+  profile: ApplyWizzCandidateProfile,
+  resumeText: string,
+  jobContext: JobContext,
+  resumeFacts?: any
+): string {
+  const choiceOptions = getEffectiveFieldOptions(field);
+  const promptOptions = choiceOptions || (field.optionsComplete === false ? field.options : undefined);
+  const optionsSection =
+    promptOptions && promptOptions.length > 0
+      ? `${formatAvailableOptionsLine(promptOptions)}${field.optionsComplete === false ? ' (incomplete list; not exhaustive)' : ''}`
+      : '';
+
+  const profileDecisionBlock = isBinaryYesNoQuestion(field)
+    ? buildProfileDecisionContext(field, profile)
+    : '';
+
+  const corporateDefaultHint = (field as any).corporateDefaultHint;
+  let corporateDefaultsBlock = '';
+  if (corporateDefaultHint) {
+    const locationStr =
+      (profile as any).location ||
+      ((profile as any).city ? `${(profile as any).city || ''}, ${(profile as any).state || ''}`.trim() : '') ||
+      '{city}, {state}';
+    corporateDefaultsBlock = `
+## Corporate Default Rules
+When a question matches these patterns and no resume evidence exists, use the default answer below.
+Map the default to the closest available option in the form — do NOT answer literally if the form
+has no matching option (return null instead).
+
+- "Have you interviewed here before?" → default: "No"
+- "How did you hear about us?" → default: LinkedIn or first job board option
+  Priority: linkedin > job board > online > website > indeed > glassdoor > other
+  Pick the first option that contains a keyword from this list. If none match, pick the first non-empty option.
+- Arbitration / policy agreements → default: agree / yes / checked
+- "County" → derive from candidate city/state: "${locationStr}"
+Corporate default hint for this question: ${corporateDefaultHint}
+`;
+  }
+
+  const incompleteChoice = field.type === 'select' && field.optionsComplete === false;
+  const instructions = incompleteChoice
+    ? `Instructions:
+1. This is a dropdown with an incomplete scanned option list; the full option list is not provided.
+2. Return only one concise exact choice label supported by candidate information, in the format expected by the dropdown (for example, a full school name).
+3. Do not invent or assume candidate information. If no supported answer is available, return NONE.`
+    : isBinaryYesNoQuestion(field)
+    ? `Instructions:
+1. Use the exact requires_sponsorship and work_authorization values from the profile. Do not guess.
+2. You MUST respond with exactly one of the provided options, no other text.`
+    : choiceOptions && choiceOptions.length > 0
+      ? `Instructions:
+1. You MUST respond with exactly one of these options, no other text.
+2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.`
+      : `Strict Instructions:
+1. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile.
+2. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
+3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer". Always cite their ACTUAL past companies, verified project names, or specific tools found in their resume.
+4. If the candidate's resume does not mention the exact requested tool/technology, write honestly: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
+5. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
+6. Respond as JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. If you are not at least 0.65 confident, set confidence below 0.65.`;
+
+  const candidateEvidence = buildQuestionRelevantEvidence(
+    field,
+    profile,
+    resumeText,
+    resumeFacts
+  );
+
+  return `You are an automated assistant helping a job candidate apply for a position.
+${corporateDefaultsBlock}
+Candidate Information:
+- Full Name: ${profile.clientName}
+- Candidate evidence selected for this question:
+${candidateEvidence || '(No directly relevant candidate evidence found.)'}
+- Work Authorization (work_authorization, exact): ${profile.workAuthorization || '(not provided)'}
+- Requires Sponsorship (requires_sponsorship, exact): ${profile.requiresSponsorship === true ? 'true' : 'false'}
+${profileDecisionBlock}
+
+Target Job:
+- Position: ${jobContext.title}
+- Company: ${jobContext.company}
+
+Question to Answer:
+- Question Label: "${field.label}"
+- Input Type: ${field.type}${optionsSection}
+
+${instructions}`;
 }

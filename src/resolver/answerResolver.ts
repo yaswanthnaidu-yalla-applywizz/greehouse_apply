@@ -18,7 +18,7 @@ import config from '../config/env.js';
 import { getProfile, type ProfileRow } from '../db/profiles.js';
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
-import { isCountryField, resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
+import { resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { findSemanticMatch, getLastSemanticScore } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
@@ -47,9 +47,20 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
-import { applicationNeedsOperatorReview } from './needsReview.js';
+import {
+  applicationNeedsOperatorReview,
+  applicationShouldBeFilteredOut,
+  countAiFields,
+  countUnresolvedRequiredFields,
+} from './needsReview.js';
 
-export { applicationNeedsOperatorReview } from './needsReview.js';
+export {
+  applicationNeedsOperatorReview,
+  applicationShouldBeFilteredOut,
+  countAiFields,
+  countUnresolvedRequiredFields,
+} from './needsReview.js';
+
 
 function parseScoreFromJob(score: string | number | undefined): number | null {
   if (score === undefined || score === '') return null;
@@ -104,7 +115,17 @@ export function isUnsupportedUuidAnswer(field: ScannedField, answer: string): bo
   );
 }
 
-function alignResolvedChoice(
+function isSchoolField(field: ScannedField): boolean {
+  const norm = `${field.fieldId} ${field.name} ${field.label}`.toLowerCase();
+  return (
+    /\bschool\b/i.test(norm) ||
+    /\buniversity\b/i.test(norm) ||
+    /\binstitution\b/i.test(norm) ||
+    /school--\d+/i.test(norm)
+  );
+}
+
+export function alignResolvedChoice(
   field: ScannedField,
   resolved: ResolvedField,
   effectiveOptions?: string[]
@@ -129,7 +150,8 @@ function alignResolvedChoice(
   }
   if (field.type === 'checkbox') return baseWithOptions;
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
-  if (field.optionsComplete === false) {
+  // School comboboxes are dynamically populated / lazy-loaded over the wire
+  if (field.optionsComplete === false || isSchoolField(field)) {
     return { ...baseWithOptions, ...(field.options ? { options: field.options } : {}) };
   }
 
@@ -148,7 +170,7 @@ function alignResolvedChoice(
 function alignResolvedChoiceOrNull(field: ScannedField, value: string): string | null {
   if (field.type === 'checkbox') return value;
   if (field.type !== 'select' && field.type !== 'radio') return value;
-  if (field.optionsComplete === false) return value;
+  if (field.optionsComplete === false || isSchoolField(field)) return value;
   return matchChoiceOption(value, field.options);
 }
 
@@ -433,21 +455,6 @@ export class AnswerResolver {
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
-    // Optional fields normally stop after Tier 1; standalone country fields can still use payload evidence.
-    if (!isRequired && !isCountryField(field)) {
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: '',
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
-
     // ------------------------------------------------------------------------
     // Tier 2: Resume Parse Cache / Extractor
     // ------------------------------------------------------------------------
@@ -572,6 +579,7 @@ export class AnswerResolver {
 
   private unresolvedField(field: ScannedField): ResolvedField {
     const options = getFieldOptions(field);
+    const corporateDefaultHint = (field as any).corporateDefaultHint;
     return {
       fieldId: field.fieldId,
       name: field.name,
@@ -582,6 +590,7 @@ export class AnswerResolver {
       resolvedByTier: null,
       confidence: 0,
       isRequired: Boolean(field.isRequired),
+      ...(corporateDefaultHint ? { corporateDefaultHint } : {}),
       ...(options ? { options } : {}),
       ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
       ...(field.metadata ? { metadata: field.metadata } : {}),
@@ -645,20 +654,6 @@ export class AnswerResolver {
       return { ...tier1, isRequired };
     }
     log.info(`[Resolver] ❌ T1 ${field.label} — no profile match`);
-
-    if (!isRequired && !isCountryField(field)) {
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: '',
-        source: 'supabase',
-        resolvedByTier: 1,
-        confidence: 1.0,
-        isRequired,
-      };
-    }
 
     const parsedResume =
       context.parsedResume !== undefined
@@ -737,6 +732,8 @@ export class AnswerResolver {
     const jobContext = {
       companyName: template.companyName || 'Company',
       jobTitle: template.jobTitle || 'Position',
+      jobUrl: template.jobUrl,
+      role: template.jobTitle || 'Position',
     };
 
     if (template.isExpired || !template.fields || template.fields.length === 0) {
@@ -897,7 +894,7 @@ export class AnswerResolver {
       }
     }
 
-    const poolSize = Math.max(1, Math.min(5, config.RESOLVER_WORKER_POOL_SIZE));
+    const poolSize = Math.max(1, Math.min(20, config.RESOLVER_WORKER_POOL_SIZE));
     if (compact) {
       log.info(`[Answer Resolver] resolve workers=${poolSize}`);
     }
@@ -922,7 +919,9 @@ export class AnswerResolver {
     let totalUnsuccessful = 0;
     let autoQueuedApplications = 0;
     let readyForReviewApplications = 0;
+    let filteredOutApplications = 0;
     const noTemplateLoggedUrls = new Set<string>();
+
 
     const processResolveTask = async (): Promise<void> => {
       while (true) {
@@ -1011,6 +1010,7 @@ export class AnswerResolver {
           try {
             const assignedCaEmail =
               app.assignedCaEmail || (seg as any).assignedCaEmail || seg.profile?.ca_email || null;
+            const shouldFilterOut = applicationShouldBeFilteredOut(app.resolvedFields);
             const needsReview = applicationNeedsOperatorReview(app.resolvedFields);
             const existing = await getApplicationByCandidateAndJob(app.applywizzId, persistJobUrl);
             const existingStatus = existing?.status;
@@ -1018,9 +1018,14 @@ export class AnswerResolver {
               field_count: questionCount,
             }).eligible;
             const canAutoEnqueue =
+              !shouldFilterOut &&
               !needsReview &&
               withinQuestionLimit &&
               (!existingStatus || RESOLVE_AUTO_ENQUEUE_ELIGIBLE.has(existingStatus));
+
+            const initialStatus: ApplicationStatus = shouldFilterOut
+              ? 'FILTERED_OUT'
+              : 'READY_FOR_REVIEW';
 
             const persistedApplication = await upsertApplication({
               applywizz_id: app.applywizzId,
@@ -1031,10 +1036,17 @@ export class AnswerResolver {
               csv_job_score: parseScoreFromJob(job.score),
               field_count: questionCount,
               assigned_ca_email: assignedCaEmail,
-              status: 'READY_FOR_REVIEW',
+              status: initialStatus,
             });
 
-            if (canAutoEnqueue) {
+            if (shouldFilterOut) {
+              filteredOutApplications++;
+              const aiCount = countAiFields(app.resolvedFields);
+              const unresCount = countUnresolvedRequiredFields(app.resolvedFields);
+              log.info(
+                `[Answer Resolver] 🚫 Filtered out ${app.applywizzId} ${persistJobUrl} (ai_count=${aiCount} unresolved_required=${unresCount} > 3)`
+              );
+            } else if (canAutoEnqueue) {
               try {
                 await enqueueApplication(app.applywizzId, {
                   jobUrl: persistJobUrl,
@@ -1055,6 +1067,7 @@ export class AnswerResolver {
             } else if (persistedApplication.status === 'READY_FOR_REVIEW') {
               readyForReviewApplications++;
             }
+
           } catch (dbErr: any) {
             if (isMissingTableError(dbErr)) {
               haltWithDevAlert(
@@ -1071,6 +1084,17 @@ export class AnswerResolver {
               );
             }
             log.warn(`[Answer Resolver] ⚠️ Could not upsert candidate_applications: ${dbErr.message}`);
+            const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+            await emitFailureDiagnostic({
+              category: 'RESOLVE_APPLICATION_PERSIST',
+              stage: 'application_persistence',
+              reason: `Failed to persist candidate application: ${dbErr.message}`,
+              error: dbErr,
+              applywizzId: app.applywizzId,
+              jobUrl: persistJobUrl,
+              isTerminal: false,
+              isRetryable: true,
+            }).catch(() => {});
           }
         }
 
@@ -1120,8 +1144,9 @@ export class AnswerResolver {
     const totalQuestions = Object.values(questionsByCategory).reduce((sum, count) => sum + count, 0);
     const unresolvedQuestions = questionsByCategory.unresolved;
     log.info(
-      `[Answer Resolver] resolution summary questions=${totalQuestions} resolved=${totalQuestions - unresolvedQuestions} unresolved=${unresolvedQuestions} resolved_by_category=supabase:${questionsByCategory.supabase},resume:${questionsByCategory.resume},semantic:${questionsByCategory.semantic},fuzzy:${questionsByCategory.fuzzy},llm:${questionsByCategory.llm},other:${questionsByCategory.other} auto_queued=${autoQueuedApplications} ready_for_review=${readyForReviewApplications}`
+      `[Answer Resolver] resolution summary questions=${totalQuestions} resolved=${totalQuestions - unresolvedQuestions} unresolved=${unresolvedQuestions} resolved_by_category=supabase:${questionsByCategory.supabase},resume:${questionsByCategory.resume},semantic:${questionsByCategory.semantic},fuzzy:${questionsByCategory.fuzzy},llm:${questionsByCategory.llm},other:${questionsByCategory.other} auto_queued=${autoQueuedApplications} ready_for_review=${readyForReviewApplications} filtered_out=${filteredOutApplications}`
     );
+
 
     if (compact) {
       log.info(

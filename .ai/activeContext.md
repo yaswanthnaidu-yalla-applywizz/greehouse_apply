@@ -1,6 +1,217 @@
+## Current Session Update (2026-10-12 — OpenRouter Gemini 2.5 Flash with Prompt Caching, Direct Token Cost & 1536 Vector Revert)
+
+- **OpenRouter Primary LLM Integration with Google Gemini 2.5 Flash (`google/gemini-2.5-flash`)**:
+  - Configured `LLM_PROVIDER: 'openrouter'` and `OPENROUTER_MODEL: 'google/gemini-2.5-flash'` in `src/config/env.ts` and `.env.example`.
+  - Added `'X-OpenRouter-Cache': 'true'` header on OpenRouter client chat completion requests.
+  - **Candidate Cache Isolation Guarantee**: Formatted candidate identity block (`ApplyWizz ID`, name, contact, authorization, demographics) at the absolute beginning of the prompt/message prefix. This ensures candidate A's prompt cache prefix never matches candidate B's, isolating caches completely.
+  - **Direct Cost & Cache Hit Metrics Extraction**: Extracted `usage.cost` (USD) and `usage.prompt_tokens_details.cached_tokens` from OpenRouter API responses.
+- **Per-Application Token Usage Cost Tracking**:
+  - Updated `src/db/tokenUsage.ts` and `src/resolver/tier5LLM.ts` to record provider-reported direct cost (`input.cost`) rather than a hardcoded static formula.
+- **Reverted Tier 3 Semantic Embeddings to 1536 Dimensions (`src/resolver/semanticSearch.ts`)**:
+  - Reverted primary embeddings provider to OpenRouter `text-embedding-3-small` (1,536 dimensions).
+  - Created migration `033_revert_vector_1536.sql` altering `gh_candidate_qa_bank.embedding` back to `vector(1536)`, rebuilding HNSW index, and updating `match_candidate_qa` RPC.
+  - Added `scripts/reembedQaBankOpenRouter1536.ts` for fast re-embedding.
+- **Typecheck & Execution Verified**: `npm run typecheck` passing (0 errors), OpenRouter batch synthesis verified via live API test, and `embedText` output verified at 1,536 dimensions.
+
+## Current Session Update (2026-10-12 — Greenhouse Combobox Backing Input Validation Fix, OTP 8m Budget, Bidirectional Fallback & Sandbox LLM Config)
+
+- **Remix / React-Select Backing Input HTML5 Validation Fix (`src/submitter/liveSubmit.ts`)**:
+  - Diagnosed "missing custom field answers" / "complete this job form" form fill failures (e.g. IMC `https://job-boards.eu.greenhouse.io/imc/jobs/4945646101`).
+  - Greenhouse Remix comboboxes inject hidden inputs `<input required="" tabindex="-1" aria-hidden="true" class="remix-css-1a0ro4n-requiredInput">` which fail `:invalid` checks even when interactive comboboxes are filled.
+  - Excluded hidden React-Select inputs from the HTML5 check: `'input:invalid:not([aria-hidden="true"]):not([tabindex="-1"]), select:invalid, textarea:invalid'`.
+- **OTP Budget Extended to 8 Minutes (`src/services/otpResolutionService.ts`)**:
+  - Raised `OTP_CHALLENGE_TIMEOUT_MS` from `5 * 60 * 1000` (5m) to `8 * 60 * 1000` (8m) to accommodate slow Greenhouse email delivery.
+- **Bidirectional OTP Fallback on `not_yet` / `found: false` / `received: false` (`src/services/otpResolutionService.ts`, `src/services/zoho-connector.ts`)**:
+  - Both Gmail and Zoho immediately trigger provider fallback on `not_yet` or missing messages instead of burning the full poll budget on one empty inbox.
+- **Sandbox Explicit LLM Provider Override Fix (`src/config/env.ts`, `src/resolver/llmSynthesizer.ts`)**:
+  - Fixed hardcoded `LLM_PROVIDER: 'openrouter'` in sandbox config (`isSandboxEnv ? ((process.env.LLM_PROVIDER as ...) || 'openrouter') : rawEnv.LLM_PROVIDER`), allowing runtime flags like `LLM_PROVIDER=gemini` to take effect.
+  - Bumped default Gemini synthesizer model from `gemini-1.5-flash` to `gemini-2.5-flash`.
+- **Current Blockers / Decisions in Flight**:
+  - **OpenRouter Credit Exhaustion**: OpenRouter org credits hit $50.00 spend cap ($0.003 over budget). When using OpenRouter, Tier 3 embedding generation (`text-embedding-3-small`) and Tier 5 batch requests fail with HTTP 402 (`Insufficient credits`), triggering the `[HALT]` pipeline guard. Requires either topping up OpenRouter org balance at `openrouter.ai/credits` or configuring direct embedding/LLM providers.
+
+## Current Session Update (2026-10-11 — Zoho Connected Startup Backfill & End-to-End Ingestion/Submission Filter)
+
+- **Zoho Connected Startup Backfill & Strict Ingestion/Submission Gating Shipped:**
+  - **Startup Backfill in Sandbox DB (`src/db/sandboxClient.ts`)**:
+    - Added `backfillZohoConnectedProfiles(pool)` executed immediately after `copyProfilesFromDb2(pool)` in `runSandboxMigrations()`.
+    - Queries `https://zoho-mail-reader.onrender.com/api/zoho/ui/users`, extracts all connected mailbox emails, resets profiles to `false`, and updates `profiles.zoho_connected = true` for matching `company_email` or `email` (plus demo IDs).
+    - Fixed `SandboxQueryBuilder` `.update()` and `.delete()` to return `count: res.rowCount`.
+  - **Ingestion Filtering in All Environments (`src/candidate/segregator.ts`)**:
+    - Removed `process.env.SANDBOX !== 'true'` check so that candidate segregation enforces the Zoho connection check in sandbox too. Candidates whose profile is not Zoho connected are dropped before producing segments, preventing them from being ingested into `gh_candidate_applications` or resolved.
+  - **Status Resolution Robustness (`src/services/zohoConnectionCheck.ts`)**:
+    - `resolveZohoConnectionStatuses` now checks both `profile.company_email`, `profile.email`, and pre-flagged `profile.zoho_connected === true`.
+  - **Dequeue Submission Guard (`src/db/applications.ts`)**:
+    - `getNextQueuedApplicationForRoundRobin` validates `assertApplywizzZohoConnected` before moving an application to `APPLYING`. Disconnected candidates are transitioned to `READY_FOR_REVIEW` with an informative error rather than submitted.
+  - **Verified with Vitest**: `tests/zohoConnectedFilter.test.ts` (5/5 tests passing); full 48-test regression suite clean.
+
+## Current Session Update (2026-10-11 — Full 5-Phase Hardening Plan Execution Complete)
+
+- **Completed All 5 Hardening Phases per `salutations.md` with 43/43 Tests Passing (No Git Commits per User Instruction):**
+  - **Phase 1: Process Crash Guard (`src/server/crashGuard.ts`, `src/server/index.ts`)**:
+    - Process-level `uncaughtException` & `unhandledRejection` handlers intercepting Playwright CDP disconnections (`Target closed`, `Session closed`, `Browser closed`, `WebSocket error`).
+    - Startup and shutdown cleanup sweeps transitioning stale `OTP_REQUIRED` / `APPLYING` rows (>10 min old) to `QUEUED`.
+    - Verified via `tests/crashGuard.test.ts` (5/5 passing).
+  - **Phase 2: Universal Security Code Routing + Company Normalization (`src/services/otpResolutionService.ts`, `src/services/zoho-connector.ts`, `src/submitter/proofCapture.ts`, `src/submitter/liveSubmit.ts`)**:
+    - Exported `normalizeCompanyNameForOtp` to strip legal entity suffixes (`Inc.`, `LLC`, `Corp`, etc.).
+    - Configured universal routing: all domains (`@gmail.com` and `@applywizard.ai`) call `fetchGmailOtpViaApi` first.
+    - Handled `mailbox_not_connected` to immediately trigger Zoho fallback; `not_yet` continues polling Gmail without switching.
+    - Implemented `captureJobOtpScreenshot(page, application)` saving `{applicationId}_otp_challenge.png` in `output/proofs/` the moment `detectOTPField` succeeds.
+    - Implemented `captureJobFailedScreenshot(page, application, reason)` saving `{applicationId}_failed_{sanitizedReason}.png` in `output/proofs_failed/`.
+    - Verified via `tests/otpRouting.test.ts` (12/12 passing).
+  - **Phase 3: Form Filler Precision (`src/submitter/formFiller.ts`, `src/submitter/liveSubmit.ts`)**:
+    - Fixed `isCountryCodeField` regex to explicitly exclude work authorization and legal eligibility (`/authorized|legally authorized|work authorization|eligible to work|right to work/i`) before the country keyword check.
+    - Added `normalizeForCombobox` in `src/submitter/formFiller.ts` to convert curly apostrophes/quotes (`’`, `‘`, `“`, `”`) and en/em dashes before `searchInput.pressSequentially`.
+    - Added `applyEducationDegreeFallback` defaulting `Degree*` to `"Bachelor's Degree"` when education is required on DOM and candidate degree is blank.
+    - Added `isDemographicOrEeoField` and `resolveEeoFallbackOption` selecting `"Decline to self-identify"` (or first valid option) for mandatory unmapped demographic dropdowns.
+    - Added `resolveInvalidFieldLabel` in `detectFormFillingErrors` with container traversal and `aria-labelledby` resolution.
+    - Verified via `tests/formFillerPrecision.test.ts` (12/12 passing).
+  - **Phase 4: Spinner-Aware Submission Confirmation (`src/submitter/otpSession.ts`)**:
+    - Extended `DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS`: 45s $\to$ 75s.
+    - Added `SPINNER_EXTENDED_TIMEOUT_MS`: 90s.
+    - Implemented and exported `isSubmitButtonSpinnerActive(page)` inspecting `.loading`, `aria-busy="true"`, `.spinner`, `svg[class*="animate"]`.
+    - Integrated spinner detection loop into `verifySubmissionSignals(page, timeoutMs, spinnerExtendedTimeoutMs)`.
+    - Verified via `tests/spinnerTimeout.test.ts` (7/7 passing).
+  - **Phase 5: Contextual Failure Filenames + Error Message Fix (`src/operator/operatorErrorMessages.ts`, `src/submitter/proofCapture.ts`)**:
+    - Added sanitized failure reason embed in screenshot filenames (`{applicationId}_failed_{sanitizedReason}.png`).
+    - Added OTP timeout, Gmail security code not found, and mailbox not connected branches before generic `isNetworkError` check in `normalizeOperatorErrorMessage`.
+    - Preserved `ECONNREFUSED` generic network error mapping.
+    - Verified via `tests/errorMessages.test.ts` (7/7 passing).
+  - **Consolidated Verification**: 43/43 unit tests passing, `npm run typecheck` clean (0 errors across src and dashboard). Uncommitted working tree maintained.
+
+
+- **Comprehensive Diagnosis of 335 RETRY ("Network/429") Applications:**
+  - **Identified Root Cause of "Network" Label**: In `src/operator/operatorErrorMessages.ts`, `isNetworkError()` tests `/timed out|timeout/i`. Any OTP retrieval timeout (e.g. `[OTP_FETCH:POLL_BUDGET_EXHAUSTED] Automatic OTP retrieval timed out after 300s`) gets mapped directly to `OperatorErrors.NETWORK`. These were NOT Greenhouse bot blocks or Render 429s!
+  - **Actual Event Breakdown**:
+    - 178 applications: Zoho UI inbox unreachability (`reason=ZOHO_INBOX_UNAVAILABLE`) under 15 lanes.
+    - 97 applications: `reason=GMAIL_OTP_NOT_FOUND`.
+    - 46 applications: `reason=POLL_BUDGET_EXHAUSTED`.
+    - 14 applications: Playwright navigation/connect timeouts.
+- **Deep Investigation of 143 Gmail OTP Failures & Company Name Parameter:**
+  - Verified live against `GET /api/gmail/greenhouse-security-code`:
+    1. **Disconnected Accounts (~45%)**: Accounts like `vparekh232004@gmail.com` returned `{"found": false, "reason": "mailbox_not_connected"}`.
+    2. **Company Parameter Mismatch (~55%)**: Passing raw `application.company_name` (e.g. `"BrightAI Corporation"`, `"Take-Two Interactive Software, Inc."`) causes the API's email subject search to fail against Greenhouse subjects (`"Your BrightAI security code"`), returning `{"found": false, "reason": "not_yet"}` for 300s!
+  - **Solution Integrated**: Added legal suffix sanitizer `normalizeCompanyNameForOtp()` (stripping `Inc`, `LLC`, `Corp`, punctuation) + unfiltered fallback (`?email=<email>` without `company`) after 30s.
+- **Comprehensive Visual Screenshot Diagnosis Completed:**
+  - **Form Fill Failures (80 Apps)**: Opened and inspected screenshots (`cbf766d5` EarnIn, `d4e601aa` RA Capital, `e8948cd4` PitchBook). Identified 4 root causes:
+    1. `isCountryCodeField` regex defect: treated work authorization questions containing "country" as phone country dropdowns, attempting to fill "United States" into a ["Yes", "No"] select.
+    2. React-Select filter typing: typed raw curly apostrophes (`’` U+2019) into search inputs filtering straight apostrophes (`'`), returning 0 results.
+    3. Mandatory Education fallback: when DOM requires Education but candidate profile degree is blank, Degree is left empty (`Degree is required`).
+    4. Mandatory EEO: employer-mandated race/demographic dropdowns left unselected.
+  - **Confirmation Timeouts (31 Apps)**: Inspected Anthropic and Ceribell screenshots; 100% of jobs had the submit button clicked and actively showing the loading spinner, but the 30-45s timeout expired before Greenhouse backend responded.
+  - **Failure Observability & Storage**: Mandatory full-page screenshots before `browser.close()` with sanitized failure reason filenames: `{applicationId}_failed_{sanitizedReason}.png`. Capturing `{applicationId}_otp_required.png` upon challenge detection.
+- **Target Performance Contract Defined:**
+  - **Requirement 1**: $\ge 80\%$ of all eligible applications resolved accurately.
+  - **Requirement 2**: $\ge 90\%$ of resolved applications convert to `APPLIED` + `EMAIL_PROOF_PENDING`.
+- **Strategic Blueprint Updated:** `claude_approval.md` updated with full diagnosis, visual evidence, process crash guards, universal OTP routing, company normalization + unfiltered fallback, spinner-aware confirmation (75s), and failure-cause screenshot naming (`{id}_failed_{cause}.png`). Zero code edits made this turn; ready for Claude review.
+
+## Current Session Update (2026-10-11 — 4-Phase Submission Hardening Execution Complete)
+
+- **Completed All 4 Hardening Phases per `blessings.md` with 35/35 Tests Passing:**
+  - **Phase 1: SubmitterPool Backpressure & Idle Gating:**
+    - Gated `dispatchQueue` and `dispatchOnce` on `getIdleCount() > 0`.
+    - Removed unbounded worker lane buffers (`workerQueues[workerIndex]`).
+    - Added graceful shutdown recovery reverting all in-flight `APPLYING` applications to `QUEUED` in PostgreSQL and memory on pool stop, SIGINT, or SIGTERM.
+    - Verified via `tests/submitterPool.test.ts` (5/5 passing).
+  - **Phase 2: OTP Engine: Premature Break Removal, Domain Routing & Token Bucket Rate Limiting:**
+    - Implemented token bucket rate limiter singleton in `src/services/mailboxRateLimiter.ts` (3 req/sec cap, queues without dropping).
+    - Rate-limited all Zoho and Gmail HTTP fetch requests in `src/services/zoho-connector.ts`.
+    - Removed premature `break;` on first `not_yet` response in `src/services/otpResolutionService.ts` — sustained full 300s budget with 4000ms delay.
+    - Domain routing: `@applywizard.ai` exclusively to Zoho, `@gmail.com` exclusively to Gmail.
+    - Guaranteed cleanup: on budget exhaustion, closes paused session via `clearPausedSession()` and transitions to `RETRY` (or `FAILED` if $\ge 3$) — `OTP_REQUIRED` never persists as a resting state.
+    - Verified via `tests/otpResolution.test.ts` (9/9 passing).
+  - **Phase 3: Form Filler: Unicode Normalization & Multi-Stage Dropdown Matching:**
+    - Added shared `normalizeOptionText()` (straightens curly quotes, en/em dashes, collapses whitespace, trims, lowercases).
+    - Implemented 3-stage matching in `matchDropdownOption()`: Stage 1 exact normalized $\to$ Stage 2 prefix/contains $\to$ Stage 3 Fuse.js token-set (threshold 0.35 / similarity $\ge 0.85$). Fail-closed miss logging without picking random options.
+    - Integrated multi-stage matching into interactive and native select dropdowns in `src/submitter/formFiller.ts`.
+    - Enhanced DOM traversal for `input:invalid` in `src/submitter/liveSubmit.ts` to log full field label, filled value, and options.
+    - Verified via `tests/formFillerNormalization.test.ts` (10/10 passing).
+  - **Phase 4: Tier 5 Corporate Defaults via LLM Context Injection:**
+    - Added `CORPORATE_DEFAULT_PATTERNS` and `getCorporateDefaultHint()` in `src/resolver/tier1Supabase.ts`.
+    - Updated `ResolvedField` and `BatchQuestion` types to carry `corporateDefaultHint`.
+    - Injected `## Corporate Default Rules` context block in `buildBatchPrompt()` and `buildSinglePrompt()` in `src/resolver/llmSynthesizer.ts`.
+    - County derived dynamically from candidate city/state; referral source keyword-priority list enforced.
+    - Preserved fail-closed option alignment (`hint != forced answer`).
+    - Verified via `tests/corporateDefaults.test.ts` (11/11 passing).
+  - **Consolidated Verification:** 35/35 unit tests pass, `npm run typecheck` passes with 0 errors across src and dashboard, and `npm run build` passes cleanly.
+
+## Current Session Update (2026-10-11 - Gmail OTP Integration & Submission Hardening)
+
+- **Gmail Greenhouse Security Code API Integrated:**
+  - Implemented `fetchGmailOtpViaApi` in `src/services/zoho-connector.ts` calling `GET /api/gmail/greenhouse-security-code?email=<candidateEmail>&company=<companyName>`.
+  - Configured 4s polling with ~800-1900ms live latency and clean failover handling.
+  - Set as primary OTP resolver in `src/services/otpResolutionService.ts` with automated fallback to `fetchZohoOtpViaApi` (Zoho inbox).
+  - Unit tests (`tests/zohoApiOtp.test.ts`) and TypeScript typecheck (`tsc --noEmit`) passing.
+  - Handover file updated at `handover.md` and stats ledger updated at `.ai/stats.md`.
+
+## Current Session Update (2026-10-11 - Auto-Queue Optimization & Resolution Hardening)
+
+- **Auto-Queue Eligibility Elevated to 79.5% (841 / 1,058 applications):**
+  - Updated `src/resolver/needsReview.ts` to allow auto-queueing for required fields answered by AI when confidence $\ge 0.8$.
+  - Preserved operator review guards: applications hold for review if any required field is unresolved, if an AI required field has confidence $< 0.8$, or if a salary/compensation question was answered negatively ("No", "Decline").
+  - Updated unit test suite `tests/autoQueueAndCaNotification.test.ts` to verify the confidence threshold and negative salary gates.
+- **Phone Country Resolution & Filling Hardened:**
+  - `src/resolver/tier1Supabase.ts`: Resolves country fields (`#country`, `phone_country`, `country_code`) directly from `profile.country` (fallback: parsed country from `profile.location`, default: `"United States"`). If missing, cascades cleanly down the waterfall without blind guessing.
+  - `src/submitter/formFiller.ts`: Enhanced phone and country handling to properly select the `#country` dropdown on modern Greenhouse boards (`job-boards.greenhouse.io`), eliminating submission timeouts from unselected phone country errors.
+- **Consent & Agreement Checkboxes Mapped:**
+  - `src/resolver/tier1Supabase.ts`: Added mapping for standard legal consent and terms checkboxes (including ScaleOps `question_37471261002[]` and Klaviyo `question_37872860002[]`) resolving to `'true'`.
+  - `src/submitter/formFiller.ts`: Added a Safety Sweep step to guarantee any mandatory consent/privacy checkboxes on the active DOM are checked before submission, eliminating form fill validation errors.
+- **Truth-Grounded LLM Context:**
+  - `src/resolver/llmSynthesizer.ts`: Updated `inferYesNoFromProfile()` to default to `"No"` for prior employment / interview history when absent from candidate resume facts, and `"Yes"` for arbitration/terms agreements and hybrid/office presence requirements.
+
+
+- **Merged & Normalized Dataset:** Consolidated 239 candidate records across 25 sheets of `DASHBOARD CONFIRMATION.xlsx` and `Book1.xlsx`. Stripped operational columns (`Operator`, `Client Name`), replaced placeholder values (`no`, `-`, `n/a`, etc.) with blanks, converted countries to full names (`United States`, `United Kingdom`, `Ireland`, `Australia`), and standardized all locations to Greenhouse-compatible 3-part format: `"{City}, {State/Region}, {Country}"`.
+- **Database Synchronization:**
+  - Missing profiles handled: Identified 3 profiles missing from `postgres-db2` (`AWL-43949`, `AWL-36115`, `AWL-35184`). Fetched complete JSON records from ApplyWizz API, inserted base rows into `profiles`, and updated with normalized CSV values.
+  - Existing profiles updated: Synchronized 237 unique profiles across 7 columns (`phone`, `country`, `country_code`, `location`, `linkedin_url`, `github_url`, `company_email`).
+  - Blank preservation: Blank fields in CSV were strictly prevented from overwriting non-null database values. Untouched profile fields (`education`, `work_experience`, `resume_facts`) remained intact.
+  - Final database count: 364 total profiles in `postgres-db2`.
+
+## Current Session Update (2026-10-10 - Full Repository Structural Audit)
+
+- **Conducted Performance & Architectural Review:** Completed a full code review using the code-review-and-quality and performance-optimization skills. Findings are logged in Code_Review_Report.md.
+- **Identified Major Bottlenecks:**
+  1. **Frontend Bloat:** Dual-stack UI with legacy operator-app.jsx (4300+ lines) alongside Vite React. App.tsx lacks code splitting, forcing heavy bundle downloads on all users.
+  2. **Playwright CDP Latency:** `for loops sequentially iterating Playwright locators generate severe network round-trips.
+  3. **Main Thread Blocking:** `fs.readFileSync used synchronously in Express routes (src/server/index.ts).
+  4. **Unbounded Data Fetching:** Administrative list APIs (listAllDashboardUsers, etc.) lack pagination.
+  5. **God Files:** src/db/applications.ts and src/server/index.ts exceed 2,000 lines, mixing separate concerns.
+  6. **Stale Timestamps & Open RLS:** schema.sql lacks updated_at triggers and leaves core tables open via USING (true).
+
 # Active Context — Current Sprint State
 
-_Last updated: 2026-10-07_
+_Last updated: 2026-10-09_
+
+## Current Session Update (2026-10-09 — CAPTCHA Removal Complete)
+
+- **Complete CAPTCHA Codebase Removal ([captcha.md](file:///C:/Users/yaswa/Dev/greehouse_apply/captcha.md)):**
+  1. **Active Engine Behavior Eliminated:** Removed `CAPTCHA_SELECTORS`, `detectCaptchaIframe`, and post-submit whole-page text matching (`pageText.includes('security' | 'verify' | 'challenge')`) in `src/submitter/liveSubmit.ts`. Form submission halts now route strictly through standard form validation diagnostics (`SUBMIT_FORM_FILL_ERROR`, `UNRESOLVED_REQUIRED_FIELD`).
+  2. **Clean Separation of OTP:** Preserved all automated OTP detection, multi-box filling, resolution, and session management (`otpSession.ts`, `otpResolutionService.ts`).
+  3. **Diagnostics & Schema Purged:** Removed `SUBMIT_CAPTCHA_BLOCK` and `SUBMIT_CAPTCHA_AMBIGUOUS` from `FAILURE_DIAGNOSTIC_CATEGORIES` and category mapping. Dropped `CAPTCHA_TIMEOUT` from live database schema `src/db/schema.sql` and ensured forward migration `030_remove_captcha_state.sql` drops `captcha_retry_count` and migrates historical rows to `FAILED`.
+  4. **UI & Documentation Cleanup:** Removed legacy captcha states, listeners, and help text from `operator-app.jsx` and related internal comments.
+  5. **Regression Tests Updated:** Added test coverage in `tests/submissions.test.ts` verifying that passive reCAPTCHA badges (common on Greenhouse boards) do not divert submissions into challenge handling and that OTP detection operates cleanly. Updated `applicationStats.test.ts`, `autoQueueAndCaNotification.test.ts`, and `candidateQueueFilter.test.ts`. All 24 unit tests pass, and full `npm run typecheck` passes with zero errors.
+
+## Previous Session Update (2026-10-09 — Selective Feature Restoration Completed)
+
+- **Targeted Restoration:** Restored strictly the 4 requested features from the pre-revert state without architectural sprawl:
+  1. **Feature 1: Retry Counter:** `retry_count` OTP timeout cycle `0 -> 1 -> 2 -> 3 FAILED` (`MAX_SUBMISSION_RETRIES = 3`) with atomic compare-and-set guards in `updateStatus()` and `enqueueApplication()`. Invalid candidate mailbox fails terminally without burning retries.
+  2. **Feature 2: Failure Diagnostics & LLM Telemetry:** `gh_failure_diagnostics` table, migration `029_failure_diagnostics.sql`, automated 90-day background retention cleanup, Dev Dashboard Diagnostics tab with search & pagination, and safe PII-redacted LLM provider telemetry (`getLlmProviderErrorDiagnostics()`).
+  3. **Feature 3: Role-Specific Session Expiry:** 8-hour operator ceiling computed from `sessionLoginAt` (`OPERATOR_SESSION_TTL_SECONDS = 28800`), 7-day staff sessions (`STAFF_SESSION_TTL_SECONDS = 604800`), enforced across backend `/api/auth/refresh`, modern `useSession` hook, and legacy `roleAccess.js`.
+  4. **Feature 4: Challenge State Deprecation:** Purged `CAPTCHA_REQUIRED` and `CAPTCHA_TIMEOUT` from TypeScript types, schema constraints, Dev/Admin/Operator UIs, and submit routes. Replaced manual challenge endpoints with fast automated OTP flow. Migration `030_remove_captcha_state.sql` created.
+- **Strict Boundary Enforced:** **NO mailbox submission lock.** `src/submitter/mailboxSubmissionLock.ts` was deliberately excluded and not created.
+- **Pre-Production Checklist:** Created [`PRE_PROD_CHECKLIST.md`](file:///C:/Users/yaswa/Dev/greehouse_apply/to-do/do%20before%20prod/PRE_PROD_CHECKLIST.md) under `to-do/do before prod/` detailing SQL migrations 029 & 030, permission verifications, and pre-flight steps.
+- **Verification:** Full TypeScript compilation (`tsc --noEmit && npm run typecheck:dashboard`), production Vite bundle build (`npm run build`), and focused test suites pass cleanly.
+
+## Current Session Update (2026-10-09 — Rollback branch reconstruction)
+- Rebuilt the historical `rollback` worktree from the verified `7a35135` baseline without touching the dirty `dev` checkout.
+- Created branch `rollback` and committed the recovered run-time tree at `b9b30db` in `C:\Users\yaswa\Dev\rollback-worktree`.
+- Preserved the historical typecheck faults and excluded post-run artifacts as required by the rollback plan.
+
+## Previous Session Update (2026-10-08 — Full Codebase Rollback to 7a35135 & Session Conclusion)
+
+- **Complete Revert to Clean Baseline:** Rolled back uncommitted changes from the 2026-10-08 work session via `git restore .` and removed untracked files.
+- Codebase state was verified at commit `7a35135`.
+- **Environment Key Resolution Fix:** Fixed `src/config/env.ts` so `OPENROUTER_API_KEY` loaded from the repository `.env` file explicitly overrides stale or credit-exhausted keys inherited from the parent Windows shell environment.
+- Task-observer observations `0030`, `0031`, and `0032` logged.
 
 ## Current Session Update — Sandbox CA Assignment
 

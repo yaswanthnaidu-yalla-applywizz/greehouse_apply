@@ -8,6 +8,8 @@ import { assertSupabaseReady } from '../db/client.js';
 
 const log = createLogger('Queue Worker');
 
+import { otpResolutionService } from '../services/otpResolutionService.js';
+
 export interface QueueDaemonOptions {
   concurrency?: number;
   pollIntervalMs?: number;
@@ -24,10 +26,12 @@ export class SubmissionQueueDaemon {
     const poolSize = parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10);
     log.info(`[QueueWorker] Starting with ${poolSize} submission lanes`);
     void assertSupabaseReady();
+    otpResolutionService.start();
     this.pool.start();
   }
 
   public async stop(): Promise<void> {
+    otpResolutionService.stop();
     await this.pool.stop();
   }
 

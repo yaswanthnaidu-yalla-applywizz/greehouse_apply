@@ -15,7 +15,7 @@ export function getRetryReason(
 }
 
 function classifyRetryMessage(message: string): SubmissionRetryReason | null {
-  if (/OTP_FETCH_FAIL|OTP fetch failed/i.test(message)) return 'OTP_FETCH_FAIL';
+  if (/OTP_FETCH(?:_FAIL|:)|OTP fetch failed/i.test(message)) return 'OTP_FETCH_FAIL';
   if (/Required field validation failed/i.test(message)) return 'UNRESOLVED_REQUIRED_FIELD';
   return null;
 }

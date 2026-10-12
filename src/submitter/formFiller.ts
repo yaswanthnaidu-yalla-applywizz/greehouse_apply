@@ -10,6 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { Page, Locator } from 'playwright';
+import Fuse from 'fuse.js';
 import { downloadResumeTempFile, isDemoResumeApplywizzId } from '../db/storage.js';
 import { getUnmappedVisibleFields } from './cascadeDetector.js';
 import { AnswerResolver } from '../resolver/answerResolver.js';
@@ -186,15 +187,86 @@ const CUSTOM_SELECT_OPTION_LOCATOR =
 const GREENHOUSE_SELECT_INPUT_CONTAINER =
   '[class*="select_input-container"], .select_input-container, [class*="remix-css-"][class*="-container"]';
 
-type OptionTextMatcher = (optionText: string, answerText: string) => boolean;
-
-function exactOptionTextMatch(optionText: string, answerText: string): boolean {
-  const opt = optionText.trim();
-  const ans = answerText.trim();
-  return opt === ans || opt.toLowerCase() === ans.toLowerCase();
+export function normalizeOptionText(text: string): string {
+  return (text || '')
+    .replace(/[\u2018\u2019\u02BC]/g, "'")   // curly singles → straight
+    .replace(/[\u201C\u201D]/g, '"')          // curly doubles → straight
+    .replace(/[\u2013\u2014]/g, '-')          // en/em dash → hyphen
+    .replace(/\s+/g, ' ')                     // collapse whitespace
+    .trim()
+    .toLowerCase();
 }
 
-function containsOptionTextMatch(optionText: string, answerText: string): boolean {
+export interface DropdownMatchResult {
+  matchedOption: string | null;
+  stage: 1 | 2 | 3 | null;
+}
+
+export function matchDropdownOption(
+  options: string[],
+  target: string
+): DropdownMatchResult {
+  if (!target || !options || options.length === 0) {
+    return { matchedOption: null, stage: null };
+  }
+
+  const normTarget = normalizeOptionText(target);
+  if (!normTarget) {
+    return { matchedOption: null, stage: null };
+  }
+
+  // Stage 1 — Exact normalized match:
+  const stage1Match = options.find((o) => normalizeOptionText(o) === normTarget);
+  if (stage1Match !== undefined) {
+    log.info(`[FormFiller] Stage 1 match for "${target}" -> "${stage1Match}"`);
+    return { matchedOption: stage1Match, stage: 1 };
+  }
+
+  // Stage 2 — Prefix / contains match:
+  // target is prefix of option, or option contains target
+  const stage2Match = options.find((o) => {
+    const normOpt = normalizeOptionText(o);
+    return normOpt.startsWith(normTarget) || normOpt.includes(normTarget);
+  });
+  if (stage2Match !== undefined) {
+    log.info(`[FormFiller] Stage 2 match for "${target}" -> "${stage2Match}"`);
+    return { matchedOption: stage2Match, stage: 2 };
+  }
+
+  // Stage 3 — Token-set fuzzy (Fuse.js, threshold 0.35 equivalent to 0.85 similarity)
+  try {
+    const fuse = new Fuse(options, {
+      threshold: 0.35,
+      getFn: (o: string) => normalizeOptionText(o),
+    });
+    const results = fuse.search(normTarget);
+    if (results.length > 0 && results[0].item !== undefined) {
+      log.info(`[FormFiller] Stage 3 match for "${target}" -> "${results[0].item}"`);
+      return { matchedOption: results[0].item, stage: 3 };
+    }
+  } catch {}
+
+  // All 3 stages missed: do NOT pick fallback option
+  log.warn(`[FormFiller] ❌ no option match for "${target}" in [${options.join(', ')}]`);
+  return { matchedOption: null, stage: null };
+}
+
+export function formatInvalidFieldLog(
+  label: string,
+  filled: string,
+  options: string[] = []
+): string {
+  const optionsStr = options.length > 0 ? ` | options=[${options.join(', ')}]` : '';
+  return `[FormFiller] ❌ required field invalid: label="${label}" | filled="${filled}"${optionsStr}`;
+}
+
+type OptionTextMatcher = (optionText: string, answerText: string) => boolean;
+
+export function exactOptionTextMatch(optionText: string, answerText: string): boolean {
+  return normalizeOptionText(optionText) === normalizeOptionText(answerText);
+}
+
+export function containsOptionTextMatch(optionText: string, answerText: string): boolean {
   const opt = optionText.trim().toLowerCase();
   const ans = answerText.trim().toLowerCase();
   return Boolean(opt && ans && (opt.includes(ans) || ans.includes(opt)));
@@ -306,7 +378,11 @@ async function resolveComboboxControls(
 
   const nestedInput = control.locator('input[type="text"], input:not([type="hidden"]), .select__input').first();
   if (tagName === 'INPUT' || className.includes('select__input') || role === 'combobox') {
-    return { searchInput: control, openTrigger: control };
+    const parentContainer = control
+      .locator('xpath=ancestor::*[contains(@class,"select__control") or contains(@class,"select-shell")][1]')
+      .first();
+    const openTrigger = (await parentContainer.count()) > 0 ? parentContainer : control;
+    return { searchInput: control, openTrigger };
   }
   if ((await nestedInput.count()) > 0) {
     return { searchInput: nestedInput, openTrigger: control };
@@ -425,6 +501,58 @@ async function clickDropdownOptionByMatch(
   return false;
 }
 
+async function clickDropdownOptionMultiStage(
+  page: Page,
+  answerText: string,
+  scope?: Locator | null
+): Promise<boolean> {
+  const roots: Locator[] = [];
+  if (scope && (await scope.count()) > 0) roots.push(scope);
+  roots.push(page.locator('body'));
+
+  for (const root of roots) {
+    const options = root.locator(CUSTOM_SELECT_OPTION_LOCATOR);
+    const count = await options.count().catch(() => 0);
+    if (count === 0) continue;
+
+    const visibleElements: { locator: Locator; text: string }[] = [];
+    for (let i = 0; i < count; i++) {
+      const opt = options.nth(i);
+      const visible = await opt.isVisible().catch(() => false);
+      if (!visible) continue;
+      const text = (await opt.innerText().catch(() => '')).trim();
+      if (!text) continue;
+      visibleElements.push({ locator: opt, text });
+    }
+
+    if (visibleElements.length === 0) continue;
+
+    const optionTexts = visibleElements.map((v) => v.text);
+    const match = matchDropdownOption(optionTexts, answerText);
+    if (match.matchedOption) {
+      const matchedElem = visibleElements.find((v) => v.text === match.matchedOption);
+      if (matchedElem) {
+        await matchedElem.locator.scrollIntoViewIfNeeded().catch(() => {});
+        await matchedElem.locator.click({ force: true, timeout: 2500 });
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Normalizes combobox search query text (straightens curly quotes, en/em dashes).
+ */
+export function normalizeForCombobox(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/[\u2018\u2019]/g, "'")   // curly single quotes → straight
+    .replace(/[\u201C\u201D]/g, '"')   // curly double quotes → straight
+    .replace(/[\u2013\u2014]/g, '-')   // en/em dash → hyphen
+    .trim();
+}
+
 /**
  * Searchable/combobox select: type into filter input when present, else open menu; then click option by text match.
  */
@@ -442,10 +570,12 @@ async function fillInteractiveSelectDropdown(
     const sameOpenAndSearch = openTrigger === searchInput;
     if (!sameOpenAndSearch) {
       await openTrigger.click({ force: true }).catch(() => {});
+    } else {
+      await searchInput.click({ force: true }).catch(() => {});
     }
-    await searchInput.click({ force: true }).catch(() => {});
     await searchInput.fill('').catch(() => {});
-    await searchInput.pressSequentially(answerText, { delay: 35 });
+    const textToType = normalizeForCombobox(answerText);
+    await searchInput.pressSequentially(textToType, { delay: 35 });
     await page.waitForTimeout(500);
   } else {
     await openTrigger.click({ force: true }).catch(() => {});
@@ -454,34 +584,13 @@ async function fillInteractiveSelectDropdown(
 
   const optionScope = await resolveSelectOptionScope(control);
 
-  // Phase 1 (Authoritative Primary): Exact option match with resolved answerText
-  let clicked = await clickDropdownOptionByMatch(
-    page,
-    answerText,
-    exactOptionTextMatch,
-    optionScope
-  );
+  // Multi-Stage Matching: Stage 1 Exact Normalized -> Stage 2 Prefix/Contains -> Stage 3 Fuse Token-Set
+  let clicked = await clickDropdownOptionMultiStage(page, answerText, optionScope);
 
-  // Phase 2 (Fallback / Backup): If exact match fails, use normalized choice aliases, contains, or fuzzy
-  if (!clicked) {
-    clicked = await clickDropdownOptionByMatch(page, answerText, choiceOptionTextMatches, optionScope);
-  }
-  if (!clicked) {
-    clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
-  }
-  if (!clicked) {
-    clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
-  }
-  if (!clicked) {
-    clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
-  }
   if (!clicked && searchInput) {
     await searchInput.press('ArrowDown').catch(() => {});
     await page.waitForTimeout(150);
-    clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
-    if (!clicked) {
-      clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
-    }
+    clicked = await clickDropdownOptionMultiStage(page, answerText, optionScope);
   }
 
   if (!clicked && optionScope) {
@@ -491,48 +600,29 @@ async function fillInteractiveSelectDropdown(
     if ((await toggle.count()) > 0) {
       await toggle.click({ force: true }).catch(() => {});
       await page.waitForTimeout(350);
-      clicked = await clickDropdownOptionByMatch(
-        page,
-        answerText,
-        exactOptionTextMatch,
-        optionScope
-      );
+      clicked = await clickDropdownOptionMultiStage(page, answerText, optionScope);
       if (!clicked) {
-        clicked = await clickDropdownOptionByMatch(page, answerText, choiceOptionTextMatches, optionScope);
-      }
-      if (!clicked) {
-        clicked = await clickDropdownOptionByMatch(page, answerText, containsOptionTextMatch, optionScope);
-      }
-      if (!clicked) {
-        clicked = await clickDropdownOptionByMatch(page, answerText, fuzzyOptionTextMatch, optionScope);
-      }
-      if (!clicked) {
-        clicked = await clickDropdownOptionByMatch(
-          page,
-          answerText,
-          containsOptionTextMatch,
-          page.locator('body')
-        );
-      }
-      if (!clicked) {
-        clicked = await clickDropdownOptionByMatch(
-          page,
-          answerText,
-          fuzzyOptionTextMatch,
-          page.locator('body')
-        );
+        clicked = await clickDropdownOptionMultiStage(page, answerText, page.locator('body'));
       }
     }
+  }
+
+  // Fallback to legacy choiceOptionTextMatches or caller matchOption if provided
+  if (!clicked) {
+    clicked = await clickDropdownOptionByMatch(page, answerText, choiceOptionTextMatches, optionScope);
+  }
+  if (!clicked && matchOption !== exactOptionTextMatch) {
+    clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
   }
 
   if (clicked) {
     await searchInput?.blur().catch(() => {});
     await page.waitForTimeout(250);
     const committedMatch = choiceOptionTextMatches;
-    clicked =
+    const verified =
       (await comboboxDisplaysAnswer(searchInput || control, answerText, committedMatch)) ||
       (await hiddenRequiredInputDisplaysAnswer(searchInput || control, answerText, committedMatch));
-    if (!clicked && retryCount === 0) {
+    if (!verified && retryCount === 0) {
       return fillInteractiveSelectDropdown(page, control, answerText, matchOption, 1);
     }
   }
@@ -565,6 +655,9 @@ function normalizeBooleanValue(value: string): 'Yes' | 'No' | null {
 
 export function isCountryCodeField(fieldId: string, name: string, label: string): boolean {
   const combined = `${fieldId} ${name} ${label}`.toLowerCase();
+  if (/authorized|legally authorized|work authorization|eligible to work|right to work/i.test(combined)) {
+    return false;
+  }
   if (/sponsorship|visa|relocat|citizen/i.test(combined)) return false;
   return (
     fieldId === 'country' ||
@@ -574,6 +667,73 @@ export function isCountryCodeField(fieldId: string, name: string, label: string)
     /country\s*code|phone\s*country/i.test(combined) ||
     (combined.includes('country') && !/salary|relocation/i.test(combined))
   );
+}
+
+export function isDemographicOrEeoField(fieldId: string, name: string, label: string): boolean {
+  const combined = `${fieldId} ${name} ${label}`.toLowerCase();
+  return /race|ethnicity|gender|sex|veteran|disability|demographic|voluntary self-identification|equal employment/i.test(combined);
+}
+
+export function resolveEeoFallbackOption(options: string[]): string | null {
+  if (!options || options.length === 0) return null;
+  const declineOption = options.find((opt) =>
+    /decline|prefer not|not wish|choose not|don't wish|do not wish/i.test(opt)
+  );
+  if (declineOption) return declineOption;
+  const validOption = options.find((opt) => !/select\b|^--|^\s*$/i.test(opt));
+  return validOption || options[0] || null;
+}
+
+export function applyEducationDegreeFallback<T extends { fieldId: string; name?: string; label?: string; value: string }>(
+  fields: T[],
+  isEducationRequiredOnDom: boolean
+): T[] {
+  if (!isEducationRequiredOnDom) return fields;
+
+  return fields.map((f) => {
+    if (
+      isExplicitEducationField(f as any) &&
+      /\bdegree\b/i.test(`${f.fieldId} ${f.name || ''} ${f.label || ''}`) &&
+      (!f.value || !f.value.trim())
+    ) {
+      log.info(`[Form Filler] Education degree defaulted to "Bachelor's Degree" — profile degree blank`);
+      return { ...f, value: "Bachelor's Degree" };
+    }
+    return f;
+  });
+}
+
+export function resolveInvalidFieldLabel(
+  input: { id?: string; name?: string; getAttribute?: (attr: string) => string | null; closest?: (sel: string) => any },
+  doc: { querySelector?: (sel: string) => any; getElementById?: (id: string) => any } = typeof document !== 'undefined' ? document : {} as any
+): string {
+  let labelText = '';
+  if (input.id && doc.querySelector) {
+    const l = doc.querySelector(`label[for="${input.id}"]`);
+    if (l) labelText = (l.textContent || '').trim();
+  }
+  if (!labelText && input.closest) {
+    const dataField = input.closest('[data-field-id]');
+    const l = dataField?.querySelector?.('label');
+    if (l) labelText = (l.textContent || '').trim();
+  }
+  if (!labelText && input.getAttribute && doc.getElementById) {
+    const ariaLabelledBy = input.getAttribute('aria-labelledby');
+    if (ariaLabelledBy) {
+      const ariaEl = doc.getElementById(ariaLabelledBy);
+      if (ariaEl) labelText = (ariaEl.textContent || '').trim();
+    }
+  }
+  if (!labelText && input.closest) {
+    const parentLabel = input.closest('label');
+    if (parentLabel) labelText = (parentLabel.textContent || '').trim();
+  }
+  if (!labelText && input.closest) {
+    const container = input.closest('.field, .field-wrapper, [class*="field"], .question, tr, div');
+    const l = container?.querySelector?.('label, [class*="label"], .field__label');
+    if (l) labelText = (l.textContent || '').trim();
+  }
+  return labelText || input.name || input.id || 'unlabeled';
 }
 
 export function isSponsorshipQuestion(fieldId: string, name: string, label: string): boolean {
@@ -762,6 +922,22 @@ export async function fillSingleField(
     } else if (isReferralSource) {
       val = 'LinkedIn';
       log.info(`Referral source field empty — fallback setting LinkedIn for label=${label}`);
+    } else if (isDemographicOrEeoField(fieldId, name, label)) {
+      const fieldOptions = (field as any).options || [];
+      const fallback = resolveEeoFallbackOption(fieldOptions);
+      if (fallback) {
+        val = fallback;
+        log.info(`[FormFiller] EEO field "${label}" defaulted to "${fallback}" — no candidate value`);
+      }
+    }
+  }
+
+  if (val.toLowerCase() === 'unresolved' && isDemographicOrEeoField(fieldId, name, label)) {
+    const fieldOptions = (field as any).options || [];
+    const fallback = resolveEeoFallbackOption(fieldOptions);
+    if (fallback) {
+      val = fallback;
+      log.info(`[FormFiller] EEO field "${label}" defaulted to "${fallback}" — candidate value was unresolved`);
     }
   }
 
@@ -983,6 +1159,45 @@ export async function fillSingleField(
         }
       }
 
+      // Check for choice question rendered as checkbox inputs in the DOM (e.g. name="question_123[]")
+      const checkboxGroup = page.locator(
+        `input[type="checkbox"][name="${escapeAttr(name)}"], input[type="checkbox"][name="${escapeAttr(fieldId)}[]"], input[type="checkbox"][name*="${escapeAttr(fieldId)}"]`
+      );
+      const cbCount = await checkboxGroup.count().catch(() => 0);
+      if (cbCount > 0) {
+        let cbChecked = false;
+        let checkedSelectorUsed = '';
+        for (let c = 0; c < cbCount; c++) {
+          const cb = checkboxGroup.nth(c);
+          const cbId = (await cb.getAttribute('id').catch(() => '')) || '';
+          let cbText = '';
+          if (cbId) {
+            const lLoc = page.locator(`label[for="${escapeId(cbId)}"]`).first();
+            if ((await lLoc.count()) > 0) cbText = (await lLoc.innerText().catch(() => '')) || '';
+          }
+          if (!cbText) {
+            const parentL = cb.locator('..').first();
+            if ((await parentL.count()) > 0) cbText = (await parentL.innerText().catch(() => '')) || '';
+          }
+          if (cbText && (cbText.trim().toLowerCase() === selectValue.trim().toLowerCase() || choiceOptionTextMatches(cbText, selectValue))) {
+            checkedSelectorUsed = cbId ? `#${cbId}` : `input[name="${name}"]`;
+            await cb.scrollIntoViewIfNeeded().catch(() => {});
+            await cb.check({ force: true, timeout: 3000 }).catch(async () => {
+              await cb.click({ force: true });
+            });
+            cbChecked = true;
+            break;
+          }
+        }
+        if (cbChecked) {
+          fillResult.success = true;
+          log.info(
+            `[Submitter] Checkbox option field "${fieldId}" → selector: ${checkedSelectorUsed} → value: ${selectValue} → checked ✅`
+          );
+          return fillResult;
+        }
+      }
+
       const selectSelectors = [
         (field as any).metadata?.selector,
         ...(isCountryCode ? [
@@ -1168,18 +1383,22 @@ export async function fillSingleField(
             } catch {}
           }
 
-          // Fallback standard options matching
+          // Fallback standard options matching via matchDropdownOption
           if (!selected) {
-            // 1. Try exact label match
-            for (const attempt of selectOptionValues) {
-              try {
-                await found.locator.selectOption({ label: attempt }, { force: true, timeout: 2000 });
-                selected = true;
-                break;
-              } catch {}
-            }
+            try {
+              const optionsList = await found.locator.locator('option').allInnerTexts();
+              const cleanedOptions = optionsList.map((o) => o.trim()).filter(Boolean);
+              for (const attempt of selectOptionValues) {
+                const match = matchDropdownOption(cleanedOptions, attempt);
+                if (match.matchedOption) {
+                  await found.locator.selectOption({ label: match.matchedOption }, { force: true, timeout: 2000 });
+                  selected = true;
+                  break;
+                }
+              }
+            } catch {}
 
-            // 2. Try value match
+            // Try value match if label did not match
             if (!selected) {
               for (const attempt of selectOptionValues) {
                 try {
@@ -1188,24 +1407,6 @@ export async function fillSingleField(
                   break;
                 } catch {}
               }
-            }
-
-            // 3. Try fuzzy/case-insensitive option match
-            if (!selected) {
-              try {
-                const optionsList = await found.locator.locator('option').allInnerTexts();
-                const matchedOpt = optionsList.find((opt) => {
-                  const o = opt.toLowerCase().trim();
-                  return selectOptionValues.some((attempt) => {
-                    const lowerVal = attempt.toLowerCase().trim();
-                    return o === lowerVal || o.startsWith(lowerVal) || o.includes(lowerVal) || lowerVal.includes(o);
-                  });
-                });
-                if (matchedOpt) {
-                  await found.locator.selectOption({ label: matchedOpt.trim() }, { force: true, timeout: 2000 });
-                  selected = true;
-                }
-              } catch {}
             }
           }
 
@@ -1590,9 +1791,20 @@ export async function fillSingleField(
           // Element was misclassified as text but is actually a native select
           let selected = false;
           try {
-            await found.locator.selectOption({ label: val }, { force: true, timeout: 2000 });
-            selected = true;
+            const optionsList = await found.locator.locator('option').allInnerTexts();
+            const cleanedOptions = optionsList.map((o) => o.trim()).filter(Boolean);
+            const match = matchDropdownOption(cleanedOptions, val);
+            if (match.matchedOption) {
+              await found.locator.selectOption({ label: match.matchedOption }, { force: true, timeout: 2000 });
+              selected = true;
+            }
           } catch {}
+          if (!selected) {
+            try {
+              await found.locator.selectOption({ label: val }, { force: true, timeout: 2000 });
+              selected = true;
+            } catch {}
+          }
           if (!selected) {
             try {
               await found.locator.selectOption({ value: val }, { force: true, timeout: 2000 });
@@ -1677,7 +1889,43 @@ export async function fillSingleField(
                 return false;
               }, targetCountryCode).catch(() => {});
 
-              // 2. Try UI dropdown interaction if flag/country is visible
+              // 2. Modern Greenhouse React-Select or native #country dropdown
+              const countryDrop = page.locator('#country, input#country, select#country, select[name="country"]').first();
+              if ((await countryDrop.count()) > 0 && (await countryDrop.isVisible())) {
+                const tagName = await countryDrop.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'INPUT');
+                if (tagName === 'SELECT') {
+                  const opts = await countryDrop.locator('option').allInnerTexts().catch(() => []);
+                  const matchOpt = opts.find((o) => o.includes(targetCountry) || o.includes(targetDial));
+                  if (matchOpt) {
+                    await countryDrop.selectOption({ label: matchOpt.trim() }, { force: true }).catch(() => {});
+                    log.info(
+                      `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
+                    );
+                  }
+                } else {
+                  // Explicitly click and select option to trigger React selection state
+                  await countryDrop.scrollIntoViewIfNeeded().catch(() => {});
+                  await countryDrop.click({ force: true }).catch(() => {});
+                  await page.waitForTimeout(150);
+                  await countryDrop.pressSequentially(targetCountry, { delay: 35 });
+                  await page.waitForTimeout(300);
+                  const opt = page.locator('.select__option, [id*="-option"], [role="option"]').filter({
+                    hasText: new RegExp(`(?:${targetCountry}|\\${targetDial})`, 'i'),
+                  }).first();
+                  if ((await opt.count()) > 0) {
+                    await opt.scrollIntoViewIfNeeded().catch(() => {});
+                    await opt.click({ force: true, timeout: 2000 }).catch(() => {});
+                    log.info(
+                      `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
+                    );
+                  } else {
+                    await page.keyboard.press('Enter').catch(() => {});
+                    await page.keyboard.press('Tab').catch(() => {});
+                  }
+                }
+              }
+
+              // 3. Try UI dropdown interaction if flag/country is visible in classic intl-tel-input
               const itiContainer = found.locator.locator('xpath=ancestor::*[contains(@class, "iti")][1]');
               const flagBtn = (await itiContainer.count()) > 0
                 ? itiContainer.locator('.iti__selected-country, .iti__selected-flag, .iti__flag-container [role="combobox"]').first()
@@ -1711,51 +1959,6 @@ export async function fillSingleField(
                   }
                 }
               }
-
-              // 3. Also check for adjacent modern Greenhouse React-Select or native #country dropdown
-              const countryDrop = page.locator('#country, input#country, select#country, select[name="country"]').first();
-              if ((await countryDrop.count()) > 0 && (await countryDrop.isVisible())) {
-                const isSelected = await countryDrop.evaluate((el: HTMLElement) => {
-                  if (el.tagName === 'SELECT') return (el as HTMLSelectElement).selectedIndex > 0;
-                  const container = el.closest('.select__control, .select-shell');
-                  const singleVal = container?.querySelector('.select__single-value');
-                  return Boolean(singleVal && singleVal.textContent?.trim());
-                }).catch(() => false);
-
-                if (!isSelected) {
-                  log.info(`[Form Filler] 📞 Setting phone country dropdown to United States (+1)`);
-                  const tagName = await countryDrop.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => 'INPUT');
-                  if (tagName === 'SELECT') {
-                    const opts = await countryDrop.locator('option').allInnerTexts().catch(() => []);
-                    const matchOpt = opts.find((o) => o.includes(targetCountry) || o.includes(targetDial));
-                    if (matchOpt) {
-                      await countryDrop.selectOption({ label: matchOpt.trim() }, { force: true }).catch(() => {});
-                      log.info(
-                        `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
-                      );
-                    }
-                  } else {
-                    await countryDrop.scrollIntoViewIfNeeded().catch(() => {});
-                    await countryDrop.click({ force: true }).catch(() => {});
-                    await page.waitForTimeout(150);
-                    await countryDrop.pressSequentially(targetCountry, { delay: 35 });
-                    await page.waitForTimeout(300);
-                    const opt = page.locator('.select__option, [id*="-option"], [role="option"]').filter({
-                      hasText: new RegExp(`(?:${targetCountry}|\\${targetDial})`, 'i'),
-                    }).first();
-                    if ((await opt.count()) > 0) {
-                      await opt.scrollIntoViewIfNeeded().catch(() => {});
-                      await opt.click({ force: true, timeout: 2000 }).catch(() => {});
-                      log.info(
-                        `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
-                      );
-                    } else {
-                      await page.keyboard.press('Enter').catch(() => {});
-                      await page.keyboard.press('Tab').catch(() => {});
-                    }
-                  }
-                }
-              }
             } catch (itiErr: any) {
               log.warn(`[Form Filler] ⚠️ intl-tel-input notice: ${itiErr.message}`);
             }
@@ -1778,10 +1981,36 @@ export async function fillSingleField(
         `[Submitter] Sponsorship field → selector: ${fieldId} → attempted click: Yes → result: NOT SELECTED`
       );
     }
-    log.warn(`[Form Filler] ⚠️ Could not populate field "${label}" (${name}): ${fieldErr.message}`);
   }
 
   return fillResult;
+}
+
+function isExplicitEducationField(field: ResolvedField | ScannedField): boolean {
+  const normId = (field.fieldId || '').toLowerCase();
+  const normName = (field.name || '').toLowerCase();
+  const normLabel = (field.label || '').toLowerCase();
+  return (
+    /^(school|degree|discipline|start_date|end_date)--\d+/i.test(normId) ||
+    /^(school|degree|discipline|start_date|end_date)--\d+/i.test(normName) ||
+    /\beducation_attributes\b/i.test(normName) ||
+    (/\b(school|degree|discipline)\b/i.test(normLabel) && /--\d+/.test(`${normId} ${normName}`))
+  );
+}
+
+async function isEducationSectionRequiredOnDom(page: Page): Promise<boolean> {
+  const schoolLabel = page.locator('#school--0-label, label[for="school--0"]').first();
+  if ((await schoolLabel.count()) > 0) {
+    const text = (await schoolLabel.innerText().catch(() => '')).trim();
+    if (text.includes('*')) return true;
+  }
+  const schoolInput = page.locator('#school--0').first();
+  if ((await schoolInput.count()) > 0) {
+    const ariaReq = await schoolInput.getAttribute('aria-required').catch(() => null);
+    const req = await schoolInput.getAttribute('required').catch(() => null);
+    if (ariaReq === 'true' || req !== null) return true;
+  }
+  return false;
 }
 
 /**
@@ -1837,11 +2066,26 @@ export async function fillForm(
       log.warn('[Form Filler] ⚠️ Form element not found immediately, proceeding with page-wide selectors.');
     });
 
+    // Check explicit education section requirement
+    const isEducationRequired = await isEducationSectionRequiredOnDom(page);
+    const educationFields = fields.filter((f) => isExplicitEducationField(f));
+    const hasIncompleteEducation = educationFields.some((f) => !f.value || !f.value.trim());
+
+    let activeFields = fields;
+    if (!isEducationRequired && hasIncompleteEducation && educationFields.length > 0) {
+      log.info(
+        `[Form Filler] 🎓 Explicit Education section is optional on DOM and candidate lacks complete education answers; leaving entire education section untouched to prevent required field cascade.`
+      );
+      activeFields = fields.filter((f) => !isExplicitEducationField(f));
+    } else if (isEducationRequired) {
+      activeFields = applyEducationDegreeFallback(activeFields, true);
+    }
+
     // 2. Populate initial queue of resolved fields
-    for (let i = 0; i < fields.length; i++) {
-      const field = isConsentSmsMarketingField(fields[i].label || '')
-        ? applyConsentSmsMarketingNo(fields[i])
-        : fields[i];
+    for (let i = 0; i < activeFields.length; i++) {
+      const field = isConsentSmsMarketingField(activeFields[i].label || '')
+        ? applyConsentSmsMarketingNo(activeFields[i])
+        : activeFields[i];
       const fillRes = await fillSingleField(
         page,
         field,

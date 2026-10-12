@@ -34,14 +34,15 @@ export async function resolveBatchLlmFields(
 ): Promise<BatchResolvedGroup[]> {
   return Promise.all(
     groups.map(async (group) => {
-      const answers = await synthesizer.synthesizeBatchAnswers(
+      const batchResult = await synthesizer.synthesizeBatchAnswers(
         group.fields,
         group.resumeText ?? '',
         group.jobDescription ?? ''
       );
+      const answers = batchResult.answers;
       const fields = group.fields.map((field, index) => ({
         ...field,
-        value: answers[index],
+        value: answers[index] || '',
         source: 'ai' as const,
         confidence: 0.85 as const,
       }));

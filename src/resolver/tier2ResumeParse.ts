@@ -189,6 +189,15 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
     const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
     if (stat.size > MAX_PDF_SIZE_BYTES) {
       log.warn(`[Tier 2] PDF exceeds 5MB limit (${stat.size} bytes) for ${applywizzId} — skipping parse`);
+      const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+      await emitFailureDiagnostic({
+        category: 'RESOLVE_TIER2_PARSE',
+        stage: 'resume_parse',
+        reason: `File size exceeds 5MB limit (${stat.size} bytes)`,
+        applywizzId,
+        isTerminal: false,
+        isRetryable: false,
+      }).catch(() => {});
       return {
         applywizz_id: applywizzId,
         raw_text: '',
@@ -238,6 +247,16 @@ export async function getOrParseResume(applywizzId: string): Promise<ResumeParse
     return record;
   } catch (err: any) {
     log.warn(`[Tier 2] PDF parse failed for ${applywizzId}: ${err.message}`);
+    const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+    await emitFailureDiagnostic({
+      category: 'RESOLVE_TIER2_PARSE',
+      stage: 'resume_parse',
+      reason: err?.message || 'Resume PDF parsing failed',
+      error: err,
+      applywizzId,
+      isTerminal: false,
+      isRetryable: true,
+    }).catch(() => {});
     return null;
   } finally {
     if (tempPath) {

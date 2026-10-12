@@ -4,12 +4,14 @@
 
 import axios from 'axios';
 import { LRUCache } from 'lru-cache';
+import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import config from '../config/env.js';
 import { supabase } from '../db/client.js';
 import type { ProfileRow } from '../db/profiles.js';
 import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { getProfileFacts, type ProfileFact } from './profileFacts.js';
+import { getBedrockClient, isBedrockConfigured } from '../services/bedrockClient.js';
 
 const log = createLogger('Semantic');
 
@@ -23,14 +25,17 @@ let semanticWarnLogged = false;
  */
 export function isSemanticEnabled(): boolean {
   const apiKey = config.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    if (!semanticWarnLogged) {
-      semanticWarnLogged = true;
-      log.warn('[Semantic] OPENROUTER_API_KEY not set — semantic search disabled');
-    }
-    return false;
+  if (apiKey) {
+    return true;
   }
-  return true;
+  if (isBedrockConfigured()) {
+    return true;
+  }
+  if (!semanticWarnLogged) {
+    semanticWarnLogged = true;
+    log.warn('[Semantic] OPENROUTER_API_KEY not configured — semantic search disabled');
+  }
+  return false;
 }
 
 let lastSemanticScore = 0;
@@ -83,7 +88,7 @@ export function bestSemanticProfileFact(
 }
 
 /**
- * Generates text embeddings using OpenRouter API (text-embedding-3-small) with in-memory caching.
+ * Generates text embeddings using OpenRouter API (text-embedding-3-small, 1536 dims) with in-memory caching.
  *
  * @param text - Input text to embed.
  * @returns 1536-dimensional embedding array, or null on error.
@@ -104,46 +109,104 @@ async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
   if (missingIndices.length === 0 || !isSemanticEnabled()) return result;
 
   const apiKey = config.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
-  for (let start = 0; start < missingIndices.length; start += 64) {
-    const indices = missingIndices.slice(start, start + 64);
-    try {
-      const response = await axios.post(
-        'https://openrouter.ai/api/v1/embeddings',
-        {
-          model: 'text-embedding-3-small',
-          input: indices.map((index) => cleanTexts[index]),
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
-            'X-Title': 'Greenhouse Automation Operator',
-          },
-          timeout: 10000,
-        }
-      );
 
-      const embeddings = Array.isArray(response.data?.data)
-        ? response.data.data
-        : response.data?.embedding
-          ? [{ index: 0, embedding: response.data.embedding }]
-          : [];
-      for (let position = 0; position < indices.length; position++) {
-        const item = embeddings.find((candidate: { index?: number }) =>
-          candidate.index === position
-        ) || embeddings[position];
-        const embedding = item?.embedding;
-        if (Array.isArray(embedding) && embedding.length > 0) {
-          const index = indices[position];
-          result[index] = embedding;
-          embeddingCache.set(cleanTexts[index], embedding);
+  // 1. Primary: OpenRouter text-embedding-3-small (1536 dimensions)
+  if (apiKey) {
+    for (let start = 0; start < missingIndices.length; start += 64) {
+      const indices = missingIndices.slice(start, start + 64);
+      try {
+        const response = await axios.post(
+          'https://openrouter.ai/api/v1/embeddings',
+          {
+            model: 'text-embedding-3-small',
+            input: indices.map((index) => cleanTexts[index]),
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
+              'X-Title': 'Greenhouse Automation Operator',
+            },
+            timeout: 10000,
+          }
+        );
+
+        const embeddings = Array.isArray(response.data?.data)
+          ? response.data.data
+          : response.data?.embedding
+            ? [{ index: 0, embedding: response.data.embedding }]
+            : [];
+        for (let position = 0; position < indices.length; position++) {
+          const item = embeddings.find((candidate: { index?: number }) =>
+            candidate.index === position
+          ) || embeddings[position];
+          const embedding = item?.embedding;
+          if (Array.isArray(embedding) && embedding.length > 0) {
+            const index = indices[position];
+            result[index] = embedding;
+            embeddingCache.set(cleanTexts[index], embedding);
+          }
         }
+      } catch (err: any) {
+        const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+        await emitFailureDiagnostic({
+          category: 'RESOLVE_TIER3_EMBEDDING',
+          stage: 'embedding_generation',
+          reason: err?.message || 'OpenRouter text-embedding-3-small request failed',
+          error: err,
+          isTerminal: false,
+          isRetryable: true,
+        }).catch(() => {});
+        continue;
       }
-    } catch {
-      continue;
     }
+    return result;
   }
+
+  // 2. Fallback: Bedrock Titan Text Embeddings V2
+  if (isBedrockConfigured()) {
+    const client = getBedrockClient();
+    const modelId = config.BEDROCK_EMBEDDING_MODEL_ID || 'amazon.titan-embed-text-v2:0';
+
+    for (const index of missingIndices) {
+      const textToEmbed = cleanTexts[index];
+      try {
+        const payload = {
+          inputText: textToEmbed,
+          dimensions: 1024,
+          normalize: true,
+        };
+        const command = new InvokeModelCommand({
+          modelId,
+          contentType: 'application/json',
+          accept: 'application/json',
+          body: JSON.stringify(payload),
+        });
+
+        const response = await client.send(command);
+        const rawBody = new TextDecoder().decode(response.body);
+        const parsed = JSON.parse(rawBody);
+
+        if (Array.isArray(parsed?.embedding) && parsed.embedding.length > 0) {
+          result[index] = parsed.embedding;
+          embeddingCache.set(textToEmbed, parsed.embedding);
+        }
+      } catch (err: any) {
+        const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+        await emitFailureDiagnostic({
+          category: 'RESOLVE_TIER3_EMBEDDING',
+          stage: 'embedding_generation_bedrock',
+          reason: err?.message || 'Bedrock Titan Embeddings V2 request failed',
+          error: err,
+          isTerminal: false,
+          isRetryable: true,
+        }).catch(() => {});
+      }
+    }
+    return result;
+  }
+
   return result;
 }
 
@@ -209,6 +272,16 @@ export async function findSemanticMatch(
     });
 
     if (error) {
+      const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+      await emitFailureDiagnostic({
+        category: 'RESOLVE_TIER3_VECTOR_SEARCH',
+        stage: 'vector_search',
+        reason: `pgvector match_candidate_qa RPC error: ${error.message}`,
+        error,
+        applywizzId,
+        isTerminal: false,
+        isRetryable: true,
+      }).catch(() => {});
       return null;
     }
 
@@ -240,7 +313,17 @@ export async function findSemanticMatch(
     }
 
     return null;
-  } catch {
+  } catch (err: any) {
+    const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+    await emitFailureDiagnostic({
+      category: 'RESOLVE_TIER3_VECTOR_SEARCH',
+      stage: 'vector_search',
+      reason: `pgvector match_candidate_qa search exception: ${err?.message || String(err)}`,
+      error: err,
+      applywizzId,
+      isTerminal: false,
+      isRetryable: true,
+    }).catch(() => {});
     return null;
   }
 }

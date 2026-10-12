@@ -90,11 +90,12 @@ function incrementMetric(counts: ApplicationStatsCounts, metric: ApplicationStat
 
 export function statusMetricsForTransition(status: string): ApplicationStatsMetric[] {
   const metrics: ApplicationStatsMetric[] = [];
-  if (status !== 'READY_FOR_REVIEW' && status !== 'SKIPPED') metrics.push('submitted');
+  if (status !== 'READY_FOR_REVIEW' && status !== 'SKIPPED' && status !== 'FILTERED_OUT') metrics.push('submitted');
   if (status === 'APPLIED' || status === 'EMAIL_PROOF_PENDING') metrics.push('applied');
   if (status === 'FAILED') metrics.push('failed');
   return metrics;
 }
+
 
 export function summarizeApplicationStatRows(rows: StatDayRow[]): {
   counts: ApplicationStatsCounts;

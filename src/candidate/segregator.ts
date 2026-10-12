@@ -475,7 +475,7 @@ export async function segregateCandidatesByApplyWizzId(
 
     await Promise.all(workers);
 
-    if (process.env.SANDBOX !== 'true' && syncedProfiles.size > 0) {
+    if (syncedProfiles.size > 0) {
       const zohoResult = await checkZohoConnectionForProfiles(Array.from(syncedProfiles.values()));
       const connectedCount = Array.from(zohoResult.connectedByApplywizzId.values()).filter(Boolean).length;
       let disconnectedCount = 0;

@@ -252,7 +252,7 @@ applicationsRouter.patch('/:id/fields/:fieldId', async (req: Request, res: Respo
 
 /**
  * PATCH /api/applications/:id/status
- * Updates application status (APPLYING, APPLIED, FAILED, CAPTCHA_REQUIRED, QUEUED, etc.)
+ * Updates application status (APPLYING, APPLIED, FAILED, OTP_REQUIRED, QUEUED, etc.)
  * and immediately persists to Supabase.
  */
 applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Promise<void> => {
@@ -689,7 +689,8 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let applications: any[] = [];
     if (isSupabaseConfigured()) {
       const supabase = getDbClient();
-      let query = supabase.from('gh_candidate_applications').select('*');
+      let query = supabase.from('gh_candidate_applications').select('*').neq('status', 'FILTERED_OUT');
+
       if (applywizzId) {
         query = query.eq('applywizz_id', applywizzId);
       } else if (allowedIds) {
