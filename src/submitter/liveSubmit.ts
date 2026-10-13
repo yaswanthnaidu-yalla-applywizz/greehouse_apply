@@ -31,6 +31,7 @@ import {
   registerSubmissionSession,
   verifySubmissionSignals,
   closeSubmissionSession,
+  OTP_SESSION_TTL_MS,
 } from './otpSession.js';
 
 export { verifySubmissionSignals };
@@ -152,7 +153,7 @@ export interface PausedSession {
   boxSelectors?: string[];
   /** Whether a success or failure screenshot was already captured before closing */
   screenshotCaptured?: boolean;
-  /** 5-minute auto-close timer handle to prevent leaking browser processes */
+  /** Auto-close timer handle for the paused OTP session */
   ttlTimer?: NodeJS.Timeout;
 }
 
@@ -237,10 +238,10 @@ export function storePausedSession(
 
   const ttlTimer = setTimeout(async () => {
     log.warn(
-      `[Live Submit] ⏰ Paused OTP session ${canonicalKey} timed out after 5m. Closing browser context...`
+      `[Live Submit] ⏰ Paused OTP session ${canonicalKey} timed out after ${OTP_SESSION_TTL_MS / 60000}m. Closing browser context...`
     );
     await clearPausedSession(canonicalKey);
-  }, 5 * 60 * 1000);
+  }, OTP_SESSION_TTL_MS);
 
   if (ttlTimer.unref) {
     ttlTimer.unref();
