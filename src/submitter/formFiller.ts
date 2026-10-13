@@ -652,6 +652,16 @@ async function fillSearchableSelectInput(
   return selected;
 }
 
+export function sanitizePhoneNumberForSubmission(phone: string): string {
+  if (!phone) return phone;
+  const digits = phone.replace(/\D/g, '');
+  // Only strip US prefix (+1 / 1) if there are 11 or more digits, so at least 10 digits remain
+  if (digits.length >= 11 && (phone.trim().startsWith('+1') || phone.trim().startsWith('1'))) {
+    return phone.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
+  }
+  return phone.replace(/^\+/, '').replace(/\s+/g, ' ').trim();
+}
+
 function normalizeBooleanValue(value: string): 'Yes' | 'No' | null {
   const normalized = value.trim().toLowerCase();
   if (['yes', 'y', 'true', '1', 'agree', 'checked'].includes(normalized)) return 'Yes';
@@ -996,9 +1006,9 @@ export async function fillSingleField(
     return fillResult;
   }
 
-  // Strip +1 country code prefix from phone numbers
+  // Strip +1 country code prefix from US phone numbers when safe
   if (fieldId === 'phone' || name === 'phone' || /phone/i.test(label)) {
-    val = val.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
+    val = sanitizePhoneNumberForSubmission(val);
     fillResult.valuePopulated = val;
   }
 
