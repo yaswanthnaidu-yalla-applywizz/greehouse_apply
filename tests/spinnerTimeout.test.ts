@@ -7,6 +7,11 @@ import {
   verifySubmissionSignals,
 } from '../src/submitter/otpSession.js';
 import { OTP_CHALLENGE_TIMEOUT_MS } from '../src/services/otpResolutionService.js';
+import {
+  PAUSED_SESSIONS,
+  clearPausedSession,
+  storePausedSession,
+} from '../src/submitter/liveSubmit.js';
 
 describe('Spinner-Aware Submission Confirmation (Phase 4)', () => {
   it('extends base timeout to 75s and spinner ceiling to 90s', () => {
@@ -16,6 +21,38 @@ describe('Spinner-Aware Submission Confirmation (Phase 4)', () => {
 
   it('keeps a paused OTP session alive through the challenge and confirmation window', () => {
     expect(OTP_SESSION_TTL_MS).toBe(OTP_CHALLENGE_TIMEOUT_MS + 90000);
+  });
+
+  it('does not close a paused session before the shared OTP session TTL', async () => {
+    const applicationId = 'otp-session-ttl-test';
+    const page = {
+      isClosed: () => false,
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const browser = {
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    vi.useFakeTimers();
+    storePausedSession(applicationId, {
+      browser: browser as any,
+      page: page as any,
+      applicationId,
+      screenshotCaptured: true,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      expect(PAUSED_SESSIONS.has(applicationId)).toBe(true);
+      expect(page.close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(OTP_SESSION_TTL_MS - 5 * 60 * 1000);
+      expect(PAUSED_SESSIONS.has(applicationId)).toBe(false);
+      expect(page.close).toHaveBeenCalledOnce();
+    } finally {
+      await clearPausedSession(applicationId, { captureFailureProof: false });
+      vi.useRealTimers();
+    }
   });
 
   it('spinner detection handles missing submit button without throwing', async () => {
