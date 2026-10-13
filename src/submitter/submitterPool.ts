@@ -10,6 +10,7 @@ import {
   getNextQueuedApplicationForRoundRobin,
   logQueueStatusChange,
   recoverStaleApplyingApplications,
+  requeueApplicationForRetry,
   updateStatus,
   type ApplicationRow,
 } from '../db/applications.js';
@@ -21,6 +22,8 @@ import {
   QuestionLimitExceededError,
 } from '../submission/questionLimit.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
+import { config } from '../config/env.js';
+import { browserManager } from './browserManager.js';
 
 const log = createLogger('Submitter Pool');
 
@@ -55,8 +58,8 @@ export class SubmitterPool {
     this.pollIntervalMs = options.pollIntervalMs ?? 2000;
     this.dequeueFn = options.dequeueFn ?? getNextQueuedApplicationForRoundRobin;
     this.updateStatusFn = options.updateStatusFn ?? updateStatus;
-    const poolSize = parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10);
-    this.poolSize = Number.isInteger(poolSize) && poolSize > 0 ? poolSize : 3;
+    const poolSize = parseInt(config.SUBMISSION_POOL_SIZE ?? '3', 10);
+    this.poolSize = Number.isInteger(poolSize) && poolSize > 0 ? Math.min(poolSize, 6) : 3;
     this.lanes = Array.from({ length: this.poolSize }, () => []);
     this.workerBusy = Array.from({ length: this.poolSize }, () => false);
   }
@@ -65,6 +68,7 @@ export class SubmitterPool {
     if (!isSupabaseConfigured()) return;
     try {
       const snap = this.getSnapshot();
+      const browserStats = browserManager.getStats();
       const payload = {
         service_name: 'submitter_pool',
         status: statusOverride ?? (snap.running ? 'running' : 'stopped'),
@@ -73,6 +77,9 @@ export class SubmitterPool {
         in_flight_count: snap.inFlightCount,
         in_flight_ids: snap.inFlightIds,
         lane_lengths: snap.laneLengths,
+        browser_active_count: browserStats.activeCount,
+        browser_waiting_count: browserStats.waitingCount,
+        browser_max_count: browserStats.maxBrowsers,
         updated_at: new Date().toISOString(),
       };
       await getDbClient()
@@ -343,26 +350,31 @@ export class SubmitterPool {
           );
         } else if (result.status === 'FAILED') {
           const failureMessage = result.errorMessage || 'Submission execution failed.';
-          await updateStatus(applicationId, 'RETRY', {
-            error_message: failureMessage,
-            job_url: application.job_url,
-          });
-          await logQueueStatusChange(applicationId, 'APPLYING', 'RETRY');
+          const retryOutcome = await requeueApplicationForRetry(
+            applicationId,
+            failureMessage,
+            application.job_url
+          );
+          const finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
+          await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
           this.emitFailure(application, failureMessage, result);
         } else if (result.status === 'QUEUED') {
           await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        let finalStatus = 'FAILED';
         try {
-          await updateStatus(applicationId, 'RETRY', {
-            error_message: message,
-            job_url: application.job_url,
-          });
+          const retryOutcome = await requeueApplicationForRetry(
+            applicationId,
+            message,
+            application.job_url
+          );
+          finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
         } catch (statusError) {
-          log.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
+          log.error(`[Submitter] Worker ${workerNumber} retry requeue failed: ${(statusError as Error).message}`);
         }
-        await logQueueStatusChange(applicationId, 'APPLYING', 'RETRY');
+        await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
         this.emitFailure(application, message);
         work.reject(error instanceof Error ? error : new Error(message));
       } finally {

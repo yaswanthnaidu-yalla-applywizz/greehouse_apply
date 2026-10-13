@@ -19,6 +19,7 @@ if (typeof globalThis.WebSocket === 'undefined') {
 }
 
 import { setupProcessCrashGuard, sweepStaleApplications } from './crashGuard.js';
+import { browserManager } from '../submitter/browserManager.js';
 // Install top-level process crash guards immediately before any server bootstrap code
 setupProcessCrashGuard();
 
@@ -2285,10 +2286,20 @@ export function startServer(
       log.error(`[Server] Stale sweep on startup failed: ${err instanceof Error ? err.message : String(err)}`);
     });
 
+    // Periodically sweep stale/disconnected browser processes every 60 seconds
+    const browserSweepInterval = setInterval(() => {
+      void browserManager.cleanupStaleBrowsers().catch((err) => {
+        log.warn(`[Server] Browser cleanup sweep warning: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }, 60 * 1000);
+    if (browserSweepInterval.unref) {
+      browserSweepInterval.unref();
+    }
+
     // Launch background round-robin submission worker daemon if enabled (Phase V2-4c)
     let queueDaemon: SubmissionQueueDaemon | null = null;
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
-      const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 2;
+      const concurrency = process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY, 10) : 3;
       log.info(
         `[Queue] ENABLE_QUEUE_WORKER=true — starting SubmissionQueueDaemon (WORKER_CONCURRENCY=${concurrency}, dequeue status=QUEUED)`
       );
@@ -2305,6 +2316,7 @@ export function startServer(
   const cleanup = async () => {
     otpResolutionService.stop();
     await sweepStaleApplications().catch(() => {});
+    await browserManager.closeAll().catch(() => {});
     if (process.env.ENABLE_QUEUE_WORKER === 'true') {
       // Allow in-flight Playwright workers to finish
       log.info('[Server] 🧹 Shutting down background queue daemon...');
