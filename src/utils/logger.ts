@@ -50,7 +50,29 @@ function parseModule(
   return { module: fallback, parts: args };
 }
 
+const LOG_SEVERITY: Record<LogLevel, number> = {
+  DEBUG: 10,
+  INFO: 20,
+  WARN: 30,
+  ERROR: 40,
+  HALT: 50,
+};
+
+export function shouldLogMessage(level: LogLevel, configuredLevel?: LogLevel | string): boolean {
+  if (level === 'WARN' || level === 'ERROR' || level === 'HALT') {
+    return true;
+  }
+  const minLevel = (configuredLevel?.toUpperCase() as LogLevel) || 'INFO';
+  const minSeverity = LOG_SEVERITY[minLevel] ?? LOG_SEVERITY.INFO;
+  const currentSeverity = LOG_SEVERITY[level] ?? LOG_SEVERITY.INFO;
+  return currentSeverity >= minSeverity;
+}
+
 function emit(level: LogLevel, fallbackModule: string, args: unknown[]): void {
+  const configured = process.env.LOG_LEVEL as LogLevel | undefined;
+  if (!shouldLogMessage(level, configured)) {
+    return;
+  }
   const { module, parts } = parseModule(args, fallbackModule);
   const ts = new Date().toISOString();
   const line = `[${ts}] ${padCol(`[${level}]`, LEVEL_COL)}${padCol(`[${module}]`, MODULE_COL)}${parts.map(stringify).join(' ')}`;

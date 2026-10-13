@@ -590,3 +590,6 @@ checkpoint 2026-10-13T09:26:24 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522
 2026-10-13 13:18 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
 checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.1791877152458 status=complete note=" no observations"
 2026-10-13 session-end: Choice option matching & form filling fixes shipped (isSchoolField narrowed, alignResolvedChoice guarded, dash normalization, demographic decline matching); all 4 test suites passed; no new observations
+2026-10-13 13:32 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 session-end: created four evidence-gated implementation plans for OTP timing, retry/confirmation safety, answer mismatches, and browser disconnect diagnostics; no new observations
+2026-10-13 session-end: Signal-to-noise logging optimization shipped (logger level filtering with shouldLogMessage, downgraded per-field and per-selector chatter to debug in worker and ingest pipelines, retained stats, errors, warns); all test suites passed; no new observations

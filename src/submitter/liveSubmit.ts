@@ -1703,9 +1703,9 @@ export async function runLiveSubmit(
       } else if (browser) {
         await browser.close().catch(() => {});
       }
-      log.info(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
+      log.debug(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
     } else {
-      log.info(
+      log.debug(
         `[Live Submit] ⏸️ Browser context kept paused in memory for application ${applicationId}.`
       );
     }

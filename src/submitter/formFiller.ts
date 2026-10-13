@@ -218,7 +218,7 @@ export function matchDropdownOption(
   // Stage 1 — Exact normalized match:
   const stage1Match = options.find((o) => normalizeOptionText(o) === normTarget);
   if (stage1Match !== undefined) {
-    log.info(`[FormFiller] Stage 1 match for "${target}" -> "${stage1Match}"`);
+    log.debug(`[FormFiller] Stage 1 match for "${target}" -> "${stage1Match}"`);
     return { matchedOption: stage1Match, stage: 1 };
   }
 
@@ -229,7 +229,7 @@ export function matchDropdownOption(
     return normOpt.startsWith(normTarget) || normOpt.includes(normTarget);
   });
   if (stage2Match !== undefined) {
-    log.info(`[FormFiller] Stage 2 match for "${target}" -> "${stage2Match}"`);
+    log.debug(`[FormFiller] Stage 2 match for "${target}" -> "${stage2Match}"`);
     return { matchedOption: stage2Match, stage: 2 };
   }
 
@@ -241,7 +241,7 @@ export function matchDropdownOption(
     });
     const results = fuse.search(normTarget);
     if (results.length > 0 && results[0].item !== undefined) {
-      log.info(`[FormFiller] Stage 3 match for "${target}" -> "${results[0].item}"`);
+      log.debug(`[FormFiller] Stage 3 match for "${target}" -> "${results[0].item}"`);
       return { matchedOption: results[0].item, stage: 3 };
     }
   } catch {}
@@ -801,9 +801,9 @@ async function debugDumpPageInputs(page: Page): Promise<void> {
       }))
     )
     .catch(() => [] as Array<{ id: string; role: string; type: string; ariaExpanded: string | null; cls: string }>);
-  log.info(`[Sponsorship DEBUG] ${inputs.length} input elements on page:`);
+  log.debug(`[Sponsorship DEBUG] ${inputs.length} input elements on page:`);
   for (const i of inputs) {
-    log.info(
+    log.debug(
       `  - id=${i.id} role=${i.role} type=${i.type} aria-expanded=${i.ariaExpanded} class=${i.cls}`
     );
   }
@@ -817,7 +817,7 @@ async function debugDumpPageInputs(page: Page): Promise<void> {
 async function debugSponsorshipComboboxSequence(page: Page, answerText: string): Promise<boolean> {
   const comboboxes = page.locator('[role="combobox"]');
   const count = await comboboxes.count().catch(() => 0);
-  log.info(`[Sponsorship DEBUG] Found ${count} [role="combobox"] element(s) on page`);
+  log.debug(`[Sponsorship DEBUG] Found ${count} [role="combobox"] element(s) on page`);
   if (count === 0) return false;
 
   let target = comboboxes.first();
@@ -831,22 +831,22 @@ async function debugSponsorshipComboboxSequence(page: Page, answerText: string):
           return (root?.textContent || '').trim();
         })
         .catch(() => '');
-      log.info(`[Sponsorship DEBUG] combobox[${i}] nearest label text: "${labelText.slice(0, 100)}"`);
+      log.debug(`[Sponsorship DEBUG] combobox[${i}] nearest label text: "${labelText.slice(0, 100)}"`);
       if (/sponsor/i.test(labelText)) {
         target = cb;
-        log.info(`[Sponsorship DEBUG] → selected combobox[${i}] (label contains "sponsor")`);
+        log.debug(`[Sponsorship DEBUG] → selected combobox[${i}] (label contains "sponsor")`);
         break;
       }
     }
   }
 
   const targetId = await target.getAttribute('id').catch(() => null);
-  log.info(`[Sponsorship DEBUG] Attempting sequence on combobox id=${targetId ?? '(none)'}`);
+  log.debug(`[Sponsorship DEBUG] Attempting sequence on combobox id=${targetId ?? '(none)'}`);
   await target.click({ timeout: 3000 }).catch((e) => {
-    log.info(`[Sponsorship DEBUG] click failed: ${e.message}`);
+    log.debug(`[Sponsorship DEBUG] click failed: ${e.message}`);
   });
   await target.pressSequentially(answerText, { delay: 40 }).catch((e) => {
-    log.info(`[Sponsorship DEBUG] type failed: ${e.message}`);
+    log.debug(`[Sponsorship DEBUG] type failed: ${e.message}`);
   });
 
   const option = page
@@ -856,14 +856,14 @@ async function debugSponsorshipComboboxSequence(page: Page, answerText: string):
     await option.waitFor({ state: 'visible', timeout: 4000 });
   } catch {
     const visibleOptions = await page.locator('[role="option"]').allInnerTexts().catch(() => []);
-    log.info(
+    log.debug(
       `[Sponsorship DEBUG] No [role="option"] matching "${answerText}" appeared; options seen: ${JSON.stringify(visibleOptions)}`
     );
     return false;
   }
   const optText = (await option.innerText().catch(() => '')).trim();
   await option.click({ timeout: 3000 });
-  log.info(`[Sponsorship DEBUG] Clicked option "${optText}" ✅`);
+  log.debug(`[Sponsorship DEBUG] Clicked option "${optText}" ✅`);
   return true;
 }
 
@@ -1428,15 +1428,15 @@ export async function fillSingleField(
           if (selected) {
             fillResult.success = true;
             if (isCountryCode) {
-              log.info(
+              log.debug(
                 `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
               );
             } else if (isSponsorship) {
-              log.info(
+              log.debug(
                 `[Submitter] Sponsorship field → selector: ${found.selector} → attempted click: Yes → result: selected`
               );
             } else if (booleanValue) {
-              log.info(
+              log.debug(
                 `[Submitter] Boolean field "${fieldId}" → selector: ${found.selector} → value: ${booleanValue} → selected ✅`
               );
             }
@@ -1446,7 +1446,7 @@ export async function fillSingleField(
         }
       } else {
         if (isSponsorship) {
-          log.info(`[Sponsorship DEBUG] No selector matched — trying [role="combobox"] sequence directly`);
+          log.debug(`[Sponsorship DEBUG] No selector matched — trying [role="combobox"] sequence directly`);
           const debugFilled = await debugSponsorshipComboboxSequence(page, selectValue);
           if (debugFilled) {
             fillResult.success = true;
@@ -1551,7 +1551,7 @@ export async function fillSingleField(
             if (isSponsorship) {
               await radio.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
               await radio.click({ force: true, timeout: 3000 });
-              log.info(
+              log.debug(
                 `[Submitter] Sponsorship field → selector: ${optionSelector} → attempted click: Yes → result: selected`
               );
             } else if (booleanValue) {
@@ -1576,7 +1576,7 @@ export async function fillSingleField(
           if (isSponsorship) {
             await labelLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
             await labelLoc.click({ force: true });
-            log.info(
+            log.debug(
               `[Submitter] Sponsorship field → selector: label:has-text("Yes") → attempted click: Yes → result: selected`
             );
           } else if (booleanValue) {
@@ -1592,7 +1592,7 @@ export async function fillSingleField(
         fillResult.success = true;
       } else {
         if (isSponsorship) {
-          log.info(
+          log.debug(
             `[Submitter] Sponsorship field → selector: input[type="radio"][name="${escapeAttr(name)}"] → attempted click: Yes → result: NOT SELECTED`
           );
         }
@@ -1618,14 +1618,14 @@ export async function fillSingleField(
         const found = await findElementLocator(page, checkboxSelectors, timeoutMs);
         if (found) {
           const checkboxSelector = found.selector || checkboxSelectors[0];
-          log.info(
+          log.debug(
             `[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → value: Yes`
           );
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
           await found.locator.check({ force: true, timeout: 3000 }).catch(async () => {
             await clickBooleanOption(found.locator, fieldId, checkboxSelector, 'Yes');
           });
-          log.info(`[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → clicked ✅`);
+          log.debug(`[Submitter] Boolean field "${fieldId}" → selector: ${checkboxSelector} → clicked ✅`);
           fillResult.success = true;
         } else {
           const labelLoc = page.locator(`label:has-text("${label}")`).first();
@@ -1905,7 +1905,7 @@ export async function fillSingleField(
                   const matchOpt = opts.find((o) => o.includes(targetCountry) || o.includes(targetDial));
                   if (matchOpt) {
                     await countryDrop.selectOption({ label: matchOpt.trim() }, { force: true }).catch(() => {});
-                    log.info(
+                    log.debug(
                       `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
                     );
                   }
@@ -1922,7 +1922,7 @@ export async function fillSingleField(
                   if ((await opt.count()) > 0) {
                     await opt.scrollIntoViewIfNeeded().catch(() => {});
                     await opt.click({ force: true, timeout: 2000 }).catch(() => {});
-                    log.info(
+                    log.debug(
                       `[Submitter] Country code field → selector: #country → attempted value: ${targetDial} → result: filled`
                     );
                   } else {
@@ -1947,7 +1947,7 @@ export async function fillSingleField(
                 const alreadyMatches = combinedStatus.includes('united states') || combinedStatus.includes('+1');
 
                 if (!alreadyMatches) {
-                  log.info(`[Form Filler] 📞 Setting intl-tel-input country to United States (+1)`);
+                  log.debug(`[Form Filler] 📞 Setting intl-tel-input country to United States (+1)`);
                   await flagBtn.click({ timeout: 2000 }).catch(() => {});
                   await page.waitForTimeout(200);
 
@@ -1979,12 +1979,12 @@ export async function fillSingleField(
     fillResult.success = false;
     fillResult.error = fieldErr.message;
     if (isCountryCode) {
-      log.info(
+      log.debug(
         `[Submitter] Country code field → selector: ${fieldId} → attempted value: ${val} → result: NOT FILLED`
       );
     }
     if (isSponsorship) {
-      log.info(
+      log.debug(
         `[Submitter] Sponsorship field → selector: ${fieldId} → attempted click: Yes → result: NOT SELECTED`
       );
     }

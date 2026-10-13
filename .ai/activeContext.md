@@ -1,3 +1,23 @@
+## Current Session Update (2026-10-13 — Signal-to-Noise Logging Optimization across Worker & Ingest)
+
+- **Centralized Log Level Filtering (`src/utils/logger.ts`)**:
+  - Implemented and exported `shouldLogMessage(level, configuredLevel)` with strict severity levels (`DEBUG: 10`, `INFO: 20`, `WARN: 30`, `ERROR: 40`, `HALT: 50`).
+  - `WARN`, `ERROR`, and `HALT` are always emitted regardless of configured log level.
+  - `emit()` checks `process.env.LOG_LEVEL` (defaults to `INFO`), eliminating intermediate debug noise in production while preserving milestones, stats, warnings, and errors.
+  - Covered by unit and integration tests in `tests/loggerFiltering.test.ts`.
+- **Worker & Submitter Pipeline Decluttering (`src/submitter/formFiller.ts`, `src/submitter/liveSubmit.ts`)**:
+  - Downgraded per-keystroke/selector debug logs (`[FormFiller] Stage 1/2/3 match`, `[Sponsorship DEBUG]`, `Country code field → selector`, `Boolean field → clicked`) to `log.debug()`.
+  - Preserved critical completion stats and operational milestones: resume uploads, form fill completion ratios (`Finished filling form: X/Y successful, Z failed`), and terminal verification/submission statuses.
+- **Ingest Pipeline Decluttering (`src/resolver/answerResolver.ts`)**:
+  - Downgraded per-field resolution attempts (`[Resolver] ✅ T1/T2/T3/T4/T5`, `[Resolver] ❌ T1/T2/T3/T4/T5`) to `log.debug()`.
+  - Retained candidate resolution summaries, phase metrics, auto-queue notices, filter-out notices, and batch rollups at `log.info()`.
+- **Validation**:
+  - `tests/loggerFiltering.test.ts` (PASS, 6/6 tests)
+  - `tests/optionMatchingAlignment.test.ts` (PASS)
+  - `tests/filteredOutRouting.test.ts` (PASS, 11/11 tests)
+  - `tests/autoQueueAndCaNotification.test.ts` (PASS, 16/16 tests)
+  - `tests/formFillerNormalization.test.ts` (PASS, 11/11 tests)
+
 ## Current Session Update (2026-10-13 — Choice Option Matching & Form Filling Fixes)
 
 - **Routing Policy Update (Auto-Queue vs. Review vs. Filtered-Out):**
