@@ -732,10 +732,11 @@ export function resolveFromPayloadStructured(
   const payload = rawPayload && typeof rawPayload === 'object' ? rawPayload as {
     client?: Record<string, unknown>;
     additional_information?: Record<string, unknown>;
+    demographics?: Record<string, unknown>;
     education?: unknown[];
   } : {};
   const client = payload.client || {};
-  const additional = payload.additional_information || {};
+  const additional = { ...(payload.demographics || {}), ...(payload.additional_information || {}) };
   const educationRecords = education.length > 0 ? education : payload.education || [];
   const match = (
     pattern: RegExp,
@@ -795,9 +796,9 @@ export function resolveFromPayloadStructured(
     matchBoolean(/essential functions|perform.*functions|physical.*requirements/, additional.can_perform_essential_functions) ??
     match(/^gender$|gender identity|what is your gender/, additional.gender) ??
     match(/^hispanic|^latino|hispanic or latino/, additional.is_hispanic_latino) ??
-    match(/^race$|^race and ethnicity$|^ethnicity$|race.*ethnicity|racial|racial background/, additional.race_ethnicity) ??
-    match(/^veteran|military status|protected veteran/, additional.veteran_status) ??
-    match(/^disability|disabled status|disabled|ada|accommodation/, additional.disability_status) ??
+    match(/^race$|^race and ethnicity$|^ethnicity$|race.*ethnicity|racial|racial background|please identify your race|identify your race/i, additional.race_ethnicity ?? additional.raceEthnicity) ??
+    match(/^veteran|military status|protected veteran/, additional.veteran_status ?? additional.veteranStatus) ??
+    match(/^disability|disabled status|disabled|ada|accommodation/, additional.disability_status ?? additional.disabilityStatus) ??
     match(/address|street address|home address|mailing address/, additional.full_address) ??
     match(/^state$|state of residence|current state|which state/, additional.state_of_residence, false, true) ??
     match(/date of birth|dob|birth date/, additional.date_of_birth, true) ??
