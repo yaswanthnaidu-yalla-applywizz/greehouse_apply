@@ -14,7 +14,7 @@ export type NeedsReviewField = {
 /**
  * True when:
  * 1. Any required field is unresolved.
- * 2. Any required AI field has confidence < 0.8.
+ * 2. Any required field was resolved using AI (source === 'ai').
  * 3. Any salary / compensation field was resolved negatively ("No", "Decline").
  *
  * Optional AI/unresolved fields do not block auto-queue.
@@ -28,8 +28,8 @@ export function applicationNeedsOperatorReview(fields: NeedsReviewField[]): bool
       return true;
     }
 
-    // 2. Low-confidence AI field for required questions (< 0.8)
-    if (f.isRequired && f.source === 'ai' && (f.confidence ?? 0) < 0.8) {
+    // 2. Any required field solved by AI (auto-queue requires 100% resolved without AI)
+    if (f.isRequired && f.source === 'ai') {
       return true;
     }
 
