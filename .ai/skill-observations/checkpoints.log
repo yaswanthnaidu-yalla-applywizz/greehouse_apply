@@ -593,3 +593,8 @@ checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.179187715245
 2026-10-13 13:32 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
 2026-10-13 session-end: created four evidence-gated implementation plans for OTP timing, retry/confirmation safety, answer mismatches, and browser disconnect diagnostics; no new observations
 2026-10-13 session-end: Signal-to-noise logging optimization shipped (logger level filtering with shouldLogMessage, downgraded per-field and per-selector chatter to debug in worker and ingest pipelines, retained stats, errors, warns); all test suites passed; no new observations
+2026-10-13 14:16 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 14:40 [greehouse_apply] after third todo completion: no observations
+2026-10-13 14:47 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 15:37 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 session-end: STAR methodology LLM synthesis for open-ended questions shipped (classifier, single & batch prompt directives, QA bank evidence grounding); all test suites passed; no new observations
