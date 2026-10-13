@@ -586,3 +586,7 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 session-start 2026-10-13T09:01:15 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=chromium-crashes-concurrency-fix
 checkpoint 2026-10-13T09:18:46 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=chromium-crashes-concurrency-fix status=complete note=" no observations\
 checkpoint 2026-10-13T09:26:24 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=railway-envs-configured status=complete note=" no observations\
+2026-10-13 13:13 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 13:18 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.1791877152458 status=complete note=" no observations"
+2026-10-13 session-end: Choice option matching & form filling fixes shipped (isSchoolField narrowed, alignResolvedChoice guarded, dash normalization, demographic decline matching); all 4 test suites passed; no new observations

@@ -1,3 +1,25 @@
+## Current Session Update (2026-10-13 — Choice Option Matching & Form Filling Fixes)
+
+- **Root Causes Diagnosed and Resolved:**
+  - **School bypass bug in `alignResolvedChoice`**: `isSchoolField` broadly matched any question containing the word `institution` (such as OPT extension questions), allowing answers like `"University of South Florida"` to bypass static option matching when the only valid options were `["Yes", "No", "Not Applicable"]`. Narrowed `isSchoolField` to exclude questions with boolean/choice options and non-school eligibility questions.
+  - **Tier 1 Structured Payload Matcher**: Prevented `university|institution` regex from mapping eligibility, OPT, and STEM questions to the candidate's university name.
+  - **En-dash / Em-dash / Hyphen mismatch**: Normalized unicode dashes in `matchDropdownOption` and `fuzzyOptionTextMatch` to standard ASCII hyphens (`-`), allowing salary and range options (e.g. `"$100,000 – $110,000"`) to match Greenhouse DOM `<option>` values.
+  - **Demographic Decline Matching**: Added EEO decline phrasing detection in `fuzzyOptionTextMatch` and enabled it for `isDemographicOrEeoField` in searchable select controls, enabling `"Decline To Self Identify"` to match company-specific variants like `"Decline to self-identify"`, `"I do not wish to disclose"`, or `"Prefer not to say"`.
+- **Validation**:
+  - `tests/optionMatchingAlignment.test.ts` (PASS)
+  - `tests/choiceOptions.test.ts` (PASS)
+  - `tests/formFillerNormalization.test.ts` (PASS)
+  - `tests/resolverDiagnosedFixes.test.ts` (PASS)
+
+## Current Session Update (2026-10-13 — Submission Log Root-Cause Diagnosis)
+
+- **OTP timeout/log storm:** The 8-minute resolver keeps polling after less than the 10-second connector poll interval remains. The Zoho connector then runs zero polls and returns immediately, while the resolver skips its wait and loops. Align the final-poll/stop behavior and cap repeated logging. The paused browser session TTL is only 5 minutes, shorter than the 8-minute OTP budget; align both lifetimes. Timeout text still says 300 seconds.
+- **Unsafe retry behavior:** The submitter requeues every `FAILED` result. The logs show repeated attempts for required-field failures and ambiguous post-submit confirmation timeouts. Restrict retries to safe, classified failures; do not automatically resubmit when the first submit may have succeeded.
+- **Confirmation failures:** Two separate applications timed out on the same Greenhouse job after 30 seconds. The submitter passes 30 seconds despite the verifier's 75-second default; inspect failure proofs and widen only for observed confirmation signals before changing matching behavior.
+- **Answer mismatches:** The log shows education text passed to discrete school-category choices and a phone-shaped value rejected for a TikTok field. The form filler correctly fails closed; inspect stored resolved-field values and tier/source before changing the filler.
+- **Diagnostics:** BrowserManager labels every Playwright `disconnected` event unexpected, including explicit closes; separate intentional cleanup from crashes. `tests/otpResolution.test.ts` also has two stale assertions expecting `RETRY` while code now persists `QUEUED`.
+- No application code changed in this diagnosis. Focused validation: option-alignment script passed; two OTP assertions failed as noted above.
+
 ## Current Session Update (2026-10-13 — Chromium Crashes & Worker Concurrency Optimization)
 
 - **Centralized Browser Lifecycle Manager (`src/submitter/browserManager.ts`)**:
