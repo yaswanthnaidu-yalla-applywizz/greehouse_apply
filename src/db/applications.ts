@@ -2203,6 +2203,81 @@ export async function enqueueApplication(
 }
 
 /**
+ * Selects the next application from an in-memory list using round-robin fairness across candidates (applywizz_id).
+ * Groups by applywizz_id, ranks each candidate's queued applications by submission_order ASC,
+ * and orders candidates by round rank (rank 1 first across all candidates, then rank 2, etc.),
+ * tie-broken by submission_order ASC.
+ */
+export function selectNextRoundRobinAppInMemory(
+  apps: ApplicationRow[],
+  options: { allCandidateApps?: ApplicationRow[] } = {}
+): ApplicationRow | null {
+  const queued = apps.filter((a) => a.status === 'QUEUED');
+  if (queued.length === 0) return null;
+
+  // If a broader list of candidate apps is provided (or if apps includes in-flight/completed apps),
+  // compute how many applications each candidate has already had processed/dequeued
+  const candidateProcessedCounts = new Map<string, number>();
+  const allApps = options.allCandidateApps || apps;
+  for (const app of allApps) {
+    if (app.status && app.status !== 'QUEUED') {
+      const key = (app.applywizz_id || '').trim().toUpperCase();
+      candidateProcessedCounts.set(key, (candidateProcessedCounts.get(key) || 0) + 1);
+    }
+  }
+
+  // Group queued by applywizz_id
+  const byCandidate = new Map<string, ApplicationRow[]>();
+  for (const app of queued) {
+    const key = (app.applywizz_id || '').trim().toUpperCase();
+    if (!byCandidate.has(key)) {
+      byCandidate.set(key, []);
+    }
+    byCandidate.get(key)!.push(app);
+  }
+
+  // Sort each candidate's applications by submission_order ASC (nulls last) then created_at
+  for (const list of byCandidate.values()) {
+    list.sort((a, b) => {
+      const orderA = a.submission_order ?? Number.MAX_SAFE_INTEGER;
+      const orderB = b.submission_order ?? Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeA - timeB;
+    });
+  }
+
+  // Assign candidate rank based on prior processed count + position in queued list
+  const ranked: Array<{ app: ApplicationRow; candidateRank: number; submissionOrder: number }> = [];
+  for (const [candId, list] of byCandidate.entries()) {
+    const priorCount = candidateProcessedCounts.get(candId) || 0;
+    list.forEach((app, idx) => {
+      ranked.push({
+        app,
+        candidateRank: priorCount + idx + 1,
+        submissionOrder: app.submission_order ?? Number.MAX_SAFE_INTEGER,
+      });
+    });
+  }
+
+  // Sort by candidateRank ASC (Round 1 for all candidates first, then Round 2, etc.),
+  // tie-broken by candidateBase ASC (fair rotation among candidates in the round),
+  // then app submissionOrder ASC
+  ranked.sort((a, b) => {
+    if (a.candidateRank !== b.candidateRank) {
+      return a.candidateRank - b.candidateRank;
+    }
+    if (a.candidateBase !== b.candidateBase) {
+      return a.candidateBase - b.candidateBase;
+    }
+    return a.submissionOrder - b.submissionOrder;
+  });
+
+  return ranked.length > 0 ? ranked[0].app : null;
+}
+
+/**
  * Retrieves the next application in the global submission queue for round-robin processing (Phase V2-4c).
  * Uses atomic PostgreSQL FOR UPDATE SKIP LOCKED via RPC with fallback to query.
  * Transitions status to 'APPLYING'.
