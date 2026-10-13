@@ -76,8 +76,10 @@ export class SubmitterPool {
     try {
       const snap = this.getSnapshot();
       const browserStats = browserManager.getStats();
+      const replicaId = (process.env.RAILWAY_REPLICA_ID || '').trim();
+      const serviceName = replicaId ? `submitter_pool:${replicaId}` : 'submitter_pool';
       const payload = {
-        service_name: 'submitter_pool',
+        service_name: serviceName,
         status: statusOverride ?? (snap.running ? 'running' : 'stopped'),
         worker_count: snap.workerCount,
         idle_count: snap.idleCount,

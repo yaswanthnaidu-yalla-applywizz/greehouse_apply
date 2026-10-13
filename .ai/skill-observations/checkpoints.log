@@ -1,3 +1,4 @@
+2026-10-13 session-end: auto-retry for browser launch & mailbox-connected OTP errors verified; no DB migration required; activeContext updated; no new observations
 2026-10-11 session-start scan: context loaded from handover.md (sandbox PostgreSQL, Gmail OTP integration ready)
 2026-09-14 session-start scan: files=0 parsed=0
 2026-09-15 session-end: docs updated (progress, activeContext, systemPatterns, techContext); observation 0001 logged
@@ -598,3 +599,8 @@ checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.179187715245
 2026-10-13 14:47 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
 2026-10-13 15:37 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
 2026-10-13 session-end: STAR methodology LLM synthesis for open-ended questions shipped (classifier, single & batch prompt directives, QA bank evidence grounding); all test suites passed; no new observations
+2026-10-13 checkpoint: form validation & demographic fixes completed; no observations
+2026-10-13 session-start scan
+2026-10-13 checkpoint: operator dashboard carousel filtering completed; no observations
+2026-10-13 deliverable flush: dual mailbox sync and candidate round-robin dequeue complete (all 6 tasks verified and committed)
+2026-10-13 deliverable flush: migration 034 applied to remote db postgres-db2 and verified via MCP query
