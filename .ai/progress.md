@@ -1,3 +1,8 @@
+### Submission Retry Safety (2026-10-13)
+- [x] Restricted generic automatic retries to explicit `BROWSER_LAUNCH_FAILED` metadata; required-field, unclassified, and thrown failures remain `FAILED` without incrementing `retry_count` or clearing proof fields.
+- [x] Required the typed retry reason in `requeueApplicationForRetry()` and removed `OTP_REQUIRED` from its generic source statuses; the dedicated OTP timeout path remains unchanged.
+- [x] Added queue-policy regression coverage. Focused queue tests, full unit suite, and `npm run typecheck` pass.
+
 ### Signal-to-Noise Logging Optimization (2026-10-13 Complete)
 - [x] **Configurable Severity Filtering (`src/utils/logger.ts`, `tests/loggerFiltering.test.ts`):**
   - Implemented and exported `shouldLogMessage(level, configuredLevel)` adhering to severity ordering (`DEBUG: 10`, `INFO: 20`, `WARN: 30`, `ERROR: 40`, `HALT: 50`).

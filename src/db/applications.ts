@@ -36,6 +36,7 @@ import {
   statusShouldPersistOperatorError,
 } from '../operator/operatorErrorMessages.js';
 import { assertApplywizzZohoConnected } from './zohoConnected.js';
+import type { AutomaticSubmissionRetryReason } from '../submitter/submissionRetry.js';
 
 const log = createLogger('Applications');
 
@@ -1477,6 +1478,7 @@ export async function retryFailedApplication(
 export async function requeueApplicationForRetry(
   applicationId: string,
   reason: string,
+  retryReason: AutomaticSubmissionRetryReason,
   jobUrl?: string
 ): Promise<{ requeued: boolean; retryCount: number }> {
   const app = await getApplication(applicationId, jobUrl);
@@ -1488,7 +1490,7 @@ export async function requeueApplicationForRetry(
       : 0;
   if (currentRetryCount >= MAX_SUBMISSION_RETRIES) {
     log.warn(
-      `[OTP TRACE] application=${applicationId} requeue=false retry_count=${currentRetryCount}/${MAX_SUBMISSION_RETRIES} reason="${reason}"`
+      `[Retry] application=${applicationId} requeue=false retry_count=${currentRetryCount}/${MAX_SUBMISSION_RETRIES} retry_reason=${retryReason} reason="${reason}"`
     );
     return { requeued: false, retryCount: currentRetryCount };
   }
@@ -1515,7 +1517,7 @@ export async function requeueApplicationForRetry(
         query = query.eq('applywizz_id', app.applywizz_id).eq('job_url', app.job_url);
       }
       const result = await query
-        .in('status', ['FAILED', 'APPLYING', 'OTP_REQUIRED', 'RETRY'])
+        .in('status', ['FAILED', 'APPLYING', 'RETRY'])
         .eq('retry_count', storedRetryCount)
         .select('id');
       updated = !result.error && Array.isArray(result.data) && result.data.length > 0;
@@ -1530,8 +1532,8 @@ export async function requeueApplicationForRetry(
   if (!updated) return { requeued: false, retryCount: currentRetryCount };
   cacheApplicationLocally({ ...app, ...payload });
   log.info(
-    `[OTP TRACE] application=${applicationId} requeue=${!isTerminal} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
-      `status=${nextStatus} reason="${reason}"`
+    `[Retry] application=${applicationId} requeue=${!isTerminal} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
+      `status=${nextStatus} retry_reason=${retryReason} reason="${reason}"`
   );
   return { requeued: !isTerminal, retryCount: nextRetryCount };
 }

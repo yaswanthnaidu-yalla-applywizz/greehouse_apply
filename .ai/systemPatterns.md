@@ -161,7 +161,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `proof_captured_at` | TIMESTAMPTZ | |
 | `dry_run_screenshot_url` | TEXT | |
 | `submitted_at` | TIMESTAMPTZ | |
-| `retry_count` | INTEGER | Automatic OTP-fetch / unresolved-required-field retries used; max 3 before `FAILED` |
+| `retry_count` | INTEGER | Bounded OTP-fetch and explicitly classified browser-launch retries; max 3 before `FAILED`. Required-field and ambiguous post-submit failures are not generically retried |
 | `error_message` | TEXT | |
 | UNIQUE | | `(applywizz_id, job_url)` — idempotent upsert |
 
