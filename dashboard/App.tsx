@@ -42,6 +42,7 @@ import {
 } from './hooks/useSession.js';
 import { DevSwitcher } from './components/DevSwitcher.js';
 import { HeaderSignOut } from './components/HeaderSignOut.js';
+import { ClientInfoDrawer } from './components/ClientInfoDrawer.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -118,6 +119,7 @@ export const App: React.FC = () => {
     }
   });
   const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
+  const [isClientInfoOpen, setIsClientInfoOpen] = useState<boolean>(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const selectedCandidateRef = useRef<string | null>(null);
 
@@ -1180,6 +1182,7 @@ export const App: React.FC = () => {
                   selectedApplywizzId={selectedCandidateId}
                   selectedJobUrl={selectedJobUrl}
                   onBack={() => setMobileScreen('candidates')}
+                  onOpenClientInfo={() => setIsClientInfoOpen(true)}
                   onSelectJob={(url) => {
                     setSelectedJobUrl(url);
                     setMobileScreen(url ? 'application' : 'jobs');
@@ -1204,6 +1207,13 @@ export const App: React.FC = () => {
                   onStatusChange={handleStatusChange}
                 />
               </div>
+
+              {/* Candidate Client Info Slide-Over Drawer */}
+              <ClientInfoDrawer
+                isOpen={isClientInfoOpen}
+                onClose={() => setIsClientInfoOpen(false)}
+                candidate={candidateDetail}
+              />
             </>
           ) : (
             <div className="mobile-detail-empty flex-1 flex flex-col items-center justify-center text-[#8e8e93]">

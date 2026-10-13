@@ -34,6 +34,8 @@ export interface JobQueueViewProps {
   onBack: () => void;
   /** Expand/collapse job for review only — never starts submit/dry-run */
   onSelectJob: (jobUrl: string | null) => void;
+  /** Open candidate client info drawer */
+  onOpenClientInfo?: () => void;
 }
 
 type CandidateJob = CandidateDetail['jobs'][number];
@@ -44,6 +46,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   selectedJobUrl,
   onBack,
   onSelectJob,
+  onOpenClientInfo,
 }) => {
   const [proofViewerState, setProofViewerState] = useState<{
     isOpen: boolean;
@@ -162,17 +165,31 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
           </span>
         </div>
 
-        {candidate.resumeUrl && (
-          <a
-            href={candidate.resumeUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#30d158] hover:text-[#ffffff] bg-[#30d158]/15 hover:bg-[#30d158]/25 border border-[#30d158]/30 px-3 py-1 rounded-md transition-all"
-          >
-            <span>📄</span>
-            <span>Master Resume PDF</span>
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          {onOpenClientInfo && (
+            <button
+              type="button"
+              onClick={onOpenClientInfo}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0a84ff] hover:text-[#ffffff] bg-[#0a84ff]/15 hover:bg-[#0a84ff]/25 border border-[#0a84ff]/30 px-3 py-1 rounded-md transition-all cursor-pointer"
+              title="View Complete Candidate Profile Details"
+            >
+              <span>👤</span>
+              <span>Client Info</span>
+            </button>
+          )}
+
+          {candidate.resumeUrl && (
+            <a
+              href={candidate.resumeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#30d158] hover:text-[#ffffff] bg-[#30d158]/15 hover:bg-[#30d158]/25 border border-[#30d158]/30 px-3 py-1 rounded-md transition-all"
+            >
+              <span>📄</span>
+              <span>Master Resume PDF</span>
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Horizontal Scrollable Tabs */}
