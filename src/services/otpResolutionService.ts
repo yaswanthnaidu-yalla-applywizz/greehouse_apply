@@ -8,9 +8,10 @@ import { fetchZohoOtpViaApi, fetchGmailOtpViaApi } from './zoho-connector.js';
 import { config } from '../config/env.js';
 import { emitFailureDiagnostic, withDiagnosticRun } from '../utils/failureDiagnostics.js';
 import { captureJobFailedScreenshot } from '../submitter/proofCapture.js';
+import { OTP_CHALLENGE_TIMEOUT_MS, OTP_POLL_INTERVAL_MS } from '../submitter/otpTimeouts.js';
 
 const log = createLogger('OTP Resolution');
-export const OTP_CHALLENGE_TIMEOUT_MS = 8 * 60 * 1000; // increased from 5 min to give slow email delivery more time
+export { OTP_CHALLENGE_TIMEOUT_MS } from '../submitter/otpTimeouts.js';
 const TERMINAL_OTP_FETCH_REASONS = new Set([
   'INVALID_CANDIDATE_EMAIL',
   'INVALID_SUBMIT_TIMESTAMP',
@@ -198,8 +199,8 @@ export class OtpResolutionService {
 
     // Wait 10s after OTP detection before first mailbox query
     const elapsedSinceDetect = Date.now() - entry.submitClickedAt;
-    if (elapsedSinceDetect < 10000) {
-      await sleepFn(10000 - elapsedSinceDetect);
+    if (elapsedSinceDetect < OTP_POLL_INTERVAL_MS) {
+      await sleepFn(OTP_POLL_INTERVAL_MS - elapsedSinceDetect);
     }
 
     log.info(
@@ -215,6 +216,10 @@ export class OtpResolutionService {
     while (Date.now() < deadline) {
       if (!pendingEntries.has(entry.applicationId)) return;
       const remainingMs = deadline - Date.now();
+      if (remainingMs < OTP_POLL_INTERVAL_MS) {
+        lastReason = 'POLL_BUDGET_EXHAUSTED';
+        break;
+      }
       log.info(
         `[OTP Resolution] ⏳ ${entry.applicationId} elapsed=${Date.now() - entry.submitClickedAt}ms/` +
           `${OTP_CHALLENGE_TIMEOUT_MS}ms attempt=${attemptNumber}`
@@ -230,7 +235,7 @@ export class OtpResolutionService {
               companyName: companyParam,
               correlationId: entry.applicationId,
               timeoutMs: Math.min(30000, remainingMs),
-              pollIntervalMs: 10000,
+              pollIntervalMs: OTP_POLL_INTERVAL_MS,
               excludedCodes: entry.attemptedCodes,
             })
           : await fetchZoho({
@@ -239,7 +244,7 @@ export class OtpResolutionService {
               sinceTimestamp: entry.submitClickedAt,
               companyName: companyParam,
               timeoutMs: Math.min(30000, remainingMs),
-              pollIntervalMs: 10000,
+              pollIntervalMs: OTP_POLL_INTERVAL_MS,
               newerThanTimestamp: entry.newestAttemptedTimestamp,
               excludedMessageIds: entry.attemptedMessageIds,
               excludedCodes: entry.attemptedCodes,
@@ -281,9 +286,12 @@ export class OtpResolutionService {
             return;
           }
 
-          // not_yet / poll timeout: wait 10s and continue polling same endpoint until deadline
-          if (Date.now() + 10000 < deadline) {
-            await sleepFn(10000);
+          // not_yet / poll timeout: wait only when another full poll fits before the deadline.
+          if (deadline - Date.now() >= OTP_POLL_INTERVAL_MS) {
+            await sleepFn(OTP_POLL_INTERVAL_MS);
+          } else {
+            lastReason = 'POLL_BUDGET_EXHAUSTED';
+            break;
           }
           continue;
         }
@@ -392,7 +400,8 @@ export class OtpResolutionService {
     const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES;
     const finalStatus: 'FAILED' | 'QUEUED' = isTerminal ? 'FAILED' : 'QUEUED';
     const errorMessage =
-      `[OTP_FETCH:TIMEOUT] OTP not received within 300s (attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}); reason=${lastReason}.`;
+      `[OTP_FETCH:TIMEOUT] OTP not received within ${OTP_CHALLENGE_TIMEOUT_MS / 1000}s ` +
+      `(attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}); reason=${lastReason}.`;
 
     await emitFailureDiagnostic({
       category: 'SUBMIT_OTP_TIMEOUT',

@@ -1,15 +1,21 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
+  OTP_SESSION_TTL_MS,
   SPINNER_EXTENDED_TIMEOUT_MS,
   isSubmitButtonSpinnerActive,
   verifySubmissionSignals,
 } from '../src/submitter/otpSession.js';
+import { OTP_CHALLENGE_TIMEOUT_MS } from '../src/services/otpResolutionService.js';
 
 describe('Spinner-Aware Submission Confirmation (Phase 4)', () => {
   it('extends base timeout to 75s and spinner ceiling to 90s', () => {
     expect(DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS).toBe(75000);
     expect(SPINNER_EXTENDED_TIMEOUT_MS).toBe(90000);
+  });
+
+  it('keeps a paused OTP session alive through the challenge and confirmation window', () => {
+    expect(OTP_SESSION_TTL_MS).toBe(OTP_CHALLENGE_TIMEOUT_MS + 90000);
   });
 
   it('spinner detection handles missing submit button without throwing', async () => {

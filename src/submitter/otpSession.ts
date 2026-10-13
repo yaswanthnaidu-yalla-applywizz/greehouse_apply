@@ -8,6 +8,18 @@
 import type { Browser, BrowserContext, Page } from 'playwright';
 import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
+import {
+  OTP_CHALLENGE_TIMEOUT_MS,
+  OTP_SESSION_TTL_MS,
+  SPINNER_EXTENDED_TIMEOUT_MS,
+} from './otpTimeouts.js';
+
+export {
+  DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
+  OTP_CHALLENGE_TIMEOUT_MS,
+  OTP_SESSION_TTL_MS,
+  SPINNER_EXTENDED_TIMEOUT_MS,
+} from './otpTimeouts.js';
 
 const log = createLogger('OTP Session');
 
@@ -21,12 +33,6 @@ export interface ActiveSubmissionSession {
   ttlTimer?: NodeJS.Timeout;
 }
 
-/** 5-minute timeout matching the click-anchored OTP resolution window to prevent leaking browser contexts */
-export const OTP_SESSION_TTL_MS = 5 * 60 * 1000;
-
-export const DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS = 75000;
-export const SPINNER_EXTENDED_TIMEOUT_MS = 90000;
-
 /**
  * In-memory registry of active browser contexts paused for OTP resolution.
  */
@@ -34,7 +40,7 @@ export const activeSubmissions = new Map<string, ActiveSubmissionSession>();
 
 /**
  * Registers an active browser context session in memory.
- * Sets a 5-minute safety timeout to auto-close the session if unresolved.
+ * Sets a safety timeout longer than the OTP challenge budget by the confirmation grace.
  */
 export function registerSubmissionSession(session: ActiveSubmissionSession): void {
   const existing = activeSubmissions.get(session.applicationId);
@@ -44,7 +50,7 @@ export function registerSubmissionSession(session: ActiveSubmissionSession): voi
 
   const ttlTimer = setTimeout(async () => {
     log.warn(
-      `[OTP Session] ⏰ Paused session for application ${session.applicationId} reached 5m TTL. Closing browser context...`
+      `[OTP Session] ⏰ Paused session for application ${session.applicationId} reached ${OTP_SESSION_TTL_MS / 60000}m TTL. Closing browser context...`
     );
     await closeSubmissionSession(session.applicationId);
   }, OTP_SESSION_TTL_MS);
@@ -55,7 +61,7 @@ export function registerSubmissionSession(session: ActiveSubmissionSession): voi
   });
 
   log.info(
-    `[OTP Session] 📌 Registered paused OTP session for application ${session.applicationId} (TTL: 5m)`
+    `[OTP Session] 📌 Registered paused OTP session for application ${session.applicationId} (TTL: ${OTP_SESSION_TTL_MS / 60000}m; OTP budget: ${OTP_CHALLENGE_TIMEOUT_MS / 60000}m + ${SPINNER_EXTENDED_TIMEOUT_MS / 1000}s confirmation grace)`
   );
 }
 

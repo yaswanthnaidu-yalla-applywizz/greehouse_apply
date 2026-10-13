@@ -116,7 +116,7 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
     Date.now = () => virtualTime;
 
     try {
-      const submitClickedAt = virtualTime; // deadline = virtualTime + 300,000
+      const submitClickedAt = virtualTime; // deadline = virtualTime + 480,000
 
       const svc = new OtpResolutionService({
         getApplication: async () =>
@@ -136,7 +136,7 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
         clearPausedSession: async () => {},
         sleep: async () => {
           sleepCount++;
-          virtualTime += 100000; // advance 100s per sleep, so 3 sleeps exhaust the 300s budget
+          virtualTime += 100000; // Advance 100s per sleep to cover the 480s budget.
         },
       });
 
@@ -199,7 +199,53 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
     assert.equal(pollCount, 2, 'Poll loop must exit early once code is resolved (expected 2 calls, got ' + pollCount + ')');
   });
 
-  it('test: budget exhaustion triggers RETRY status with retry_count++', async () => {
+  it('does not start a mailbox poll when less than one full interval remains', async () => {
+    let virtualTime = 1000000;
+    const realNow = Date.now;
+    const submitClickedAt = virtualTime - OTP_CHALLENGE_TIMEOUT_MS + 3000;
+    let pollCount = 0;
+
+    Date.now = () => virtualTime;
+    try {
+      const svc = new OtpResolutionService({
+        getApplication: async () =>
+          ({
+            id: 'app-final-poll-window',
+            applywizz_id: 'AWL-5A',
+            job_url: 'https://gh.io/job5a',
+            status: 'OTP_REQUIRED',
+            retry_count: 0,
+          } as ApplicationRow),
+        updateStatus: async () => true,
+        resolvePausedSession: () => ({ session: {} as any, canonicalKey: 'session-final-poll-window' }),
+        fetchZohoOtpViaApi: async () => {
+          pollCount++;
+          virtualTime = submitClickedAt + OTP_CHALLENGE_TIMEOUT_MS;
+          return { success: false, reasonCode: 'POLL_BUDGET_EXHAUSTED' };
+        },
+        clearPausedSession: async () => {},
+        sleep: async () => {},
+      });
+      const entry: OtpPendingEntry = {
+        applicationId: 'app-final-poll-window',
+        email: 'test@applywizard.ai',
+        submitClickedAt,
+        sessionKey: 'session-final-poll-window',
+        claimed: false,
+        attemptedMessageIds: [],
+        attemptedCodes: [],
+      };
+
+      svc.register(entry);
+      await svc.processEntryInContext(entry);
+
+      assert.equal(pollCount, 0, 'a poll must not start when less than 10 seconds remain');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('test: budget exhaustion triggers QUEUED status with retry_count++', async () => {
     let finalStatus: string | null = null;
     let finalRetryCount: number | null = null;
     let finalErrorMessage: string | null = null;
@@ -240,11 +286,11 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
     svc.register(entry);
     await svc.processEntryInContext(entry);
 
-    assert.equal(finalStatus, 'RETRY', 'Budget exhaustion must trigger RETRY status');
+    assert.equal(finalStatus, 'QUEUED', 'Budget exhaustion must trigger QUEUED status before the retry limit');
     assert.equal(finalRetryCount, 2, 'retry_count must be incremented from 1 to 2');
     assert.ok(
-      finalErrorMessage && finalErrorMessage.includes('300s'),
-      'error_message must describe 300s timeout'
+      finalErrorMessage && finalErrorMessage.includes('480s'),
+      'error_message must describe the 480s timeout'
     );
   });
 
@@ -289,7 +335,7 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
     assert.equal(clearedKey, 'session-6', 'cleared session key must match entry.sessionKey');
   });
 
-  it('test: OTP_REQUIRED never persists after 300s budget', async () => {
+  it('test: OTP_REQUIRED never persists after 480s budget', async () => {
     let recordedStatus: string | null = null;
     const submitClickedAt = Date.now() - (OTP_CHALLENGE_TIMEOUT_MS + 1000);
 
@@ -327,9 +373,9 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
     assert.notEqual(
       recordedStatus,
       'OTP_REQUIRED',
-      'OTP_REQUIRED must never be the resting state after 300s budget'
+      'OTP_REQUIRED must never be the resting state after 480s budget'
     );
-    assert.equal(recordedStatus, 'RETRY', 'Resting status should be RETRY');
+    assert.equal(recordedStatus, 'QUEUED', 'Budget exhaustion should queue a retry before the retry limit');
   });
 
   it('test: token bucket allows max 3 requests/sec across concurrent callers', async () => {
