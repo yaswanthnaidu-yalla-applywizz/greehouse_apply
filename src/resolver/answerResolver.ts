@@ -115,8 +115,22 @@ export function isUnsupportedUuidAnswer(field: ScannedField, answer: string): bo
   );
 }
 
-function isSchoolField(field: ScannedField): boolean {
+export function isSchoolField(field: ScannedField): boolean {
+  // If field has discrete choice options including boolean or not-applicable, it is not a free-form school input
+  if (
+    field.options &&
+    field.options.length > 0 &&
+    field.options.some((o) => /^(yes|no|not applicable|n\/a)$/i.test(o.trim()))
+  ) {
+    return false;
+  }
+
   const norm = `${field.fieldId} ${field.name} ${field.label}`.toLowerCase();
+  // Do not treat complex eligibility/authorization/opt questions as school fields just because they mention institution
+  if (/\b(?:opt|stem|extension|sponsorship|eligible|authorization|visa)\b/i.test(norm)) {
+    return false;
+  }
+
   return (
     /\bschool\b/i.test(norm) ||
     /\buniversity\b/i.test(norm) ||
@@ -150,8 +164,8 @@ export function alignResolvedChoice(
   }
   if (field.type === 'checkbox') return baseWithOptions;
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
-  // School comboboxes are dynamically populated / lazy-loaded over the wire
-  if (field.optionsComplete === false || isSchoolField(field)) {
+  // School comboboxes are dynamically populated / lazy-loaded over the wire only when optionsComplete === false
+  if (field.optionsComplete === false && isSchoolField(field)) {
     return { ...baseWithOptions, ...(field.options ? { options: field.options } : {}) };
   }
 
