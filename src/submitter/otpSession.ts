@@ -9,6 +9,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
 import {
+  DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
   OTP_CHALLENGE_TIMEOUT_MS,
   OTP_SESSION_TTL_MS,
   SPINNER_EXTENDED_TIMEOUT_MS,
