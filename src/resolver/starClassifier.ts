@@ -19,8 +19,8 @@ const BEHAVIORAL_PATTERNS = [
 ];
 
 const MOTIVATIONAL_PATTERNS = [
-  /\bwhy (?:do you want to work|choose|join|are you interested in)\b/i,
-  /\bwhy (?:this role|our company|applywizz|us)\b/i,
+  /\bwhy (?:do you want to work|do you want to join|choose|join|are you interested in)\b/i,
+  /\bwhy (?:this role|our company|applywizz|us|this team)\b/i,
   /\bwhat (?:excites|interests|attracts|draws) you\b/i,
   /\bwhat makes you a good fit\b/i,
   /\bwhy should we hire you\b/i,
@@ -42,7 +42,7 @@ const FACTUAL_OR_EXCLUDED_PATTERNS = [
  * suitable for STAR (Situation, Task, Action, Result) methodology synthesis.
  */
 export function isBehavioralOrMotivationalQuestion(
-  field: Pick<ScannedField, 'label'> & Partial<Pick<ScannedField, 'type' | 'options'>>
+  field: Pick<ScannedField, 'label'> & { type?: string; options?: string[] }
 ): boolean {
   const label = (field.label || '').trim();
   if (!label) return false;

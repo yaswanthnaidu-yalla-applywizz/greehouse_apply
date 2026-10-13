@@ -1,3 +1,14 @@
+### STAR Methodology LLM Synthesis for Open-Ended Questions (2026-10-13 Complete)
+- [x] **Behavioral & Motivational Question Classifier (`src/resolver/starClassifier.ts`, `tests/starClassifier.test.ts`):**
+  - Created regex classifier detecting open-ended behavioral ("have you worked with", "tell us about a time", "describe a project") and motivational ("why choose our company", "why are you interested in this role") prompts while strictly exempting dropdown, radio, checkbox, demographic/EEO, URL, and salary fields.
+- [x] **STAR Prompt Directives in LLMSynthesizer (`src/resolver/llmSynthesizer.ts`, `tests/starPromptSynthesis.test.ts`):**
+  - Embedded STAR guidelines into `buildSinglePrompt` and `buildBatchPrompt` / `systemMessage` (CREATIVE RULE).
+  - Enforced 50–80 words concise single paragraph without section headers or bullet labels in confident first-person narrative, strictly truthful to candidate history.
+- [x] **Context Grounding with QA Bank & Target Company (`src/resolver/candidateEvidence.ts`, `tests/starGroundingContext.test.ts`):**
+  - Extended evidence collection to incorporate candidate QA bank answers (`qaBankAnswers`, `qa_bank`) alongside resume facts.
+- [x] **Full Regression Verification (`tests/starSynthesisRegression.test.ts`):**
+  - Verified behavioral question classification, prompt constraints, and zero regression across existing option matching and routing test suites.
+
 ### Submission Retry Safety (2026-10-13)
 - [x] Restricted generic automatic retries to explicit `BROWSER_LAUNCH_FAILED` metadata; required-field, unclassified, and thrown failures remain `FAILED` without incrementing `retry_count` or clearing proof fields.
 - [x] Required the typed retry reason in `requeueApplicationForRetry()` and removed `OTP_REQUIRED` from its generic source statuses; the dedicated OTP timeout path remains unchanged.

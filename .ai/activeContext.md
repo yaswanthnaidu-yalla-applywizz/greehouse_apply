@@ -1,3 +1,21 @@
+## Current Session Update (2026-10-13 — STAR Methodology LLM Synthesis for Open-Ended Questions)
+
+- **STAR Question Classifier (`src/resolver/starClassifier.ts`)**:
+  - Implemented `isBehavioralOrMotivationalQuestion` to detect open-ended behavioral prompts ("Have you worked with...", "Tell us about a time...", "Describe a project...") and motivational prompts ("Why choose our company...", "Why are you interested in this role?").
+  - Strictly excluded choice/select/radio/checkbox fields, demographic/EEO fields, URLs, contact numbers, and salary fields.
+- **LLM Synthesizer Prompt Directives (`src/resolver/llmSynthesizer.ts`)**:
+  - Embedded STAR guidelines into `buildSinglePrompt` and `buildBatchPrompt` / `systemMessage` (CREATIVE RULE).
+  - Constrained responses to a concise single paragraph of approximately 50 to 80 words without artificial section headers or bullets.
+  - Enforced a confident first-person narrative ("I led...", "In my role at...") grounded strictly in actual candidate resume history, verified projects, and QA bank entries.
+- **Context Grounding (`src/resolver/candidateEvidence.ts`)**:
+  - Added support for candidate QA bank answers (`qaBankAnswers`, `qa_bank`) in evidence extraction so behavioral responses maintain consistency with past candidate interview answers.
+- **Validation**:
+  - `tests/starClassifier.test.ts` (PASS, 4/4)
+  - `tests/starPromptSynthesis.test.ts` (PASS, 4/4)
+  - `tests/starGroundingContext.test.ts` (PASS, 1/1)
+  - `tests/starSynthesisRegression.test.ts` (PASS, 3/3)
+  - Regressions clean: `optionMatchingAlignment.test.ts`, `filteredOutRouting.test.ts`, `autoQueueAndCaNotification.test.ts`, `formFillerNormalization.test.ts`.
+
 ## Current Session Update (2026-10-13 — Signal-to-Noise Logging Optimization across Worker & Ingest)
 
 - **Centralized Log Level Filtering (`src/utils/logger.ts`)**:
