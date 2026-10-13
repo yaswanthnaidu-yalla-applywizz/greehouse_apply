@@ -1305,11 +1305,17 @@ export async function fillSingleField(
           className.includes('select__input');
 
         if (interactive) {
-          const selectAttempts = isReferralSource ? referralOptionValues : [selectValue];
+          const isEeoField = isDemographicOrEeoField(fieldId, name, label);
+          const eeoFallback = isEeoField && field.options ? resolveEeoFallbackOption(field.options) : null;
+          const selectAttempts = isReferralSource
+            ? referralOptionValues
+            : (selectValue ? [selectValue] : (eeoFallback ? [eeoFallback] : [selectValue]));
+          if (isEeoField && eeoFallback && selectValue && !selectAttempts.includes(eeoFallback)) {
+            selectAttempts.push(eeoFallback);
+          }
           const countryMatcher: OptionTextMatcher = (optText) =>
             new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
           let selected = false;
-          const isEeoField = isDemographicOrEeoField(fieldId, name, label);
           for (const attempt of selectAttempts) {
             selected = await fillSearchableSelectInput(
               page,

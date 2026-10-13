@@ -312,13 +312,13 @@ export function resolveAvailabilityField(
   };
 }
 
-function resolveStructuredEeocField(
+export function resolveStructuredEeocField(
   field: ScannedField,
   profile: ProfileRow | null,
   isRequired: boolean
 ): ResolvedField | null {
   const normalizedLabel = normalizeText(field.label);
-  if (!/^gender$|^race$|^race and ethnicity$|^ethnicity$|^veteran|^disability/.test(normalizedLabel)) {
+  if (!/^gender$|^race$|^race and ethnicity$|^ethnicity$|^veteran|^disability|please identify your race|identify your race/i.test(normalizedLabel)) {
     return null;
   }
 
