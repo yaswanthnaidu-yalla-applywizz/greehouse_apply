@@ -89,7 +89,7 @@ describe('Spinner-Aware Submission Confirmation (Phase 4)', () => {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
     };
 
-    const res = await verifySubmissionSignals(mockPage as any, 75000);
+    const res = await verifySubmissionSignals(mockPage as any);
     expect(res.verified).toBe(true);
     expect(res.signal).toContain('confirmation URL');
   });

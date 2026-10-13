@@ -378,6 +378,103 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
     assert.equal(recordedStatus, 'QUEUED', 'Budget exhaustion should queue a retry before the retry limit');
   });
 
+  it('test: budget exhaustion fails immediately as FAILED when candidate mailbox is NOT connected', async () => {
+    let recordedStatus: string | null = null;
+    let recordedErrorMessage: string | null = null;
+    const submitClickedAt = Date.now() - (OTP_CHALLENGE_TIMEOUT_MS + 1000);
+
+    const svc = new OtpResolutionService({
+      getApplication: async () =>
+        ({
+          id: 'app-mailbox-disconnected',
+          applywizz_id: 'AWL-DISCONNECTED',
+          job_url: 'https://gh.io/job-disconnected',
+          status: 'OTP_REQUIRED',
+          retry_count: 0,
+        } as ApplicationRow),
+      getProfile: async () =>
+        ({
+          applywizz_id: 'AWL-DISCONNECTED',
+          client_name: 'Disconnected Candidate',
+          zoho_connected: false,
+        } as any),
+      updateStatus: async (_id, status, extra) => {
+        recordedStatus = status;
+        recordedErrorMessage = extra?.error_message ?? null;
+        return true;
+      },
+      resolvePausedSession: () => ({ session: {} as any, canonicalKey: 'session-disconnected' }),
+      fetchZohoOtpViaApi: async () => ({ success: false }),
+      clearPausedSession: async () => {},
+      sleep: async () => {},
+    });
+
+    const entry: OtpPendingEntry = {
+      applicationId: 'app-mailbox-disconnected',
+      email: 'disconnected@applywizard.ai',
+      submitClickedAt,
+      sessionKey: 'session-disconnected',
+      claimed: false,
+      attemptedMessageIds: [],
+      attemptedCodes: [],
+    };
+    svc.register(entry);
+    await svc.processEntryInContext(entry);
+
+    assert.equal(recordedStatus, 'FAILED', 'Must transition to terminal FAILED if mailbox is not connected');
+    assert.ok(
+      recordedErrorMessage && recordedErrorMessage.includes('mailbox is disconnected'),
+      'Error message must state candidate mailbox is disconnected'
+    );
+  });
+
+  it('test: budget exhaustion requeues to QUEUED when candidate mailbox is connected and under retry limit', async () => {
+    let recordedStatus: string | null = null;
+    let recordedRetryCount: number | null = null;
+    const submitClickedAt = Date.now() - (OTP_CHALLENGE_TIMEOUT_MS + 1000);
+
+    const svc = new OtpResolutionService({
+      getApplication: async () =>
+        ({
+          id: 'app-mailbox-connected',
+          applywizz_id: 'AWL-CONNECTED',
+          job_url: 'https://gh.io/job-connected',
+          status: 'OTP_REQUIRED',
+          retry_count: 1,
+        } as ApplicationRow),
+      getProfile: async () =>
+        ({
+          applywizz_id: 'AWL-CONNECTED',
+          client_name: 'Connected Candidate',
+          zoho_connected: true,
+        } as any),
+      updateStatus: async (_id, status, extra) => {
+        recordedStatus = status;
+        recordedRetryCount = extra?.retry_count ?? null;
+        return true;
+      },
+      resolvePausedSession: () => ({ session: {} as any, canonicalKey: 'session-connected' }),
+      fetchZohoOtpViaApi: async () => ({ success: false }),
+      clearPausedSession: async () => {},
+      sleep: async () => {},
+    });
+
+    const entry: OtpPendingEntry = {
+      applicationId: 'app-mailbox-connected',
+      email: 'connected@applywizard.ai',
+      submitClickedAt,
+      sessionKey: 'session-connected',
+      claimed: false,
+      attemptedMessageIds: [],
+      attemptedCodes: [],
+    };
+    svc.register(entry);
+    await svc.processEntryInContext(entry);
+
+    assert.equal(recordedStatus, 'QUEUED', 'Must requeue to QUEUED when mailbox is connected');
+    assert.equal(recordedRetryCount, 2, 'retry_count must be incremented to 2');
+  });
+
   it('test: token bucket allows max 3 requests/sec across concurrent callers', async () => {
     const limiter = new TokenBucketLimiter(3, 3);
     const start = Date.now();

@@ -4,6 +4,7 @@ import {
   updateStatus,
   MAX_SUBMISSION_RETRIES,
 } from '../db/applications.js';
+import { getProfile } from '../db/profiles.js';
 import { fetchZohoOtpViaApi, fetchGmailOtpViaApi } from './zoho-connector.js';
 import { config } from '../config/env.js';
 import { emitFailureDiagnostic, withDiagnosticRun } from '../utils/failureDiagnostics.js';
@@ -74,6 +75,7 @@ export function resolveOtpEndpoint(candidateEmail: string): 'zoho' | 'gmail' {
 
 export interface OtpResolutionDeps {
   getApplication?: typeof getApplication;
+  getProfile?: typeof getProfile;
   updateStatus?: typeof updateStatus;
   fetchZohoOtpViaApi?: typeof fetchZohoOtpViaApi;
   fetchGmailOtpViaApi?: typeof fetchGmailOtpViaApi;
@@ -168,6 +170,7 @@ export class OtpResolutionService {
   public async processEntryInContext(entry: OtpPendingEntry): Promise<void> {
     const liveSubmit = await import('../submitter/liveSubmit.js');
     const getApp = this.deps.getApplication ?? getApplication;
+    const getProf = this.deps.getProfile ?? getProfile;
     const updateStat = this.deps.updateStatus ?? updateStatus;
     const fetchZoho = this.deps.fetchZohoOtpViaApi ?? fetchZohoOtpViaApi;
     const fetchGmail = this.deps.fetchGmailOtpViaApi ?? fetchGmailOtpViaApi;
@@ -397,16 +400,33 @@ export class OtpResolutionService {
     }
 
     const nextRetryCount = retryCount + 1;
-    const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES;
+    let isMailboxConnected = true;
+    if (application.applywizz_id) {
+      try {
+        const profile = await getProf(application.applywizz_id);
+        if (profile && profile.zoho_connected === false) {
+          isMailboxConnected = false;
+        }
+      } catch (err: any) {
+        log.warn(`[OTP Resolution] Could not verify mailbox connection for ${application.applywizz_id}: ${err.message}`);
+      }
+    }
+
+    const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES || !isMailboxConnected;
     const finalStatus: 'FAILED' | 'QUEUED' = isTerminal ? 'FAILED' : 'QUEUED';
+    const reasonDetail = !isMailboxConnected
+      ? 'mailbox is disconnected (zoho_connected=false)'
+      : `attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}`;
     const errorMessage =
       `[OTP_FETCH:TIMEOUT] OTP not received within ${OTP_CHALLENGE_TIMEOUT_MS / 1000}s ` +
-      `(attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}); reason=${lastReason}.`;
+      `(${reasonDetail}); reason=${lastReason}.`;
 
     await emitFailureDiagnostic({
       category: 'SUBMIT_OTP_TIMEOUT',
       stage: 'otp_mailbox_lookup',
-      reason: 'Automatic OTP retrieval exceeded the configured submit-time deadline.',
+      reason: !isMailboxConnected
+        ? 'Automatic OTP retrieval exceeded deadline and candidate mailbox is not connected.'
+        : 'Automatic OTP retrieval exceeded the configured submit-time deadline.',
       errorCode: lastReason,
       isTerminal,
       isRetryable: !isTerminal,
@@ -417,6 +437,7 @@ export class OtpResolutionService {
         elapsedMs: Date.now() - entry.submitClickedAt,
         retryCount: nextRetryCount,
         reasonCode: lastReason,
+        isMailboxConnected,
       },
     });
 
@@ -438,7 +459,7 @@ export class OtpResolutionService {
     log.warn(
       `[OTP Resolution] application=${entry.applicationId} outcome=${finalStatus.toLowerCase()} ` +
         `reason=${lastReason} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
-        `elapsed_ms=${Date.now() - startedAt} session=closed`
+        `mailbox_connected=${isMailboxConnected} elapsed_ms=${Date.now() - startedAt} session=closed`
     );
     this.cancel(entry.applicationId);
   }

@@ -129,6 +129,25 @@ const MOCK_PASSIVE_RECAPTCHA_HTML = `
 </html>
 `;
 
+const MOCK_NO_CONFIRMATION_HTML = `
+<!DOCTYPE html>
+<html>
+<head><title>Job Application - Acme Corp</title></head>
+<body>
+  <form id="application_form">
+    <label for="first_name">First Name</label>
+    <input type="text" id="first_name" name="first_name" />
+    <button type="submit" id="submit_app">Submit Application</button>
+  </form>
+  <script>
+    document.getElementById('application_form').addEventListener('submit', function(e) {
+      e.preventDefault();
+    });
+  </script>
+</body>
+</html>
+`;
+
 const MOCK_OTP_FORM_HTML = `
 <!DOCTYPE html>
 <html>
@@ -294,6 +313,9 @@ async function runSubmissionsTestSuite() {
     if (req.url === '/passive-recaptcha-job') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(MOCK_PASSIVE_RECAPTCHA_HTML);
+    } else if (req.url === '/no-confirmation-job') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(MOCK_NO_CONFIRMATION_HTML);
     } else if (req.url?.startsWith('/full-flow-job')) {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(MOCK_FULL_FLOW_HTML);
@@ -313,6 +335,7 @@ async function runSubmissionsTestSuite() {
   const mockPort = (mockHttpServer.address() as any).port;
   const mockFormUrl = `http://localhost:${mockPort}/job-form`;
   const mockPassiveRecaptchaUrl = `http://localhost:${mockPort}/passive-recaptcha-job`;
+  const mockNoConfirmationUrl = `http://localhost:${mockPort}/no-confirmation-job`;
   const mockOtpUrl = `http://localhost:${mockPort}/otp-job`;
   const mockMultiBoxOtpUrl = `http://localhost:${mockPort}/multibox-otp-job`;
   const mockFullFlowUrl = `http://localhost:${mockPort}/full-flow-job`;
@@ -452,7 +475,7 @@ async function runSubmissionsTestSuite() {
     const liveSubmitOtpResult = await runLiveSubmit(otpDbApp);
 
     assert(liveSubmitOtpResult.status === 'OTP_REQUIRED', 'Live submit paused with status OTP_REQUIRED');
-    assert(liveSubmitOtpResult.message === 'OTP required. Enter code in dashboard.', 'Returned expected dashboard message');
+    assert(liveSubmitOtpResult.requiresOtp === true, 'Live submit marks the result as requiring OTP');
     assert(PAUSED_SESSIONS.has(otpDbApp.id!), 'Paused session stored in PAUSED_SESSIONS map');
 
     const pausedSession = PAUSED_SESSIONS.get(otpDbApp.id!);
@@ -465,7 +488,32 @@ async function runSubmissionsTestSuite() {
 
     // 4b. Test retry retention: failure keeps session paused for operator retry
     // Test verification failure with a short timeout
-    const failVerifyResult = await submitOtpToPausedSession(otpDbApp.id!, '000000', { timeoutMs: 500 });
+    const otpConfirmationLogs: string[] = [];
+    const originalOtpConsoleLog = console.log;
+    console.log = (...args: any[]) => {
+      const line = args.map(String).join(' ');
+      if (line.includes('[Live Submit]') && line.includes('Waiting up to')) {
+        otpConfirmationLogs.push(line);
+      }
+      originalOtpConsoleLog(...args);
+    };
+    let failVerifyResult: Awaited<ReturnType<typeof submitOtpToPausedSession>>;
+    try {
+      failVerifyResult = await submitOtpToPausedSession(otpDbApp.id!, '000000', {
+        timeoutMs: 1000,
+        confirmationTimeoutMs: 500,
+      });
+    } finally {
+      console.log = originalOtpConsoleLog;
+    }
+    assert(
+      otpConfirmationLogs.some((line) => line.includes('Waiting up to 0.5s for confirmation after OTP')),
+      'OTP confirmation uses its own explicit timeout instead of the form/navigation timeout'
+    );
+    assert(
+      failVerifyResult.errorMessage?.includes('OTP confirmation timed out after 500ms'),
+      'OTP confirmation timeout reports the configured confirmation timeout'
+    );
     assert(failVerifyResult.status === 'FAILED', 'submitOtpToPausedSession returns status FAILED on timeout/non-confirmation');
     assert(PAUSED_SESSIONS.has(otpDbApp.id!), 'Paused session REMAINS in PAUSED_SESSIONS map on failure for retry');
 
@@ -495,11 +543,11 @@ async function runSubmissionsTestSuite() {
     // Seed test application in Supabase (use AWL-YASWANTH so Zoho check passes)
     const dbApp = await upsertApplication({
       applywizz_id: 'AWL-YASWANTH',
-      job_url: mockFormUrl,
+      job_url: `${mockFormUrl}?submission-test=1`,
       company_name: 'Acme Corp',
       job_title: 'Software Engineer',
       status: 'READY_FOR_REVIEW',
-      resolved_fields: testResolvedFields,
+      resolved_fields: testResolvedFields.filter((field) => field.fieldId !== 'resume'),
     });
 
     assert(dbApp !== null && Boolean(dbApp.id), 'Seeded application in candidate_applications');
@@ -625,7 +673,25 @@ async function runSubmissionsTestSuite() {
       ],
     });
 
-    const liveSubmitBadgeResult = await runLiveSubmit(passiveBadgeApp);
+    const confirmationWaitLogs: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: any[]) => {
+      const line = args.map(String).join(' ');
+      if (line.includes('[Live Submit]') && line.includes('Waiting up to')) {
+        confirmationWaitLogs.push(line);
+      }
+      originalConsoleLog(...args);
+    };
+    let liveSubmitBadgeResult: Awaited<ReturnType<typeof runLiveSubmit>>;
+    try {
+      liveSubmitBadgeResult = await runLiveSubmit(passiveBadgeApp, { timeoutMs: 5000 });
+    } finally {
+      console.log = originalConsoleLog;
+    }
+    assert(
+      confirmationWaitLogs.some((line) => line.includes('Waiting up to 75s for submission confirmation signals')),
+      'Default confirmation wait remains 75s with a separate 5s navigation timeout'
+    );
     assert(
       liveSubmitBadgeResult.status === 'APPLIED' || liveSubmitBadgeResult.status === 'EMAIL_PROOF_PENDING',
       'Passive reCAPTCHA badge does not divert submission; reaches APPLIED / EMAIL_PROOF_PENDING'
@@ -633,6 +699,54 @@ async function runSubmissionsTestSuite() {
     assert(liveSubmitBadgeResult.errorMessage !== 'CAPTCHA encountered', 'Does not produce CAPTCHA encountered error message');
     assert(!PAUSED_SESSIONS.has(passiveBadgeApp.id!), 'No paused session registered for passive badge');
     assert(!activeSubmissions.has(passiveBadgeApp.id!), 'No session registered in activeSubmissions for passive badge');
+
+    const confirmationTimeoutApp = await upsertApplication({
+      id: 'confirmation-timeout-test',
+      applywizz_id: 'AWL-CONFIRMATION-TIMEOUT',
+      job_url: mockNoConfirmationUrl,
+      company_name: 'Acme Corp',
+      job_title: 'Software Engineer',
+      status: 'READY_FOR_REVIEW',
+      resolved_fields: [
+        { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name', value: 'Alex', source: 'supabase', resolvedByTier: 1, confidence: 1 },
+      ],
+    });
+    const diagnosticLines: string[] = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: any[]) => {
+      const line = args.map(String).join(' ');
+      if (line.includes('[Failure Diagnostic]')) diagnosticLines.push(line);
+      originalConsoleError(...args);
+    };
+    let confirmationTimeoutResult: Awaited<ReturnType<typeof runLiveSubmit>>;
+    try {
+      confirmationTimeoutResult = await runLiveSubmit(confirmationTimeoutApp, {
+        timeoutMs: 3000,
+        confirmationTimeoutMs: 1000,
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+    const timeoutDiagnosticLine = diagnosticLines.find((line) =>
+      line.includes('SUBMIT_CONFIRMATION_TIMEOUT')
+    );
+    const timeoutDiagnostic = timeoutDiagnosticLine
+      ? JSON.parse(timeoutDiagnosticLine.slice(timeoutDiagnosticLine.indexOf('{')))
+      : null;
+    const savedConfirmationTimeoutApp = await getApplication(confirmationTimeoutApp.id!);
+    assert(
+      confirmationTimeoutResult.errorMessage === 'Timeout: Submission verification timed out after 1000ms.',
+      'Confirmation timeout message reports the configured confirmation timeout, not navigation timeout'
+    );
+    assert(
+      timeoutDiagnostic?.metadata?.timeoutMs === 1000 && timeoutDiagnostic?.is_retryable === false,
+      'Confirmation timeout diagnostic retains its configured timeout and is non-retryable'
+    );
+    assert(
+      Boolean(confirmationTimeoutResult.proofFailedUrl) &&
+        savedConfirmationTimeoutApp?.proof_failed_url === confirmationTimeoutResult.proofFailedUrl,
+      'Confirmation timeout failure proof remains attached for reconciliation'
+    );
 
     // =========================================================================
     // Test Group 7: Full E2E Flow (Form Fill -> Auto-Submit -> Multi-Box OTP -> APPLIED)

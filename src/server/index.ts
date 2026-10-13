@@ -1064,6 +1064,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         const { submitOtpToPausedSession } = await import('../submitter/liveSubmit.js');
         const result = await submitOtpToPausedSession(appId, otp.trim(), {
           timeoutMs: req.body?.timeoutMs ?? 30000,
+          confirmationTimeoutMs: req.body?.confirmationTimeoutMs,
           jobUrl: req.body?.jobUrl,
         });
         res.json(result);

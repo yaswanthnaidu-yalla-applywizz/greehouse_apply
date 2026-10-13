@@ -326,6 +326,7 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
     const result = await runLiveSubmit(appId, {
       headless: req.body?.headless !== undefined ? req.body.headless : true,
       timeoutMs: req.body?.timeoutMs ?? 30000,
+      confirmationTimeoutMs: req.body?.confirmationTimeoutMs,
       jobUrl: req.body?.jobUrl,
     });
 
@@ -446,6 +447,7 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
   try {
     const result = await submitOtpToPausedSession(appId, otp, {
       timeoutMs,
+      confirmationTimeoutMs: req.body?.confirmationTimeoutMs,
       jobUrl: req.body?.jobUrl,
     });
 

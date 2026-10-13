@@ -1,3 +1,36 @@
+## Current Session Update (2026-10-13 — Application Queue Export, Cleanup & Stats Alignment)
+
+- **Application Queue Transition & Export (`queued_applications_export_2026-10-13T16-17-24-402Z.csv`)**:
+  - Identified all applications outside of the protected set (`APPLIED`, `EMAIL_PROOF_PENDING`, `READY_FOR_REVIEW`) and transitioned them to `QUEUED` (332 applications transitioned).
+  - Queried all 703 `QUEUED` applications and exported them matching the exact ingest reference CSV format (`company_name,job_url,score,lead_name,applywizz_id`), referencing candidate lead names from [`greenhouse-jobs-2026-10-09.csv`](file:///C:/Users/yaswa/Dev/greehouse_apply/greenhouse-jobs-2026-10-09.csv) and profiles table.
+  - Successfully exported **703 applications** to [`queued_applications_export_2026-10-13T16-17-24-402Z.csv`](file:///C:/Users/yaswa/Dev/greehouse_apply/queued_applications_export_2026-10-13T16-17-24-402Z.csv).
+  - Deleted all 703 `QUEUED` application records from `gh_candidate_applications` and deleted their 3,816 associated events from `gh_application_events`.
+  - Synced `gh_stats_rollups` with true ground truth database counts (`total: 636`, `submitted: 250`, `applied: 250`, `failed: 0`).
+  - Remaining applications in database strictly consist of:
+    - `READY_FOR_REVIEW`: **386**
+    - `APPLIED`: **131**
+    - `EMAIL_PROOF_PENDING`: **119**
+    - Total: **636**
+
+## Current Session Update (2026-10-13 — Auto-Retry Browser Launch & Mailbox-Gated OTP & Multi-Replica Heartbeat Fix)
+
+- **Multi-Replica Worker Heartbeat Isolation & Cluster Rollup (`src/submitter/submitterPool.ts`, `src/server/healthSnapshot.ts`)**:
+  - In [`src/submitter/submitterPool.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply/src/submitter/submitterPool.ts), updated `writeHeartbeat()` to write with `service_name = 'submitter_pool:' + process.env.RAILWAY_REPLICA_ID` (falling back to `'submitter_pool'` when not in a multi-replica container). This eliminates row overwrite conflicts between concurrent Railway replicas.
+  - In [`src/server/healthSnapshot.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply/src/server/healthSnapshot.ts), updated `collectHealthSnapshot()` to query all matching `service_name.eq.submitter_pool,service_name.like.submitter_pool:%` updated within 30 seconds, dynamically summing `worker_count`, `idle_count`, and `in_flight_count` across all active replicas.
+- **Auto-Retry for Browser Launch & OTP Errors (`src/submitter/submissionRetry.ts`, `src/services/otpResolutionService.ts`)**:
+  - **Browser Launch Errors**: `BROWSER_LAUNCH_FAILED` is already wired into `isAutomaticRetryAllowed()` and `submitterPool.ts`. On launch failure, the worker automatically requeues the application back to `QUEUED` with incremented `retry_count` and prioritized submission order (capped at `MAX_SUBMISSION_RETRIES = 3`).
+  - **OTP Errors (OTP Not Received / Timeout)**:
+    - Updated `OtpResolutionService.processEntryInContext` to check candidate mailbox connection (`profile?.zoho_connected !== false`) via `getProfile(application.applywizz_id)` on timeout/poll budget exhaustion.
+    - If the mailbox is **connected** and `retry_count < MAX_SUBMISSION_RETRIES`, the application is safely requeued to `QUEUED` with `retry_count = retry_count + 1`.
+    - If the candidate's mailbox is **not connected** (`zoho_connected === false`), retry is bypassed and the application is transitioned to terminal `FAILED` immediately with an informative reason (`mailbox is disconnected`).
+  - **Database Migrations Assessment**:
+    - **No database migrations required.** The status transitions remain within existing permitted enum values (`QUEUED`, `FAILED`, `OTP_REQUIRED`) and `retry_count` is already supported by the schema and Postgres RPC `get_next_queued_application()`.
+- **Validation**:
+  - `tests/submissionRetry.test.ts` (PASS, 2/2)
+  - `tests/submitterPoolRetry.test.ts` (PASS, 5/5)
+  - `tests/otpResolution.test.ts` (PASS, 12/12)
+  - `npm run typecheck` passed cleanly across server and dashboard.
+
 ## Current Session Update (2026-10-13 — Client Info Drawer & 2-Tier Mobile Header Layout)
 
 - **Client Info Drawer (`dashboard/components/ClientInfoDrawer.tsx`, `tests/clientInfoFormatting.test.ts`)**:
