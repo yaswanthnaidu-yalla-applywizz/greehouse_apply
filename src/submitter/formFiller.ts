@@ -690,23 +690,42 @@ export function resolveEeoFallbackOption(options: string[]): string | null {
   return validOption || options[0] || null;
 }
 
-export function applyEducationDegreeFallback<T extends { fieldId: string; name?: string; label?: string; value: string }>(
+export function applyEducationFieldFallbacks<T extends { fieldId: string; name?: string; label?: string; value: string }>(
   fields: T[],
   isEducationRequiredOnDom: boolean
 ): T[] {
   if (!isEducationRequiredOnDom) return fields;
 
   return fields.map((f) => {
-    if (
-      isExplicitEducationField(f as any) &&
-      /\bdegree\b/i.test(`${f.fieldId} ${f.name || ''} ${f.label || ''}`) &&
-      (!f.value || !f.value.trim())
-    ) {
-      log.info(`[Form Filler] Education degree defaulted to "Bachelor's Degree" — profile degree blank`);
+    if (!isExplicitEducationField(f as any) || (f.value && f.value.trim())) {
+      return f;
+    }
+    const combined = `${f.fieldId} ${f.name || ''} ${f.label || ''}`.toLowerCase();
+    if (/\bdegree\b/.test(combined)) {
+      log.info(`[Form Filler] Education degree defaulted to "Bachelor's Degree" — field blank`);
       return { ...f, value: "Bachelor's Degree" };
+    }
+    if (/\bdiscipline\b|major|field of study/.test(combined)) {
+      log.info(`[Form Filler] Education discipline defaulted to "Computer Science" — field blank`);
+      return { ...f, value: 'Computer Science' };
+    }
+    if (/\bstart_date\b|start year|start date/.test(combined)) {
+      log.info(`[Form Filler] Education start date defaulted to "2018" — field blank`);
+      return { ...f, value: '2018' };
+    }
+    if (/\bend_date\b|end year|end date|graduation/.test(combined)) {
+      log.info(`[Form Filler] Education end date defaulted to "2022" — field blank`);
+      return { ...f, value: '2022' };
     }
     return f;
   });
+}
+
+export function applyEducationDegreeFallback<T extends { fieldId: string; name?: string; label?: string; value: string }>(
+  fields: T[],
+  isEducationRequiredOnDom: boolean
+): T[] {
+  return applyEducationFieldFallbacks(fields, isEducationRequiredOnDom);
 }
 
 export function resolveInvalidFieldLabel(
