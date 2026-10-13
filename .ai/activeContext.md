@@ -1,5 +1,11 @@
 ## Current Session Update (2026-10-13 — Choice Option Matching & Form Filling Fixes)
 
+- **Routing Policy Update (Auto-Queue vs. Review vs. Filtered-Out):**
+  - **Auto-Queue (`QUEUED`)**: Strictly requires **100% of required fields to be resolved without AI** (all resolved by Tiers 1–4: Supabase, Resume, Semantic, or Fuzzy), zero unresolved required fields, and valid salary expectations.
+  - **Ready for Review (`READY_FOR_REVIEW`)**: Holds applications where any required field was solved by AI (`source === 'ai'`), or where unresolved required count is $1 \dots 3$, or where unresolved required $> 3$ but total AI $\le 3$.
+  - **Filtered Out (`FILTERED_OUT`)**: Triggers when both unresolved required fields $> 3$ AND total AI fields $> 3$.
+  - **Tests**: Verified and passing in `tests/autoQueueAndCaNotification.test.ts` and `tests/filteredOutRouting.test.ts`.
+
 - **Root Causes Diagnosed and Resolved:**
   - **School bypass bug in `alignResolvedChoice`**: `isSchoolField` broadly matched any question containing the word `institution` (such as OPT extension questions), allowing answers like `"University of South Florida"` to bypass static option matching when the only valid options were `["Yes", "No", "Not Applicable"]`. Narrowed `isSchoolField` to exclude questions with boolean/choice options and non-school eligibility questions.
   - **Tier 1 Structured Payload Matcher**: Prevented `university|institution` regex from mapping eligibility, OPT, and STEM questions to the candidate's university name.
