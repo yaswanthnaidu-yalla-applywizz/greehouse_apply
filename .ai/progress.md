@@ -1,3 +1,17 @@
+### Dual Mailbox Ingest Sync & Candidate Round-Robin Dequeue (2026-10-13 Complete)
+- [x] **Dual Mailbox (Zoho + Gmail) Ingest Check (`src/services/zohoConnectionCheck.ts`, `scripts/scanZohoConnected.ts`, `tests/zohoConnectedFilter.test.ts`):**
+  - Updated `fetchConnectedEmails` to query both `/api/zoho/ui/users` and `/api/gmail/ui/users` concurrently via `Promise.allSettled`.
+  - Filters `user.connected === true` from both sources, lowercases and trims email addresses, and unifies them into a single connected mailbox set.
+  - Enhanced `scripts/scanZohoConnected.ts` to sync both Zoho and Gmail mailboxes to Supabase `profiles.zoho_connected`.
+- [x] **Resolution Gating for Connected Profiles (`src/resolver/answerResolver.ts`):**
+  - Updated `resolveAllApplications` to filter candidate segments to only those where `profile?.zoho_connected !== false`.
+  - Skips non-connected profiles at resolution time, saving LLM tokens and preventing un-submittable application records.
+- [x] **Candidate Round-Robin Dequeue & Migration 034 (`src/db/migrations/034_candidate_round_robin_dequeue.sql`, `src/db/applications.ts`, `tests/roundRobinDequeue.test.ts`):**
+  - Added Migration 034 creating composite index `idx_applications_round_robin_queue` on `(applywizz_id, submission_order ASC) WHERE status = 'QUEUED'`.
+  - Implemented window-ranked round-robin stored procedure `get_next_queued_application()` calculating candidate round rank (prior processed apps + queued position) ordered by candidate rank ASC, tie-broken by `submission_order ASC`, with atomic `FOR UPDATE OF ca SKIP LOCKED`.
+  - Implemented parity TypeScript helper `selectNextRoundRobinAppInMemory` and updated the Supabase query fallback and in-memory queue fallback in `getNextQueuedApplicationForRoundRobin`.
+  - Added comprehensive unit tests and multi-worker concurrent starvation simulation verifying fair round interleaving across candidates with uneven queue depths.
+
 ### Operator Dashboard Actionable Carousel Filtering (2026-10-13 Complete)
 - [x] **Carousel Field Filter (`dashboard/utils/fieldFilters.ts`, `tests/fieldFilters.test.ts`):**
   - Implemented `isActionableCarouselField` restricting card carousel mode strictly to:

@@ -45,4 +45,53 @@ describe('Round-Robin Dequeue Algorithm', () => {
     ];
     expect(selectNextRoundRobinAppInMemory(nonQueued as ApplicationRow[])).toBeNull();
   });
+
+  it('prevents candidate starvation across simulated concurrent worker dispatches', () => {
+    // Candidate 1 has 10 applications, Candidate 2 has 2, Candidate 3 has 1
+    const pool: ApplicationRow[] = [];
+    for (let i = 1; i <= 10; i++) {
+      pool.push({
+        id: `c1-app-${i}`,
+        applywizz_id: 'CAND_1',
+        status: 'QUEUED',
+        submission_order: i,
+      } as ApplicationRow);
+    }
+    for (let i = 1; i <= 2; i++) {
+      pool.push({
+        id: `c2-app-${i}`,
+        applywizz_id: 'CAND_2',
+        status: 'QUEUED',
+        submission_order: 10 + i,
+      } as ApplicationRow);
+    }
+    pool.push({
+      id: 'c3-app-1',
+      applywizz_id: 'CAND_3',
+      status: 'QUEUED',
+      submission_order: 13,
+    } as ApplicationRow);
+
+    // Simulate 3 workers dispatching from the pool round-robin
+    const dispatchedIds: string[] = [];
+    while (true) {
+      const next = selectNextRoundRobinAppInMemory(pool);
+      if (!next) break;
+      next.status = 'APPLYING';
+      dispatchedIds.push(next.id || '');
+    }
+
+    // Total dispatched count must match total apps (13)
+    expect(dispatchedIds.length).toBe(13);
+
+    // Round 1: first app from CAND_1, CAND_2, CAND_3
+    expect(dispatchedIds.slice(0, 3)).toEqual(['c1-app-1', 'c2-app-1', 'c3-app-1']);
+
+    // Round 2: second app from CAND_1, CAND_2 (CAND_3 has none left)
+    expect(dispatchedIds.slice(3, 5)).toEqual(['c1-app-2', 'c2-app-2']);
+
+    // Round 3+: remaining apps from CAND_1
+    expect(dispatchedIds[5]).toBe('c1-app-3');
+    expect(dispatchedIds[12]).toBe('c1-app-10');
+  });
 });
