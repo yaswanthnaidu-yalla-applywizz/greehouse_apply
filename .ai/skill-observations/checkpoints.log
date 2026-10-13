@@ -1,3 +1,4 @@
+2026-10-13 session-end: auto-retry for browser launch & mailbox-connected OTP errors verified; no DB migration required; activeContext updated; no new observations
 2026-10-11 session-start scan: context loaded from handover.md (sandbox PostgreSQL, Gmail OTP integration ready)
 2026-09-14 session-start scan: files=0 parsed=0
 2026-09-15 session-end: docs updated (progress, activeContext, systemPatterns, techContext); observation 0001 logged
@@ -586,3 +587,20 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 session-start 2026-10-13T09:01:15 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=chromium-crashes-concurrency-fix
 checkpoint 2026-10-13T09:18:46 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=chromium-crashes-concurrency-fix status=complete note=" no observations\
 checkpoint 2026-10-13T09:26:24 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=railway-envs-configured status=complete note=" no observations\
+2026-10-13 13:13 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 13:18 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.1791877152458 status=complete note=" no observations"
+2026-10-13 session-end: Choice option matching & form filling fixes shipped (isSchoolField narrowed, alignResolvedChoice guarded, dash normalization, demographic decline matching); all 4 test suites passed; no new observations
+2026-10-13 13:32 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 session-end: created four evidence-gated implementation plans for OTP timing, retry/confirmation safety, answer mismatches, and browser disconnect diagnostics; no new observations
+2026-10-13 session-end: Signal-to-noise logging optimization shipped (logger level filtering with shouldLogMessage, downgraded per-field and per-selector chatter to debug in worker and ingest pipelines, retained stats, errors, warns); all test suites passed; no new observations
+2026-10-13 14:16 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 14:40 [greehouse_apply] after third todo completion: no observations
+2026-10-13 14:47 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 15:37 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-13 session-end: STAR methodology LLM synthesis for open-ended questions shipped (classifier, single & batch prompt directives, QA bank evidence grounding); all test suites passed; no new observations
+2026-10-13 checkpoint: form validation & demographic fixes completed; no observations
+2026-10-13 session-start scan
+2026-10-13 checkpoint: operator dashboard carousel filtering completed; no observations
+2026-10-13 deliverable flush: dual mailbox sync and candidate round-robin dequeue complete (all 6 tasks verified and committed)
+2026-10-13 deliverable flush: migration 034 applied to remote db postgres-db2 and verified via MCP query

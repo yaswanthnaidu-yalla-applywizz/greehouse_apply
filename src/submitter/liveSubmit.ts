@@ -7,7 +7,7 @@
  * 3. Clicks the submit button
  * 4. Inspects for OTP input fields (post-submit only)
  *    - If detected: transitions status to OTP_REQUIRED and registers paused session
- * 5. Runs 30-second multi-signal completion verification (Title / DOM tokens / URL)
+ * 5. Runs multi-signal completion verification (Title / DOM tokens / URL)
  * 6. On confirmation: captures full-page web proof, uploads to Supabase Storage, sets status APPLIED
  * 7. On timeout / failure: captures error details, sets status FAILED
  */
@@ -30,7 +30,9 @@ import {
   activeSubmissions,
   registerSubmissionSession,
   verifySubmissionSignals,
+  DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
   closeSubmissionSession,
+  OTP_SESSION_TTL_MS,
 } from './otpSession.js';
 
 export { verifySubmissionSignals };
@@ -110,8 +112,10 @@ async function ensureResumeAvailable(application: ApplicationRow): Promise<boole
 export interface LiveSubmitOptions extends FormFillerOptions {
   /** Launch in headless mode (default: true) */
   headless?: boolean;
-  /** Navigation and submission timeout in milliseconds (default: 30000) */
+  /** Navigation and form timeout in milliseconds (default: 30000) */
   timeoutMs?: number;
+  /** Confirmation verification timeout in milliseconds (default: 75000) */
+  confirmationTimeoutMs?: number;
   /** Target job posting URL */
   jobUrl?: string;
 }
@@ -152,7 +156,7 @@ export interface PausedSession {
   boxSelectors?: string[];
   /** Whether a success or failure screenshot was already captured before closing */
   screenshotCaptured?: boolean;
-  /** 5-minute auto-close timer handle to prevent leaking browser processes */
+  /** Auto-close timer handle for the paused OTP session */
   ttlTimer?: NodeJS.Timeout;
 }
 
@@ -237,10 +241,10 @@ export function storePausedSession(
 
   const ttlTimer = setTimeout(async () => {
     log.warn(
-      `[Live Submit] ⏰ Paused OTP session ${canonicalKey} timed out after 5m. Closing browser context...`
+      `[Live Submit] ⏰ Paused OTP session ${canonicalKey} timed out after ${OTP_SESSION_TTL_MS / 60000}m. Closing browser context...`
     );
     await clearPausedSession(canonicalKey);
-  }, 5 * 60 * 1000);
+  }, OTP_SESSION_TTL_MS);
 
   if (ttlTimer.unref) {
     ttlTimer.unref();
@@ -746,9 +750,10 @@ export interface SubmitOtpResult {
 export async function submitOtpToPausedSession(
   applicationId: string,
   otp: string,
-  options: { timeoutMs?: number; jobUrl?: string } = {}
+  options: { timeoutMs?: number; confirmationTimeoutMs?: number; jobUrl?: string } = {}
 ): Promise<SubmitOtpResult> {
-  const timeoutMs = options.timeoutMs ?? 30000;
+  const confirmationTimeoutMs =
+    options.confirmationTimeoutMs ?? DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS;
   const cleanOtp = (otp || '').trim();
 
   if (!cleanOtp) {
@@ -844,8 +849,8 @@ export async function submitOtpToPausedSession(
       }
     }
 
-    log.info(`[Live Submit] ⏳ Waiting up to ${timeoutMs / 1000}s for confirmation after OTP...`);
-    const verification = await verifySubmissionSignals(page, timeoutMs);
+    log.info(`[Live Submit] ⏳ Waiting up to ${confirmationTimeoutMs / 1000}s for confirmation after OTP...`);
+    const verification = await verifySubmissionSignals(page, confirmationTimeoutMs);
 
     if (verification.verified) {
       log.info(`[Live Submit] 🎉 OTP verification confirmed! Signal: ${verification.signal}`);
@@ -924,7 +929,7 @@ export async function submitOtpToPausedSession(
 
     const isTimeout = /time.*out/i.test(verification.error || '');
     const errorMsg = isTimeout
-      ? 'Timeout: OTP was not filled in time.'
+      ? `Timeout: OTP confirmation timed out after ${confirmationTimeoutMs}ms.`
       : (verification.error || 'OTP submission verification failed.');
 
     if (isTimeout) {
@@ -1022,6 +1027,8 @@ export async function runLiveSubmit(
   options: LiveSubmitOptions = {}
 ): Promise<LiveSubmitResult> {
   const timeoutMs = options.timeoutMs ?? 30000;
+  const confirmationTimeoutMs =
+    options.confirmationTimeoutMs ?? DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS;
 
   // 1. Resolve application record
   let application: ApplicationRow;
@@ -1470,9 +1477,11 @@ export async function runLiveSubmit(
       }
     }
 
-    // 7. Multi-Signal Completion Verification (up to 30s)
-    log.info(`[Live Submit] ⏳ Waiting up to ${timeoutMs / 1000}s for submission confirmation signals...`);
-    const verification = await verifySubmissionSignals(page, timeoutMs);
+    // 7. Multi-Signal Completion Verification
+    log.info(
+      `[Live Submit] ⏳ Waiting up to ${confirmationTimeoutMs / 1000}s for submission confirmation signals...`
+    );
+    const verification = await verifySubmissionSignals(page, confirmationTimeoutMs);
 
     if (verification.verified) {
       log.info(`[Live Submit] 🎉 Submission verified! Signal: ${verification.signal}`);
@@ -1567,7 +1576,7 @@ export async function runLiveSubmit(
         errorMsg = verification.error || 'Form filling error: Validation failed.';
         log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
       } else if (isTimeout) {
-        errorMsg = 'Timeout: Submission verification timed out after 30s.';
+        errorMsg = `Timeout: Submission verification timed out after ${confirmationTimeoutMs}ms.`;
         log.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
       } else {
         errorMsg = verification.error || 'Submission verification failed.';
@@ -1579,10 +1588,10 @@ export async function runLiveSubmit(
         stage: 'submission_confirmation',
         reason: errorMsg,
         isTerminal: false,
-        isRetryable: true,
+        isRetryable: !isTimeout,
         applicationId: application.id || applicationId,
         jobUrl: targetUrl,
-        metadata: { timeoutMs },
+        metadata: { timeoutMs: confirmationTimeoutMs },
       });
 
       let failedProof: any = null;
@@ -1705,7 +1714,7 @@ export async function runLiveSubmit(
       }
       log.info(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
     } else {
-      log.info(
+      log.debug(
         `[Live Submit] ⏸️ Browser context kept paused in memory for application ${applicationId}.`
       );
     }

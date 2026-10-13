@@ -23,13 +23,14 @@ describe('Auto-queue Routing & NeedsReview', () => {
     assert.equal(applicationNeedsOperatorReview(fields), true);
   });
 
-  it('applicationNeedsOperatorReview does NOT require review when a required field has source=ai with confidence >= 0.8', () => {
+  it('applicationNeedsOperatorReview requires review when ANY required field has source=ai', () => {
     const fields = [
       { isRequired: true, source: 'supabase' },
       { isRequired: true, source: 'ai', confidence: 0.9 },
       { isRequired: false, source: 'resume_parse' },
     ];
-    assert.equal(applicationNeedsOperatorReview(fields), false);
+    // Required fields solved by AI must never auto-queue; they require operator review
+    assert.equal(applicationNeedsOperatorReview(fields), true);
   });
 
   it('applicationNeedsOperatorReview requires review when a salary question is answered negatively', () => {

@@ -93,6 +93,16 @@ function collectFacts(value: unknown, path: string, facts: EvidenceFact[], depth
     return;
   }
   if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    // When item is a QA bank row ({ question_label, value })
+    if (typeof obj.question_label === 'string' && typeof obj.value === 'string' && obj.value.trim()) {
+      facts.push({
+        path: `${path}.qa (${obj.question_label.trim()})`,
+        value: `${obj.question_label.trim()}: ${obj.value.trim()}`.slice(0, MAX_FACT_VALUE_CHARS),
+      });
+      return;
+    }
+
     for (const [key, child] of Object.entries(value)) {
       if (/^(?:resume_text|resume_url|resume_storage_path|id|created_at|updated_at)$/i.test(key)) continue;
       collectFacts(child, path ? `${path}.${key}` : key, facts, depth + 1);
@@ -152,6 +162,7 @@ export function buildQuestionRelevantEvidence(
     if (candidate[key] !== undefined) collectFacts(candidate[key], `profile.${key}`, facts);
   }
   collectFacts(candidate.raw_api_payload, 'raw_api_payload', facts);
+  collectFacts(candidate.qaBankAnswers ?? candidate.qa_bank ?? candidate.qa_bank_answers, 'qa_bank', facts);
   collectFacts(resumeFacts, 'resume_facts', facts);
 
   const question = `${field.label} ${field.name} ${field.fieldId}`;

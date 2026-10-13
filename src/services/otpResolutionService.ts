@@ -4,13 +4,15 @@ import {
   updateStatus,
   MAX_SUBMISSION_RETRIES,
 } from '../db/applications.js';
+import { getProfile } from '../db/profiles.js';
 import { fetchZohoOtpViaApi, fetchGmailOtpViaApi } from './zoho-connector.js';
 import { config } from '../config/env.js';
 import { emitFailureDiagnostic, withDiagnosticRun } from '../utils/failureDiagnostics.js';
 import { captureJobFailedScreenshot } from '../submitter/proofCapture.js';
+import { OTP_CHALLENGE_TIMEOUT_MS, OTP_POLL_INTERVAL_MS } from '../submitter/otpTimeouts.js';
 
 const log = createLogger('OTP Resolution');
-export const OTP_CHALLENGE_TIMEOUT_MS = 8 * 60 * 1000; // increased from 5 min to give slow email delivery more time
+export { OTP_CHALLENGE_TIMEOUT_MS } from '../submitter/otpTimeouts.js';
 const TERMINAL_OTP_FETCH_REASONS = new Set([
   'INVALID_CANDIDATE_EMAIL',
   'INVALID_SUBMIT_TIMESTAMP',
@@ -73,6 +75,7 @@ export function resolveOtpEndpoint(candidateEmail: string): 'zoho' | 'gmail' {
 
 export interface OtpResolutionDeps {
   getApplication?: typeof getApplication;
+  getProfile?: typeof getProfile;
   updateStatus?: typeof updateStatus;
   fetchZohoOtpViaApi?: typeof fetchZohoOtpViaApi;
   fetchGmailOtpViaApi?: typeof fetchGmailOtpViaApi;
@@ -167,6 +170,7 @@ export class OtpResolutionService {
   public async processEntryInContext(entry: OtpPendingEntry): Promise<void> {
     const liveSubmit = await import('../submitter/liveSubmit.js');
     const getApp = this.deps.getApplication ?? getApplication;
+    const getProf = this.deps.getProfile ?? getProfile;
     const updateStat = this.deps.updateStatus ?? updateStatus;
     const fetchZoho = this.deps.fetchZohoOtpViaApi ?? fetchZohoOtpViaApi;
     const fetchGmail = this.deps.fetchGmailOtpViaApi ?? fetchGmailOtpViaApi;
@@ -198,8 +202,8 @@ export class OtpResolutionService {
 
     // Wait 10s after OTP detection before first mailbox query
     const elapsedSinceDetect = Date.now() - entry.submitClickedAt;
-    if (elapsedSinceDetect < 10000) {
-      await sleepFn(10000 - elapsedSinceDetect);
+    if (elapsedSinceDetect < OTP_POLL_INTERVAL_MS) {
+      await sleepFn(OTP_POLL_INTERVAL_MS - elapsedSinceDetect);
     }
 
     log.info(
@@ -215,6 +219,10 @@ export class OtpResolutionService {
     while (Date.now() < deadline) {
       if (!pendingEntries.has(entry.applicationId)) return;
       const remainingMs = deadline - Date.now();
+      if (remainingMs < OTP_POLL_INTERVAL_MS) {
+        lastReason = 'POLL_BUDGET_EXHAUSTED';
+        break;
+      }
       log.info(
         `[OTP Resolution] ⏳ ${entry.applicationId} elapsed=${Date.now() - entry.submitClickedAt}ms/` +
           `${OTP_CHALLENGE_TIMEOUT_MS}ms attempt=${attemptNumber}`
@@ -230,7 +238,7 @@ export class OtpResolutionService {
               companyName: companyParam,
               correlationId: entry.applicationId,
               timeoutMs: Math.min(30000, remainingMs),
-              pollIntervalMs: 10000,
+              pollIntervalMs: OTP_POLL_INTERVAL_MS,
               excludedCodes: entry.attemptedCodes,
             })
           : await fetchZoho({
@@ -239,7 +247,7 @@ export class OtpResolutionService {
               sinceTimestamp: entry.submitClickedAt,
               companyName: companyParam,
               timeoutMs: Math.min(30000, remainingMs),
-              pollIntervalMs: 10000,
+              pollIntervalMs: OTP_POLL_INTERVAL_MS,
               newerThanTimestamp: entry.newestAttemptedTimestamp,
               excludedMessageIds: entry.attemptedMessageIds,
               excludedCodes: entry.attemptedCodes,
@@ -281,9 +289,12 @@ export class OtpResolutionService {
             return;
           }
 
-          // not_yet / poll timeout: wait 10s and continue polling same endpoint until deadline
-          if (Date.now() + 10000 < deadline) {
-            await sleepFn(10000);
+          // not_yet / poll timeout: wait only when another full poll fits before the deadline.
+          if (deadline - Date.now() >= OTP_POLL_INTERVAL_MS) {
+            await sleepFn(OTP_POLL_INTERVAL_MS);
+          } else {
+            lastReason = 'POLL_BUDGET_EXHAUSTED';
+            break;
           }
           continue;
         }
@@ -389,15 +400,33 @@ export class OtpResolutionService {
     }
 
     const nextRetryCount = retryCount + 1;
-    const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES;
+    let isMailboxConnected = true;
+    if (application.applywizz_id) {
+      try {
+        const profile = await getProf(application.applywizz_id);
+        if (profile && profile.zoho_connected === false) {
+          isMailboxConnected = false;
+        }
+      } catch (err: any) {
+        log.warn(`[OTP Resolution] Could not verify mailbox connection for ${application.applywizz_id}: ${err.message}`);
+      }
+    }
+
+    const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES || !isMailboxConnected;
     const finalStatus: 'FAILED' | 'QUEUED' = isTerminal ? 'FAILED' : 'QUEUED';
+    const reasonDetail = !isMailboxConnected
+      ? 'mailbox is disconnected (zoho_connected=false)'
+      : `attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}`;
     const errorMessage =
-      `[OTP_FETCH:TIMEOUT] OTP not received within 300s (attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}); reason=${lastReason}.`;
+      `[OTP_FETCH:TIMEOUT] OTP not received within ${OTP_CHALLENGE_TIMEOUT_MS / 1000}s ` +
+      `(${reasonDetail}); reason=${lastReason}.`;
 
     await emitFailureDiagnostic({
       category: 'SUBMIT_OTP_TIMEOUT',
       stage: 'otp_mailbox_lookup',
-      reason: 'Automatic OTP retrieval exceeded the configured submit-time deadline.',
+      reason: !isMailboxConnected
+        ? 'Automatic OTP retrieval exceeded deadline and candidate mailbox is not connected.'
+        : 'Automatic OTP retrieval exceeded the configured submit-time deadline.',
       errorCode: lastReason,
       isTerminal,
       isRetryable: !isTerminal,
@@ -408,6 +437,7 @@ export class OtpResolutionService {
         elapsedMs: Date.now() - entry.submitClickedAt,
         retryCount: nextRetryCount,
         reasonCode: lastReason,
+        isMailboxConnected,
       },
     });
 
@@ -429,7 +459,7 @@ export class OtpResolutionService {
     log.warn(
       `[OTP Resolution] application=${entry.applicationId} outcome=${finalStatus.toLowerCase()} ` +
         `reason=${lastReason} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
-        `elapsed_ms=${Date.now() - startedAt} session=closed`
+        `mailbox_connected=${isMailboxConnected} elapsed_ms=${Date.now() - startedAt} session=closed`
     );
     this.cancel(entry.applicationId);
   }

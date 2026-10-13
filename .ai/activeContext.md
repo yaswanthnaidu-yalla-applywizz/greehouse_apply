@@ -1,3 +1,173 @@
+## Current Session Update (2026-10-13 — Application Queue Export, Cleanup & Stats Alignment)
+
+- **Application Queue Transition & Export (`queued_applications_export_2026-10-13T16-17-24-402Z.csv`)**:
+  - Identified all applications outside of the protected set (`APPLIED`, `EMAIL_PROOF_PENDING`, `READY_FOR_REVIEW`) and transitioned them to `QUEUED` (332 applications transitioned).
+  - Queried all 703 `QUEUED` applications and exported them matching the exact ingest reference CSV format (`company_name,job_url,score,lead_name,applywizz_id`), referencing candidate lead names from [`greenhouse-jobs-2026-10-09.csv`](file:///C:/Users/yaswa/Dev/greehouse_apply/greenhouse-jobs-2026-10-09.csv) and profiles table.
+  - Successfully exported **703 applications** to [`queued_applications_export_2026-10-13T16-17-24-402Z.csv`](file:///C:/Users/yaswa/Dev/greehouse_apply/queued_applications_export_2026-10-13T16-17-24-402Z.csv).
+  - Deleted all 703 `QUEUED` application records from `gh_candidate_applications` and deleted their 3,816 associated events from `gh_application_events`.
+  - Synced `gh_stats_rollups` with true ground truth database counts (`total: 636`, `submitted: 250`, `applied: 250`, `failed: 0`).
+  - Remaining applications in database strictly consist of:
+    - `READY_FOR_REVIEW`: **386**
+    - `APPLIED`: **131**
+    - `EMAIL_PROOF_PENDING`: **119**
+    - Total: **636**
+
+## Current Session Update (2026-10-13 — Auto-Retry Browser Launch & Mailbox-Gated OTP & Multi-Replica Heartbeat Fix)
+
+- **Multi-Replica Worker Heartbeat Isolation & Cluster Rollup (`src/submitter/submitterPool.ts`, `src/server/healthSnapshot.ts`)**:
+  - In [`src/submitter/submitterPool.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply/src/submitter/submitterPool.ts), updated `writeHeartbeat()` to write with `service_name = 'submitter_pool:' + process.env.RAILWAY_REPLICA_ID` (falling back to `'submitter_pool'` when not in a multi-replica container). This eliminates row overwrite conflicts between concurrent Railway replicas.
+  - In [`src/server/healthSnapshot.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply/src/server/healthSnapshot.ts), updated `collectHealthSnapshot()` to query all matching `service_name.eq.submitter_pool,service_name.like.submitter_pool:%` updated within 30 seconds, dynamically summing `worker_count`, `idle_count`, and `in_flight_count` across all active replicas.
+- **Auto-Retry for Browser Launch & OTP Errors (`src/submitter/submissionRetry.ts`, `src/services/otpResolutionService.ts`)**:
+  - **Browser Launch Errors**: `BROWSER_LAUNCH_FAILED` is already wired into `isAutomaticRetryAllowed()` and `submitterPool.ts`. On launch failure, the worker automatically requeues the application back to `QUEUED` with incremented `retry_count` and prioritized submission order (capped at `MAX_SUBMISSION_RETRIES = 3`).
+  - **OTP Errors (OTP Not Received / Timeout)**:
+    - Updated `OtpResolutionService.processEntryInContext` to check candidate mailbox connection (`profile?.zoho_connected !== false`) via `getProfile(application.applywizz_id)` on timeout/poll budget exhaustion.
+    - If the mailbox is **connected** and `retry_count < MAX_SUBMISSION_RETRIES`, the application is safely requeued to `QUEUED` with `retry_count = retry_count + 1`.
+    - If the candidate's mailbox is **not connected** (`zoho_connected === false`), retry is bypassed and the application is transitioned to terminal `FAILED` immediately with an informative reason (`mailbox is disconnected`).
+  - **Database Migrations Assessment**:
+    - **No database migrations required.** The status transitions remain within existing permitted enum values (`QUEUED`, `FAILED`, `OTP_REQUIRED`) and `retry_count` is already supported by the schema and Postgres RPC `get_next_queued_application()`.
+- **Validation**:
+  - `tests/submissionRetry.test.ts` (PASS, 2/2)
+  - `tests/submitterPoolRetry.test.ts` (PASS, 5/5)
+  - `tests/otpResolution.test.ts` (PASS, 12/12)
+  - `npm run typecheck` passed cleanly across server and dashboard.
+
+## Current Session Update (2026-10-13 — Client Info Drawer & 2-Tier Mobile Header Layout)
+
+- **Client Info Drawer (`dashboard/components/ClientInfoDrawer.tsx`, `tests/clientInfoFormatting.test.ts`)**:
+  - Slide-over drawer providing comprehensive candidate details (`awl_id`, `name`, `company_email`, `phone`, `country`, `location`, `linkedin_url`, `website_url`, `github_url`, `work_auth`, `sponsorship`, `education`, and `experience`).
+  - Added formatted vertical card lists for education and work experience (skipping raw JSON strings).
+  - Automatically filters out empty/null/undefined candidate fields.
+  - Backdrop blur and dismissal via backdrop click or `Escape` key.
+- **JobQueueView & App.tsx Integration (`dashboard/JobQueueView.tsx`, `dashboard/App.tsx`, `tests/clientInfoIntegration.test.ts`)**:
+  - Wired `👤 Client Info` pill button adjacent to `📄 Master Resume PDF`.
+  - Passed `onOpenClientInfo` to toggle drawer state cleanly without disrupting job queue layout.
+- **2-Tier Mobile Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`)**:
+  - Redesigned mobile header (`< 768px`) into a 2-tier structure eliminating crowded/overlapping controls:
+    - **Tier 1 (Main Header):** Brand logo + notifications bell (`🔔`) + user avatar/sign out.
+    - **Tier 2 (Sub-bar):** Date filter (`📅 IST`), refresh button (`↻`), and DevSwitcher with comfortable touch targets.
+  - Preserved single-row desktop layout (`hidden md:flex h-16`) intact.
+- **Validation**:
+  - `tests/clientInfoFormatting.test.ts` (PASS, 4/4)
+  - `tests/clientInfoIntegration.test.ts` (PASS, 1/1)
+  - `tests/mobileHeaderLayout.test.ts` (PASS, 1/1)
+  - `npm run typecheck` (`tsc --noEmit && npm run typecheck:dashboard`) passed with 0 errors.
+
+## Current Session Update (2026-10-13 — Dual Mailbox Ingest Sync & Candidate Round-Robin Dequeue)
+
+- **Dual Mailbox (Zoho + Gmail) Sync & Gate (`src/services/zohoConnectionCheck.ts`, `scripts/scanZohoConnected.ts`, `src/resolver/answerResolver.ts`)**:
+  - `fetchConnectedEmails` queries both `/api/zoho/ui/users` and `/api/gmail/ui/users` concurrently via `Promise.allSettled`, normalizing and combining all mailboxes where `user.connected === true`.
+  - Updated `scripts/scanZohoConnected.ts` to sync both services to `profiles.zoho_connected`.
+  - In `resolveAllApplications`, strictly gated answer resolution to candidate segments where `profile?.zoho_connected !== false`.
+- **Candidate Round-Robin Dequeue & Migration 034 (`src/db/migrations/034_candidate_round_robin_dequeue.sql`, `src/db/applications.ts`)**:
+  - Created Migration 034 adding composite index `idx_applications_round_robin_queue` and updating stored procedure `get_next_queued_application()` with candidate-level window ranking (`candidate_rank = prior processed count + queued position`) with atomic `FOR UPDATE OF ca SKIP LOCKED`.
+  - Implemented `selectNextRoundRobinAppInMemory` in `src/db/applications.ts` and updated the Supabase query fallback and in-memory queue fallback to enforce identical candidate interleaving.
+- **Validation**:
+  - `tests/zohoConnectedFilter.test.ts` (PASS, 7/7)
+  - `tests/roundRobinDequeue.test.ts` (PASS, 3/3, including 3-worker starvation simulation)
+  - Full `npm run test:vitest` (PASS, 55/55)
+  - `npm run typecheck` passes with 0 errors.
+
+## Current Session Update (2026-10-13 — Operator Dashboard Carousel Actionable Filtering)
+
+- **Actionable Question Filtering (`dashboard/utils/fieldFilters.ts`, `dashboard/FormRenderer.tsx`)**:
+  - Implemented `isActionableCarouselField` to restrict card carousel review strictly to:
+    1. Required Unresolved fields (`isRequired === true && source === 'unresolved'`)
+    2. Required AI-resolved fields (`isRequired === true && source === 'ai'`)
+    3. Optional AI-resolved fields (`isRequired === false && source === 'ai'`)
+    4. Manually edited fields (`source === 'manual' || isEdited === true`)
+  - Excluded profile identity fields (`first_name`, `last_name`, `email`, `phone`) and non-AI profile/resume resolved fields from the carousel.
+  - Carousel progress bar and approval counter strictly reflect the filtered actionable questions.
+  - Added empty-state card when 0 review questions exist (with direct "Approve & Submit" and "Inspect Full List" options).
+  - Preserved 100% full field view when switched to "Switch to Full List" mode.
+- **Validation**:
+  - `tests/fieldFilters.test.ts` (PASS, 7/7)
+  - `tests/formRendererFiltering.test.ts` (PASS, 3/3)
+  - `npm run typecheck` and `npm run typecheck:dashboard` pass with 0 errors.
+
+## Current Session Update (2026-10-13 — Form Validation & Demographic Fixes for Terminal Failures)
+
+- **Demographic Race Labeling & EEO Fallback (`src/resolver/answerResolver.ts`, `src/resolver/tier1Supabase.ts`, `src/submitter/formFiller.ts`)**:
+  - Broadened race regex patterns to match "Please identify your race" and "Please identify your race/ethnicity".
+  - Extended Tier 1 structured resolver to match candidate race from `additional.raceEthnicity` and `payload.demographics`.
+  - Added DOM fallback `resolveEeoFallbackOption` in `formFiller.ts` to select employer decline options for required demographic dropdowns when no candidate preference is matched.
+- **Mandatory Cover Letter Gate (`src/resolver/needsReview.ts`)**:
+  - Added gate routing applications to `READY_FOR_REVIEW` when a cover letter is mandatory (`field.required === true`), preventing headless submit timeouts.
+- **Education Cascading Fallbacks (`src/submitter/formFiller.ts`)**:
+  - Added `applyEducationFieldFallbacks` providing default degree, discipline, start date, and end date when Greenhouse renders an unfilled mandatory education block.
+- **International Phone Formatting Safeguard (`src/submitter/formFiller.ts`)**:
+  - Implemented `sanitizePhoneNumberForSubmission` ensuring prefix stripping only applies to numbers with 11+ digits, protecting 10-digit international phone numbers from corruption.
+- **Validation**:
+  - `tests/demographicRaceMatching.test.ts` (PASS, 4/4)
+  - `tests/mandatoryCoverLetterReview.test.ts` (PASS, 2/2)
+  - `tests/educationFallbacks.test.ts` (PASS, 2/2)
+  - `tests/phoneFormatting.test.ts` (PASS, 4/4)
+  - `npm run typecheck` passes with zero type errors.
+
+## Current Session Update (2026-10-13 — STAR Methodology LLM Synthesis for Open-Ended Questions)
+
+- **STAR Question Classifier (`src/resolver/starClassifier.ts`)**:
+  - Implemented `isBehavioralOrMotivationalQuestion` to detect open-ended behavioral prompts ("Have you worked with...", "Tell us about a time...", "Describe a project...") and motivational prompts ("Why choose our company...", "Why are you interested in this role?").
+  - Strictly excluded choice/select/radio/checkbox fields, demographic/EEO fields, URLs, contact numbers, and salary fields.
+- **LLM Synthesizer Prompt Directives (`src/resolver/llmSynthesizer.ts`)**:
+  - Embedded STAR guidelines into `buildSinglePrompt` and `buildBatchPrompt` / `systemMessage` (CREATIVE RULE).
+  - Constrained responses to a concise single paragraph of approximately 50 to 80 words without artificial section headers or bullets.
+  - Enforced a confident first-person narrative ("I led...", "In my role at...") grounded strictly in actual candidate resume history, verified projects, and QA bank entries.
+- **Context Grounding (`src/resolver/candidateEvidence.ts`)**:
+  - Added support for candidate QA bank answers (`qaBankAnswers`, `qa_bank`) in evidence extraction so behavioral responses maintain consistency with past candidate interview answers.
+- **Validation**:
+  - `tests/starClassifier.test.ts` (PASS, 4/4)
+  - `tests/starPromptSynthesis.test.ts` (PASS, 4/4)
+  - `tests/starGroundingContext.test.ts` (PASS, 1/1)
+  - `tests/starSynthesisRegression.test.ts` (PASS, 3/3)
+  - Regressions clean: `optionMatchingAlignment.test.ts`, `filteredOutRouting.test.ts`, `autoQueueAndCaNotification.test.ts`, `formFillerNormalization.test.ts`.
+
+## Current Session Update (2026-10-13 — Signal-to-Noise Logging Optimization across Worker & Ingest)
+
+- **Centralized Log Level Filtering (`src/utils/logger.ts`)**:
+  - Implemented and exported `shouldLogMessage(level, configuredLevel)` with strict severity levels (`DEBUG: 10`, `INFO: 20`, `WARN: 30`, `ERROR: 40`, `HALT: 50`).
+  - `WARN`, `ERROR`, and `HALT` are always emitted regardless of configured log level.
+  - `emit()` checks `process.env.LOG_LEVEL` (defaults to `INFO`), eliminating intermediate debug noise in production while preserving milestones, stats, warnings, and errors.
+  - Covered by unit and integration tests in `tests/loggerFiltering.test.ts`.
+- **Worker & Submitter Pipeline Decluttering (`src/submitter/formFiller.ts`, `src/submitter/liveSubmit.ts`)**:
+  - Downgraded per-keystroke/selector debug logs (`[FormFiller] Stage 1/2/3 match`, `[Sponsorship DEBUG]`, `Country code field → selector`, `Boolean field → clicked`) to `log.debug()`.
+  - Preserved critical completion stats and operational milestones: resume uploads, form fill completion ratios (`Finished filling form: X/Y successful, Z failed`), and terminal verification/submission statuses.
+- **Ingest Pipeline Decluttering (`src/resolver/answerResolver.ts`)**:
+  - Downgraded per-field resolution attempts (`[Resolver] ✅ T1/T2/T3/T4/T5`, `[Resolver] ❌ T1/T2/T3/T4/T5`) to `log.debug()`.
+  - Retained candidate resolution summaries, phase metrics, auto-queue notices, filter-out notices, and batch rollups at `log.info()`.
+- **Validation**:
+  - `tests/loggerFiltering.test.ts` (PASS, 6/6 tests)
+  - `tests/optionMatchingAlignment.test.ts` (PASS)
+  - `tests/filteredOutRouting.test.ts` (PASS, 11/11 tests)
+  - `tests/autoQueueAndCaNotification.test.ts` (PASS, 16/16 tests)
+  - `tests/formFillerNormalization.test.ts` (PASS, 11/11 tests)
+
+## Current Session Update (2026-10-13 — Choice Option Matching & Form Filling Fixes)
+
+- **Routing Policy Update (Auto-Queue vs. Review vs. Filtered-Out):**
+  - **Auto-Queue (`QUEUED`)**: Strictly requires **100% of required fields to be resolved without AI** (all resolved by Tiers 1–4: Supabase, Resume, Semantic, or Fuzzy), zero unresolved required fields, and valid salary expectations.
+  - **Ready for Review (`READY_FOR_REVIEW`)**: Holds applications where any required field was solved by AI (`source === 'ai'`), or where unresolved required count is $1 \dots 3$, or where unresolved required $> 3$ but total AI $\le 3$.
+  - **Filtered Out (`FILTERED_OUT`)**: Triggers when both unresolved required fields $> 3$ AND total AI fields $> 3$.
+  - **Tests**: Verified and passing in `tests/autoQueueAndCaNotification.test.ts` and `tests/filteredOutRouting.test.ts`.
+
+- **Root Causes Diagnosed and Resolved:**
+  - **School bypass bug in `alignResolvedChoice`**: `isSchoolField` broadly matched any question containing the word `institution` (such as OPT extension questions), allowing answers like `"University of South Florida"` to bypass static option matching when the only valid options were `["Yes", "No", "Not Applicable"]`. Narrowed `isSchoolField` to exclude questions with boolean/choice options and non-school eligibility questions.
+  - **Tier 1 Structured Payload Matcher**: Prevented `university|institution` regex from mapping eligibility, OPT, and STEM questions to the candidate's university name.
+  - **En-dash / Em-dash / Hyphen mismatch**: Normalized unicode dashes in `matchDropdownOption` and `fuzzyOptionTextMatch` to standard ASCII hyphens (`-`), allowing salary and range options (e.g. `"$100,000 – $110,000"`) to match Greenhouse DOM `<option>` values.
+  - **Demographic Decline Matching**: Added EEO decline phrasing detection in `fuzzyOptionTextMatch` and enabled it for `isDemographicOrEeoField` in searchable select controls, enabling `"Decline To Self Identify"` to match company-specific variants like `"Decline to self-identify"`, `"I do not wish to disclose"`, or `"Prefer not to say"`.
+- **Validation**:
+  - `tests/optionMatchingAlignment.test.ts` (PASS)
+  - `tests/choiceOptions.test.ts` (PASS)
+  - `tests/formFillerNormalization.test.ts` (PASS)
+  - `tests/resolverDiagnosedFixes.test.ts` (PASS)
+
+## Current Session Update (2026-10-13 — Submission Log Root-Cause Diagnosis)
+
+- **✅ OTP timeout/log storm fixed (2026-10-13):** Shared timing constants now align the 8-minute OTP budget, 10-second poll interval, and 9.5-minute paused-session TTL (including the 90-second confirmation grace). The resolver stops before a poll that cannot fit and reports the configured `480s` timeout, eliminating the zero-poll tight loop. Focused tests and `npm run typecheck` pass.
+- **✅ Unsafe generic retries fixed (2026-10-13):** The pool now retries only explicit `BROWSER_LAUNCH_FAILED` results. Required-field failures, unclassified results, and thrown errors are persisted as `FAILED` without incrementing `retry_count`; existing proof fields are left untouched. The generic DB retry helper requires the typed eligible reason and no longer transitions from `OTP_REQUIRED`; the dedicated OTP timeout path remains unchanged.
+- **Confirmation failures:** Two separate applications timed out on the same Greenhouse job after 30 seconds. The submitter passes 30 seconds despite the verifier's 75-second default; inspect failure proofs and widen only for observed confirmation signals before changing matching behavior.
+- **Answer mismatches:** The log shows education text passed to discrete school-category choices and a phone-shaped value rejected for a TikTok field. The form filler correctly fails closed; inspect stored resolved-field values and tier/source before changing the filler.
+- **Diagnostics:** BrowserManager labels every Playwright `disconnected` event unexpected, including explicit closes; separate intentional cleanup from crashes. `tests/otpResolution.test.ts` also has two stale assertions expecting `RETRY` while code now persists `QUEUED`.
+- No application code changed in this diagnosis. Focused validation: option-alignment script passed; two OTP assertions failed as noted above.
 ## Current Session Update (2026-10-13 — Chromium Crashes & Worker Concurrency Optimization)
 
 - **Centralized Browser Lifecycle Manager (`src/submitter/browserManager.ts`)**:

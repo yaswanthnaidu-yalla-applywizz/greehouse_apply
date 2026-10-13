@@ -4,7 +4,7 @@ import { sanitizeFailureCause } from '../src/submitter/proofCapture.js';
 
 describe('Phase 5: Error Messages & Contextual Failure Filenames', () => {
   it('maps ZOHO_INBOX_UNAVAILABLE OTP timeout to OTP-specific message, not Network error', () => {
-    const raw = '[OTP_FETCH:TIMEOUT] Automatic OTP retrieval timed out after 300s reason=ZOHO_INBOX_UNAVAILABLE';
+    const raw = '[OTP_FETCH:TIMEOUT] Automatic OTP retrieval timed out after 480s reason=ZOHO_INBOX_UNAVAILABLE';
     const message = normalizeOperatorErrorMessage(raw);
     expect(message).toBe(
       'OTP verification code not received within the allowed window. Application will be retried automatically.'
@@ -13,14 +13,14 @@ describe('Phase 5: Error Messages & Contextual Failure Filenames', () => {
   });
 
   it('maps GMAIL_OTP_NOT_FOUND to Gmail-specific message', () => {
-    const raw = '[OTP_FETCH:TIMEOUT] Automatic OTP retrieval timed out after 300s reason=GMAIL_OTP_NOT_FOUND';
+    const raw = '[OTP_FETCH:TIMEOUT] Automatic OTP retrieval timed out after 480s reason=GMAIL_OTP_NOT_FOUND';
     const message = normalizeOperatorErrorMessage(raw);
     expect(message).toBe('Gmail security code not found. Check that the mailbox is connected on Render.');
     expect(message).not.toBe(OperatorErrors.NETWORK);
   });
 
   it('maps POLL_BUDGET_EXHAUSTED to OTP-specific message', () => {
-    const raw = '[OTP_FETCH:POLL_BUDGET_EXHAUSTED] Automatic OTP retrieval timed out after 300s';
+    const raw = '[OTP_FETCH:POLL_BUDGET_EXHAUSTED] Automatic OTP retrieval timed out after 480s';
     const message = normalizeOperatorErrorMessage(raw);
     expect(message).toBe(
       'OTP verification code not received within the allowed window. Application will be retried automatically.'

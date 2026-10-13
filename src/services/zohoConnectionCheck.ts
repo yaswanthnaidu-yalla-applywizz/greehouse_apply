@@ -11,7 +11,7 @@ export interface ZohoConnectionCheckResult {
   connectorError?: string;
 }
 
-interface ZohoUsersResponse {
+export interface ZohoUsersResponse {
   users: Array<{ email: string; connected: boolean }>;
 }
 
@@ -42,45 +42,68 @@ export function resolveZohoConnectionStatuses(
   );
 }
 
-async function fetchConnectedEmails(connectorUrl: string): Promise<Set<string>> {
-  const url = `${connectorUrl.replace(/\/+$/, '')}/api/zoho/ui/users`;
-  log.info(`[Zoho Check] Fetching connected users snapshot from ${url}`);
+export async function fetchConnectedEmails(connectorUrl: string): Promise<Set<string>> {
+  const baseUrl = connectorUrl.replace(/\/+$/, '');
+  const zohoUrl = `${baseUrl}/api/zoho/ui/users`;
+  const gmailUrl = `${baseUrl}/api/gmail/ui/users`;
 
-  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
-  if (!response.ok) {
-    throw new Error(`Zoho connector returned HTTP ${response.status}: ${response.statusText}`);
+  log.info(`[Mailbox Check] Fetching connected users snapshots from ${zohoUrl} and ${gmailUrl}`);
+
+  const [zohoRes, gmailRes] = await Promise.allSettled([
+    fetch(zohoUrl, { signal: AbortSignal.timeout(10000) }),
+    fetch(gmailUrl, { signal: AbortSignal.timeout(10000) }),
+  ]);
+
+  const parseUsersFromResponse = async (res: Response, serviceName: string): Promise<string[]> => {
+    if (!res.ok) {
+      log.warn(`[Mailbox Check] ${serviceName} connector returned HTTP ${res.status}: ${res.statusText}`);
+      return [];
+    }
+    const payload: any = await res.json();
+    if (!payload || typeof payload !== 'object' || !Array.isArray(payload.users)) {
+      log.warn(`[Mailbox Check] ${serviceName} connector returned invalid payload`);
+      return [];
+    }
+    return payload.users
+      .filter((u: any) => u && u.connected === true && typeof u.email === 'string')
+      .map((u: any) => u.email.trim().toLowerCase())
+      .filter(Boolean);
+  };
+
+  const connectedEmails = new Set<string>();
+  let atLeastOneSuccess = false;
+
+  if (zohoRes.status === 'fulfilled') {
+    try {
+      const zohoEmails = await parseUsersFromResponse(zohoRes.value, 'Zoho');
+      for (const e of zohoEmails) connectedEmails.add(e);
+      atLeastOneSuccess = true;
+      log.info(`[Mailbox Check] Found ${zohoEmails.length} connected Zoho mailbox(es)`);
+    } catch (err: any) {
+      log.warn(`[Mailbox Check] Failed parsing Zoho users: ${err.message}`);
+    }
+  } else {
+    log.warn(`[Mailbox Check] Zoho request failed: ${zohoRes.reason?.message || zohoRes.reason}`);
   }
 
-  const payload: unknown = await response.json();
-  if (
-    !payload ||
-    typeof payload !== 'object' ||
-    !Array.isArray((payload as ZohoUsersResponse).users)
-  ) {
-    throw new Error('Zoho connector returned an invalid users response');
+  if (gmailRes.status === 'fulfilled') {
+    try {
+      const gmailEmails = await parseUsersFromResponse(gmailRes.value, 'Gmail');
+      for (const e of gmailEmails) connectedEmails.add(e);
+      atLeastOneSuccess = true;
+      log.info(`[Mailbox Check] Found ${gmailEmails.length} connected Gmail mailbox(es)`);
+    } catch (err: any) {
+      log.warn(`[Mailbox Check] Failed parsing Gmail users: ${err.message}`);
+    }
+  } else {
+    log.warn(`[Mailbox Check] Gmail request failed: ${gmailRes.reason?.message || gmailRes.reason}`);
   }
 
-  const users = (payload as ZohoUsersResponse).users;
-  if (
-    users.some(
-      (user) =>
-        !user ||
-        typeof user.email !== 'string' ||
-        typeof user.connected !== 'boolean'
-    )
-  ) {
-    throw new Error('Zoho connector returned an invalid user entry');
+  if (!atLeastOneSuccess) {
+    throw new Error('Both Zoho and Gmail connector user endpoints failed');
   }
 
-  const connectedEmails = new Set(
-    users
-      .filter((user) => user.connected)
-      .map((user) => user.email.trim().toLowerCase())
-      .filter(Boolean)
-  );
-  log.info(
-    `[Zoho Check] Snapshot contains ${connectedEmails.size} connected email(s) out of ${users.length} user(s)`
-  );
+  log.info(`[Mailbox Check] Total unified connected mailbox(es): ${connectedEmails.size}`);
   return connectedEmails;
 }
 
