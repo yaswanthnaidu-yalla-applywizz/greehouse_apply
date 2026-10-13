@@ -1,3 +1,15 @@
+### Chromium Crashes & Worker Concurrency Optimization (2026-10-13 Complete)
+- [x] **Browser Lifecycle & Concurrency Controller (`src/submitter/browserManager.ts`, `tests/browserManager.test.ts`):**
+  - Created centralized `BrowserManager` enforcing global counting semaphore `MAX_CONCURRENT_BROWSERS=5` across background workers, paused OTP sessions, and manual dry-runs.
+  - Implemented launch throttling queue with `BROWSER_LAUNCH_COOLDOWN_MS=1500` to space consecutive Chromium process initializations, eliminating CPU/RAM spikes on Railway cgroups.
+  - Implemented non-fatal failure handling: eliminated `haltWithDevAlert` (which called `process.exit(1)`) on launch error in `liveSubmit.ts`, replacing with retryable `SUBMIT_PLAYWRIGHT_LAUNCH` diagnostic and status `FAILED` with retry reason `BROWSER_LAUNCH_FAILED`.
+  - Added periodic zombie/stale browser sweeper (every 60s) in `server/index.ts` and automated process shutdown cleanup (`closeAll()`).
+- [x] **Safe Railway Pro Pool Defaults (`src/config/env.ts`, `src/submitter/submitterPool.ts`, `.env`):**
+  - Adjusted `SUBMISSION_POOL_SIZE` and `WORKER_CONCURRENCY` to safe default of `3` lanes, with maximum hard clamp of 6.
+  - Added `browser_active_count`, `browser_waiting_count`, and `browser_max_count` metrics to `system_worker_heartbeats`.
+- [x] **Unified Paused Session Registry (`src/submitter/liveSubmit.ts`, `src/submitter/otpSession.ts`):**
+  - Synchronized paused session cleanup across `PAUSED_SESSIONS` and `activeSubmissions` to guarantee zero browser leaks when OTP sessions resolve or time out.
+
 ### Ingest LLM Timeout & Deferred Auto-Queue Submissions (2026-10-13 Complete)
 - [x] **Configurable LLM Timeout (`src/config/env.ts`, `src/resolver/llmSynthesizer.ts`):**
   - Added `LLM_TIMEOUT_MS` environment variable (default 30,000ms), replacing the hardcoded 8,000ms client timeout in OpenRouter / OpenAI SDK client initializations.

@@ -223,10 +223,10 @@ export class OtpResolutionService {
         log.info(
           `[OTP Resolution] application=${entry.applicationId} email=${entry.email} [OTP] routing → ${currentEndpoint}`
         );
-
         const result = currentEndpoint === 'gmail'
           ? await fetchGmail({
               candidateEmail: entry.email,
+              sinceTimestamp: entry.submitClickedAt,
               companyName: companyParam,
               correlationId: entry.applicationId,
               timeoutMs: Math.min(30000, remainingMs),
@@ -253,45 +253,6 @@ export class OtpResolutionService {
               `lookup_elapsed_ms=${Date.now() - startedAt} remaining_budget_ms=${Math.max(0, deadline - Date.now())}`
           );
 
-          const isNotYet =
-            result.reason === 'not_yet' ||
-            result.reasonCode === 'GMAIL_OTP_NOT_YET' ||
-            result.reasonCode === 'NO_MESSAGES_SINCE_SUBMIT' ||
-            result.reasonCode === 'STALE_TIMESTAMPS_ONLY' ||
-            result.reasonCode === 'POLL_BUDGET_EXHAUSTED' ||
-            result.reasonCode === 'GMAIL_OTP_NOT_FOUND' ||
-            (result as any).received === false ||
-            (result as any).found === false;
-
-          if (
-            currentEndpoint === 'gmail' &&
-            (result.reason === 'mailbox_not_connected' ||
-              result.reasonCode === 'GMAIL_MAILBOX_NOT_CONNECTED' ||
-              isNotYet)
-          ) {
-            log.info(
-              `[OTP Resolution] application=${entry.applicationId} Gmail returned ${result.reason || result.reasonCode}; switching to Zoho fallback`
-            );
-            currentEndpoint = 'zoho';
-            if (Date.now() + 2000 < deadline) {
-              await sleepFn(2000);
-            }
-            continue;
-          } else if (
-            currentEndpoint === 'zoho' &&
-            (result.reason === 'mailbox_not_connected' ||
-              result.reasonCode === 'ZOHO_INBOX_UNAVAILABLE' ||
-              isNotYet)
-          ) {
-            log.info(
-              `[OTP Resolution] application=${entry.applicationId} Zoho returned ${result.reason || result.reasonCode}; switching to Gmail fallback`
-            );
-            currentEndpoint = 'gmail';
-            if (Date.now() + 2000 < deadline) {
-              await sleepFn(2000);
-            }
-            continue;
-          }
           if (isTerminalOtpFetchFailure(result.reasonCode || '')) {
             await emitFailureDiagnostic({
               category: 'SUBMIT_OTP_FETCH',
@@ -320,7 +281,7 @@ export class OtpResolutionService {
             return;
           }
 
-          // not_yet / poll timeout: wait 10s and continue until deadline
+          // not_yet / poll timeout: wait 10s and continue polling same endpoint until deadline
           if (Date.now() + 10000 < deadline) {
             await sleepFn(10000);
           }
@@ -429,7 +390,7 @@ export class OtpResolutionService {
 
     const nextRetryCount = retryCount + 1;
     const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES;
-    const finalStatus: 'FAILED' | 'RETRY' = isTerminal ? 'FAILED' : 'RETRY';
+    const finalStatus: 'FAILED' | 'QUEUED' = isTerminal ? 'FAILED' : 'QUEUED';
     const errorMessage =
       `[OTP_FETCH:TIMEOUT] OTP not received within 300s (attempt ${nextRetryCount}/${MAX_SUBMISSION_RETRIES}); reason=${lastReason}.`;
 

@@ -118,17 +118,24 @@ describe('OTP Engine: Universal Routing + Company Name Normalization (Phase 2)',
       expect(fetchZohoMock).not.toHaveBeenCalled();
     }, 10000);
 
-    it('mailbox_not_connected response triggers Zoho fallback', async () => {
-      const fetchGmailMock = vi.fn().mockResolvedValue({
-        success: false,
-        reason: 'mailbox_not_connected',
-        reasonCode: 'GMAIL_MAILBOX_NOT_CONNECTED',
+    it('@gmail.com candidate polls only Gmail without Zoho fallback on not_yet', async () => {
+      let gmailPolls = 0;
+      const fetchGmailMock = vi.fn().mockImplementation(async () => {
+        gmailPolls++;
+        if (gmailPolls < 2) {
+          return {
+            success: false,
+            reason: 'not_yet',
+            reasonCode: 'GMAIL_OTP_NOT_YET',
+          };
+        }
+        return {
+          success: true,
+          otp: '99999999',
+          messageId: 'gmail-msg-final',
+        };
       });
-      const fetchZohoMock = vi.fn().mockResolvedValue({
-        success: true,
-        otp: '99999999',
-        messageId: 'zoho-msg-1',
-      });
+      const fetchZohoMock = vi.fn();
 
       const service = new otpResolutionService.constructor({
         fetchGmailOtpViaApi: fetchGmailMock,
@@ -157,20 +164,27 @@ describe('OTP Engine: Universal Routing + Company Name Normalization (Phase 2)',
       service.register(entry);
       await service.processEntryInContext(entry);
 
-      expect(fetchGmailMock).toHaveBeenCalled();
-      expect(fetchZohoMock).toHaveBeenCalled();
+      expect(fetchGmailMock).toHaveBeenCalledTimes(2);
+      expect(fetchZohoMock).not.toHaveBeenCalled();
     });
 
-    it('not_yet response triggers fallback to Zoho provider', async () => {
-      const fetchGmailMock = vi.fn().mockResolvedValue({
-        success: false,
-        reason: 'not_yet',
-        reasonCode: 'GMAIL_OTP_NOT_YET',
-      });
-      const fetchZohoMock = vi.fn().mockResolvedValue({
-        success: true,
-        otp: '11223344',
-        messageId: 'msg-final',
+    it('non-gmail candidate polls only Zoho without Gmail fallback on not_yet', async () => {
+      let zohoPolls = 0;
+      const fetchGmailMock = vi.fn();
+      const fetchZohoMock = vi.fn().mockImplementation(async () => {
+        zohoPolls++;
+        if (zohoPolls < 2) {
+          return {
+            success: false,
+            reason: 'not_yet',
+            reasonCode: 'NO_MESSAGES_SINCE_SUBMIT',
+          };
+        }
+        return {
+          success: true,
+          otp: '11223344',
+          messageId: 'msg-final',
+        };
       });
 
       const service = new otpResolutionService.constructor({
@@ -191,7 +205,7 @@ describe('OTP Engine: Universal Routing + Company Name Normalization (Phase 2)',
       const entry = {
         applicationId: 'app-4',
         sessionKey: 'app-4',
-        email: 'test@gmail.com',
+        email: 'test@applywizard.ai',
         submitClickedAt: Date.now(),
         attemptedCodes: [],
         attemptedMessageIds: [],
@@ -200,8 +214,8 @@ describe('OTP Engine: Universal Routing + Company Name Normalization (Phase 2)',
       service.register(entry);
       await service.processEntryInContext(entry);
 
-      expect(fetchGmailMock).toHaveBeenCalled();
-      expect(fetchZohoMock).toHaveBeenCalled();
+      expect(fetchZohoMock).toHaveBeenCalledTimes(2);
+      expect(fetchGmailMock).not.toHaveBeenCalled();
     });
   });
 

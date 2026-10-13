@@ -114,6 +114,12 @@ const envSchema = z.object({
   /** Submitter worker pool concurrency / lane count (default '3') */
   SUBMISSION_POOL_SIZE: z.string().optional().default('3'),
 
+  /** Maximum concurrent live Chromium browser instances across all workers/dry-runs (default: 5) */
+  MAX_CONCURRENT_BROWSERS: z.coerce.number().int().min(1).max(15).default(5),
+
+  /** Minimum spacing in ms between consecutive browser launches to prevent CPU/memory burst spikes (default: 1500) */
+  BROWSER_LAUNCH_COOLDOWN_MS: z.coerce.number().int().min(0).max(10000).default(1500),
+
   /** Operator dashboard delivery mode: 'html' (Babel in-browser) or 'tsx' (Vite bundle) */
   DASHBOARD_MODE: z.string().optional().default('html'),
 
@@ -135,8 +141,8 @@ const envSchema = z.object({
   /** Local directory for cached candidate master PDF resumes */
   RESUMES_DIR: z.string().default('./resumes'),
 
-  /** Jobs with field_count >= this value are skipped (default 35 → allow 0–34 fields) */
-  MAX_JOB_QUESTIONS: z.coerce.number().int().positive().default(35),
+  /** Jobs with field_count >= this value are skipped (default 50 → allow 0–49 fields) */
+  MAX_JOB_QUESTIONS: z.coerce.number().int().positive().default(50),
 
   /** Supabase Project URL */
   SUPABASE_URL: z.string().optional(),
