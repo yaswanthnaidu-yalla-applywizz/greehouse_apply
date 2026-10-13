@@ -21,6 +21,7 @@ import type { EmailProofJson } from './components/EmailProofRenderer.js';
 import type { ResolvedField, ApplicationStatus } from './types.js';
 import { isOperatorFormPanelBlocked } from '../src/dashboard/candidateQueueFilter.js';
 import { OperatorFormBlockedPanel } from './components/OperatorFormBlockedPanel.js';
+import { isActionableCarouselField } from './utils/fieldFilters.js';
 
 export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
 
@@ -79,7 +80,6 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
   const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(() => getStoredApprovals(storageKey));
   const [viewMode, setViewMode] = useState<'carousel' | 'list'>('carousel');
-  const [filterActionableOnly, setFilterActionableOnly] = useState<boolean>(false);
 
   useEffect(() => {
     setCarouselIndex(0);
@@ -145,26 +145,10 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
     }
   }, [currentStatus]);
 
-  const isIdentityField = (f: ResolvedField) => {
-    const name = String(f?.name || f?.fieldId || '').toLowerCase();
-    const label = String(f?.label || '').toLowerCase().trim();
-    const identityNames = ['first_name', 'last_name', 'phone', 'email'];
-    if (identityNames.includes(name)) return true;
-    if (identityNames.some((id) => name.endsWith(`[${id}]`) || name.endsWith(`.${id}`) || name.endsWith(`_${id}`))) return true;
-    if (label === 'first name' || label === 'last name' || label === 'phone number' || label === 'email address') return true;
-    return false;
-  };
-
-  // Only show: identity profile fields + required fields + unresolved fields.
-  // Drop non-required resolved fields — they don't need operator attention.
-  const actionableFields = fields.filter((f) => {
-    if (isIdentityField(f)) return true;
-    const isReq = f?.isRequired || (f as any)?.required;
-    const isUnresolved = f?.source === 'unresolved' || f?.resolvedByTier == null;
-    return Boolean(isReq) || isUnresolved;
-  });
-
-  const displayFields = actionableFields.length > 0 ? actionableFields : fields;
+  // Carousel fields: Only required unresolved, required AI, unrequired AI, or operator-edited fields.
+  // Standard profile identity and non-AI profile/resume fields are excluded from carousel review.
+  const displayFields = fields.filter(isActionableCarouselField);
+  const approvedActionableCount = displayFields.filter((f) => approvedFieldIds.has(f.fieldId)).length;
 
   const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
   const currentField = displayFields[boundedIndex];
@@ -547,34 +531,59 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             )}
           </div>
         ) : viewMode === 'carousel' ? (
+          displayFields.length === 0 ? (
+            /* Empty state for carousel when all fields are auto-resolved and no AI/unresolved/edited questions exist */
+            <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-8 text-center space-y-4">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#30d158]/15 border border-[#30d158]/30 text-2xl">
+                ✨
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-[#ffffff]">
+                  All Priority Questions Resolved
+                </h3>
+                <p className="text-xs text-[#8e8e93] mt-1 max-w-md mx-auto">
+                  All {fields.length} form fields were resolved via verified candidate records. There are no unresolved required fields or AI-generated answers requiring operator review.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className="px-4 py-2 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-[#ffffff] font-medium text-xs rounded-lg border border-[#3a3a3c] transition-all"
+                >
+                  📋 Inspect Full List ({fields.length} fields)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTriggerSubmit}
+                  disabled={submitFlowActive}
+                  className="px-5 py-2 bg-[#30d158] hover:bg-[#28b84d] text-[#000000] font-bold text-xs uppercase tracking-wider rounded-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {submitFlowActive ? 'Submitting...' : 'Approve & Submit Now →'}
+                </button>
+              </div>
+            </div>
+          ) : (
           <div className="space-y-4">
-            {/* Carousel Control & Filter Bar */}
+            {/* Carousel Control Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3 bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-3">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono font-medium text-[#ffffff]">
                   Field {boundedIndex + 1} of {displayFields.length}
                 </span>
                 <span className="text-xs font-mono font-semibold text-[#30d158] bg-[#30d158]/15 border border-[#30d158]/30 px-2 py-0.5 rounded-md">
-                  {approvedFieldIds.size}/{displayFields.length} Approved
+                  {approvedActionableCount}/{displayFields.length} Approved
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setFilterActionableOnly((prev) => !prev)}
-                  className="text-xs font-medium text-[#8e8e93] hover:text-[#ffffff] bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md transition-all"
-                >
-                  {filterActionableOnly
-                    ? `Showing Priority (${displayFields.length}) — Show All`
-                    : `Showing All (${displayFields.length}) — Filter Priority`}
-                </button>
-                <button
-                  type="button"
                   onClick={() => setViewMode('list')}
-                  className="text-xs font-medium text-[#8e8e93] hover:text-[#ffffff] bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md transition-all"
+                  className="text-xs font-medium text-[#8e8e93] hover:text-[#ffffff] bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5"
                 >
-                  📋 Switch to Full List
+                  <span>📋 Switch to Full List</span>
+                  <span className="text-[10px] font-mono text-[#8e8e93]">({fields.length})</span>
                 </button>
               </div>
             </div>
@@ -660,7 +669,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
             )}
 
             {/* Completion Banner */}
-            {approvedFieldIds.size >= displayFields.length && (
+            {approvedActionableCount >= displayFields.length && (
               <div className="bg-[#1c1c1e] border border-[#30d158]/40 rounded-xl p-4 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">🎉</span>
@@ -684,6 +693,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
               </div>
             )}
           </div>
+          )
         ) : (
           <div className="space-y-3.5">
             <div className="flex justify-between items-center bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-3">

@@ -31,5 +31,16 @@ assertEqual(
   null,
   'ambiguous answer fails closed'
 );
+assertEqual(
+  matchChoiceOption('$100,000 \u2013 $110,000', ['$90,000 - $100,000', '$100,000 - $110,000', '$110,000 - $120,000']),
+  '$100,000 - $110,000',
+  'en-dash matches ascii hyphen option in salary range'
+);
+assertEqual(
+  matchChoiceOption('$100,000 - $110,000', ['$90,000 \u2013 $100,000', '$100,000 \u2013 $110,000', '$110,000 \u2013 $120,000']),
+  '$100,000 \u2013 $110,000',
+  'ascii hyphen matches en-dash option in salary range'
+);
 
 console.log('Choice option matching tests passed.');
+

@@ -15,7 +15,7 @@ import {
   type ApplicationRow,
 } from '../db/applications.js';
 import { wsManager } from '../server/ws.js';
-import { runLiveSubmit, type LiveSubmitResult } from './liveSubmit.js';
+import { runLiveSubmit, type LiveSubmitOptions, type LiveSubmitResult } from './liveSubmit.js';
 import { createLogger } from '../utils/logger.js';
 import {
   isWithinSubmissionQuestionLimit,
@@ -24,6 +24,7 @@ import {
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { config } from '../config/env.js';
 import { browserManager } from './browserManager.js';
+import { getRetryReason, isAutomaticRetryAllowed } from './submissionRetry.js';
 
 const log = createLogger('Submitter Pool');
 
@@ -31,6 +32,8 @@ export interface SubmitterPoolOptions {
   pollIntervalMs?: number;
   dequeueFn?: () => Promise<ApplicationRow | null>;
   updateStatusFn?: (id: string, status: any, extra?: any) => Promise<boolean>;
+  submitFn?: (applicationId: string, options: LiveSubmitOptions) => Promise<LiveSubmitResult>;
+  requeueFn?: typeof requeueApplicationForRetry;
 }
 
 interface QueuedSubmission {
@@ -43,6 +46,8 @@ export class SubmitterPool {
   private readonly pollIntervalMs: number;
   private readonly dequeueFn: () => Promise<ApplicationRow | null>;
   private readonly updateStatusFn: (id: string, status: any, extra?: any) => Promise<boolean>;
+  private readonly submitFn: (applicationId: string, options: LiveSubmitOptions) => Promise<LiveSubmitResult>;
+  private readonly requeueFn: typeof requeueApplicationForRetry;
   private readonly poolSize: number;
   private readonly lanes: QueuedSubmission[][];
   private readonly workerBusy: boolean[];
@@ -58,6 +63,8 @@ export class SubmitterPool {
     this.pollIntervalMs = options.pollIntervalMs ?? 2000;
     this.dequeueFn = options.dequeueFn ?? getNextQueuedApplicationForRoundRobin;
     this.updateStatusFn = options.updateStatusFn ?? updateStatus;
+    this.submitFn = options.submitFn ?? runLiveSubmit;
+    this.requeueFn = options.requeueFn ?? requeueApplicationForRetry;
     const poolSize = parseInt(config.SUBMISSION_POOL_SIZE ?? '3', 10);
     this.poolSize = Number.isInteger(poolSize) && poolSize > 0 ? Math.min(poolSize, 6) : 3;
     this.lanes = Array.from({ length: this.poolSize }, () => []);
@@ -69,8 +76,10 @@ export class SubmitterPool {
     try {
       const snap = this.getSnapshot();
       const browserStats = browserManager.getStats();
+      const replicaId = (process.env.RAILWAY_REPLICA_ID || '').trim();
+      const serviceName = replicaId ? `submitter_pool:${replicaId}` : 'submitter_pool';
       const payload = {
-        service_name: 'submitter_pool',
+        service_name: serviceName,
         status: statusOverride ?? (snap.running ? 'running' : 'stopped'),
         worker_count: snap.workerCount,
         idle_count: snap.idleCount,
@@ -321,7 +330,7 @@ export class SubmitterPool {
         if (!eligibility.eligible) {
           const message = eligibility.reason || 'Application exceeds the question limit.';
           log.warn(`[Submitter] application=${applicationId} blocked by question limit: ${message}`);
-          await updateStatus(applicationId, 'READY_FOR_REVIEW', {
+          await this.updateStatusFn(applicationId, 'READY_FOR_REVIEW', {
             error_message: message,
             job_url: application.job_url,
           });
@@ -329,14 +338,14 @@ export class SubmitterPool {
           continue;
         }
 
-        await updateStatus(applicationId, 'APPLYING', {
+        await this.updateStatusFn(applicationId, 'APPLYING', {
           job_url: application.job_url,
         });
         log.info(`[Submitter] Worker ${workerNumber} submitting app-${applicationId} → status=APPLYING`);
         log.info(`[API] Status → APPLYING (application ${applicationId}, submitter executing)`);
         await logQueueStatusChange(applicationId, 'QUEUED', 'APPLYING');
 
-        const result = await runLiveSubmit(applicationId, {
+        const result = await this.submitFn(applicationId, {
           headless: true,
           jobUrl: application.job_url,
         });
@@ -350,12 +359,22 @@ export class SubmitterPool {
           );
         } else if (result.status === 'FAILED') {
           const failureMessage = result.errorMessage || 'Submission execution failed.';
-          const retryOutcome = await requeueApplicationForRetry(
-            applicationId,
-            failureMessage,
-            application.job_url
-          );
-          const finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
+          const retryReason = getRetryReason(result);
+          let finalStatus = 'FAILED';
+          if (isAutomaticRetryAllowed(retryReason)) {
+            const retryOutcome = await this.requeueFn(
+              applicationId,
+              failureMessage,
+              retryReason,
+              application.job_url
+            );
+            finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
+          } else {
+            await this.updateStatusFn(applicationId, 'FAILED', {
+              error_message: failureMessage,
+              job_url: application.job_url,
+            });
+          }
           await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
           this.emitFailure(application, failureMessage, result);
         } else if (result.status === 'QUEUED') {
@@ -364,15 +383,28 @@ export class SubmitterPool {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         let finalStatus = 'FAILED';
-        try {
-          const retryOutcome = await requeueApplicationForRetry(
-            applicationId,
-            message,
-            application.job_url
-          );
-          finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
-        } catch (statusError) {
-          log.error(`[Submitter] Worker ${workerNumber} retry requeue failed: ${(statusError as Error).message}`);
+        const retryReason = getRetryReason(error instanceof Error ? error : String(error));
+        if (isAutomaticRetryAllowed(retryReason)) {
+          try {
+            const retryOutcome = await this.requeueFn(
+              applicationId,
+              message,
+              retryReason,
+              application.job_url
+            );
+            finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
+          } catch (statusError) {
+            log.error(`[Submitter] Worker ${workerNumber} retry requeue failed: ${(statusError as Error).message}`);
+            await this.updateStatusFn(applicationId, 'FAILED', {
+              error_message: message,
+              job_url: application.job_url,
+            });
+          }
+        } else {
+          await this.updateStatusFn(applicationId, 'FAILED', {
+            error_message: message,
+            job_url: application.job_url,
+          });
         }
         await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
         this.emitFailure(application, message);

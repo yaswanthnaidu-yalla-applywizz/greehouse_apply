@@ -45,6 +45,15 @@ describe('FILTERED_OUT routing logic', () => {
     assert.equal(applicationNeedsOperatorReview(fields), false);
   });
 
+  it('routes to READY_FOR_REVIEW when any required field is solved by AI (not auto-queued and not filtered out)', () => {
+    const fields = [
+      { isRequired: true, source: 'ai', confidence: 0.9, label: 'Custom Question', value: 'Answer' },
+      { isRequired: true, source: 'supabase', label: 'First Name', value: 'John' },
+    ];
+    assert.equal(applicationShouldBeFilteredOut(fields), false);
+    assert.equal(applicationNeedsOperatorReview(fields), true); // true = requires operator review (READY_FOR_REVIEW)
+  });
+
   it('does NOT filter out when AI <= 3 even if unresolved required > 3', () => {
     const fields = [
       { isRequired: true, source: 'ai', confidence: 0.9 },

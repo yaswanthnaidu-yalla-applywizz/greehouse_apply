@@ -1,15 +1,58 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
+  OTP_SESSION_TTL_MS,
   SPINNER_EXTENDED_TIMEOUT_MS,
   isSubmitButtonSpinnerActive,
   verifySubmissionSignals,
 } from '../src/submitter/otpSession.js';
+import { OTP_CHALLENGE_TIMEOUT_MS } from '../src/services/otpResolutionService.js';
+import {
+  PAUSED_SESSIONS,
+  clearPausedSession,
+  storePausedSession,
+} from '../src/submitter/liveSubmit.js';
 
 describe('Spinner-Aware Submission Confirmation (Phase 4)', () => {
   it('extends base timeout to 75s and spinner ceiling to 90s', () => {
     expect(DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS).toBe(75000);
     expect(SPINNER_EXTENDED_TIMEOUT_MS).toBe(90000);
+  });
+
+  it('keeps a paused OTP session alive through the challenge and confirmation window', () => {
+    expect(OTP_SESSION_TTL_MS).toBe(OTP_CHALLENGE_TIMEOUT_MS + 90000);
+  });
+
+  it('does not close a paused session before the shared OTP session TTL', async () => {
+    const applicationId = 'otp-session-ttl-test';
+    const page = {
+      isClosed: () => false,
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const browser = {
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+
+    vi.useFakeTimers();
+    storePausedSession(applicationId, {
+      browser: browser as any,
+      page: page as any,
+      applicationId,
+      screenshotCaptured: true,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      expect(PAUSED_SESSIONS.has(applicationId)).toBe(true);
+      expect(page.close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(OTP_SESSION_TTL_MS - 5 * 60 * 1000);
+      expect(PAUSED_SESSIONS.has(applicationId)).toBe(false);
+      expect(page.close).toHaveBeenCalledOnce();
+    } finally {
+      await clearPausedSession(applicationId, { captureFailureProof: false });
+      vi.useRealTimers();
+    }
   });
 
   it('spinner detection handles missing submit button without throwing', async () => {
@@ -46,7 +89,7 @@ describe('Spinner-Aware Submission Confirmation (Phase 4)', () => {
       waitForTimeout: vi.fn().mockResolvedValue(undefined),
     };
 
-    const res = await verifySubmissionSignals(mockPage as any, 75000);
+    const res = await verifySubmissionSignals(mockPage as any);
     expect(res.verified).toBe(true);
     expect(res.signal).toContain('confirmation URL');
   });

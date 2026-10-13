@@ -4,6 +4,7 @@ import {
   normalizeOptionText,
   matchDropdownOption,
   formatInvalidFieldLog,
+  fuzzyOptionTextMatch,
 } from '../src/submitter/formFiller.js';
 
 describe('Phase 3: Form Filler Unicode Normalization & Multi-Stage Dropdown Matching', () => {
@@ -89,5 +90,20 @@ describe('Phase 3: Form Filler Unicode Normalization & Multi-Stage Dropdown Matc
     assert.ok(logOutput.includes(`label="${label}"`));
     assert.ok(logOutput.includes(`filled="${filled}"`));
     assert.ok(logOutput.includes("Bachelor's Degree"));
+  });
+
+  test('fuzzyOptionTextMatch matches EEO decline phrases', () => {
+    assert.strictEqual(
+      fuzzyOptionTextMatch('Decline to self-identify', 'Decline To Self Identify'),
+      true
+    );
+    assert.strictEqual(
+      fuzzyOptionTextMatch('I do not wish to disclose', 'Decline To Self Identify'),
+      true
+    );
+    assert.strictEqual(
+      fuzzyOptionTextMatch('Prefer not to say', 'Decline To Self Identify'),
+      true
+    );
   });
 });

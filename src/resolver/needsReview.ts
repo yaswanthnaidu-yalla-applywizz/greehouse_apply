@@ -14,7 +14,7 @@ export type NeedsReviewField = {
 /**
  * True when:
  * 1. Any required field is unresolved.
- * 2. Any required AI field has confidence < 0.8.
+ * 2. Any required field was resolved using AI (source === 'ai').
  * 3. Any salary / compensation field was resolved negatively ("No", "Decline").
  *
  * Optional AI/unresolved fields do not block auto-queue.
@@ -22,14 +22,23 @@ export type NeedsReviewField = {
 export function applicationNeedsOperatorReview(fields: NeedsReviewField[]): boolean {
   if (!Array.isArray(fields) || fields.length === 0) return false;
 
+  // 0. Mandatory Cover Letter (must not auto-queue since system policy omits cover letters)
+  const hasRequiredCoverLetter = fields.some((f) => {
+    const combined = `${f.label || ''} ${(f as any).name || ''} ${(f as any).fieldId || ''}`.toLowerCase();
+    return Boolean(f.isRequired) && /cover\s*letter|cover_letter/i.test(combined);
+  });
+  if (hasRequiredCoverLetter) {
+    return true;
+  }
+
   return fields.some((f) => {
     // 1. Unresolved required field
     if (f.isRequired && (!f.source || f.source === 'unresolved')) {
       return true;
     }
 
-    // 2. Low-confidence AI field for required questions (< 0.8)
-    if (f.isRequired && f.source === 'ai' && (f.confidence ?? 0) < 0.8) {
+    // 2. Any required field solved by AI (auto-queue requires 100% resolved without AI)
+    if (f.isRequired && f.source === 'ai') {
       return true;
     }
 

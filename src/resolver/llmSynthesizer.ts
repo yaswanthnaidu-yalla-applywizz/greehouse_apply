@@ -24,6 +24,7 @@ import { haltWithDevAlert, createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { buildQuestionRelevantEvidence } from './candidateEvidence.js';
+import { isBehavioralOrMotivationalQuestion } from './starClassifier.js';
 
 const log = createLogger('LLM Synthesizer');
 
@@ -228,6 +229,11 @@ export function isBinaryYesNoQuestion(field: ScannedField): boolean {
     ) {
       return true;
     }
+  }
+
+  // Text / textarea fields that are behavioral/motivational are open-ended STAR questions, not binary Yes/No
+  if (isBehavioralOrMotivationalQuestion(field)) {
+    return false;
   }
 
   return (
@@ -891,7 +897,7 @@ PROFILE DATA RULE: The Candidate Profile section below contains factual data abo
 
 EEOC RULE: For gender, race/ethnicity, veteran status, and disability status fields: find the value in the Candidate Profile and return it. These are always present. Do not guess or default to "No". If the candidate's gender, race/ethnicity, veteran status, or disability status is NOT present in the Candidate Profile section, return exactly: "Decline to self-identify" for that field. Never return "No" for an EEOC demographic field.
 
-CREATIVE RULE: For open-ended text questions (why do you want this role, describe your experience, tell us about yourself, cover letter style fields): write a professional, specific, 2-4 sentence answer using the candidate's actual work experience, skills, education, and job role from the profile. Do not say the resume does not contain information — synthesize a real answer.
+CREATIVE RULE: For open-ended behavioral/experience questions ("Have you worked with...", "Tell us about a time...", "Describe a project...") or company motivation questions ("Why choose our company...", "Why are you interested in this role?"): write a concise single paragraph (approximately 50 to 80 words) following the STAR methodology (Situation, Task, Action, and Result) without explicit section headings or bullet labels. Write in a confident, professional first-person voice ("I led...", "In my role at..."). Ground every detail strictly in the candidate's actual work experience, verified project names, and tools from their profile/resume. Do not say the resume does not contain information — synthesize a truthful answer.
 
 OPTION RULE: For select/radio/checkbox fields with complete options provided, return exactly one provided option. For a select marked with incomplete options, do not constrain the answer to the partial sample; return a concise exact choice supported by candidate data, or NONE if unsupported.
 
@@ -1227,10 +1233,13 @@ ${questions
           ? ` ${question.optionsComplete === false ? 'Captured options (incomplete)' : 'Options'}: ${question.options.join(' | ')}`
           : '';
       const completenessHint = question.optionsComplete === false ? ' [choice options incomplete]' : '';
+      const starHint = isBehavioralOrMotivationalQuestion({ label: question.label, type: question.type, options: question.options })
+        ? ' [STAR format 50-80 words, Situation-Task-Action-Result in first-person, strictly grounded in candidate history]'
+        : '';
       const hintLine = question.corporateDefaultHint
         ? `\nCorporate default hint: ${question.corporateDefaultHint}`
         : '';
-      return `${index}. [${question.type}] ${question.label}${completenessHint}${opts}${question.value ? ` (existing value: ${question.value})` : ''}${hintLine}\nCandidate evidence:\n${question.candidateEvidence || '(No directly relevant candidate evidence found.)'}`;
+      return `${index}. [${question.type}] ${question.label}${completenessHint}${starHint}${opts}${question.value ? ` (existing value: ${question.value})` : ''}${hintLine}\nCandidate evidence:\n${question.candidateEvidence || '(No directly relevant candidate evidence found.)'}`;
     })
     .join('\n')}`;
 
@@ -1292,6 +1301,14 @@ Corporate default hint for this question: ${corporateDefaultHint}
       ? `Instructions:
 1. You MUST respond with exactly one of these options, no other text.
 2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.`
+      : isBehavioralOrMotivationalQuestion(field)
+      ? `Strict Instructions (STAR Methodology):
+1. Format answer as a concise single paragraph (approximately 50 to 80 words) following the STAR methodology (Situation, Task, Action, and Result) without explicit headings or bullet labels.
+2. Provide a professional, confident direct response written in first-person ("I led...", "In my role at...").
+3. Ground every detail strictly in the candidate's actual work experience, verified project names, and tools from their resume or profile. NEVER invent companies, degrees, or tools.
+4. For questions asking why you want to work at this company ("${jobContext.company}"), tie the candidate's specific background and aspirations directly to ${jobContext.company} and the ${jobContext.title} position.
+5. If the candidate's resume does not mention the exact requested tool/technology, write honestly using adjacent skills: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
+6. Respond as JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. If you are not at least 0.65 confident, set confidence below 0.65.`
       : `Strict Instructions:
 1. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile.
 2. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").

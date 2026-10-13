@@ -36,6 +36,7 @@ import {
   statusShouldPersistOperatorError,
 } from '../operator/operatorErrorMessages.js';
 import { assertApplywizzZohoConnected } from './zohoConnected.js';
+import type { AutomaticSubmissionRetryReason } from '../submitter/submissionRetry.js';
 
 const log = createLogger('Applications');
 
@@ -1477,6 +1478,7 @@ export async function retryFailedApplication(
 export async function requeueApplicationForRetry(
   applicationId: string,
   reason: string,
+  retryReason: AutomaticSubmissionRetryReason,
   jobUrl?: string
 ): Promise<{ requeued: boolean; retryCount: number }> {
   const app = await getApplication(applicationId, jobUrl);
@@ -1488,7 +1490,7 @@ export async function requeueApplicationForRetry(
       : 0;
   if (currentRetryCount >= MAX_SUBMISSION_RETRIES) {
     log.warn(
-      `[OTP TRACE] application=${applicationId} requeue=false retry_count=${currentRetryCount}/${MAX_SUBMISSION_RETRIES} reason="${reason}"`
+      `[Retry] application=${applicationId} requeue=false retry_count=${currentRetryCount}/${MAX_SUBMISSION_RETRIES} retry_reason=${retryReason} reason="${reason}"`
     );
     return { requeued: false, retryCount: currentRetryCount };
   }
@@ -1515,7 +1517,7 @@ export async function requeueApplicationForRetry(
         query = query.eq('applywizz_id', app.applywizz_id).eq('job_url', app.job_url);
       }
       const result = await query
-        .in('status', ['FAILED', 'APPLYING', 'OTP_REQUIRED', 'RETRY'])
+        .in('status', ['FAILED', 'APPLYING', 'RETRY'])
         .eq('retry_count', storedRetryCount)
         .select('id');
       updated = !result.error && Array.isArray(result.data) && result.data.length > 0;
@@ -1530,8 +1532,8 @@ export async function requeueApplicationForRetry(
   if (!updated) return { requeued: false, retryCount: currentRetryCount };
   cacheApplicationLocally({ ...app, ...payload });
   log.info(
-    `[OTP TRACE] application=${applicationId} requeue=${!isTerminal} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
-      `status=${nextStatus} reason="${reason}"`
+    `[Retry] application=${applicationId} requeue=${!isTerminal} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
+      `status=${nextStatus} retry_reason=${retryReason} reason="${reason}"`
   );
   return { requeued: !isTerminal, retryCount: nextRetryCount };
 }
@@ -2201,6 +2203,78 @@ export async function enqueueApplication(
 }
 
 /**
+ * Selects the next application from an in-memory list using round-robin fairness across candidates (applywizz_id).
+ * Groups by applywizz_id, ranks each candidate's queued applications by submission_order ASC,
+ * and orders candidates by round rank (rank 1 first across all candidates, then rank 2, etc.),
+ * tie-broken by submission_order ASC.
+ */
+export function selectNextRoundRobinAppInMemory(
+  apps: ApplicationRow[],
+  options: { allCandidateApps?: ApplicationRow[] } = {}
+): ApplicationRow | null {
+  const queued = apps.filter((a) => a.status === 'QUEUED');
+  if (queued.length === 0) return null;
+
+  // If a broader list of candidate apps is provided (or if apps includes in-flight/completed apps),
+  // compute how many applications each candidate has already had processed/dequeued
+  const candidateProcessedCounts = new Map<string, number>();
+  const allApps = options.allCandidateApps || apps;
+  for (const app of allApps) {
+    if (app.status && app.status !== 'QUEUED') {
+      const key = (app.applywizz_id || '').trim().toUpperCase();
+      candidateProcessedCounts.set(key, (candidateProcessedCounts.get(key) || 0) + 1);
+    }
+  }
+
+  // Group queued by applywizz_id
+  const byCandidate = new Map<string, ApplicationRow[]>();
+  for (const app of queued) {
+    const key = (app.applywizz_id || '').trim().toUpperCase();
+    if (!byCandidate.has(key)) {
+      byCandidate.set(key, []);
+    }
+    byCandidate.get(key)!.push(app);
+  }
+
+  // Sort each candidate's applications by submission_order ASC (nulls last) then created_at
+  for (const list of byCandidate.values()) {
+    list.sort((a, b) => {
+      const orderA = a.submission_order ?? Number.MAX_SAFE_INTEGER;
+      const orderB = b.submission_order ?? Number.MAX_SAFE_INTEGER;
+      if (orderA !== orderB) return orderA - orderB;
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeA - timeB;
+    });
+  }
+
+  // Assign candidate rank based on prior processed count + position in queued list
+  const ranked: Array<{ app: ApplicationRow; candidateRank: number; candidateBase: number; submissionOrder: number }> = [];
+  for (const [candId, list] of byCandidate.entries()) {
+    const priorCount = candidateProcessedCounts.get(candId) || 0;
+    list.forEach((app, idx) => {
+      ranked.push({
+        app,
+        candidateRank: priorCount + idx + 1,
+        candidateBase: priorCount,
+        submissionOrder: app.submission_order ?? Number.MAX_SAFE_INTEGER,
+      });
+    });
+  }
+
+  // Sort by candidateRank ASC (Round 1 for all candidates first, then Round 2, etc.),
+  // tie-broken by overall submissionOrder ASC
+  ranked.sort((a, b) => {
+    if (a.candidateRank !== b.candidateRank) {
+      return a.candidateRank - b.candidateRank;
+    }
+    return a.submissionOrder - b.submissionOrder;
+  });
+
+  return ranked.length > 0 ? ranked[0].app : null;
+}
+
+/**
  * Retrieves the next application in the global submission queue for round-robin processing (Phase V2-4c).
  * Uses atomic PostgreSQL FOR UPDATE SKIP LOCKED via RPC with fallback to query.
  * Transitions status to 'APPLYING'.
@@ -2238,58 +2312,84 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
         .select('*')
         .eq('status', 'QUEUED')
         .order('submission_order', { ascending: true })
-        .limit(1)
-        .maybeSingle();
+        .limit(50);
 
-      if (!error && data) {
-        const applywizzId = data.applywizz_id;
-        const gate = await assertApplywizzZohoConnected(applywizzId, { allowAdminDemo: true });
-        if (!gate.allowed) {
-          log.warn(
-            `[Queue] ⛔ Candidate ${applywizzId} is not Zoho connected. Setting application ${data.id} to READY_FOR_REVIEW.`
-          );
-          await supabase
+      if (!error && data && data.length > 0) {
+        // Query candidate counts for candidates present in the queued set to compute accurate candidate round ranks
+        const queuedCandidateIds = Array.from(new Set(data.map((d: any) => d.applywizz_id).filter(Boolean)));
+        let activeHistory: ApplicationRow[] = [];
+        if (queuedCandidateIds.length > 0) {
+          const { data: histData } = await supabase
             .from('gh_candidate_applications')
-            .update({
-              status: 'READY_FOR_REVIEW',
-              error_message: gate.error || OperatorErrors.ZOHO_NOT_CONNECTED,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', data.id)
-            .eq('status', 'QUEUED');
-          return null;
+            .select('applywizz_id, status')
+            .in('applywizz_id', queuedCandidateIds)
+            .in('status', ['APPLYING', 'APPLIED', 'FAILED', 'RETRY', 'EMAIL_PROOF_PENDING']);
+          if (histData) activeHistory = histData as ApplicationRow[];
         }
 
-        const updateRes = await supabase
-          .from('gh_candidate_applications')
-          .update({
-            status: 'APPLYING',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', data.id)
-          .eq('status', 'QUEUED')
-          .select('id');
+        let remainingCandidates = [...(data as ApplicationRow[])];
 
-        if (!updateRes.data || updateRes.data.length === 0) return null; // another worker claimed it
-
-        if (!updateRes.error) {
-          const applyingApp: ApplicationRow = {
-            ...(data as ApplicationRow),
-            status: 'APPLYING',
-            updated_at: new Date().toISOString(),
-          };
-          cacheApplicationLocally(applyingApp);
-          void insertApplicationEvent({
-            applicationId: applyingApp.id || '',
-            applywizzId: applyingApp.applywizz_id,
-            jobUrl: applyingApp.job_url,
-            fromStatus: 'QUEUED',
-            toStatus: 'APPLYING',
-            actorEmail: applyingApp.assigned_ca_email ?? null,
+        while (remainingCandidates.length > 0) {
+          const candidateApp = selectNextRoundRobinAppInMemory(remainingCandidates, {
+            allCandidateApps: [...activeHistory, ...remainingCandidates],
           });
-          const appRef = applyingApp.id || applyingApp.applywizz_id;
-          log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from QUEUED)`);
-          return applyingApp;
+          if (!candidateApp) break;
+
+          const applywizzId = candidateApp.applywizz_id;
+          const gate = await assertApplywizzZohoConnected(applywizzId, { allowAdminDemo: true });
+          if (!gate.allowed) {
+            log.warn(
+              `[Queue] ⛔ Candidate ${applywizzId} is not Zoho connected. Setting application ${candidateApp.id} to READY_FOR_REVIEW.`
+            );
+            await supabase
+              .from('gh_candidate_applications')
+              .update({
+                status: 'READY_FOR_REVIEW',
+                error_message: gate.error || OperatorErrors.ZOHO_NOT_CONNECTED,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', candidateApp.id)
+              .eq('status', 'QUEUED');
+
+            remainingCandidates = remainingCandidates.filter((c) => c.id !== candidateApp.id);
+            continue;
+          }
+
+          const updateRes = await supabase
+            .from('gh_candidate_applications')
+            .update({
+              status: 'APPLYING',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', candidateApp.id)
+            .eq('status', 'QUEUED')
+            .select('id');
+
+          if (!updateRes.data || updateRes.data.length === 0) {
+            // another worker claimed it — continue to next candidate
+            remainingCandidates = remainingCandidates.filter((c) => c.id !== candidateApp.id);
+            continue;
+          }
+
+          if (!updateRes.error) {
+            const applyingApp: ApplicationRow = {
+              ...candidateApp,
+              status: 'APPLYING',
+              updated_at: new Date().toISOString(),
+            };
+            cacheApplicationLocally(applyingApp);
+            void insertApplicationEvent({
+              applicationId: applyingApp.id || '',
+              applywizzId: applyingApp.applywizz_id,
+              jobUrl: applyingApp.job_url,
+              fromStatus: 'QUEUED',
+              toStatus: 'APPLYING',
+              actorEmail: applyingApp.assigned_ca_email ?? null,
+            });
+            const appRef = applyingApp.id || applyingApp.applywizz_id;
+            log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from QUEUED via round-robin query fallback)`);
+            return applyingApp;
+          }
         }
       }
     } catch (queryErr: any) {
@@ -2298,16 +2398,14 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
   }
 
   // 3. In-memory queue selection fallback
-  const queued = Array.from(memoryApplications.values())
-    .filter((a) => a.status === 'QUEUED')
-    .sort((a, b) => (a.submission_order || 0) - (b.submission_order || 0));
+  const allMem = Array.from(memoryApplications.values());
+  const next = selectNextRoundRobinAppInMemory(allMem);
 
-  if (queued.length > 0) {
-    const next = queued[0];
+  if (next) {
     next.status = 'APPLYING';
     next.updated_at = new Date().toISOString();
     const appRef = next.id || next.applywizz_id;
-    log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from in-memory QUEUED)`);
+    log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from in-memory round-robin QUEUED)`);
     return next;
   }
 
