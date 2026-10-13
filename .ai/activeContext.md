@@ -1,3 +1,18 @@
+## Current Session Update (2026-10-13 — Dual Mailbox Ingest Sync & Candidate Round-Robin Dequeue)
+
+- **Dual Mailbox (Zoho + Gmail) Sync & Gate (`src/services/zohoConnectionCheck.ts`, `scripts/scanZohoConnected.ts`, `src/resolver/answerResolver.ts`)**:
+  - `fetchConnectedEmails` queries both `/api/zoho/ui/users` and `/api/gmail/ui/users` concurrently via `Promise.allSettled`, normalizing and combining all mailboxes where `user.connected === true`.
+  - Updated `scripts/scanZohoConnected.ts` to sync both services to `profiles.zoho_connected`.
+  - In `resolveAllApplications`, strictly gated answer resolution to candidate segments where `profile?.zoho_connected !== false`.
+- **Candidate Round-Robin Dequeue & Migration 034 (`src/db/migrations/034_candidate_round_robin_dequeue.sql`, `src/db/applications.ts`)**:
+  - Created Migration 034 adding composite index `idx_applications_round_robin_queue` and updating stored procedure `get_next_queued_application()` with candidate-level window ranking (`candidate_rank = prior processed count + queued position`) with atomic `FOR UPDATE OF ca SKIP LOCKED`.
+  - Implemented `selectNextRoundRobinAppInMemory` in `src/db/applications.ts` and updated the Supabase query fallback and in-memory queue fallback to enforce identical candidate interleaving.
+- **Validation**:
+  - `tests/zohoConnectedFilter.test.ts` (PASS, 7/7)
+  - `tests/roundRobinDequeue.test.ts` (PASS, 3/3, including 3-worker starvation simulation)
+  - Full `npm run test:vitest` (PASS, 55/55)
+  - `npm run typecheck` passes with 0 errors.
+
 ## Current Session Update (2026-10-13 — Operator Dashboard Carousel Actionable Filtering)
 
 - **Actionable Question Filtering (`dashboard/utils/fieldFilters.ts`, `dashboard/FormRenderer.tsx`)**:
