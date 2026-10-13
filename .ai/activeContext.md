@@ -39,7 +39,7 @@
 
 ## Current Session Update (2026-10-13 — Submission Log Root-Cause Diagnosis)
 
-- **✅ OTP timeout/log storm fixed (2026-10-13):** Shared timing constants now align the 8-minute OTP budget, 10-second poll interval, and 9.5-minute paused-session TTL (including the 90-second confirmation grace). The resolver stops before a poll that cannot fit and reports the configured `480s` timeout, eliminating the zero-poll tight loop. Focused tests pass; the plan's final typecheck remains pending.
+- **✅ OTP timeout/log storm fixed (2026-10-13):** Shared timing constants now align the 8-minute OTP budget, 10-second poll interval, and 9.5-minute paused-session TTL (including the 90-second confirmation grace). The resolver stops before a poll that cannot fit and reports the configured `480s` timeout, eliminating the zero-poll tight loop. Focused tests and `npm run typecheck` pass.
 - **Unsafe retry behavior:** The submitter requeues every `FAILED` result. The logs show repeated attempts for required-field failures and ambiguous post-submit confirmation timeouts. Restrict retries to safe, classified failures; do not automatically resubmit when the first submit may have succeeded.
 - **Confirmation failures:** Two separate applications timed out on the same Greenhouse job after 30 seconds. The submitter passes 30 seconds despite the verifier's 75-second default; inspect failure proofs and widen only for observed confirmation signals before changing matching behavior.
 - **Answer mismatches:** The log shows education text passed to discrete school-category choices and a phone-shaped value rejected for a TikTok field. The form filler correctly fails closed; inspect stored resolved-field values and tier/source before changing the filler.
