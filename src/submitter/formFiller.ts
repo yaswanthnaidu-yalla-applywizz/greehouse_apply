@@ -272,7 +272,7 @@ export function containsOptionTextMatch(optionText: string, answerText: string):
   return Boolean(opt && ans && (opt.includes(ans) || ans.includes(opt)));
 }
 
-function fuzzyOptionTextMatch(optionText: string, answerText: string): boolean {
+export function fuzzyOptionTextMatch(optionText: string, answerText: string): boolean {
   if (exactOptionTextMatch(optionText, answerText)) return true;
   const opt = optionText.trim().toLowerCase();
   const ans = answerText.trim().toLowerCase();
@@ -280,6 +280,12 @@ function fuzzyOptionTextMatch(optionText: string, answerText: string): boolean {
   if (opt.startsWith(ans) || ans.startsWith(opt)) return true;
   if (ans === 'yes' && /^yes\b/.test(opt)) return true;
   if (ans === 'no' && /^no\b/.test(opt)) return true;
+
+  // EEO / Voluntary Self-Identification decline phrase matching
+  const isAnsDecline = /decline|prefer not|not wish|choose not|don't wish|do not wish/i.test(ans);
+  const isOptDecline = /decline|prefer not|not wish|choose not|don't wish|do not wish/i.test(opt);
+  if (isAnsDecline && isOptDecline) return true;
+
   return opt.includes(ans) || ans.includes(opt);
 }
 
@@ -1303,6 +1309,7 @@ export async function fillSingleField(
           const countryMatcher: OptionTextMatcher = (optText) =>
             new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
           let selected = false;
+          const isEeoField = isDemographicOrEeoField(fieldId, name, label);
           for (const attempt of selectAttempts) {
             selected = await fillSearchableSelectInput(
               page,
@@ -1311,7 +1318,7 @@ export async function fillSingleField(
               isCountryCode ? targetCountryName : attempt,
               isCountryCode
                 ? countryMatcher
-                : isSponsorship || booleanValue || isReferralSource
+                : isSponsorship || booleanValue || isReferralSource || isEeoField
                 ? fuzzyOptionTextMatch
                 : exactOptionTextMatch
             );
