@@ -22,6 +22,15 @@ export type NeedsReviewField = {
 export function applicationNeedsOperatorReview(fields: NeedsReviewField[]): boolean {
   if (!Array.isArray(fields) || fields.length === 0) return false;
 
+  // 0. Mandatory Cover Letter (must not auto-queue since system policy omits cover letters)
+  const hasRequiredCoverLetter = fields.some((f) => {
+    const combined = `${f.label || ''} ${(f as any).name || ''} ${(f as any).fieldId || ''}`.toLowerCase();
+    return Boolean(f.isRequired) && /cover\s*letter|cover_letter/i.test(combined);
+  });
+  if (hasRequiredCoverLetter) {
+    return true;
+  }
+
   return fields.some((f) => {
     // 1. Unresolved required field
     if (f.isRequired && (!f.source || f.source === 'unresolved')) {
