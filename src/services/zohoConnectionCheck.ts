@@ -11,7 +11,7 @@ export interface ZohoConnectionCheckResult {
   connectorError?: string;
 }
 
-interface ZohoUsersResponse {
+export interface ZohoUsersResponse {
   users: Array<{ email: string; connected: boolean }>;
 }
 
