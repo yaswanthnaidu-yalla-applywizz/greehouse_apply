@@ -25,20 +25,44 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
   const scannedAt = new Date().toISOString();
 
   try {
-    const url = `${BASE_URL.replace(/\/+$/, '')}/api/zoho/ui/users`;
-    console.log(`[Zoho Scanner] 🌐 Fetching connected users from ${url} via REST API...`);
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Zoho connector returned HTTP ${res.status}: ${res.statusText}`);
+    const baseUrl = BASE_URL.replace(/\/+$/, '');
+    const zohoUrl = `${baseUrl}/api/zoho/ui/users`;
+    const gmailUrl = `${baseUrl}/api/gmail/ui/users`;
+    console.log(`[Mailbox Scanner] 🌐 Fetching connected users from Zoho and Gmail via REST API...`);
+
+    const [zohoRes, gmailRes] = await Promise.allSettled([
+      fetch(zohoUrl),
+      fetch(gmailUrl),
+    ]);
+
+    const connectedEmailsSet = new Set<string>();
+
+    if (zohoRes.status === 'fulfilled' && zohoRes.value.ok) {
+      const data = (await zohoRes.value.json()) as { users?: Array<{ email: string; connected: boolean }> };
+      const zohoUsers = data.users || [];
+      const zohoConnected = zohoUsers
+        .filter((u) => u.connected && u.email)
+        .map((u) => u.email.toLowerCase().trim());
+      console.log(`[Mailbox Scanner] 📊 Found ${zohoConnected.length} connected Zoho user(s) out of ${zohoUsers.length} total.`);
+      for (const e of zohoConnected) connectedEmailsSet.add(e);
+    } else {
+      console.warn(`[Mailbox Scanner] ⚠️ Zoho fetch failed`);
     }
 
-    const data = (await res.json()) as { users?: Array<{ email: string; connected: boolean }> };
-    const users = data.users || [];
-    const connectedEmails = users
-      .filter((u) => u.connected && u.email)
-      .map((u) => u.email.toLowerCase().trim());
+    if (gmailRes.status === 'fulfilled' && gmailRes.value.ok) {
+      const data = (await gmailRes.value.json()) as { users?: Array<{ email: string; connected: boolean }> };
+      const gmailUsers = data.users || [];
+      const gmailConnected = gmailUsers
+        .filter((u) => u.connected && u.email)
+        .map((u) => u.email.toLowerCase().trim());
+      console.log(`[Mailbox Scanner] 📊 Found ${gmailConnected.length} connected Gmail user(s) out of ${gmailUsers.length} total.`);
+      for (const e of gmailConnected) connectedEmailsSet.add(e);
+    } else {
+      console.warn(`[Mailbox Scanner] ⚠️ Gmail fetch failed`);
+    }
 
-    console.log(`[Zoho Scanner] 📊 Found ${connectedEmails.length} connected user(s) out of ${users.length} total.`);
+    const connectedEmails = Array.from(connectedEmailsSet);
+    console.log(`[Mailbox Scanner] 📊 Total unified connected user(s): ${connectedEmails.length}`);
 
     if (isSupabaseConfigured() && connectedEmails.length > 0) {
       await syncConnectedProfiles(connectedEmails);
@@ -50,7 +74,7 @@ export async function runZohoConnectedScan(): Promise<ZohoConnectedScanResult> {
       emails: connectedEmails,
     };
   } catch (err: any) {
-    console.error(`[Zoho Scanner] ❌ Error scanning connected users: ${err.message}`);
+    console.error(`[Mailbox Scanner] ❌ Error scanning connected users: ${err.message}`);
     return {
       scannedAt,
       count: 0,
