@@ -1,3 +1,18 @@
+### Client Info Drawer & Mobile Header Redesign (2026-10-13 Complete)
+- [x] **Client Info Drawer (`dashboard/components/ClientInfoDrawer.tsx`, `tests/clientInfoFormatting.test.ts`):**
+  - Built slide-over drawer showing detailed candidate background (`awl_id`, `name`, `company_email`, `phone`, `country`, `location`, `linkedin_url`, `website_url`, `github_url`, `work_auth`, `sponsorship`, `education`, and `experience`).
+  - Added clean vertical card formatting for education and work experience (no raw JSON strings).
+  - Automatically omits rows where fields are missing or empty string.
+  - Includes smooth backdrop blur and dismissal via backdrop click or `Escape` key.
+- [x] **JobQueueView & App.tsx Drawer Integration (`dashboard/JobQueueView.tsx`, `dashboard/App.tsx`, `tests/clientInfoIntegration.test.ts`):**
+  - Added `👤 Client Info` pill button adjacent to `📄 Master Resume PDF`.
+  - Wired `onOpenClientInfo` to toggle drawer state seamlessly without shifting page layout.
+- [x] **2-Tier Mobile Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`):**
+  - Reorganized mobile header (`< 768px`) into a 2-tier structure eliminating cramped and overlapping controls:
+    - **Tier 1 (Main Header):** Brand logo + notifications bell (`🔔`) + user avatar/sign out.
+    - **Tier 2 (Sub-bar):** Date filter (`📅 IST`), refresh button (`↻`), and DevSwitcher with spacious tap targets.
+  - Kept sleek 1-row desktop navigation bar (`hidden md:flex h-16`) intact.
+
 ### Dual Mailbox Ingest Sync & Candidate Round-Robin Dequeue (2026-10-13 Complete)
 - [x] **Dual Mailbox (Zoho + Gmail) Ingest Check (`src/services/zohoConnectionCheck.ts`, `scripts/scanZohoConnected.ts`, `tests/zohoConnectedFilter.test.ts`):**
   - Updated `fetchConnectedEmails` to query both `/api/zoho/ui/users` and `/api/gmail/ui/users` concurrently via `Promise.allSettled`.
