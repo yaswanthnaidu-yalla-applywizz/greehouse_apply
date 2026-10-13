@@ -1,6 +1,6 @@
 import type { LiveSubmitResult } from './liveSubmit.js';
 
-export type SubmissionRetryReason = 'OTP_FETCH_FAIL' | 'UNRESOLVED_REQUIRED_FIELD';
+export type SubmissionRetryReason = 'OTP_FETCH_FAIL' | 'UNRESOLVED_REQUIRED_FIELD' | 'BROWSER_LAUNCH_FAILED';
 
 export function getRetryReason(
   resultOrError: Pick<LiveSubmitResult, 'retryReason' | 'errorMessage'> | Error | string
@@ -17,5 +17,6 @@ export function getRetryReason(
 function classifyRetryMessage(message: string): SubmissionRetryReason | null {
   if (/OTP_FETCH(?:_FAIL|:)|OTP fetch failed/i.test(message)) return 'OTP_FETCH_FAIL';
   if (/Required field validation failed/i.test(message)) return 'UNRESOLVED_REQUIRED_FIELD';
+  if (/Browser launch failed|Target crashed/i.test(message)) return 'BROWSER_LAUNCH_FAILED';
   return null;
 }

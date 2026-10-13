@@ -1,3 +1,16 @@
+## Current Session Update (2026-10-13 — Chromium Crashes & Worker Concurrency Optimization)
+
+- **Centralized Browser Lifecycle Manager (`src/submitter/browserManager.ts`)**:
+  - Implemented `BrowserManager` providing an authoritative counting semaphore capped at `MAX_CONCURRENT_BROWSERS` (default `5`), protecting memory limits on Railway Pro.
+  - Implemented launch throttling queue with `BROWSER_LAUNCH_COOLDOWN_MS` (default `1500`ms) to space Chromium process forks, eliminating burst CPU and cgroup memory spikes.
+  - Handled launch errors non-fatally: removed `haltWithDevAlert` (which called `process.exit(1)`) on browser launch failure in `liveSubmit.ts`, replacing with structured `SUBMIT_PLAYWRIGHT_LAUNCH` diagnostic and status `FAILED` with retry reason `BROWSER_LAUNCH_FAILED`.
+  - Added periodic zombie browser cleanup (every 60s) and graceful shutdown (`closeAll()`) in `server/index.ts`.
+- **Worker Pool Sizing & Metrics Calibration**:
+  - Clamped `SUBMISSION_POOL_SIZE` and `WORKER_CONCURRENCY` to safe default of `3` (max `6`).
+  - Added browser pool utilization metrics (`browser_active_count`, `browser_waiting_count`, `browser_max_count`) into `system_worker_heartbeats`.
+- **Unified Paused Session Registry**:
+  - Linked `PAUSED_SESSIONS` and `activeSubmissions` so closing/clearing a session purges both stores and releases the managed browser slot cleanly.
+
 ## Current Session Update (2026-10-13 — Ingest LLM Timeout & Deferred Auto-Queue Submissions)
 
 - **Root Cause Fixes for Ingestion & Submitter Concurrency Collisions**:

@@ -67,7 +67,7 @@ export const SUBMITTED_STATUSES: ApplicationStatus[] = [
   'EMAIL_PROOF_PENDING',
 ];
 
-export const FAILED_EQUIVALENT_STATUSES: ApplicationStatus[] = ['FAILED', 'RETRY'];
+export const FAILED_EQUIVALENT_STATUSES: ApplicationStatus[] = ['FAILED'];
 
 export const IN_FLIGHT_STATUSES: ApplicationStatus[] = [
   'QUEUED',
@@ -1494,8 +1494,10 @@ export async function requeueApplicationForRetry(
   }
 
   const nextRetryCount = currentRetryCount + 1;
+  const isTerminal = nextRetryCount >= MAX_SUBMISSION_RETRIES;
+  const nextStatus = isTerminal ? ('FAILED' as const) : ('QUEUED' as const);
   const payload = {
-    status: 'RETRY' as const,
+    status: nextStatus,
     retry_count: nextRetryCount,
     submission_order: nextRetryCount,
     error_message: reason,
@@ -1513,7 +1515,7 @@ export async function requeueApplicationForRetry(
         query = query.eq('applywizz_id', app.applywizz_id).eq('job_url', app.job_url);
       }
       const result = await query
-        .in('status', ['FAILED', 'APPLYING', 'OTP_REQUIRED'])
+        .in('status', ['FAILED', 'APPLYING', 'OTP_REQUIRED', 'RETRY'])
         .eq('retry_count', storedRetryCount)
         .select('id');
       updated = !result.error && Array.isArray(result.data) && result.data.length > 0;
@@ -1528,10 +1530,10 @@ export async function requeueApplicationForRetry(
   if (!updated) return { requeued: false, retryCount: currentRetryCount };
   cacheApplicationLocally({ ...app, ...payload });
   log.info(
-    `[OTP TRACE] application=${applicationId} requeue=true retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
-      `status=QUEUED reason="${reason}"`
+    `[OTP TRACE] application=${applicationId} requeue=${!isTerminal} retry_count=${nextRetryCount}/${MAX_SUBMISSION_RETRIES} ` +
+      `status=${nextStatus} reason="${reason}"`
   );
-  return { requeued: true, retryCount: nextRetryCount };
+  return { requeued: !isTerminal, retryCount: nextRetryCount };
 }
 
 

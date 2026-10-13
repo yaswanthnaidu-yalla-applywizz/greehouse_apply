@@ -14,7 +14,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
+import type { Browser, BrowserContext, Locator, Page } from 'playwright';
 import { fillForm, formatInvalidFieldLog, type FormFillSummary, type FormFillerOptions } from './formFiller.js';
 import {
   captureWebProof,
@@ -27,6 +27,7 @@ import {
 } from './proofCapture.js';
 import { emailProofPoller } from './emailProofPoller.js';
 import {
+  activeSubmissions,
   registerSubmissionSession,
   verifySubmissionSignals,
   closeSubmissionSession,
@@ -45,10 +46,11 @@ import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { uploadResume } from '../db/storage.js';
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
-import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { createLogger } from '../utils/logger.js';
 import { assertWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
+import { browserManager, type ManagedBrowser } from './browserManager.js';
 
 const log = createLogger('Live Submit');
 const RESUMES_BUCKET = 'resumes';
@@ -132,6 +134,7 @@ export interface LiveSubmitResult {
 export interface PausedSession {
   browser: Browser;
   page: Page;
+  browserId?: string;
   otpFieldSelector?: string;
   applicationId: string;
   pausedAt: number;
@@ -198,6 +201,7 @@ export function storePausedSession(
   session: {
     browser: Browser;
     page: Page;
+    browserId?: string;
     applicationId?: string;
     otpFieldSelector?: string;
     pausedAt?: number;
@@ -245,6 +249,7 @@ export function storePausedSession(
   const fullSession: PausedSession = {
     browser: session.browser,
     page: session.page,
+    browserId: session.browserId,
     otpFieldSelector: session.otpFieldSelector,
     applicationId: canonicalKey,
     pausedAt,
@@ -317,13 +322,20 @@ export async function clearPausedSession(
       } catch {}
     }
     await session.page?.close().catch(() => {});
-    await session.browser?.close().catch(() => {});
+    if (session.browserId) {
+      await browserManager.releaseBrowser(session.browserId).catch(() => {});
+    } else {
+      await session.browser?.close().catch(() => {});
+    }
   } finally {
     for (const [key, value] of PAUSED_SESSIONS.entries()) {
       if (value === session) {
         PAUSED_SESSIONS.delete(key);
+        activeSubmissions.delete(key);
       }
     }
+    if (session.applicationId) activeSubmissions.delete(session.applicationId);
+    if (session.applywizzId) activeSubmissions.delete(session.applywizzId);
   }
 }
 
@@ -1089,6 +1101,7 @@ export async function runLiveSubmit(
     }
   }
 
+  let managedBrowser: ManagedBrowser | null = null;
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   let page: Page | null = null;
@@ -1099,7 +1112,7 @@ export async function runLiveSubmit(
   try {
     // 2. Launch browser with anti-detection flags (strictly headless on Railway; headful supported locally)
     try {
-      browser = await chromium.launch({
+      managedBrowser = await browserManager.acquireBrowser({
         headless: isHeadless,
         args: [
           '--disable-blink-features=AutomationControlled',
@@ -1109,12 +1122,35 @@ export async function runLiveSubmit(
           '--disable-gpu',
         ],
       });
-    } catch (launchErr) {
-      haltWithDevAlert(
-        'Scanner',
-        'Playwright failed to launch — check RAILWAY_ENV and browser binary',
-        launchErr
-      );
+      browser = managedBrowser.browser;
+    } catch (launchErr: any) {
+      const launchErrMsg = `Browser launch failed: ${launchErr?.message || String(launchErr)}`;
+      log.error(`[Live Submit] ❌ ${launchErrMsg}`);
+      await emitFailureDiagnostic({
+        category: 'SUBMIT_PLAYWRIGHT_LAUNCH',
+        stage: 'browser_launch',
+        reason: launchErrMsg,
+        error: launchErr,
+        isTerminal: false,
+        isRetryable: true,
+        applicationId: application.id || applicationId,
+        jobUrl: targetUrl,
+      });
+
+      if (application.id) {
+        await updateStatus(application.id, 'FAILED', {
+          error_message: launchErrMsg,
+          job_url: application.job_url,
+        }).catch(() => {});
+      }
+
+      return {
+        success: false,
+        status: 'FAILED',
+        applicationId,
+        errorMessage: launchErrMsg,
+        retryReason: 'BROWSER_LAUNCH_FAILED',
+      };
     }
 
     context = await browser.newContext({
@@ -1341,6 +1377,7 @@ export async function runLiveSubmit(
         const sessionKey = storePausedSession(application, {
           browser,
           page,
+          browserId: managedBrowser?.browserId,
           otpFieldSelector: otpField.selector,
           applicationId,
           pausedAt,
@@ -1661,7 +1698,11 @@ export async function runLiveSubmit(
       }
       if (page) await page.close().catch(() => {});
       if (context) await context.close().catch(() => {});
-      if (browser) await browser.close().catch(() => {});
+      if (managedBrowser) {
+        await browserManager.releaseBrowser(managedBrowser.browserId).catch(() => {});
+      } else if (browser) {
+        await browser.close().catch(() => {});
+      }
       log.info(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
     } else {
       log.info(

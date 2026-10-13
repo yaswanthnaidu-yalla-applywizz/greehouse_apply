@@ -7,7 +7,7 @@
  * and updates the application database record.
  */
 
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 import { fillForm, type FormFillSummary } from './formFiller.js';
 import { uploadDryRunScreenshot } from '../db/storage.js';
 import {
@@ -17,6 +17,7 @@ import {
   type ApplicationRow,
 } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
+import { browserManager, type ManagedBrowser } from './browserManager.js';
 
 const log = createLogger('Dry Run');
 
@@ -84,13 +85,14 @@ export async function runDryRun(
     `[Dry Run] 🚀 Starting dry-run for ${application.applywizz_id} [${targetUrl}] (headless: ${headless}, isContainer: ${isContainer})...`
   );
 
+  let managedBrowser: ManagedBrowser | null = null;
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   let page: Page | null = null;
 
   try {
-    // 2. Launch Chromium browser
-    browser = await chromium.launch({
+    // 2. Launch Chromium browser via BrowserManager
+    managedBrowser = await browserManager.acquireBrowser({
       headless,
       slowMo: headless ? 0 : 80, // slow down interactions in headful so they're visible
       args: [
@@ -101,6 +103,7 @@ export async function runDryRun(
         '--disable-gpu',
       ],
     });
+    browser = managedBrowser.browser;
 
     context = await browser.newContext({
       userAgent:
@@ -187,7 +190,11 @@ export async function runDryRun(
   } finally {
     if (page) await page.close().catch(() => {});
     if (context) await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    if (managedBrowser) {
+      await browserManager.releaseBrowser(managedBrowser.browserId).catch(() => {});
+    } else if (browser) {
+      await browser.close().catch(() => {});
+    }
     log.info(`[Dry Run] 🏁 Completed dry-run session for ${applicationId}.`);
   }
 }

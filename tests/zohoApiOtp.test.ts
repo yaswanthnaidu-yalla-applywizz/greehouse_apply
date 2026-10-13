@@ -100,26 +100,58 @@ describe('extractOtpCodeFromText', () => {
     }
   });
 
-  it('fetches OTP code successfully from Gmail security code API', async () => {
+  it('fetches OTP code successfully from Gmail direct inbox and message APIs', async () => {
     const originalFetch = globalThis.fetch;
-    let endpointHit = false;
+    const urlsHit: string[] = [];
+    const now = Date.now();
 
     globalThis.fetch = async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
-      if (url.pathname.includes('/api/gmail/greenhouse-security-code')) {
-        endpointHit = true;
+      urlsHit.push(url.pathname);
+
+      if (url.pathname === '/api/gmail/ui/inbox') {
         assert.equal(url.searchParams.get('email'), 'candidate@gmail.com');
-        assert.equal(url.searchParams.get('company'), 'Block');
         return new Response(
           JSON.stringify({
-            found: true,
             email: 'candidate@gmail.com',
-            code: '948215',
-            received_at: new Date().toISOString(),
+            count: 2,
+            messages: [
+              {
+                messageId: 'old-msg-1',
+                from: 'no-reply@us.greenhouse-mail.io',
+                subject: 'Your Block verification code',
+                receivedAt: now - 600000, // Stale message (10 mins ago)
+              },
+              {
+                messageId: 'fresh-msg-2',
+                from: 'no-reply@us.greenhouse-mail.io',
+                subject: 'Your Block security code',
+                receivedAt: now + 1000, // Fresh message
+              },
+            ],
           }),
           { status: 200 }
         );
       }
+
+      if (url.pathname === '/api/gmail/ui/message') {
+        assert.equal(url.searchParams.get('email'), 'candidate@gmail.com');
+        assert.equal(url.searchParams.get('messageId'), 'fresh-msg-2');
+        return new Response(
+          JSON.stringify({
+            message: {
+              messageId: 'fresh-msg-2',
+              subject: 'Your Block security code',
+              from: 'no-reply@us.greenhouse-mail.io',
+              to: 'candidate@gmail.com',
+              receivedAt: now + 1000,
+              textContent: 'Hi, your verification code is 948215. Valid for 10 minutes.',
+            },
+          }),
+          { status: 200 }
+        );
+      }
+
       throw new Error(`Unexpected request: ${url}`);
     };
 
@@ -127,14 +159,17 @@ describe('extractOtpCodeFromText', () => {
       const { fetchGmailOtpViaApi } = await import('../src/services/zoho-connector.js');
       const result = await fetchGmailOtpViaApi({
         candidateEmail: 'candidate@gmail.com',
+        sinceTimestamp: now,
         companyName: 'Block',
         timeoutMs: 2000,
         pollIntervalMs: 500,
       });
 
-      assert.equal(endpointHit, true);
+      assert.equal(urlsHit.includes('/api/gmail/ui/inbox'), true, 'Must query /api/gmail/ui/inbox');
+      assert.equal(urlsHit.includes('/api/gmail/ui/message'), true, 'Must query /api/gmail/ui/message');
       assert.equal(result.success, true);
       assert.equal(result.otp, '948215');
+      assert.equal(result.messageId, 'fresh-msg-2');
     } finally {
       globalThis.fetch = originalFetch;
     }

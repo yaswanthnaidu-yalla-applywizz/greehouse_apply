@@ -886,41 +886,54 @@ export async function fetchZohoOtpViaApi(
   };
 }
 
-export interface GmailOtpApiQueryOptions {
-  candidateEmail: string;
-  companyName?: string;
-  correlationId?: string;
-  timeoutMs?: number;
-  pollIntervalMs?: number;
-  excludedCodes?: string[];
+export interface GmailOtpApiQueryOptions extends ZohoOtpApiQueryOptions {}
+
+export interface RawGmailInboxMessage {
+  messageId: string;
+  threadId?: string;
+  from?: string;
+  subject?: string;
+  snippet?: string;
+  receivedAt?: number | string;
+  hasAttachment?: boolean;
 }
 
-export interface GmailOtpApiResponse {
-  found?: boolean;
-  code?: string;
-  security_code?: string;
-  otp?: string;
-  received_at?: string;
-  message_id?: string;
+export interface RawGmailInboxResponse {
+  email?: string;
+  count?: number;
+  hasMore?: boolean;
+  nextPageToken?: string;
+  messages?: RawGmailInboxMessage[];
   reason?: string;
-  error?: string;
+}
+
+export interface RawGmailMessageResponse {
+  message?: {
+    messageId: string;
+    subject?: string;
+    from?: string;
+    to?: string;
+    receivedAt?: number | string;
+    textContent?: string;
+    htmlContent?: string;
+    labelNames?: string[];
+  };
 }
 
 /**
- * Fetch Greenhouse security code via Gmail REST API endpoint.
- * GET /api/gmail/greenhouse-security-code?email=<candidateEmail>&company=<companyName>
+ * Fetch Greenhouse security code via Gmail REST API endpoints:
+ * 1. GET /api/gmail/ui/inbox?email=<candidateEmail>&limit=15
+ * 2. GET /api/gmail/ui/message?email=<candidateEmail>&messageId=<messageId>
  */
 export async function fetchGmailOtpViaApi(
   options: GmailOtpApiQueryOptions
 ): Promise<ZohoOtpApiResult> {
   const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
+  const sinceTimestamp = options.sinceTimestamp;
   const companyName = (options.companyName || '').trim();
   const correlation = options.correlationId || 'unknown';
-  const timeoutMs = options.timeoutMs ?? 60000;
-  const pollIntervalMs = options.pollIntervalMs ?? 10000;
-  const excludedCodes = new Set(
-    (options.excludedCodes || []).map((c) => c.trim().toLowerCase()).filter(Boolean)
-  );
+  const timeoutMs = options.timeoutMs ?? 30000;
+  const pollIntervalMs = options.pollIntervalMs ?? 2000;
 
   const validEmailFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail);
   if (!candidateEmail || !validEmailFormat) {
@@ -944,93 +957,240 @@ export async function fetchGmailOtpViaApi(
     ''
   );
 
+  const minTimeMs = (sinceTimestamp && Number.isFinite(sinceTimestamp) && sinceTimestamp > 0)
+    ? sinceTimestamp - OTP_EMAIL_CLOCK_SKEW_MS
+    : 0;
+  const excludedMessageIds = new Set(options.excludedMessageIds || []);
+  const excludedCodes = new Set(
+    (options.excludedCodes || []).map((c) => c.trim().toLowerCase()).filter(Boolean)
+  );
+
   const startTime = Date.now();
   let attempt = 0;
+  let successfulInboxResponses = 0;
+  let inboxHttpErrors = 0;
+  let inboxNetworkErrors = 0;
+  let securityCodeMessages = 0;
+  let freshSecurityCodeMessages = 0;
+  let companyMismatches = 0;
+  let detailRequestFailures = 0;
 
   log.info(
     `[Gmail Connector] event=gmail_otp_fetch_started application=${correlation} ` +
-      `email=${candidateEmail} company=${companyName} poll_interval_ms=${pollIntervalMs} budget_ms=${timeoutMs}`
+      `email=${candidateEmail} company=${companyName} poll_interval_ms=${pollIntervalMs} budget_ms=${timeoutMs} ` +
+      `submit_age_ms=${sinceTimestamp ? Math.max(0, Date.now() - sinceTimestamp) : 'n/a'}`
   );
 
   while (timeoutMs - (Date.now() - startTime) >= pollIntervalMs || attempt === 0) {
     attempt++;
-    const remainingMs = Math.max(1, timeoutMs - (Date.now() - startTime));
-    const url = new URL(`${baseUrl}/api/gmail/greenhouse-security-code`);
-    url.searchParams.set('email', candidateEmail);
-    if (companyName) {
-      url.searchParams.set('company', companyName);
-    }
+    const cycleStart = Date.now();
 
     try {
+      const remainingMs = Math.max(1, timeoutMs - (Date.now() - startTime));
+      const inboxUrl = `${baseUrl}/api/gmail/ui/inbox?email=${encodeURIComponent(
+        candidateEmail
+      )}&limit=15`;
       const controller = new AbortController();
-      const fetchTimeout = setTimeout(() => controller.abort(), Math.min(8000, remainingMs));
+      const fetchTimeout = setTimeout(() => controller.abort(), Math.min(10000, remainingMs));
 
       await mailboxRateLimiter.acquire();
-      const res = await fetch(url.toString(), {
+      const res = await fetch(inboxUrl, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
       }).finally(() => clearTimeout(fetchTimeout));
 
       if (res.ok) {
-        const data = (await res.json()) as GmailOtpApiResponse;
-        const code = (data.code || data.security_code || data.otp || '').trim();
+        successfulInboxResponses++;
+        const data = (await res.json()) as RawGmailInboxResponse;
+        const messages = Array.isArray(data?.messages) ? data.messages : [];
 
-        if (data.found && code) {
-          if (excludedCodes.has(code.toLowerCase())) {
-            log.warn(
-              `[Gmail Connector] application=${correlation} code=${code} is in excludedCodes; continuing poll`
-            );
-          } else {
-            const elapsedMs = Date.now() - startTime;
-            log.info(
-              `[Gmail Connector] event=gmail_otp_fetch_succeeded application=${correlation} ` +
-                `polls=${attempt} elapsed_ms=${elapsedMs} code_length=${code.length}`
-            );
-            return {
-              success: true,
-              otp: code,
-              messageId: data.message_id || `gmail-${Date.now()}`,
-              receivedAt: data.received_at || new Date().toISOString(),
-              receivedAtMs: data.received_at ? Date.parse(data.received_at) : Date.now(),
-            };
+        const freshMessages: Array<{
+          otp?: string;
+          messageId: string;
+          subject: string;
+          receivedMs: number;
+          companyMatched: boolean;
+          matchTier: 1 | 2 | 3;
+          excludedCode: boolean;
+        }> = [];
+
+        for (const msg of messages) {
+          const fromAddress = (msg.from || '').toLowerCase();
+          const subject = msg.subject || '';
+          const subjectLower = subject.toLowerCase();
+          const messageId = msg.messageId || '';
+
+          if (!messageId || excludedMessageIds.has(messageId)) {
+            continue;
           }
-        } else {
+
+          const isGreenhouseSender =
+            fromAddress.includes('greenhouse-mail.io') ||
+            fromAddress.includes('no-reply@us.greenhouse-mail.io') ||
+            fromAddress.includes('greenhouse');
+
+          if (!isGreenhouseSender) {
+            continue;
+          }
+
+          const isSecurityCodeSubject =
+            /security\s*code|\botp\b|verification\s*code|verify/i.test(subjectLower);
+
+          if (!isSecurityCodeSubject) {
+            continue;
+          }
+          securityCodeMessages++;
+
+          let msgData: RawGmailMessageResponse | null = null;
+          try {
+            const detailQs = new URLSearchParams({
+              email: candidateEmail,
+              messageId,
+            });
+            const detailController = new AbortController();
+            const detailTimeout = setTimeout(
+              () => detailController.abort(),
+              Math.min(10000, Math.max(1, timeoutMs - (Date.now() - startTime)))
+            );
+            const msgRes = await fetch(`${baseUrl}/api/gmail/ui/message?${detailQs}`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' },
+              signal: detailController.signal,
+            }).finally(() => clearTimeout(detailTimeout));
+
+            if (msgRes.ok) {
+              msgData = (await msgRes.json()) as RawGmailMessageResponse;
+            } else {
+              detailRequestFailures++;
+            }
+          } catch {
+            detailRequestFailures++;
+          }
+
+          const rawReceived = msgData?.message?.receivedAt ?? msg.receivedAt;
+          const receivedMs =
+            typeof rawReceived === 'number'
+              ? rawReceived
+              : typeof rawReceived === 'string'
+              ? Date.parse(rawReceived)
+              : null;
+
+          if (receivedMs === null || (minTimeMs > 0 && receivedMs < minTimeMs)) {
+            continue;
+          }
+          if (
+            options.newerThanTimestamp !== undefined &&
+            receivedMs <= options.newerThanTimestamp
+          ) {
+            continue;
+          }
+
+          freshSecurityCodeMessages++;
+          const detailFrom = msgData?.message?.from || '';
+          const bodyText =
+            msgData?.message?.textContent || stripHtml(msgData?.message?.htmlContent || '');
+          const extractedOtp = extractOtpCodeFromText(bodyText);
+
+          const normalizedCompany = normalizeCompanyName(companyName);
+          const subjectMatchesCompany =
+            companyName.length > 2 &&
+            (subjectLower.includes(companyName.toLowerCase()) ||
+              (normalizedCompany.length > 2 &&
+                normalizeCompanyName(subject).includes(normalizedCompany)));
+          const bodyOrSenderMatchesCompany =
+            companyName.length > 2 &&
+            [fromAddress, detailFrom.toLowerCase(), bodyText.toLowerCase()].some(
+              (value) =>
+                value.includes(companyName.toLowerCase()) ||
+                (normalizedCompany.length > 2 &&
+                  normalizeCompanyName(value).includes(normalizedCompany))
+            );
+          const companyMatched = subjectMatchesCompany || bodyOrSenderMatchesCompany;
+          if (!companyMatched) companyMismatches++;
+
+          const excludedCode = Boolean(extractedOtp && excludedCodes.has(extractedOtp.toLowerCase()));
+
+          freshMessages.push({
+            otp: extractedOtp && !excludedCode ? extractedOtp : undefined,
+            messageId,
+            subject,
+            receivedMs,
+            companyMatched,
+            matchTier: subjectMatchesCompany ? 1 : bodyOrSenderMatchesCompany ? 2 : 3,
+            excludedCode,
+          });
+        }
+
+        const companyMatches = freshMessages.filter(
+          (message) => message.companyMatched && message.otp
+        );
+        const tierCCandidates = freshMessages.filter((message) => !message.excludedCode);
+        const tierCMatches =
+          tierCCandidates.length === 1 ? tierCCandidates.filter((message) => message.otp) : [];
+        const candidates = companyMatches.length > 0 ? companyMatches : tierCMatches;
+
+        candidates.sort(
+          (left, right) =>
+            left.matchTier - right.matchTier || right.receivedMs - left.receivedMs
+        );
+
+        const newestMessage = candidates[0];
+        if (newestMessage) {
+          const receivedAt = new Date(newestMessage.receivedMs).toISOString();
           log.info(
-            `[Gmail Connector] application=${correlation} poll=${attempt} found=false reason=${data.reason || 'not_yet'}`
+            `[Gmail Connector] event=gmail_otp_fetch_succeeded application=${correlation} ` +
+              `polls=${attempt} elapsed_ms=${Date.now() - startTime} ` +
+              `match_tier=${newestMessage.matchTier} message_id=${newestMessage.messageId} ` +
+              `received_at=${receivedAt} email_code_length=${newestMessage.otp?.length ?? 0} code=[REDACTED]`
           );
-          if (data.reason === 'mailbox_not_connected') {
-            return {
-              success: false,
-              reason: 'mailbox_not_connected',
-              reasonCode: 'GMAIL_MAILBOX_NOT_CONNECTED',
-              errorMessage: 'Candidate Gmail mailbox is not connected on Render.',
-            };
-          }
-          if (data.reason === 'not_yet' || !data.found || (data as any).received === false) {
-            return {
-              success: false,
-              reason: 'not_yet',
-              reasonCode: 'GMAIL_OTP_NOT_YET',
-              errorMessage: 'Candidate Gmail OTP not yet received.',
-            };
-          }
+          return {
+            success: true,
+            otp: newestMessage.otp,
+            subject: newestMessage.subject,
+            receivedAt,
+            receivedAtMs: newestMessage.receivedMs,
+            messageId: newestMessage.messageId,
+          };
         }
       } else {
-        log.warn(
-          `[Gmail Connector] application=${correlation} poll=${attempt} status=${res.status}`
-        );
+        inboxHttpErrors++;
       }
     } catch (err: unknown) {
+      inboxNetworkErrors++;
       const msg = err instanceof Error ? err.message : String(err);
       log.warn(
         `[Gmail Connector] application=${correlation} poll=${attempt} request_error=${msg}`
       );
     }
 
-    const elapsed = Date.now() - startTime;
-    if (timeoutMs - elapsed < pollIntervalMs) break;
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    const elapsed = Date.now() - cycleStart;
+    log.debug(
+      `[Gmail Connector] event=otp_poll_cycle application=${correlation} poll=${attempt} ` +
+        `elapsed_ms=${elapsed} inbox_ok=${successfulInboxResponses} inbox_http_errors=${inboxHttpErrors} ` +
+        `inbox_network_errors=${inboxNetworkErrors} security_messages=${securityCodeMessages} ` +
+        `fresh_security_messages=${freshSecurityCodeMessages} company_mismatches=${companyMismatches} ` +
+        `detail_failures=${detailRequestFailures}`
+    );
+
+    if (successfulInboxResponses > 0 && freshSecurityCodeMessages === 0 && attempt === 1) {
+      log.info(
+        `[Gmail Connector] application=${correlation} poll=${attempt} found=false reason=not_yet`
+      );
+      return {
+        success: false,
+        reason: 'not_yet',
+        reasonCode: securityCodeMessages === 0 ? 'NO_MESSAGES_SINCE_SUBMIT' : 'STALE_TIMESTAMPS_ONLY',
+        errorMessage: 'Gmail OTP not yet received.',
+      };
+    }
+
+    const remainingBudget = timeoutMs - (Date.now() - startTime);
+    const sleepMs = Math.max(100, pollIntervalMs - elapsed);
+    if (remainingBudget < pollIntervalMs || remainingBudget <= sleepMs) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
 
   const elapsedMs = Date.now() - startTime;
