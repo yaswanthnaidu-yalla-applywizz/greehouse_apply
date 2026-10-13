@@ -168,7 +168,6 @@
 - **Answer mismatches:** The log shows education text passed to discrete school-category choices and a phone-shaped value rejected for a TikTok field. The form filler correctly fails closed; inspect stored resolved-field values and tier/source before changing the filler.
 - **Diagnostics:** BrowserManager labels every Playwright `disconnected` event unexpected, including explicit closes; separate intentional cleanup from crashes. `tests/otpResolution.test.ts` also has two stale assertions expecting `RETRY` while code now persists `QUEUED`.
 - No application code changed in this diagnosis. Focused validation: option-alignment script passed; two OTP assertions failed as noted above.
-
 ## Current Session Update (2026-10-13 — Chromium Crashes & Worker Concurrency Optimization)
 
 - **Centralized Browser Lifecycle Manager (`src/submitter/browserManager.ts`)**:

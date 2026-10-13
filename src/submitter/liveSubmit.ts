@@ -1712,7 +1712,7 @@ export async function runLiveSubmit(
       } else if (browser) {
         await browser.close().catch(() => {});
       }
-      log.debug(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
+      log.info(`[Live Submit] 🏁 Closed browser context for application ${applicationId}.`);
     } else {
       log.debug(
         `[Live Submit] ⏸️ Browser context kept paused in memory for application ${applicationId}.`
