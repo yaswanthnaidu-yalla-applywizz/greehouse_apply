@@ -127,4 +127,48 @@ describe('Zoho Connected Filter & Backfill', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('aggregates connected emails from both Zoho and Gmail user endpoints', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: any) => {
+      const url = String(input);
+      if (url.includes('/api/zoho/ui/users')) {
+        return new Response(
+          JSON.stringify({
+            users: [
+              { email: 'zoho.user@applywizard.ai', connected: true },
+              { email: 'unconnected.zoho@applywizard.ai', connected: false },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/gmail/ui/users')) {
+        return new Response(
+          JSON.stringify({
+            total: 2,
+            connectedCount: 1,
+            users: [
+              { email: 'gmail.user@applywizard.ai', connected: true },
+              { email: 'unconnected.gmail@applywizard.ai', connected: false },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    try {
+      const { fetchConnectedEmails } = await import('../src/services/zohoConnectionCheck.js');
+      const emails = await fetchConnectedEmails('https://zoho-mail-reader.onrender.com');
+      expect(emails.has('zoho.user@applywizard.ai')).toBe(true);
+      expect(emails.has('gmail.user@applywizard.ai')).toBe(true);
+      expect(emails.has('unconnected.zoho@applywizard.ai')).toBe(false);
+      expect(emails.has('unconnected.gmail@applywizard.ai')).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
+
