@@ -881,7 +881,7 @@ export class AnswerResolver {
     }
 
     const eligibleSegments = segments.filter((seg) => {
-      if (seg.profile && seg.profile.zoho_connected === false) {
+      if (seg.profile && (seg.profile as any).zoho_connected === false) {
         log.info(
           `[Answer Resolver] ⛔ Skipping candidate ${seg.applywizzId} from resolution (zoho_connected is false)`
         );
