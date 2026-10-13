@@ -766,7 +766,9 @@ export function resolveFromPayloadStructured(
       ? `${formatPayloadValue(additional.experience, fieldType)} years`
       : null) ??
     match(/highest (level of )?education|highest degree|education level|^degree$|degree (earned|obtained|completed|type)/, additional.highest_education) ??
-    match(/university|college|institution|^school$|school name|where did you (attend|study)/, additional.university_name) ??
+    (!/\b(?:opt|stem|extension|sponsorship|eligible|authorization)\b/i.test(normalizedLabel)
+      ? match(/university|college|institution|^school$|school name|where did you (attend|study)/, additional.university_name)
+      : null) ??
     match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa) ??
     match(/graduation year|year of graduation|when did you graduate|expected graduation/, additional.graduation_year) ??
     match(/^discipline$|field of study|major|area of study|degree (in|subject)|main subject/, additional.main_subject) ??
