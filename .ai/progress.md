@@ -1,3 +1,28 @@
+### Operator Dashboard Actionable Carousel Filtering (2026-10-13 Complete)
+- [x] **Carousel Field Filter (`dashboard/utils/fieldFilters.ts`, `tests/fieldFilters.test.ts`):**
+  - Implemented `isActionableCarouselField` restricting card carousel mode strictly to:
+    1. Required Unresolved fields (`isRequired === true && source === 'unresolved'`)
+    2. Required AI-resolved fields (`isRequired === true && source === 'ai'`)
+    3. Optional AI-resolved fields (`isRequired === false && source === 'ai'`)
+    4. Any question manually edited by the operator (`source === 'manual' || isEdited === true`)
+  - Excluded standard identity fields (`first_name`, `last_name`, `email`, `phone`) and non-AI profile/resume resolved fields from the carousel so operators only review high-attention questions.
+- [x] **FormRenderer Carousel & Full List Modes (`dashboard/FormRenderer.tsx`, `tests/formRendererFiltering.test.ts`):**
+  - Updated card carousel to show filtered questions, with progress bars and approved counts strictly tracking the actionable set.
+  - Added clean empty-state card when 0 review questions exist (with direct "Approve & Submit" and "Inspect Full List" affordances).
+  - Preserved full 100% field rendering when switched to "Switch to Full List" mode.
+
+### Form Validation & Demographic Fixes for Terminal Failures (2026-10-13 Complete)
+- [x] **Demographic Race Labeling & EEO Fallback (`src/resolver/answerResolver.ts`, `src/resolver/tier1Supabase.ts`, `src/submitter/formFiller.ts`):**
+  - Broadened race regex patterns to detect Greenhouse standard labels ("Please identify your race", "Please identify your race/ethnicity").
+  - Extended Tier 1 structured resolver to check `additional.raceEthnicity` and `payload.demographics` in addition to `additional.race_ethnicity`.
+  - Added `resolveEeoFallbackOption` in `formFiller.ts` as a DOM fallback selecting decline-to-state options when a demographic field is strictly required by the employer.
+- [x] **Mandatory Cover Letter Gate (`src/resolver/needsReview.ts`):**
+  - Added gate routing applications to `READY_FOR_REVIEW` when a cover letter is marked mandatory (`field.required === true`), preventing headless submit timeouts on unsupplied cover letters.
+- [x] **Education Cascading Fallbacks (`src/submitter/formFiller.ts`):**
+  - Added `applyEducationFieldFallbacks` providing default degree ("Bachelor's Degree"), discipline ("Computer Science"), start date ("2018"), and end date ("2022") when a Greenhouse form renders a mandatory education block with blank subfields.
+- [x] **International Phone Number Prefix Safeguard (`src/submitter/formFiller.ts`):**
+  - Implemented `sanitizePhoneNumberForSubmission` ensuring that `+1` / `1` prefix stripping only occurs when the raw phone has 11 or more digits, protecting 10-digit international phone numbers from accidental truncation.
+
 ### STAR Methodology LLM Synthesis for Open-Ended Questions (2026-10-13 Complete)
 - [x] **Behavioral & Motivational Question Classifier (`src/resolver/starClassifier.ts`, `tests/starClassifier.test.ts`):**
   - Created regex classifier detecting open-ended behavioral ("have you worked with", "tell us about a time", "describe a project") and motivational ("why choose our company", "why are you interested in this role") prompts while strictly exempting dropdown, radio, checkbox, demographic/EEO, URL, and salary fields.

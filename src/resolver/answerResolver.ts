@@ -880,10 +880,20 @@ export class AnswerResolver {
       templateMap.set(t.jobUrl, t);
     }
 
+    const eligibleSegments = segments.filter((seg) => {
+      if (seg.profile && seg.profile.zoho_connected === false) {
+        log.info(
+          `[Answer Resolver] ⛔ Skipping candidate ${seg.applywizzId} from resolution (zoho_connected is false)`
+        );
+        return false;
+      }
+      return true;
+    });
+
     const applications: CandidateJobApplication[] = [];
     let totalPairs = 0;
 
-    for (const seg of segments) {
+    for (const seg of eligibleSegments) {
       totalPairs += seg.jobs.length;
     }
 
@@ -900,7 +910,7 @@ export class AnswerResolver {
 
     // Pre-resolve shortlinks if any
     const shortlinksToResolve = new Set<string>();
-    for (const seg of segments) {
+    for (const seg of eligibleSegments) {
       for (const job of seg.jobs) {
         if (job.rawUrl && job.rawUrl.includes('grnh.se')) shortlinksToResolve.add(job.rawUrl);
         if (job.canonicalUrl && job.canonicalUrl.includes('grnh.se')) shortlinksToResolve.add(job.canonicalUrl);
@@ -913,7 +923,7 @@ export class AnswerResolver {
 
     type ResolveJobTask = { seg: CandidateSegment; job: CandidateSegment['jobs'][number] };
     const tasks: ResolveJobTask[] = [];
-    for (const seg of segments) {
+    for (const seg of eligibleSegments) {
       for (const job of seg.jobs) {
         tasks.push({ seg, job });
       }
@@ -928,7 +938,7 @@ export class AnswerResolver {
       string,
       { successful: number; unsuccessful: number; noTemplate: number; failed: number; total: number }
     >();
-    for (const seg of segments) {
+    for (const seg of eligibleSegments) {
       segStats.set(seg.applywizzId, {
         successful: 0,
         unsuccessful: 0,
@@ -1120,7 +1130,7 @@ export class AnswerResolver {
 
     await Promise.all(Array.from({ length: poolSize }, () => processResolveTask()));
 
-    for (const seg of segments) {
+    for (const seg of eligibleSegments) {
       const stats = segStats.get(seg.applywizzId)!;
       const candidateApps = applications.filter((app) => app.applywizzId === seg.applywizzId);
       const tierCounts = [1, 2, 3, 4, 5].map((tier) =>

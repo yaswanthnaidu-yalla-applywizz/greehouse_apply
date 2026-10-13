@@ -170,5 +170,39 @@ describe('Zoho Connected Filter & Backfill', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('skips candidates whose profile has zoho_connected === false during resolveAllApplications', async () => {
+    const { AnswerResolver } = await import('../src/resolver/answerResolver.js');
+    const resolver = new AnswerResolver();
+
+    const segments: any[] = [
+      {
+        applywizzId: 'AWL-DISCONNECTED',
+        clientName: 'Disconnected Client',
+        profile: {
+          applywizz_id: 'AWL-DISCONNECTED',
+          client_name: 'Disconnected Client',
+          zoho_connected: false,
+        },
+        jobs: [
+          {
+            canonicalUrl: 'https://job-boards.greenhouse.io/test/jobs/100',
+            rawUrl: 'https://job-boards.greenhouse.io/test/jobs/100',
+          },
+        ],
+      },
+    ];
+
+    const templates: any[] = [
+      {
+        jobUrl: 'https://job-boards.greenhouse.io/test/jobs/100',
+        fields: [],
+      },
+    ];
+
+    const apps = await resolver.resolveAllApplications(segments, templates);
+    expect(apps.length).toBe(0);
+  });
 });
+
 
