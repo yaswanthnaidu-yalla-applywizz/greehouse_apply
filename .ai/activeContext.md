@@ -1,3 +1,24 @@
+## Current Session Update (2026-10-13 — Client Info Drawer & 2-Tier Mobile Header Layout)
+
+- **Client Info Drawer (`dashboard/components/ClientInfoDrawer.tsx`, `tests/clientInfoFormatting.test.ts`)**:
+  - Slide-over drawer providing comprehensive candidate details (`awl_id`, `name`, `company_email`, `phone`, `country`, `location`, `linkedin_url`, `website_url`, `github_url`, `work_auth`, `sponsorship`, `education`, and `experience`).
+  - Added formatted vertical card lists for education and work experience (skipping raw JSON strings).
+  - Automatically filters out empty/null/undefined candidate fields.
+  - Backdrop blur and dismissal via backdrop click or `Escape` key.
+- **JobQueueView & App.tsx Integration (`dashboard/JobQueueView.tsx`, `dashboard/App.tsx`, `tests/clientInfoIntegration.test.ts`)**:
+  - Wired `👤 Client Info` pill button adjacent to `📄 Master Resume PDF`.
+  - Passed `onOpenClientInfo` to toggle drawer state cleanly without disrupting job queue layout.
+- **2-Tier Mobile Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`)**:
+  - Redesigned mobile header (`< 768px`) into a 2-tier structure eliminating crowded/overlapping controls:
+    - **Tier 1 (Main Header):** Brand logo + notifications bell (`🔔`) + user avatar/sign out.
+    - **Tier 2 (Sub-bar):** Date filter (`📅 IST`), refresh button (`↻`), and DevSwitcher with comfortable touch targets.
+  - Preserved single-row desktop layout (`hidden md:flex h-16`) intact.
+- **Validation**:
+  - `tests/clientInfoFormatting.test.ts` (PASS, 4/4)
+  - `tests/clientInfoIntegration.test.ts` (PASS, 1/1)
+  - `tests/mobileHeaderLayout.test.ts` (PASS, 1/1)
+  - `npm run typecheck` (`tsc --noEmit && npm run typecheck:dashboard`) passed with 0 errors.
+
 ## Current Session Update (2026-10-13 — Dual Mailbox Ingest Sync & Candidate Round-Robin Dequeue)
 
 - **Dual Mailbox (Zoho + Gmail) Sync & Gate (`src/services/zohoConnectionCheck.ts`, `scripts/scanZohoConnected.ts`, `src/resolver/answerResolver.ts`)**:
