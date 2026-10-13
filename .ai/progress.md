@@ -1,3 +1,15 @@
+### Signal-to-Noise Logging Optimization (2026-10-13 Complete)
+- [x] **Configurable Severity Filtering (`src/utils/logger.ts`, `tests/loggerFiltering.test.ts`):**
+  - Implemented and exported `shouldLogMessage(level, configuredLevel)` adhering to severity ordering (`DEBUG: 10`, `INFO: 20`, `WARN: 30`, `ERROR: 40`, `HALT: 50`).
+  - Preserved unconditional emission for `WARN`, `ERROR`, and `HALT`.
+  - Added environment variable control via `process.env.LOG_LEVEL` (defaults to `INFO`), eliminating low-signal chatter from stdout while keeping milestone stats and health indicators.
+- [x] **Submitter & Worker Pipeline Decluttering (`src/submitter/formFiller.ts`, `src/submitter/liveSubmit.ts`):**
+  - Downgraded per-keystroke/selector debug logs (`[FormFiller] Stage 1/2/3 match`, `[Sponsorship DEBUG]`, `Country code field → selector`, `Boolean field → clicked`) to `log.debug()`.
+  - Retained essential operational stats: resume upload confirmations, form fill completion ratios (`Finished filling form: X/Y successful, Z failed`), and terminal verification/submission statuses.
+- [x] **Ingest Pipeline Decluttering (`src/resolver/answerResolver.ts`):**
+  - Downgraded per-field resolution attempts (`[Resolver] ✅ T1/T2/T3/T4/T5`, `[Resolver] ❌ T1/T2/T3/T4/T5`) to `log.debug()`.
+  - Retained candidate resolution summaries, phase metrics, auto-queue notices, filter-out notices, and batch rollups at `log.info()`.
+
 ### Choice Option Matching & Form Filling Fixes (2026-10-13 Complete)
 - [x] **Constrained `isSchoolField` & Guarded Option Alignment (`src/resolver/answerResolver.ts`, `src/resolver/tier1Supabase.ts`, `tests/optionMatchingAlignment.test.ts`):**
   - Narrowed `isSchoolField` so that eligibility, authorization, and OPT questions containing "institution" do not get identified as school fields.
