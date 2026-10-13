@@ -579,3 +579,10 @@ session-start 2026-10-07T14:19:51+05:30 read-only auto-queue routing explore
 2026-10-13 session-start scan: files=19 parsed=19
 2026-10-13 checkpoint: no observations accumulated
 2026-10-13 session-end: OpenRouter timeout 30s + deferred auto-queue flushing + Tier 4 UUID rejection shipped; docs updated; no new skill observations
+2026-10-13 session-end checkpoint: no observations
+2026-10-13 session-end checkpoint: no observations
+2026-10-13T08:48:04+05:30 session-start scan: files=19 parsed=19 (task-observer 3.6.0)
+2026-10-13T08:48:33+05:30 session-end checkpoint: installed task-observer, ponytail, vercel agent skills, and superpowers; registered 5 user MCP servers; no new observations
+session-start 2026-10-13T09:01:15 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=chromium-crashes-concurrency-fix
+checkpoint 2026-10-13T09:18:46 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=chromium-crashes-concurrency-fix status=complete note=" no observations\
+checkpoint 2026-10-13T09:26:24 conversation=b6d58892-6f6c-4b74-a63c-e2781edeb522 task=railway-envs-configured status=complete note=" no observations\

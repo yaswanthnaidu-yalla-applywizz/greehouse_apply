@@ -74,6 +74,10 @@ export async function closeSubmissionSession(applicationId: string): Promise<voi
       await session.browser.close().catch(() => {});
     } finally {
       activeSubmissions.delete(applicationId);
+      try {
+        const { PAUSED_SESSIONS } = await import('./liveSubmit.js');
+        PAUSED_SESSIONS.delete(applicationId);
+      } catch {}
       log.info(`[OTP Session] 🧹 Cleaned up session for application ${applicationId}`);
     }
   }
