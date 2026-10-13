@@ -89,7 +89,6 @@
   - Added dash normalization in `matchDropdownOption` and `fuzzyOptionTextMatch` to treat en-dash (`\u2013`), em-dash (`\u2014`), and minus sign (`\u2212`) as standard ASCII hyphens (`-`).
   - Added EEO/demographic decline phrase matching so standard self-identification decline values (`"Decline To Self Identify"`) match company-specific dropdown labels (`"Decline to self-identify"`, `"I do not wish to disclose"`, `"Prefer not to say"`).
   - Integrated `isDemographicOrEeoField` into searchable select controls to use fuzzy matching instead of failing on exact match.
-
 ### Chromium Crashes & Worker Concurrency Optimization (2026-10-13 Complete)
 - [x] **Browser Lifecycle & Concurrency Controller (`src/submitter/browserManager.ts`, `tests/browserManager.test.ts`):**
   - Created centralized `BrowserManager` enforcing global counting semaphore `MAX_CONCURRENT_BROWSERS=5` across background workers, paused OTP sessions, and manual dry-runs.
