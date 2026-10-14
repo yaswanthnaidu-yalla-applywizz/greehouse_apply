@@ -537,6 +537,35 @@ export function resolveStandardProfileAttribute(
     }
   }
 
+  // Job Source / How did you hear about us
+  if (
+    /\b(?:how did you (?:hear|learn)|where did you (?:hear|learn)|source of application|job source|referral source)\b/i.test(
+      combined
+    )
+  ) {
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      // 1. Try finding an option containing LinkedIn
+      const linkedInOpt = field.options.find((opt) => /linkedin/i.test(opt));
+      if (linkedInOpt) return linkedInOpt;
+
+      // 2. Fallbacks: Job Board, Career Site, Online, Website, Other
+      const fallbackPatterns = [
+        /job board/i,
+        /career(?:s)? (?:site|page|portal)/i,
+        /company website|website/i,
+        /online/i,
+        /other/i,
+      ];
+      for (const pat of fallbackPatterns) {
+        const found = field.options.find((opt) => pat.test(opt));
+        if (found) return found;
+      }
+
+      return field.options[0];
+    }
+    return 'LinkedIn';
+  }
+
   // Deadlines & Timeline Considerations (Always "None")
   if (/deadlines?|timeline considerations?/i.test(combined)) {
     if (field.type === 'checkbox') return 'false';
