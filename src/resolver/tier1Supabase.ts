@@ -57,13 +57,19 @@ export function isCountryField(field: ScannedField): boolean {
   if (/\b(?:phone|dialing|calling|code)\b/.test(`${normalizedName} ${normalizedId}`)) {
     return false;
   }
-  if (/^(?:do|does|did|are|is|will|would|can|could|have|has)\b/.test(normalizedLabel)) {
+  if (
+    /^(?:do|does|did|are|is|will|would|can|could|have|has)\b/.test(normalizedLabel) &&
+    !/\b(?:reside|based|located)\b/.test(normalizedLabel)
+  ) {
     return false;
   }
   return (
     normalizedName === 'country' ||
     normalizedId === 'country' ||
     /^(?:(?:candidate|current|residential)\s+)?country(?:\s+of\s+(?:residence|residency))?$/.test(
+      normalizedLabel
+    ) ||
+    /country(?:\s+region)?\s+(?:do\s+you\s+currently\s+reside|are\s+you\s+currently\s+based)/.test(
       normalizedLabel
     )
   );
@@ -284,8 +290,14 @@ function resolveStandardProfileAttribute(
     normName === 'country' ||
     /phone.*country|country.*phone/i.test(combined)
   ) {
-    const targetCountry = profile.country?.trim() || (profile.location?.toLowerCase().includes('united states') ? 'United States' : null);
-    const targetCode = profile.country_code?.trim() || (targetCountry === 'United States' ? '+1' : null);
+    const additional = profile.raw_api_payload?.additional_information;
+    const payloadCountry =
+      typeof additional?.zip_or_country === 'string' ? additional.zip_or_country.trim() : '';
+    const targetCountry =
+      profile.country?.trim() ||
+      payloadCountry ||
+      (profile.location?.toLowerCase().includes('united states') ? 'United States' : null);
+    const targetCode = profile.country_code?.trim() || (targetCountry?.toLowerCase().includes('united states') ? '+1' : null);
     if (!targetCountry && !targetCode) return null;
     if (field.options && field.options.length > 0) {
       const countryMatch = targetCountry
@@ -451,6 +463,22 @@ function resolveStandardProfileAttribute(
       return 'false';
     }
     return matchBestOption('No', field.options, field.label);
+  }
+
+  // Deadlines & Timeline Considerations (Always "None")
+  if (/deadlines?|timeline considerations?/i.test(combined)) {
+    if (field.type === 'checkbox') return 'false';
+    return matchBestOption('None', field.options, field.label) || 'None';
+  }
+
+  // Start Date / Earliest Availability (Dynamic 1 week out from resolution day)
+  if (
+    /(start date|available to start|when can you start|earliest start|desired start)/i.test(combined) &&
+    !/\b(?:month|year)\b/i.test(combined)
+  ) {
+    const oneWeekOut = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const isoDate = oneWeekOut.toISOString().split('T')[0];
+    return matchBestOption(isoDate, field.options, field.label) || isoDate;
   }
 
   // Consent / Terms & Conditions / Privacy Policy / Arbitration / Declarations / Acknowledgment (Always "Yes")
