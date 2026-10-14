@@ -41,6 +41,24 @@ describe('extractOtpCodeFromText', () => {
     assert.equal(code, null);
   });
 
+  it('extracts 8-character alphanumeric code across varying whitespace, HTML tags, and labels', () => {
+    const htmlText = `
+      <div>Your verification code is:</div>
+      <p style="font-size: 24px; font-weight: bold;">
+        7kP9mQ2x
+      </p>
+      <span>Enter this code to finish your application.</span>
+    `;
+    const code = extractOtpCodeFromText(htmlText);
+    assert.equal(code, '7kP9mQ2x');
+  });
+
+  it('extracts standalone mixed-case 8-character code with alphanumeric characters', () => {
+    const text = 'Use code 9aB4cD1z to complete your Greenhouse submission.';
+    const code = extractOtpCodeFromText(text);
+    assert.equal(code, '9aB4cD1z');
+  });
+
   it('fetches OTP from the message body instead of extracting it from the subject', async () => {
     const originalFetch = globalThis.fetch;
     let messageDetailFetched = false;
