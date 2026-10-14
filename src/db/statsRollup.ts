@@ -3,6 +3,13 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Stats Rollup');
 
+export const RETAINED_APPLICATION_STATUSES = ['APPLIED', 'EMAIL_PROOF_PENDING'] as const;
+
+export function buildRetainedStatusFilter(): string {
+  return `(${RETAINED_APPLICATION_STATUSES.map((status) => `"${status}"`).join(',')})`;
+}
+
+
 export function getIstDateString(timeMs: number): string {
   const istDate = new Date(timeMs + 5.5 * 60 * 60 * 1000);
   return `${istDate.getUTCFullYear()}-${String(istDate.getUTCMonth() + 1).padStart(2, '0')}-${String(istDate.getUTCDate()).padStart(2, '0')}`;
