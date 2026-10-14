@@ -754,97 +754,62 @@ export const App: React.FC = () => {
           </button>
         </div>
       )}
-      {/* Top Navigation & Brand Header */}
+      {/* Top Navigation & Brand Header (2-Tier Layout) */}
       <header className="bg-[#0a0a0a] border-b border-[#2c2c2e] flex-shrink-0">
-        {/* Desktop Single-Row Header (md and above) */}
-        <div className="hidden md:flex h-16 items-center justify-between px-6">
-          {/* Left: Brand Logo & Navigation Links */}
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2.5">
-              <img
-                src="/logo.webp"
-                alt="ApplyWizz"
-                className="w-8 h-8 rounded-lg border border-[#2c2c2e] object-cover bg-black"
-              />
-              <div>
-                <span className="text-sm font-bold tracking-tight text-[#ffffff] uppercase">
-                  ApplyWizz
-                </span>
-                <span className="text-[10px] block font-mono text-[#8e8e93] font-medium">
-                  Auto Apply V2
-                </span>
-              </div>
-            </div>
-
-            {/* Navigation Tabs (Dashboard / Stats) */}
-            <nav className="flex items-center gap-1 bg-[#1c1c1e] border border-[#2c2c2e] rounded-lg p-1">
-              <button
-                type="button"
-                onClick={() => setActiveTab('dashboard')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  activeTab === 'dashboard'
-                    ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
-                    : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
-                }`}
-              >
-                Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('stats')}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  activeTab === 'stats'
-                    ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
-                    : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
-                }`}
-              >
-                Stats
-              </button>
-            </nav>
-            <DevSwitcher current="/" />
-          </div>
-
-          {/* Right: Metrics Pills, Notifications & User Avatar */}
-          <div className="flex items-center gap-3">
-            {/* Date Scope Filter (IST) */}
-            <div className="flex items-center gap-1.5 bg-[#1c1c1e] border border-[#2c2c2e] px-2.5 py-1 rounded-md">
-              <span className="text-xs font-mono font-medium text-[#8e8e93]">📅 IST:</span>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    setSelectedDate(e.target.value);
-                  }
-                }}
-                title="Filter dashboard by assignments on this IST date"
-                className="text-xs font-mono font-medium text-[#ffffff] bg-transparent border-none outline-none cursor-pointer"
-              />
-            </div>
-
-            {stats && (
-              <div className="hidden lg:flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#8e8e93]">
-                  <span>Candidates:</span>
-                  <span className="text-[#ffffff] font-semibold">{stats.totalCandidates}</span>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#8e8e93]">
-                  <span>Jobs:</span>
-                  <span className="text-[#ffffff] font-semibold">{stats.totalApplications}</span>
+        <div className="flex flex-col">
+          {/* Tier 1: Brand Logo, Tabs (Dashboard / Stats), Notification Bell, Sign Out */}
+          <div
+            data-testid="header-tier-1"
+            className="h-14 px-4 sm:px-6 flex items-center justify-between border-b border-[#2c2c2e]/60"
+          >
+            {/* Left: Brand Logo + Navigation Tabs */}
+            <div className="flex items-center gap-3 sm:gap-6 min-w-0">
+              <div className="flex items-center gap-2.5 flex-shrink-0">
+                <img
+                  src="/logo.webp"
+                  alt="ApplyWizz"
+                  className="w-7 h-7 sm:w-8 sm:h-8 max-w-[32px] max-h-[32px] rounded-lg border border-[#2c2c2e] object-cover bg-black flex-shrink-0"
+                  style={{ width: '32px', height: '32px' }}
+                />
+                <div>
+                  <span className="text-xs sm:text-sm font-bold tracking-tight text-[#ffffff] uppercase leading-none block">
+                    ApplyWizz
+                  </span>
+                  <span className="text-[9px] sm:text-[10px] font-mono text-[#8e8e93] font-medium leading-none mt-0.5 block">
+                    Auto Apply V2
+                  </span>
                 </div>
               </div>
-            )}
 
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              title="Refresh Data"
-              className="text-xs bg-[#1c1c1e] hover:bg-[#2c2c2e] text-[#8e8e93] hover:text-[#ffffff] border border-[#2c2c2e] px-2.5 py-1 rounded-md active:translate-x-[1px] active:translate-y-[1px] font-semibold transition-all disabled:opacity-60"
-            >
-              <span className={isRefreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
-            </button>
+              {/* Navigation Tabs (Dashboard / Stats) beside the logo */}
+              <nav className="flex items-center gap-1 bg-[#1c1c1e] border border-[#2c2c2e] rounded-lg p-1 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('dashboard')}
+                  className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                    activeTab === 'dashboard'
+                      ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+                      : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
+                  }`}
+                >
+                  Dashboard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('stats')}
+                  className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                    activeTab === 'stats'
+                      ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+                      : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
+                  }`}
+                >
+                  Stats
+                </button>
+              </nav>
+            </div>
+
+            {/* Right: Notifications & User Avatar */}
+            <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
 
             {/* Interactive Notification Bell & Dropdown */}
             <div className="relative" ref={notifRef}>
@@ -1030,57 +995,15 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Mobile 2-Tier Header (< 768px) */}
-        <div className="flex md:hidden flex-col">
-          {/* Tier 1: Brand Logo & User Actions */}
-          <div
-            data-testid="mobile-header-tier-1"
-            className="h-14 px-4 flex items-center justify-between border-b border-[#2c2c2e]/60"
-          >
-            <div className="flex items-center gap-2">
-              <img
-                src="/logo.webp"
-                alt="ApplyWizz"
-                className="w-7 h-7 rounded-lg border border-[#2c2c2e] object-cover bg-black"
-              />
-              <div>
-                <span className="text-xs font-bold tracking-tight text-[#ffffff] uppercase leading-none block">
-                  ApplyWizz
-                </span>
-                <span className="text-[9px] font-mono text-[#8e8e93] font-medium leading-none mt-0.5 block">
-                  Auto Apply V2
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Notification Bell */}
-              <button
-                type="button"
-                onClick={() => setIsNotifOpen((prev) => !prev)}
-                title="Notifications"
-                className="relative p-1.5 bg-[#1c1c1e] border border-[#2c2c2e] rounded-md cursor-pointer hover:bg-[#2c2c2e] transition-colors"
-              >
-                <span className="text-xs">🔔</span>
-                {unreadNotifsCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-[16px] px-0.5 bg-[#ff453a] text-white text-[9px] font-black rounded-full flex items-center justify-center border border-[#1c1c1e]">
-                    {unreadNotifsCount > 9 ? '9+' : unreadNotifsCount}
-                  </span>
-                )}
-              </button>
-
-              {/* Sign Out */}
-              <HeaderSignOut onSignOut={handleSignOut} />
-            </div>
-          </div>
-
-          {/* Tier 2: Date Scope Filter & Quick Controls */}
-          <div
-            data-testid="mobile-header-tier-2"
-            className="py-2 px-4 bg-[#141416] flex items-center justify-between gap-2 border-b border-[#2c2c2e]"
-          >
-            <div className="flex items-center gap-1.5 bg-[#1c1c1e] border border-[#2c2c2e] px-2 py-1 rounded-md flex-shrink-0">
-              <span className="text-[11px] font-mono font-medium text-[#8e8e93]">📅 IST:</span>
+        {/* Tier 2: Date Scope Filter & Quick Controls */}
+        <div
+          data-testid="header-tier-2"
+          className="py-2 px-4 sm:px-6 bg-[#141416] flex flex-wrap items-center justify-between gap-2 border-b border-[#2c2c2e]"
+        >
+          {/* Left in Tier 2: Date Scope Filter & Stats Totals */}
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-[#1c1c1e] border border-[#2c2c2e] px-2.5 py-1 rounded-md flex-shrink-0">
+              <span className="text-[11px] sm:text-xs font-mono font-medium text-[#8e8e93]">📅 IST:</span>
               <input
                 type="date"
                 value={selectedDate}
@@ -1090,26 +1013,42 @@ export const App: React.FC = () => {
                   }
                 }}
                 title="Filter dashboard by assignments on this IST date"
-                className="text-[11px] font-mono font-medium text-[#ffffff] bg-transparent border-none outline-none cursor-pointer"
+                className="text-[11px] sm:text-xs font-mono font-medium text-[#ffffff] bg-transparent border-none outline-none cursor-pointer"
               />
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-                title="Refresh Data"
-                className="text-xs bg-[#1c1c1e] hover:bg-[#2c2c2e] text-[#8e8e93] hover:text-[#ffffff] border border-[#2c2c2e] px-2.5 py-1 rounded-md active:translate-x-[1px] active:translate-y-[1px] font-semibold transition-all disabled:opacity-60"
-              >
-                <span className={isRefreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
-              </button>
+            {stats && (
+              <div className="hidden sm:flex items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#8e8e93]">
+                  <span>Candidates:</span>
+                  <span className="text-[#ffffff] font-semibold">{stats.totalCandidates}</span>
+                </div>
 
-              <DevSwitcher current="/" />
-            </div>
+                <div className="flex items-center gap-1.5 bg-[#2c2c2e] border border-[#3a3a3c] px-2.5 py-1 rounded-md text-xs font-mono font-medium text-[#8e8e93]">
+                  <span>Jobs:</span>
+                  <span className="text-[#ffffff] font-semibold">{stats.totalApplications}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right in Tier 2: Refresh & DevSwitcher */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              title="Refresh Data"
+              className="text-xs bg-[#1c1c1e] hover:bg-[#2c2c2e] text-[#8e8e93] hover:text-[#ffffff] border border-[#2c2c2e] px-2.5 py-1 rounded-md active:translate-x-[1px] active:translate-y-[1px] font-semibold transition-all disabled:opacity-60"
+            >
+              <span className={isRefreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
+            </button>
+
+            <DevSwitcher current="/" />
           </div>
         </div>
-      </header>
+      </div>
+    </header>
 
       {/* Work-History Unreachable Top Banner */}
       {workHistoryUnreachable && !workHistoryBannerDismissed && (

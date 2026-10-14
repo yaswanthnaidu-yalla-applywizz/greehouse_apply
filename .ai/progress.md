@@ -1,3 +1,26 @@
+### 2-Tier Header Layout with Tabs Beside Logo (2026-10-14 Complete)
+- [x] **2-Tier Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`):**
+  - Removed the standalone single-row header bar entirely.
+  - Standardized on the 2-tier header across all screen sizes (desktop & mobile):
+    - **Tier 1:** ApplyWizz logo (32x32 max bounds with inline styling) + `Dashboard` & `Stats` navigation tabs directly beside the logo + Notification bell (`🔔`) & User avatar / `Sign Out`.
+    - **Tier 2:** Date filter (`📅 IST`), candidate & job counts, Refresh button (`↻`), and `DevSwitcher`.
+- [x] **Test Verification:**
+  - `tests/mobileHeaderLayout.test.ts` (1/1 passing)
+  - `tests/operatorMobileResponsiveLayout.test.ts` (3/3 passing)
+  - `npm run typecheck:dashboard` (0 errors)
+  - `npm run build:dashboard` (built cleanly)
+  - Verified server running at http://localhost:3001 returns HTTP 200 OK.
+
+### Mobile Responsive Layout & Drawer Isolation Fix (2026-10-14 Complete)
+- [x] **Constrained Mobile Header Logo (`dashboard/App.tsx`, `tests/operatorMobileResponsiveLayout.test.ts`):**
+  - Added strict max dimensions and inline styles (`max-w-[28px] max-h-[28px]`, `width: '28px'`, `height: '28px'`) to prevent uncompiled Tailwind or aspect-ratio blowup in mobile viewports.
+- [x] **ClientInfoDrawer Container Isolation & Unmounting (`dashboard/components/ClientInfoDrawer.tsx`, `tests/operatorMobileResponsiveLayout.test.ts`):**
+  - Converted semantic `<aside>` to `<div role="dialog" aria-modal="true">` to eliminate CSS cascade collisions with `.mobile-operator-workspace > aside` rules in `tokens.css`.
+  - Added early conditional unmount (`if (!candidate || !isOpen) return null;`) preventing inactive drawers from taking over screen real estate.
+- [x] **Test Verification:**
+  - Added unit regression suite [`tests/operatorMobileResponsiveLayout.test.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply/tests/operatorMobileResponsiveLayout.test.ts) (3/3 passing).
+  - TypeScript checks (`npm run typecheck`) and Vite bundle build (`npm run build:dashboard`) verified clean.
+
 ### Client Info Drawer & Mobile Header Redesign (2026-10-13 Complete)
 - [x] **Client Info Drawer (`dashboard/components/ClientInfoDrawer.tsx`, `tests/clientInfoFormatting.test.ts`):**
   - Built slide-over drawer showing detailed candidate background (`awl_id`, `name`, `company_email`, `phone`, `country`, `location`, `linkedin_url`, `website_url`, `github_url`, `work_auth`, `sponsorship`, `education`, and `experience`).
