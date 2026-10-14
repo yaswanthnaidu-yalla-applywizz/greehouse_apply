@@ -20,9 +20,9 @@ import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
 import { resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
-import { findSemanticMatch, getLastSemanticScore } from './semanticSearch.js';
+import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
-import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE } from './tier5LLM.js';
+import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getSessionLlmMetrics, resetSessionLlmMetrics } from './tier5LLM.js';
 import { getEffectiveFieldOptions } from './llmSynthesizer.js';
 import { normalizeText } from './fingerprint.js';
 import { isPhoneNumberField, resumeAnswerMatchesPhone } from './candidateEvidence.js';
@@ -218,7 +218,6 @@ export function resolvePreTierField(
     const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
     const finalVal = alignResolvedChoiceOrNull(field, targetVal);
     if (!finalVal) return null;
-    log.debug(`[Resolver] ✅ T1 ${field.label} → "${finalVal}"`);
     return { ...base, value: finalVal };
   }
 
@@ -226,7 +225,6 @@ export function resolvePreTierField(
     profileIndicatesUsLocation(profile)) {
     const finalVal = alignResolvedChoiceOrNull(field, 'Yes');
     if (!finalVal) return null;
-    log.debug(`[Resolver] ✅ PRE-TIER us-location "${field.label}" → "${finalVal}"`);
     return { ...base, value: finalVal };
   }
 
@@ -234,7 +232,6 @@ export function resolvePreTierField(
     const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
     const finalVal = alignResolvedChoiceOrNull(field, targetVal);
     if (!finalVal) return null;
-    log.debug(`[Resolver] ✅ PRE-TIER consent field "${field.label}" → "${finalVal}"`);
     return { ...base, value: finalVal };
   }
 
@@ -327,7 +324,6 @@ export function resolveStructuredEeocField(
     : null;
   if (!value) return null;
 
-  log.debug(`[Resolver] ✅ T1-STRUCT ${field.label} → "${value}"`);
   const options = getFieldOptions(field);
   return {
     fieldId: field.fieldId,
@@ -398,9 +394,6 @@ export interface ResolutionTelemetry {
   unresolvedCount: number;
 }
 
-function getTier5FailureReason(): string {
-  return 'no supported answer';
-}
 
 /**
  * Orchestrator running the 3-tier Supabase-only waterfall resolution engine.
@@ -449,7 +442,6 @@ export class AnswerResolver {
 
     // Never fill cover letters under any circumstances
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
-      log.debug(`[Resolver] ✅ T1 ${field.label} → ""`);
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -473,7 +465,6 @@ export class AnswerResolver {
     if (tier1) {
       return { ...tier1, isRequired };
     }
-    log.debug(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
     // ------------------------------------------------------------------------
     // Tier 2: Resume Parse Cache / Extractor
@@ -485,10 +476,8 @@ export class AnswerResolver {
 
     const tier2 = await resolveTier2(applywizzId, resolutionField, parsedResume);
     if (tier2) {
-      log.debug(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
       return { ...tier2, isRequired };
     }
-    log.debug(`[Resolver] ❌ T2 ${field.label} — no resume match`);
 
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
@@ -506,7 +495,6 @@ export class AnswerResolver {
         ? resumeAnswerMatchesPhone(semanticMatch.value, parsedResume?.structured, parsedResume?.raw_text)
         : semanticMatch.value;
       if (phone) {
-        log.debug(`[Resolver] ✅ T3 ${field.label} → resume phone`);
         return {
           fieldId: field.fieldId,
           name: field.name,
@@ -519,25 +507,20 @@ export class AnswerResolver {
           isRequired,
         };
       }
-      if (isPhoneNumberField(field)) {
-        log.debug(`[Resolver] ❌ T3 ${field.label} — answer not verified against resume`);
-      } else {
-      log.debug(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: semanticMatch.value,
-        source: 'semantic',
-        resolvedByTier: 3,
-        confidence: semanticMatch.confidence,
-        isRequired,
-      };
+      if (!isPhoneNumberField(field)) {
+        return {
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: semanticMatch.value,
+          source: 'semantic',
+          resolvedByTier: 3,
+          confidence: semanticMatch.confidence,
+          isRequired,
+        };
       }
     }
-    const t3Score = getLastSemanticScore().toFixed(2);
-    log.debug(`[Resolver] ❌ T3 ${field.label} — below similarity threshold (${t3Score})`);
 
     // ------------------------------------------------------------------------
     // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
@@ -549,30 +532,26 @@ export class AnswerResolver {
       profile
     );
     if (tier4) {
-      if (isUnsupportedUuidAnswer(field, tier4.value)) {
-        log.debug(`[Resolver] ❌ T4 ${field.label} — rejected UUID answer for non-identifier field`);
-      } else if (isPhoneNumberField(field)) {
-        const phone = resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text);
-        if (phone) {
-          log.debug(`[Resolver] ✅ T4 ${field.label} → resume phone`);
+      if (!isUnsupportedUuidAnswer(field, tier4.value)) {
+        if (isPhoneNumberField(field)) {
+          const phone = resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text);
+          if (phone) {
+            return {
+              ...tier4,
+              value: phone,
+              resolvedByTier: 4,
+              isRequired,
+            };
+          }
+        } else {
           return {
             ...tier4,
-            value: phone,
             resolvedByTier: 4,
             isRequired,
           };
         }
-        log.debug(`[Resolver] ❌ T4 ${field.label} — answer not verified against resume`);
-      } else {
-        log.debug(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
-        return {
-          ...tier4,
-          resolvedByTier: 4,
-          isRequired,
-        };
       }
     }
-    log.debug(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
 
     // ------------------------------------------------------------------------
     // Tier 5: Multi-provider LLM Synthesis
@@ -586,13 +565,9 @@ export class AnswerResolver {
         parsedResume?.raw_text || ''
       );
       if (tier5 && tier5.value && tier5.value.trim().length > 0) {
-        log.debug(`[Resolver] ✅ T5 ${field.label} → "${tier5.value}"`);
         return { ...tier5, isRequired };
       }
     }
-
-    const t5Reason = getTier5FailureReason();
-    log.debug(`[Resolver] ❌ T5 ${field.label} — ${t5Reason}`);
 
     return this.unresolvedField(field);
   }
@@ -652,7 +627,6 @@ export class AnswerResolver {
     if (preTier) return preTier;
 
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
-      log.debug(`[Resolver] ✅ T1 ${field.label} → ""`);
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -673,7 +647,6 @@ export class AnswerResolver {
     if (tier1) {
       return { ...tier1, isRequired };
     }
-    log.debug(`[Resolver] ❌ T1 ${field.label} — no profile match`);
 
     const parsedResume =
       context.parsedResume !== undefined
@@ -682,10 +655,8 @@ export class AnswerResolver {
 
     const tier2 = await resolveTier2(applywizzId, resolutionField, parsedResume);
     if (tier2) {
-      log.debug(`[Resolver] ✅ T2 ${field.label} → "${tier2.value}"`);
       return { ...tier2, isRequired };
     }
-    log.debug(`[Resolver] ❌ T2 ${field.label} — no resume match`);
 
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
@@ -699,7 +670,6 @@ export class AnswerResolver {
       profile
     );
     if (semanticMatch) {
-      log.debug(`[Resolver] ✅ T3 ${field.label} → "${semanticMatch.value}"`);
       return {
         fieldId: field.fieldId,
         name: field.name,
@@ -712,8 +682,6 @@ export class AnswerResolver {
         isRequired,
       };
     }
-    const t3Score = getLastSemanticScore().toFixed(2);
-    log.debug(`[Resolver] ❌ T3 ${field.label} — below similarity threshold (${t3Score})`);
 
     // ------------------------------------------------------------------------
     // Tier 4: Fuse.js Fuzzy Match against candidate_qa_bank
@@ -725,10 +693,7 @@ export class AnswerResolver {
       profile
     );
     if (tier4) {
-      if (isUnsupportedUuidAnswer(field, tier4.value)) {
-        log.debug(`[Resolver] ❌ T4 ${field.label} — rejected UUID answer for non-identifier field`);
-      } else {
-        log.debug(`[Resolver] ✅ T4 ${field.label} → "${tier4.value}"`);
+      if (!isUnsupportedUuidAnswer(field, tier4.value)) {
         return {
           ...tier4,
           resolvedByTier: 4,
@@ -736,7 +701,6 @@ export class AnswerResolver {
         };
       }
     }
-    log.debug(`[Resolver] ❌ T4 ${field.label} — no fuzzy match`);
 
     return this.unresolvedField(field);
   }
@@ -797,8 +761,6 @@ export class AnswerResolver {
         if (profile) {
           tier5Slots.push(resolvedFields.length - 1);
           tier5Pending.push(field);
-        } else {
-          log.debug(`[Resolver] ❌ T5 ${field.label} — unresolved`);
         }
       }
     }
@@ -830,14 +792,6 @@ export class AnswerResolver {
             tier5.options || getEffectiveFieldOptions(chunkFields[i])
           );
           resolvedFields[chunkSlots[i]] = alignedTier5;
-          if (alignedTier5.source === 'unresolved') {
-            log.debug(`[Resolver] ❌ T5 ${chunkFields[i].label} — no option match`);
-          } else {
-            log.debug(`[Resolver] ✅ T5 ${chunkFields[i].label} → "${alignedTier5.value}"`);
-          }
-        } else {
-          const reason = getTier5FailureReason();
-          log.debug(`[Resolver] ❌ T5 ${chunkFields[i].label} — ${reason}`);
         }
       }
     }
@@ -897,16 +851,13 @@ export class AnswerResolver {
       totalPairs += seg.jobs.length;
     }
 
+    const poolSize = Math.max(1, Math.min(20, config.RESOLVER_WORKER_POOL_SIZE));
     const compact = isPipelineCompactLogging();
-    if (!compact) {
-      log.info(
-        `[Answer Resolver] 🚀 Resolving answers across ${segments.length} candidates and ${totalPairs} job assignments (Supabase → Resume → LLM)...`
-      );
-    } else {
-      log.info(
-        `[Answer Resolver] resolve start candidates=${segments.length} job_assignments=${totalPairs}`
-      );
-    }
+
+    resetSessionLlmMetrics();
+    log.info(
+      `[Answer Resolver] 🚀 Starting resolution for ${segments.length} candidates (${totalPairs} job assignments, workers: ${poolSize})`
+    );
 
     // Pre-resolve shortlinks if any
     const shortlinksToResolve = new Set<string>();
@@ -927,11 +878,6 @@ export class AnswerResolver {
       for (const job of seg.jobs) {
         tasks.push({ seg, job });
       }
-    }
-
-    const poolSize = Math.max(1, Math.min(20, config.RESOLVER_WORKER_POOL_SIZE));
-    if (compact) {
-      log.info(`[Answer Resolver] resolve workers=${poolSize}`);
     }
 
     const segStats = new Map<
@@ -1078,7 +1024,7 @@ export class AnswerResolver {
               filteredOutApplications++;
               const aiCount = countAiFields(app.resolvedFields);
               const unresCount = countUnresolvedRequiredFields(app.resolvedFields);
-              log.info(
+              log.debug(
                 `[Answer Resolver] 🚫 Filtered out ${app.applywizzId} ${persistJobUrl} (ai_count=${aiCount} unresolved_required=${unresCount} > 3)`
               );
             } else if (canAutoEnqueue) {
@@ -1088,13 +1034,22 @@ export class AnswerResolver {
                 jobUrl: persistJobUrl,
                 assignedCaEmail: assignedCaEmail || undefined,
               });
-              log.info(
+              log.debug(
                 `[Answer Resolver] Marked for post-ingest auto-queue: ${app.applywizzId} ${persistJobUrl} (no required AI/unresolved fields)`
               );
             } else if (persistedApplication.status === 'READY_FOR_REVIEW') {
               readyForReviewApplications++;
             }
 
+            log.debug(
+              `[Answer Resolver] Application resolved: ${app.applywizzId} [${persistJobUrl}] - ${app.companyName || 'Unknown'} (${questionCount} questions, status: ${persistedApplication.status})`
+            );
+
+            if (resolvedCount % 50 === 0 || resolvedCount === tasks.length) {
+              log.info(
+                `[Answer Resolver] Progress: ${resolvedCount}/${tasks.length} applications resolved (${totalSuccessful} fully resolved)`
+              );
+            }
           } catch (dbErr: any) {
             if (isMissingTableError(dbErr)) {
               haltWithDevAlert(
@@ -1130,54 +1085,25 @@ export class AnswerResolver {
 
     await Promise.all(Array.from({ length: poolSize }, () => processResolveTask()));
 
-    for (const seg of eligibleSegments) {
-      const stats = segStats.get(seg.applywizzId)!;
-      const candidateApps = applications.filter((app) => app.applywizzId === seg.applywizzId);
-      const tierCounts = [1, 2, 3, 4, 5].map((tier) =>
-        candidateApps.reduce(
-          (count, app) =>
-            count + app.resolvedFields.filter((field) => field.resolvedByTier === tier).length,
-          0
-        )
-      );
-      const fields = candidateApps.reduce((count, app) => count + app.resolvedFields.length, 0);
-      const resolved = candidateApps.reduce(
-        (count, app) =>
-          count +
-          app.resolvedFields.filter(
-            (field) => field.resolvedByTier !== null && field.source !== 'unresolved'
-          ).length,
-        0
-      );
-      log.info(
-        `[Resolver] candidate=${seg.applywizzId} jobs=${stats.total} fields=${fields} resolved=${resolved} unresolved=${fields - resolved} t1=${tierCounts[0]} t2=${tierCounts[1]} t3=${tierCounts[2]} t4=${tierCounts[3]} t5=${tierCounts[4]}`
-      );
-    }
-
-    const questionsByCategory: Record<ReturnType<typeof resolutionSourceKey>, number> = {
-      supabase: 0,
-      resume: 0,
-      semantic: 0,
-      fuzzy: 0,
-      llm: 0,
-      unresolved: 0,
-      other: 0,
-    };
+    let fullyResolvedApps = 0;
+    let notFullyResolvedApps = 0;
     for (const app of applications) {
-      for (const field of app.resolvedFields) {
-        questionsByCategory[resolutionSourceKey(field)]++;
+      const hasUnresolved = app.resolvedFields.some(
+        (f) => !f.value || f.source === 'unresolved' || f.resolvedByTier === null
+      );
+      if (hasUnresolved) {
+        notFullyResolvedApps++;
+      } else {
+        fullyResolvedApps++;
       }
     }
-    const totalQuestions = Object.values(questionsByCategory).reduce((sum, count) => sum + count, 0);
-    const unresolvedQuestions = questionsByCategory.unresolved;
+
+    const sessionMetrics = getSessionLlmMetrics();
     log.info(
-      `[Answer Resolver] resolution summary questions=${totalQuestions} resolved=${totalQuestions - unresolvedQuestions} unresolved=${unresolvedQuestions} resolved_by_category=supabase:${questionsByCategory.supabase},resume:${questionsByCategory.resume},semantic:${questionsByCategory.semantic},fuzzy:${questionsByCategory.fuzzy},llm:${questionsByCategory.llm},other:${questionsByCategory.other} auto_queued=${autoQueuedApplications} ready_for_review=${readyForReviewApplications} filtered_out=${filteredOutApplications}`
+      `[Answer Resolver] ✅ Resolution complete: ${applications.length} applications processed ` +
+        `(${fullyResolvedApps} fully resolved, ${notFullyResolvedApps} not fully resolved). ` +
+        `AI Token Cost: $${sessionMetrics.cost.toFixed(6)} (${sessionMetrics.promptTokens + sessionMetrics.completionTokens} tokens)`
     );
-    if (compact) {
-      log.info(
-        `[Answer Resolver] resolve complete applications=${applications.length} successful=${totalSuccessful} unsuccessful=${totalUnsuccessful}`
-      );
-    }
 
     return applications;
   }

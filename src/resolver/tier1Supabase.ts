@@ -8,11 +8,8 @@ import { getProfile, type ProfileRow, getCompanyEmail } from '../db/profiles.js'
 import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { isPhoneNumberField } from './candidateEvidence.js';
- 
-const log = createLogger('Tier 1 Supabase');
 
 const US_STATE_NAMES_BY_ABBREVIATION: Record<string, string> = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -882,7 +879,6 @@ export async function resolveTier1(
         ? matchChoiceOption(candidateCountry, field.options)
         : candidateCountry;
     if (!value) return null;
-    log.info(`[Resolver] ✅ T1 ${field.label} → "${value}"`);
     return {
       fieldId: field.fieldId,
       name: field.name,
@@ -924,7 +920,6 @@ export async function resolveTier1(
     candidateProfile?.education
   );
   if (payloadVal !== null && payloadVal.trim().length > 0) {
-    log.info(`[Resolver] ✅ T1-STRUCT ${field.label} → "${payloadVal}"`);
     return {
       fieldId: field.fieldId,
       name: field.name,
