@@ -375,8 +375,11 @@ function resolveStandardProfileAttribute(
     return profile.client_name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
   }
 
-  // Email — strictly company email, never personal
-  if (/email/i.test(combined) || normId === 'email' || normName === 'email') {
+  // Email — strictly company email, never personal (must not match referral questions containing "email address")
+  if (
+    (/email/i.test(combined) || normId === 'email' || normName === 'email') &&
+    !/referred|referral/i.test(combined)
+  ) {
     if (profile.company_email && profile.company_email.trim().length > 0) {
       return profile.company_email.trim();
     }
@@ -433,12 +436,12 @@ function resolveStandardProfileAttribute(
 
   // Family / Personal Relationships / Referral by Employee (Always "No")
   if (
-    /(family.*employ|relative.*employ|know anyone.*work|anyone.*work.*company|personal.*relationship.*employ|referred.*by.*employee|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
+    /(family.*employ|relative.*employ|know (anyone|anybody|someone|somebody)|anyone.*work.*company|personal.*relationship.*employ|referred (to this role|by|for)|employee referral|referral source|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
       combined
     )
   ) {
     if (field.type === 'checkbox') return 'false';
-    return matchBestOption('No', field.options, field.label);
+    return matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Prior Employment / Former Employee (Always "No")
