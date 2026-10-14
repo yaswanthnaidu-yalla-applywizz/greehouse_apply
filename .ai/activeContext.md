@@ -1,3 +1,18 @@
+## Current Session Update (2026-10-14 — 2-Tier Header Layout with Tabs beside Logo)
+
+- **2-Tier Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`, `tests/operatorMobileResponsiveLayout.test.ts`)**:
+  - Removed the standalone single-row header bar entirely.
+  - Standardized on the 2-tier header across all screen sizes (desktop and mobile alike):
+    - **Tier 1 (`data-testid="header-tier-1"`):** ApplyWizz logo (explicitly constrained to 32x32 max bounds with inline styling) + `Dashboard` and `Stats` navigation tabs directly beside the logo + Notification bell (`🔔`) and User profile / `Sign Out` on the right.
+    - **Tier 2 (`data-testid="header-tier-2"`):** Date filter (`📅 IST`), candidate & job metrics totals, Refresh button (`↻`), and `DevSwitcher` controls.
+  - Completely resolved the duplicate header bar collision shown in user screenshots.
+- **Validation**:
+  - `tests/mobileHeaderLayout.test.ts` (PASS, 1/1)
+  - `tests/operatorMobileResponsiveLayout.test.ts` (PASS, 3/3)
+  - `npm run typecheck:dashboard` passed cleanly (0 errors).
+  - `npm run build:dashboard` completed cleanly (2.27s).
+  - Verified local server running on port 3001 returns HTTP 200 OK.
+
 ## Current Session Update (2026-10-13 — Application Queue Export, Cleanup & Stats Alignment)
 
 - **Application Queue Transition & Export (`queued_applications_export_2026-10-13T16-17-24-402Z.csv`)**:

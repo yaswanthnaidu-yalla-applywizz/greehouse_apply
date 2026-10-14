@@ -1,3 +1,5 @@
+2026-10-14 session-end: kept 2-tier header layout, removed duplicate single bar; Dashboard/Stats tabs moved beside logo in Tier 1; tests pass (4/4); no new observations
+2026-10-14 session-end: mobile responsive logo and ClientInfoDrawer aside conflict fixed; operatorMobileResponsiveLayout test added (3/3 pass); typecheck and dashboard build verified; no new observations
 2026-10-13 session-end: auto-retry for browser launch & mailbox-connected OTP errors verified; no DB migration required; activeContext updated; no new observations
 2026-10-11 session-start scan: context loaded from handover.md (sandbox PostgreSQL, Gmail OTP integration ready)
 2026-09-14 session-start scan: files=0 parsed=0
