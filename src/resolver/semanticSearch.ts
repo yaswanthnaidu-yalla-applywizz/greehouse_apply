@@ -128,7 +128,7 @@ async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
               'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
               'X-Title': 'Greenhouse Automation Operator',
             },
-            timeout: 10000,
+            timeout: 15000,
           }
         );
 
