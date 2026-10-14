@@ -1,3 +1,5 @@
+2026-10-14 session-end: LLM_ANSWERING=false in sandbox mode shipped (bypasses Tier 5, clean 4-tier benchmark); unit tests pass (55/55); typecheck clean; no new observations
+2026-10-14 session-end: resolver fixes shipped (country dial-codes, None deadlines, 7-day start dates, negative referrals, degree aliases); all unit tests pass (55/55); typecheck clean; no new observations
 2026-10-14 session-end: kept 2-tier header layout, removed duplicate single bar; Dashboard/Stats tabs moved beside logo in Tier 1; tests pass (4/4); no new observations
 2026-10-14 session-end: mobile responsive logo and ClientInfoDrawer aside conflict fixed; operatorMobileResponsiveLayout test added (3/3 pass); typecheck and dashboard build verified; no new observations
 2026-10-13 session-end: auto-retry for browser launch & mailbox-connected OTP errors verified; no DB migration required; activeContext updated; no new observations
@@ -606,3 +608,20 @@ checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.179187715245
 2026-10-13 checkpoint: operator dashboard carousel filtering completed; no observations
 2026-10-13 deliverable flush: dual mailbox sync and candidate round-robin dequeue complete (all 6 tasks verified and committed)
 2026-10-13 deliverable flush: migration 034 applied to remote db postgres-db2 and verified via MCP query
+2026-10-14T09:35:00+05:30 [session-start] ponytail check postgres db2 profiles location
+2026-10-14T09:35:05+05:30 [checkpoint] no observations
+2026-10-14T09:40:00+05:30 [session-start] ponytail systematic-debugging ingest pipeline wrong scanned options and unresolved country fields
+2026-10-14T09:41:15+05:30 [checkpoint] no observations
+2026-10-14 session-start scan: investigated db2 failure screenshots & diagnostics; no new observations
+2026-10-14T09:54:30+05:30 [checkpoint] no observations
+2026-10-14T09:59:15+05:30 [checkpoint] no observations
+2026-10-14 session-start scan: ponytail activated
+2026-10-14 session-end: OTP regex hardened for Greenhouse 8-char codes; unconfigured mailboxes fast-fail with MAILBOX_NOT_CONFIGURED; connector poll interval increased to 4s; resume download 2-retry loop added in ensureResumeAvailable; unit tests pass (zohoApiOtp 9/9, otpResolution 13/13); typecheck clean; no new observations
+2026-10-14T10:51:00+05:30 [checkpoint] all 5 tracks executed: scanner choice enrichment, country alias & zip_or_country fallback, consent option polarity, sms consent phone exclusion, dashboard quickpick fix. tests/pipelineFixes.test.ts passing; build clean.
+2026-10-14T10:57:00+05:30 [checkpoint] exported 639 non-applied, non-email-proof-pending applications to queued_applications_export_2026-10-14T05-26-46-231Z.csv
+2026-10-14 session-end: profile location/country/phone backfilled in db (235 updated, country code stripped, verified on postgres-db2); no new observations
+2026-10-14 session-end: profile location/country/phone backfilled in db (235 updated, country code stripped, verified on postgres-db2); activeContext updated; no new observations
+2026-10-14 session-start scan: files=0 parsed=0
+2026-10-14 session-start scan: files=19 parsed=19
+2026-10-14 12:37:41 deliverable flush: no observations
+2026-10-14 session-start scan: files=19 parsed=19

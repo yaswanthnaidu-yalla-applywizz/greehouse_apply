@@ -10,10 +10,6 @@ import path from 'path';
 import pg from 'pg';
 import { createLogger } from '../utils/logger.js';
 import { SANDBOX_CA_EMAIL } from './sandboxAssignment.js';
-import {
-  akshithaTemplates,
-  akshithaApplications,
-} from '../dashboard/akshithaDemoFixtures.js';
 
 const { Pool } = pg;
 const log = createLogger('SandboxDB');
@@ -689,13 +685,25 @@ export class SandboxClient {
     try {
       const keys = Object.keys(params);
       const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-      const values = keys.map((k) => params[k]);
+      const values = keys.map((k) => {
+        const val = params[k];
+        // Format number arrays for pgvector parameters (e.g. query_vector in match_candidate_qa)
+        if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'number') {
+          return `[${val.join(',')}]`;
+        }
+        return val;
+      });
       const sql = `SELECT * FROM ${funcName}(${placeholders})`;
       const res = await pool.query(sql, values);
       return { data: res.rows, error: null };
     } catch (err: any) {
       // In sandbox, if an RPC like match_candidate_qa is called but vector search is inactive, fail safely
-      log.warn(`Sandbox RPC "${funcName}" execution note:`, err.message || err);
+      const rawMsg = err.message || String(err);
+      // Sanitize vector / embedding arrays from error logs so huge float vectors are never printed
+      const sanitizedMsg = rawMsg
+        .replace(/(\[|\{)"?-?\d+\.\d+"?(?:,"?-?\d+\.\d+"?){3,}(\]|\})/g, '[...vector...]')
+        .replace(/"?(\[-?\d+\.\d+.*\]|\{-?\d+\.\d+.*\})"?,?/g, '[...vector...]');
+      log.warn(`Sandbox RPC "${funcName}" execution note:`, sanitizedMsg);
       return { data: [], error: null };
     }
   }
@@ -966,37 +974,6 @@ export async function seedSandboxDemoData(): Promise<void> {
   log.info('🌱 Seeding demo fixtures (templates, applications, dev user) into Sandbox DB...');
 
   try {
-    // 1. Seed Job Templates
-    for (const tmpl of akshithaTemplates) {
-      await client.from('gh_scanned_job_templates').upsert(
-        {
-          job_url: tmpl.jobUrl,
-          company_name: tmpl.companyName,
-          job_title: tmpl.jobTitle,
-          fields_schema: tmpl.fields,
-          is_expired: false,
-        },
-        { onConflict: 'job_url' }
-      );
-    }
-
-    // 3. Seed Applications
-    for (const app of akshithaApplications) {
-      await client.from('gh_candidate_applications').upsert(
-        {
-          applywizz_id: app.applywizzId,
-          job_url: app.jobUrl,
-          company_name: app.companyName,
-          job_title: app.jobTitle,
-          status: app.status,
-          assigned_ca_email: SANDBOX_CA_EMAIL,
-          resolved_fields: app.resolvedFields,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'applywizz_id,job_url' }
-      );
-    }
-
     // 4. Seed demo user for authDirectory
     await client.from('gh_users').upsert(
       {
