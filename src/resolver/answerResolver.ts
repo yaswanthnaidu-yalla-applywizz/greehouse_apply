@@ -165,9 +165,16 @@ export function alignResolvedChoice(
   }
   if (field.type === 'checkbox') return baseWithOptions;
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
-  // School comboboxes are dynamically populated / lazy-loaded over the wire only when optionsComplete === false
-  if (field.optionsComplete === false && isSchoolField(field)) {
-    return { ...baseWithOptions, ...(field.options ? { options: field.options } : {}) };
+  if (field.optionsComplete === false) {
+    if (isSchoolField(field)) {
+      return { ...baseWithOptions, ...(field.options ? { options: field.options } : {}) };
+    }
+    const matchedScanned = field.options?.length ? matchChoiceOption(resolved.value, field.options) : null;
+    return {
+      ...baseWithOptions,
+      value: matchedScanned || resolved.value,
+      ...(field.options ? { options: field.options } : {}),
+    };
   }
 
   const matched = matchChoiceOption(resolved.value, options);

@@ -857,8 +857,11 @@ export async function runSandboxMigrations(): Promise<void> {
 /**
  * Copies the complete profiles table from remote DB2 into the local sandbox database.
  */
-export async function copyProfilesFromDb2(localPool: pg.Pool): Promise<void> {
-  const db2Url = process.env.DB2_DATABASE_URL;
+export async function copyProfilesFromDb2(
+  localPool: pg.Pool,
+  customDb2Url?: string
+): Promise<number> {
+  const db2Url = customDb2Url || process.env.DB2_DATABASE_URL;
   if (!db2Url) {
     throw new Error('DB2_DATABASE_URL is not set in .env.sandbox. Cannot copy profiles from DB2.');
   }
@@ -874,7 +877,7 @@ export async function copyProfilesFromDb2(localPool: pg.Pool): Promise<void> {
     const res = await remoteClient.query('SELECT * FROM profiles ORDER BY created_at ASC;');
     log.info(`Fetched ${res.rows.length} profiles from DB2. Copying into sandbox DB...`);
 
-    if (res.rows.length === 0) return;
+    if (res.rows.length === 0) return 0;
 
     const client = await localPool.connect();
     try {
@@ -905,6 +908,7 @@ export async function copyProfilesFromDb2(localPool: pg.Pool): Promise<void> {
       }
       await client.query('COMMIT');
       log.info(`✅ Successfully copied ${res.rows.length} profiles from DB2 into sandbox database.`);
+      return res.rows.length;
     } catch (insertErr) {
       await client.query('ROLLBACK');
       throw insertErr;

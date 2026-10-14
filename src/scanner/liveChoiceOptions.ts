@@ -30,7 +30,6 @@ export async function enrichMissingChoiceOptions(
   const targets = result
     .map((field, index) => ({ field, index }))
     .filter(({ field }) => (
-      field.isRequired &&
       (field.type === 'select' || field.type === 'radio') &&
       (!Array.isArray(field.options) || field.options.length === 0)
     ));

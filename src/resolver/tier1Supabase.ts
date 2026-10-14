@@ -1022,7 +1022,7 @@ export async function resolveTier1(
 
     const value =
       field.type === 'select' || field.type === 'radio'
-        ? matchChoiceOption(candidateCountry, field.options)
+        ? (matchChoiceOption(candidateCountry, field.options) || (field.optionsComplete === false || !field.options?.length ? candidateCountry : null))
         : candidateCountry;
     if (!value) return null;
     return {
