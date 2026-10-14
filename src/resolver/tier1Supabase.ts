@@ -255,7 +255,7 @@ function resolveBinaryDegreeAnswer(
 /**
  * Resolves standard profile attributes based on field name and label heuristics.
  */
-function resolveStandardProfileAttribute(
+export function resolveStandardProfileAttribute(
   field: ScannedField,
   profile: ProfileRow
 ): string | null {
@@ -441,16 +441,16 @@ function resolveStandardProfileAttribute(
     return matchBestOption('No', field.options, field.label) || 'No';
   }
 
-  // Prior Employment / Former Employee (Always "No")
+  // Prior Employment / Former Employee / Previous Interview History (Always "No")
   if (
-    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name)/i.test(
+    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name|interviewed.*(?:before|prior|in the past|past \d+)|history with\b|employed by\b)/i.test(
       combined
     )
   ) {
     if (field.type === 'checkbox') {
       return 'false';
     }
-    return matchBestOption('No', field.options, field.label);
+    return matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Restrictive Covenants / Non-Compete / NDAs / Restrictive Agreements (Always "No")
