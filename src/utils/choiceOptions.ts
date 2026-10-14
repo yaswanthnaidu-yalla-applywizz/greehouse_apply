@@ -7,6 +7,11 @@ const affirmativeTokens = [
   'willing',
   'consent',
   'true',
+  'acknowledge',
+  'confirm',
+  'reviewed',
+  'certify',
+  'attest',
 ];
 
 const negativeTokens = [
@@ -26,6 +31,22 @@ const countryAliases = [
   'US',
   'USA',
   'U.S.',
+  'U.S.A.',
+];
+
+const ukCountryAliases = [
+  'United Kingdom',
+  'UK',
+  'U.K.',
+  'Great Britain',
+  'Britain',
+  'GB',
+];
+
+const uaeCountryAliases = [
+  'United Arab Emirates',
+  'UAE',
+  'U.A.E.',
 ];
 
 function normalize(value: string): string {
@@ -82,22 +103,39 @@ function semanticPolarity(value: string): 'affirmative' | 'negative' | null {
 function optionPolarity(option: string): 'affirmative' | 'negative' | null {
   const normalized = normalize(option);
   if (!normalized) return null;
-  if (negativeTokens.some((token) => normalized === token) || /^(no|not|false|decline)\b/.test(normalized)) {
+  if (
+    negativeTokens.some((token) => normalized === token) ||
+    /^(no|not|false|decline)\b/.test(normalized) ||
+    /^(i do not|i am not)\b/.test(normalized)
+  ) {
     return 'negative';
   }
   if (
     affirmativeTokens.some((token) => normalized === token) ||
-    /^(yes|true|agree|accept)\b/.test(normalized) ||
-    affirmativeTokens.some((token) => normalized.includes(` ${token} `))
+    /^(yes|true|agree|accept|acknowledge|confirm)\b/.test(normalized) ||
+    /^(i confirm|i acknowledge|i have reviewed)\b/.test(normalized) ||
+    affirmativeTokens.some(
+      (token) =>
+        normalized.includes(` ${token} `) ||
+        normalized.startsWith(`${token} `) ||
+        normalized.endsWith(` ${token}`)
+    )
   ) {
     return 'affirmative';
   }
   return null;
 }
 
+function stripDialCodeSuffix(val: string): string {
+  return val.replace(/\s*\+\d+$/, '').trim();
+}
+
 function canonicalAlias(value: string): string | null {
-  const normalized = normalize(value);
+  const stripped = stripDialCodeSuffix(value);
+  const normalized = normalize(stripped);
   if (countryAliases.some((alias) => normalize(alias) === normalized)) return 'united states';
+  if (ukCountryAliases.some((alias) => normalize(alias) === normalized)) return 'united kingdom';
+  if (uaeCountryAliases.some((alias) => normalize(alias) === normalized)) return 'united arab emirates';
   if (/^asian(?: not hispanic or latino)?$|^asian or pacific islander$/.test(normalized)) return 'asian';
   if (/^black(?: or african american| not hispanic or latino)?$/.test(normalized)) return 'black';
   if (/^white(?: not hispanic or latino)?$|^caucasian$/.test(normalized)) return 'white';
