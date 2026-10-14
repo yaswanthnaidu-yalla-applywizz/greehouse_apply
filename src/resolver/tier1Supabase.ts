@@ -475,6 +475,68 @@ export function resolveStandardProfileAttribute(
     return matchBestOption('No', field.options, field.label);
   }
 
+  // Discipline / Field of Study / Major
+  if (
+    /^discipline$|\b(?:discipline|field of study|major|area of study)\b/i.test(combined) &&
+    !/\b(?:degree|level|highest|gpa|school|university|month|year)\b/i.test(combined)
+  ) {
+    const eduList = Array.isArray(profile.education) ? profile.education : [];
+    let candidateMajor = '';
+    if (eduList.length > 0 && typeof eduList[0] === 'object') {
+      const firstEdu = eduList[0] as Record<string, any>;
+      candidateMajor =
+        firstEdu.major ||
+        firstEdu.fieldOfStudy ||
+        firstEdu.field_of_study ||
+        firstEdu.degree ||
+        '';
+    }
+    if (!candidateMajor && profile.raw_api_payload?.additional_information) {
+      candidateMajor = String(profile.raw_api_payload.additional_information.main_subject || '');
+    }
+    if (candidateMajor) {
+      // Clean major string (e.g. "Masters in Information Science" -> "Information Science")
+      const cleaned = candidateMajor.replace(/^Master(?:'s)? (?:of Science )?(?:in )?/i, '').replace(/^Bachelor(?:'s)? (?:of Science )?(?:in )?/i, '').trim();
+      const matched = matchBestOption(cleaned, field.options, field.label);
+      if (matched) return matched;
+      const directMatch = matchBestOption(candidateMajor, field.options, field.label);
+      if (directMatch) return directMatch;
+
+      // Token overlap / synonym matching for academic disciplines
+      if (Array.isArray(field.options) && field.options.length > 0) {
+        const normTarget = normalizeText(cleaned);
+        const targetTokens = normTarget.split(/\s+/).filter((t) => t.length > 2 && !/^(and|for|the|in|of)$/i.test(t));
+        
+        let bestOpt: string | null = null;
+        let maxOverlap = 0;
+        for (const opt of field.options) {
+          const normOpt = normalizeText(opt);
+          const optTokens = normOpt.split(/\s+/).filter((t) => t.length > 2 && !/^(and|for|the|in|of)$/i.test(t));
+          let overlap = 0;
+          for (const tt of targetTokens) {
+            if (optTokens.includes(tt)) {
+              overlap += 2;
+            } else if (
+              (tt === 'science' && optTokens.includes('systems')) ||
+              (tt === 'systems' && optTokens.includes('science')) ||
+              (tt === 'software' && optTokens.includes('computer')) ||
+              (tt === 'computer' && optTokens.includes('software'))
+            ) {
+              overlap += 1;
+            }
+          }
+          if (overlap > maxOverlap) {
+            maxOverlap = overlap;
+            bestOpt = opt;
+          }
+        }
+        if (bestOpt && maxOverlap >= 2) {
+          return bestOpt;
+        }
+      }
+    }
+  }
+
   // Deadlines & Timeline Considerations (Always "None")
   if (/deadlines?|timeline considerations?/i.test(combined)) {
     if (field.type === 'checkbox') return 'false';
