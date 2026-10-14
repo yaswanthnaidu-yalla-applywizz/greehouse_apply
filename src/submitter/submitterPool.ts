@@ -341,8 +341,9 @@ export class SubmitterPool {
         await this.updateStatusFn(applicationId, 'APPLYING', {
           job_url: application.job_url,
         });
-        log.info(`[Submitter] Worker ${workerNumber} submitting app-${applicationId} → status=APPLYING`);
-        log.info(`[API] Status → APPLYING (application ${applicationId}, submitter executing)`);
+        log.info(
+          `[Submitter] 🚀 Starting submission for app-${applicationId} (${application.applywizz_id || 'unknown'}) [${application.job_url || ''}]`
+        );
         await logQueueStatusChange(applicationId, 'QUEUED', 'APPLYING');
 
         const result = await this.submitFn(applicationId, {
@@ -351,14 +352,24 @@ export class SubmitterPool {
         });
         work.resolve(result);
         if (result.status === 'APPLIED') {
-          log.info(`[API] Status → APPLIED (application ${applicationId})`);
+          const proofTag = result.hasEmailProof ? '[email proof captured]' : '[web proof captured]';
+          log.info(
+            `[Submitter] ✅ Terminal Status → SUCCESS ${proofTag} (app-${applicationId})`
+          );
           await logQueueStatusChange(applicationId, 'APPLYING', 'APPLIED');
+        } else if (result.status === 'EMAIL_PROOF_PENDING') {
+          log.info(
+            `[Submitter] ✅ Terminal Status → SUCCESS [web proof captured] (app-${applicationId}, awaiting background email confirmation)`
+          );
         } else if (result.status === 'OTP_REQUIRED') {
           log.info(
-            `[OTP] handed to resolution service (application ${applicationId})`
+            `[Submitter] 🔢 Terminal Status → OTP_REQUIRED (app-${applicationId}, routed to OTP service)`
           );
         } else if (result.status === 'FAILED') {
           const failureMessage = result.errorMessage || 'Submission execution failed.';
+          log.warn(
+            `[Submitter] ❌ Terminal Status → FAILURE (app-${applicationId}) - reason: ${failureMessage}`
+          );
           const retryReason = getRetryReason(result);
           let finalStatus = 'FAILED';
           if (isAutomaticRetryAllowed(retryReason)) {

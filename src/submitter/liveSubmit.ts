@@ -85,28 +85,53 @@ async function isResumeStorageObjectAvailable(storagePath: string | null | undef
 async function ensureResumeAvailable(application: ApplicationRow): Promise<boolean> {
   if (!applicationRequiresResume(application)) return true;
 
-  try {
-    const profile = await getProfile(application.applywizz_id);
-    if (await isResumeStorageObjectAvailable(profile?.resume_storage_path)) return true;
+  const maxAttempts = 3; // 1 initial attempt + 2 retries
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const profile = await getProfile(application.applywizz_id);
+      if (await isResumeStorageObjectAvailable(profile?.resume_storage_path)) return true;
 
-    const client = new ApplyWizzClient();
-    const refreshed = await client.fetchCandidateProfile(application.applywizz_id, true);
-    if (!refreshed.resumeUrl) return false;
+      const client = new ApplyWizzClient();
+      const refreshed = await client.fetchCandidateProfile(application.applywizz_id, true);
+      if (!refreshed.resumeUrl) {
+        log.warn(`[Live Submit] ⚠️ Candidate ${application.applywizz_id} profile has no resumeUrl (attempt ${attempt}/${maxAttempts})`);
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+        return false;
+      }
 
-    const localPath = await client.downloadResume(application.applywizz_id, refreshed.resumeUrl);
-    if (!fs.existsSync(localPath) || fs.statSync(localPath).size <= 100) return false;
+      const localPath = await client.downloadResume(application.applywizz_id, refreshed.resumeUrl);
+      if (!fs.existsSync(localPath) || fs.statSync(localPath).size <= 100) {
+        log.warn(`[Live Submit] ⚠️ Downloaded resume empty/missing for ${application.applywizz_id} (attempt ${attempt}/${maxAttempts})`);
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
+        return false;
+      }
 
-    const storagePath = await uploadResume(application.applywizz_id, await fs.promises.readFile(localPath), 'application/pdf', {
-      firstName: refreshed.firstName,
-      lastName: refreshed.lastName,
-      workExperience: refreshed.workExperience,
-    });
-    await updateResumeStoragePath(application.applywizz_id, storagePath);
-    return isResumeStorageObjectAvailable(storagePath);
-  } catch (err: any) {
-    log.warn(`[Live Submit] ⚠️ Resume re-download failed for ${application.applywizz_id}: ${err.message}`);
-    return false;
+      const storagePath = await uploadResume(application.applywizz_id, await fs.promises.readFile(localPath), 'application/pdf', {
+        firstName: refreshed.firstName,
+        lastName: refreshed.lastName,
+        workExperience: refreshed.workExperience,
+      });
+      await updateResumeStoragePath(application.applywizz_id, storagePath);
+      const available = await isResumeStorageObjectAvailable(storagePath);
+      if (available) return true;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    } catch (err: any) {
+      log.warn(`[Live Submit] ⚠️ Resume preparation attempt ${attempt}/${maxAttempts} failed for ${application.applywizz_id}: ${err.message}`);
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
   }
+
+  return false;
 }
 
 export interface LiveSubmitOptions extends FormFillerOptions {
@@ -129,6 +154,7 @@ export interface LiveSubmitResult {
   proofCapturedAt?: string;
   proofFailedUrl?: string;
   proofFailedCapturedAt?: string;
+  hasEmailProof?: boolean;
   requiresOtp?: boolean;
   errorMessage?: string;
   retryReason?: SubmissionRetryReason;
@@ -740,6 +766,7 @@ export interface SubmitOtpResult {
   proofCapturedAt?: string;
   proofFailedUrl?: string;
   proofFailedCapturedAt?: string;
+  hasEmailProof?: boolean;
   errorMessage?: string;
 }
 
@@ -900,6 +927,7 @@ export async function submitOtpToPausedSession(
           proofUrl: proofResult.proofWebUrl,
           proofWebUrl: proofResult.proofWebUrl,
           proofCapturedAt: proofResult.proofCapturedAt,
+          hasEmailProof: true,
         };
       }
 
@@ -1541,6 +1569,7 @@ export async function runLiveSubmit(
           applicationId,
           proofWebUrl: proofResult.proofWebUrl,
           proofCapturedAt: proofResult.proofCapturedAt,
+          hasEmailProof: true,
           summary: fillSummary,
         };
       }

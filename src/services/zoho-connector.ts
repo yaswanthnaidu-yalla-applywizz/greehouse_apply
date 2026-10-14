@@ -404,7 +404,7 @@ export function extractOtpCodeFromText(text: string): string | null {
   // Pattern 0: Greenhouse's exact wording:
   // "Copy and paste this code into the security code field on your application: NgW4NT62"
   const greenhousePattern =
-    /copy\s*and\s*paste\s*this\s*code[^:\n]{0,120}:\s*([A-Za-z0-9]{6,16})\b/i;
+    /copy\s*and\s*paste\s*this\s*code[\s\S]{0,140}?(?::|\bis\b)[\s\r\n]*([A-Za-z0-9]{6,16})\b/i;
   const match0 = text.match(greenhousePattern);
   if (match0 && match0[1]) {
     return match0[1].trim();
@@ -509,7 +509,7 @@ export async function fetchZohoOtpViaApi(
   const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
   const sinceTimestamp = options.sinceTimestamp;
   const timeoutMs = options.timeoutMs ?? 30000;
-  const pollIntervalMs = options.pollIntervalMs ?? 2000;
+  const pollIntervalMs = options.pollIntervalMs ?? 4000;
   const companyName = (options.companyName || '').trim();
   const validEmailFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail);
 
@@ -581,7 +581,7 @@ export async function fetchZohoOtpViaApi(
       `excluded_message_count=${excludedMessageIds.size} excluded_code_count=${excludedCodes.size}`
   );
 
-  while (timeoutMs - (Date.now() - startTime) >= pollIntervalMs) {
+  while (timeoutMs - (Date.now() - startTime) >= pollIntervalMs || attempt === 0) {
     attempt++;
     const cycleStart = Date.now();
 
@@ -797,10 +797,22 @@ export async function fetchZohoOtpViaApi(
         }
       } else {
         inboxHttpErrors++;
+        const status = res.status;
         try {
           await res.body?.cancel();
         } catch {
           // Response diagnostics use status and headers only; response bodies may contain PII.
+        }
+        if (status === 401 || status === 403 || status === 404) {
+          log.warn(
+            `[Zoho Connector] application=${correlation} status=${status} reason=MAILBOX_NOT_CONFIGURED`
+          );
+          return {
+            success: false,
+            reason: 'mailbox not configured',
+            reasonCode: 'MAILBOX_NOT_CONFIGURED',
+            errorMessage: 'Candidate mailbox is not configured upstream.',
+          };
         }
       }
     } catch (error: unknown) {
@@ -933,7 +945,7 @@ export async function fetchGmailOtpViaApi(
   const companyName = (options.companyName || '').trim();
   const correlation = options.correlationId || 'unknown';
   const timeoutMs = options.timeoutMs ?? 30000;
-  const pollIntervalMs = options.pollIntervalMs ?? 2000;
+  const pollIntervalMs = options.pollIntervalMs ?? 4000;
 
   const validEmailFormat = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail);
   if (!candidateEmail || !validEmailFormat) {
@@ -1155,6 +1167,23 @@ export async function fetchGmailOtpViaApi(
         }
       } else {
         inboxHttpErrors++;
+        const status = res.status;
+        try {
+          await res.body?.cancel();
+        } catch {
+          // Response diagnostics use status and headers only
+        }
+        if (status === 401 || status === 403 || status === 404) {
+          log.warn(
+            `[Gmail Connector] application=${correlation} status=${status} reason=MAILBOX_NOT_CONFIGURED`
+          );
+          return {
+            success: false,
+            reason: 'mailbox not configured',
+            reasonCode: 'MAILBOX_NOT_CONFIGURED',
+            errorMessage: 'Candidate mailbox is not configured upstream.',
+          };
+        }
       }
     } catch (err: unknown) {
       inboxNetworkErrors++;
