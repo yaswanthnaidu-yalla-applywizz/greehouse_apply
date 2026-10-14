@@ -735,14 +735,11 @@
       const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions;
       const isCheckbox = fieldType === 'checkbox';
       const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
-      // Derive quick-pick options for unresolved fields: use field.options, or Yes/No for boolean-type labels
+      // Derive quick-pick options for unresolved fields: only use field.options if available
       const quickPickOptions = (() => {
         if (!isUnresolved) return null;
         if (fieldOptions) return fieldOptions;
-        const lc = (field.label || '').toLowerCase();
-        if (/\bdo you\b|\bare you\b|\bhave you\b|\bwill you\b|\bcan you\b|\bwould you\b|\bis your\b/.test(lc)) {
-          return ['Yes', 'No'];
-        }
+        if (isCheckbox) return ['Yes', 'No'];
         return null;
       })();
 

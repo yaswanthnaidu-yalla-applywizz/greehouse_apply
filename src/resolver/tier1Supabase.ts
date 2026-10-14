@@ -8,11 +8,8 @@ import { getProfile, type ProfileRow, getCompanyEmail } from '../db/profiles.js'
 import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
-import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { isPhoneNumberField } from './candidateEvidence.js';
- 
-const log = createLogger('Tier 1 Supabase');
 
 const US_STATE_NAMES_BY_ABBREVIATION: Record<string, string> = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -57,13 +54,19 @@ export function isCountryField(field: ScannedField): boolean {
   if (/\b(?:phone|dialing|calling|code)\b/.test(`${normalizedName} ${normalizedId}`)) {
     return false;
   }
-  if (/^(?:do|does|did|are|is|will|would|can|could|have|has)\b/.test(normalizedLabel)) {
+  if (
+    /^(?:do|does|did|are|is|will|would|can|could|have|has)\b/.test(normalizedLabel) &&
+    !/\b(?:reside|based|located)\b/.test(normalizedLabel)
+  ) {
     return false;
   }
   return (
     normalizedName === 'country' ||
     normalizedId === 'country' ||
     /^(?:(?:candidate|current|residential)\s+)?country(?:\s+of\s+(?:residence|residency))?$/.test(
+      normalizedLabel
+    ) ||
+    /country(?:\s+region)?\s+(?:do\s+you\s+currently\s+reside|are\s+you\s+currently\s+based)/.test(
       normalizedLabel
     )
   );
@@ -252,7 +255,7 @@ function resolveBinaryDegreeAnswer(
 /**
  * Resolves standard profile attributes based on field name and label heuristics.
  */
-function resolveStandardProfileAttribute(
+export function resolveStandardProfileAttribute(
   field: ScannedField,
   profile: ProfileRow
 ): string | null {
@@ -284,8 +287,14 @@ function resolveStandardProfileAttribute(
     normName === 'country' ||
     /phone.*country|country.*phone/i.test(combined)
   ) {
-    const targetCountry = profile.country?.trim() || (profile.location?.toLowerCase().includes('united states') ? 'United States' : null);
-    const targetCode = profile.country_code?.trim() || (targetCountry === 'United States' ? '+1' : null);
+    const additional = profile.raw_api_payload?.additional_information;
+    const payloadCountry =
+      typeof additional?.zip_or_country === 'string' ? additional.zip_or_country.trim() : '';
+    const targetCountry =
+      profile.country?.trim() ||
+      payloadCountry ||
+      (profile.location?.toLowerCase().includes('united states') ? 'United States' : null);
+    const targetCode = profile.country_code?.trim() || (targetCountry?.toLowerCase().includes('united states') ? '+1' : null);
     if (!targetCountry && !targetCode) return null;
     if (field.options && field.options.length > 0) {
       const countryMatch = targetCountry
@@ -363,8 +372,11 @@ function resolveStandardProfileAttribute(
     return profile.client_name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
   }
 
-  // Email — strictly company email, never personal
-  if (/email/i.test(combined) || normId === 'email' || normName === 'email') {
+  // Email — strictly company email, never personal (must not match referral or communication consent questions containing "email")
+  if (
+    (/email/i.test(combined) || normId === 'email' || normName === 'email') &&
+    !/referred|referral|communication|sms|text message/i.test(combined)
+  ) {
     if (profile.company_email && profile.company_email.trim().length > 0) {
       return profile.company_email.trim();
     }
@@ -421,24 +433,34 @@ function resolveStandardProfileAttribute(
 
   // Family / Personal Relationships / Referral by Employee (Always "No")
   if (
-    /(family.*employ|relative.*employ|know anyone.*work|anyone.*work.*company|personal.*relationship.*employ|referred.*by.*employee|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
+    /(family.*employ|relative.*employ|know (anyone|anybody|someone|somebody)|anyone.*work.*company|personal.*relationship.*employ|referred (to this role|by|for)|employee referral|referral source|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
       combined
     )
   ) {
     if (field.type === 'checkbox') return 'false';
-    return matchBestOption('No', field.options, field.label);
+    return matchBestOption('No', field.options, field.label) || 'No';
   }
 
-  // Prior Employment / Former Employee (Always "No")
+  // Communication & SMS/WhatsApp Consent (Always "No" / false)
   if (
-    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name)/i.test(
+    /(communications? via (?:sms|whatsapp|text)|receive text messages|text message communications?|opt-in.*(?:sms|text message)|consent to receive text)/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') return 'false';
+    return matchBestOption('No', field.options, field.label) || 'No';
+  }
+
+  // Prior Employment / Former Employee / Previous Interview History (Always "No")
+  if (
+    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name|interviewed.*(?:before|prior|in the past|past \d+)|history with\b|employed by\b)/i.test(
       combined
     )
   ) {
     if (field.type === 'checkbox') {
       return 'false';
     }
-    return matchBestOption('No', field.options, field.label);
+    return matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Restrictive Covenants / Non-Compete / NDAs / Restrictive Agreements (Always "No")
@@ -451,6 +473,113 @@ function resolveStandardProfileAttribute(
       return 'false';
     }
     return matchBestOption('No', field.options, field.label);
+  }
+
+  // Discipline / Field of Study / Major
+  if (
+    /^discipline$|\b(?:discipline|field of study|major|area of study)\b/i.test(combined) &&
+    !/\b(?:degree|level|highest|gpa|school|university|month|year)\b/i.test(combined)
+  ) {
+    const eduList = Array.isArray(profile.education) ? profile.education : [];
+    let candidateMajor = '';
+    if (eduList.length > 0 && typeof eduList[0] === 'object') {
+      const firstEdu = eduList[0] as Record<string, any>;
+      candidateMajor =
+        firstEdu.major ||
+        firstEdu.fieldOfStudy ||
+        firstEdu.field_of_study ||
+        firstEdu.degree ||
+        '';
+    }
+    if (!candidateMajor && profile.raw_api_payload?.additional_information) {
+      candidateMajor = String(profile.raw_api_payload.additional_information.main_subject || '');
+    }
+    if (candidateMajor) {
+      // Clean major string (e.g. "Masters in Information Science" -> "Information Science")
+      const cleaned = candidateMajor.replace(/^Master(?:'s)? (?:of Science )?(?:in )?/i, '').replace(/^Bachelor(?:'s)? (?:of Science )?(?:in )?/i, '').trim();
+      const matched = matchBestOption(cleaned, field.options, field.label);
+      if (matched) return matched;
+      const directMatch = matchBestOption(candidateMajor, field.options, field.label);
+      if (directMatch) return directMatch;
+
+      // Token overlap / synonym matching for academic disciplines
+      if (Array.isArray(field.options) && field.options.length > 0) {
+        const normTarget = normalizeText(cleaned);
+        const targetTokens = normTarget.split(/\s+/).filter((t) => t.length > 2 && !/^(and|for|the|in|of)$/i.test(t));
+        
+        let bestOpt: string | null = null;
+        let maxOverlap = 0;
+        for (const opt of field.options) {
+          const normOpt = normalizeText(opt);
+          const optTokens = normOpt.split(/\s+/).filter((t) => t.length > 2 && !/^(and|for|the|in|of)$/i.test(t));
+          let overlap = 0;
+          for (const tt of targetTokens) {
+            if (optTokens.includes(tt)) {
+              overlap += 2;
+            } else if (
+              (tt === 'science' && optTokens.includes('systems')) ||
+              (tt === 'systems' && optTokens.includes('science')) ||
+              (tt === 'software' && optTokens.includes('computer')) ||
+              (tt === 'computer' && optTokens.includes('software'))
+            ) {
+              overlap += 1;
+            }
+          }
+          if (overlap > maxOverlap) {
+            maxOverlap = overlap;
+            bestOpt = opt;
+          }
+        }
+        if (bestOpt && maxOverlap >= 2) {
+          return bestOpt;
+        }
+      }
+    }
+  }
+
+  // Job Source / How did you hear about us
+  if (
+    /\b(?:how did you (?:hear|learn)|where did you (?:hear|learn)|source of application|job source|referral source)\b/i.test(
+      combined
+    )
+  ) {
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      // 1. Try finding an option containing LinkedIn
+      const linkedInOpt = field.options.find((opt) => /linkedin/i.test(opt));
+      if (linkedInOpt) return linkedInOpt;
+
+      // 2. Fallbacks: Job Board, Career Site, Online, Website, Other
+      const fallbackPatterns = [
+        /job board/i,
+        /career(?:s)? (?:site|page|portal)/i,
+        /company website|website/i,
+        /online/i,
+        /other/i,
+      ];
+      for (const pat of fallbackPatterns) {
+        const found = field.options.find((opt) => pat.test(opt));
+        if (found) return found;
+      }
+
+      return field.options[0];
+    }
+    return 'LinkedIn';
+  }
+
+  // Deadlines & Timeline Considerations (Always "None")
+  if (/deadlines?|timeline considerations?/i.test(combined)) {
+    if (field.type === 'checkbox') return 'false';
+    return matchBestOption('None', field.options, field.label) || 'None';
+  }
+
+  // Start Date / Earliest Availability (Dynamic 1 week out from resolution day)
+  if (
+    /(start date|available to start|when can you start|earliest start|desired start)/i.test(combined) &&
+    !/\b(?:month|year)\b/i.test(combined)
+  ) {
+    const oneWeekOut = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const isoDate = oneWeekOut.toISOString().split('T')[0];
+    return matchBestOption(isoDate, field.options, field.label) || isoDate;
   }
 
   // Consent / Terms & Conditions / Privacy Policy / Arbitration / Declarations / Acknowledgment (Always "Yes")
@@ -481,6 +610,51 @@ function resolveStandardProfileAttribute(
     const addInfo = profile.raw_api_payload?.additional_information;
     const willing = addInfo?.willing_to_relocate !== false;
     return matchBestOption(willing ? 'Yes' : 'No', field.options, field.label);
+  }
+
+  // Location Preferences / Office Selection (Choice options)
+  if (
+    /(location preference|preferred location|office location|which office|which location|preferred office)/i.test(
+      combined
+    ) &&
+    Array.isArray(field.options) &&
+    field.options.length > 0
+  ) {
+    // 1. Check client.location_preferences in raw_api_payload
+    const rawPrefs = profile.raw_api_payload?.client?.location_preferences;
+    const prefList: string[] = Array.isArray(rawPrefs)
+      ? rawPrefs.map((p: any) => String(p).trim()).filter(Boolean)
+      : [];
+
+    for (const pref of prefList) {
+      const match = matchBestOption(pref, field.options, field.label);
+      if (match) return match;
+    }
+
+    // 2. Fallback: match candidate's profile.location
+    if (profile.location) {
+      const directMatch = matchBestOption(profile.location, field.options, field.label);
+      if (directMatch) return directMatch;
+
+      // Check tokens of location (e.g. "Memphis, Tennessee, United States" -> "Tennessee", "Memphis")
+      const locParts = profile.location
+        .split(/[,/]+/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 2 && !/^(united states|usa|us)$/i.test(p));
+
+      for (const part of locParts) {
+        const partMatch = matchBestOption(part, field.options, field.label);
+        if (partMatch) return partMatch;
+
+        // Also check if any option contains the part as a whole word or substring
+        const foundOpt = field.options.find((opt) => {
+          const normOpt = normalizeText(opt);
+          const normPart = normalizeText(part);
+          return normOpt.includes(normPart) || normPart.includes(normOpt);
+        });
+        if (foundOpt) return foundOpt;
+      }
+    }
   }
 
   // Location (City, State, Residence) - must not match "United States" in visa questions
@@ -848,10 +1022,9 @@ export async function resolveTier1(
 
     const value =
       field.type === 'select' || field.type === 'radio'
-        ? matchChoiceOption(candidateCountry, field.options)
+        ? (matchChoiceOption(candidateCountry, field.options) || (field.optionsComplete === false || !field.options?.length ? candidateCountry : null))
         : candidateCountry;
     if (!value) return null;
-    log.info(`[Resolver] ✅ T1 ${field.label} → "${value}"`);
     return {
       fieldId: field.fieldId,
       name: field.name,
@@ -893,7 +1066,6 @@ export async function resolveTier1(
     candidateProfile?.education
   );
   if (payloadVal !== null && payloadVal.trim().length > 0) {
-    log.info(`[Resolver] ✅ T1-STRUCT ${field.label} → "${payloadVal}"`);
     return {
       fieldId: field.fieldId,
       name: field.name,

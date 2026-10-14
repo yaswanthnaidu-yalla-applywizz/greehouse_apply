@@ -1,3 +1,24 @@
+### Race Dropdown & Composite Education Multi-Field Fixes (2026-10-14 Complete)
+- [x] **Composite Education Year Normalization (`src/submitter/formFiller.ts`, `tests/educationYearSanitization.test.ts`):**
+  - Updated `applyEducationFieldFallbacks()` and `isExplicitEducationField()` to recognize `start-year--\d+` and `end-year--\d+`.
+  - Added 4-digit year regex extraction (`YYYY`) for education year inputs to prevent HTML5 number input rejections caused by ISO dates (`2026-02-24` -> `2026`).
+- [x] **Dynamic Select Cascade Retry (`src/submitter/formFiller.ts`, `tests/dynamicSelectCascadeRetry.test.ts`):**
+  - Removed blanket `!isResolvedChoiceField` exclusion in `fillForm()` retry sweep so choice fields conditionally revealed post-cascade (like `#race` appearing after `#hispanic_ethnicity` is answered) are re-attempted and filled.
+- [x] **Test Verification:**
+  - `tests/educationYearSanitization.test.ts` (3/3 pass)
+  - `tests/educationFallbacks.test.ts` (2/2 pass)
+  - `tests/dynamicSelectCascadeRetry.test.ts` (1/1 pass)
+  - `tests/demographicRaceMatching.test.ts` (4/4 pass)
+
+### DB1 to DB2 Migration & Canonical Stats Synchronization (2026-10-14 Complete)
+- [x] **Applications Sync from DB1 to DB2 (`scripts/copyApplicationsDb1ToDb2.ts`):**
+  - Copied 635 resolved applications from local DB1 (`applywizz_sandbox`) to remote DB2 (`Supabase`).
+  - Preserved existing 48 `APPLIED` and 19 `EMAIL_PROOF_PENDING` records in DB2 (total DB2 rows: 702).
+- [x] **Dashboard Daily Metrics & Rollup Alignment (`scripts/sync_all_stats.ts`, `scripts/backfillSubmittedStats.ts`):**
+  - Purged 10,431 orphaned historical rows in `gh_application_stats_daily` left behind by deleted applications, resolving the 1,320 inflated count on dashboards.
+  - Backfilled `'submitted'` daily metric for all non-`READY_FOR_REVIEW`/`SKIPPED`/`FILTERED_OUT` applications (320 rows).
+  - Verified `'applied'` metric properly sums `APPLIED` and `EMAIL_PROOF_PENDING` applications (88 total).
+  - Aligned `gh_stats_rollups` with live application counts.
 ### 2-Tier Header Layout with Tabs Beside Logo (2026-10-14 Complete)
 - [x] **2-Tier Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`):**
   - Removed the standalone single-row header bar entirely.

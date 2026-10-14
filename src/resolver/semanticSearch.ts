@@ -112,10 +112,11 @@ async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
 
   // 1. Primary: OpenRouter text-embedding-3-small (1536 dimensions)
   if (apiKey) {
-    for (let start = 0; start < missingIndices.length; start += 64) {
-      const indices = missingIndices.slice(start, start + 64);
-      try {
-        const response = await axios.post(
+    const CHUNK_SIZE = 16;
+    for (let start = 0; start < missingIndices.length; start += CHUNK_SIZE) {
+      const indices = missingIndices.slice(start, start + CHUNK_SIZE);
+      const postEmbedding = () =>
+        axios.post(
           'https://openrouter.ai/api/v1/embeddings',
           {
             model: 'text-embedding-3-small',
@@ -128,10 +129,50 @@ async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
               'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
               'X-Title': 'Greenhouse Automation Operator',
             },
-            timeout: 10000,
+            timeout: 15000,
           }
         );
 
+      let response: any = null;
+      try {
+        response = await postEmbedding();
+      } catch (firstErr: any) {
+        // One-shot fast retry for timeouts or transient server errors
+        const isTransient =
+          firstErr.code === 'ECONNABORTED' ||
+          firstErr.code === 'ETIMEDOUT' ||
+          (firstErr.response && [429, 500, 502, 503, 504].includes(firstErr.response.status));
+        if (isTransient) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          try {
+            response = await postEmbedding();
+          } catch (retryErr: any) {
+            const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+            await emitFailureDiagnostic({
+              category: 'RESOLVE_TIER3_EMBEDDING',
+              stage: 'embedding_generation',
+              reason: retryErr?.message || 'OpenRouter text-embedding-3-small retry failed',
+              error: retryErr,
+              isTerminal: false,
+              isRetryable: true,
+            }).catch(() => {});
+            continue;
+          }
+        } else {
+          const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+          await emitFailureDiagnostic({
+            category: 'RESOLVE_TIER3_EMBEDDING',
+            stage: 'embedding_generation',
+            reason: firstErr?.message || 'OpenRouter text-embedding-3-small request failed',
+            error: firstErr,
+            isTerminal: false,
+            isRetryable: true,
+          }).catch(() => {});
+          continue;
+        }
+      }
+
+      if (response) {
         const embeddings = Array.isArray(response.data?.data)
           ? response.data.data
           : response.data?.embedding
@@ -148,17 +189,6 @@ async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
             embeddingCache.set(cleanTexts[index], embedding);
           }
         }
-      } catch (err: any) {
-        const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
-        await emitFailureDiagnostic({
-          category: 'RESOLVE_TIER3_EMBEDDING',
-          stage: 'embedding_generation',
-          reason: err?.message || 'OpenRouter text-embedding-3-small request failed',
-          error: err,
-          isTerminal: false,
-          isRetryable: true,
-        }).catch(() => {});
-        continue;
       }
     }
     return result;

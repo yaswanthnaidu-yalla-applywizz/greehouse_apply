@@ -3,6 +3,13 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Stats Rollup');
 
+export const RETAINED_APPLICATION_STATUSES = ['APPLIED', 'EMAIL_PROOF_PENDING'] as const;
+
+export function buildRetainedStatusFilter(): string {
+  return `(${RETAINED_APPLICATION_STATUSES.map((status) => `"${status}"`).join(',')})`;
+}
+
+
 export function getIstDateString(timeMs: number): string {
   const istDate = new Date(timeMs + 5.5 * 60 * 60 * 1000);
   return `${istDate.getUTCFullYear()}-${String(istDate.getUTCMonth() + 1).padStart(2, '0')}-${String(istDate.getUTCDate()).padStart(2, '0')}`;
@@ -29,10 +36,11 @@ export async function runStatsRollup(): Promise<void> {
   if (error) throw new Error(`Application stats are not initialized; apply migration 027: ${error.message}`);
   if (!data?.value) throw new Error('Application stats are not initialized; apply migration 027 before pruning applications.');
 
+  const statusFilter = buildRetainedStatusFilter();
   const { data: deletedApplications, error: applicationsError } = await getDbClient()
     .from('gh_candidate_applications')
     .delete()
-    .not('id', 'is', null)
+    .not('status', 'in', statusFilter)
     .select('id');
   if (applicationsError) throw new Error(`Failed to prune applications: ${applicationsError.message}`);
 
@@ -44,7 +52,8 @@ export async function runStatsRollup(): Promise<void> {
   if (templatesError) throw new Error(`Failed to prune templates: ${templatesError.message}`);
 
   log.info(
-    `Pruned ${deletedApplications?.length || 0} applications and ${deletedTemplates?.length || 0} templates; ` +
-      'daily statistics are retained transactionally.'
+    `Pruned ${deletedApplications?.length || 0} non-retained applications (retained APPLIED and EMAIL_PROOF_PENDING) and ` +
+      `${deletedTemplates?.length || 0} templates; daily statistics are retained transactionally.`
   );
 }
+

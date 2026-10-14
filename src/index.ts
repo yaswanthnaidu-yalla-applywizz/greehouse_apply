@@ -198,10 +198,18 @@ export async function main(): Promise<void> {
     const resolvedCsv = path.resolve(process.cwd(), options.inputCsv);
     if (String(process.env.SANDBOX).trim() === 'true' || String(process.env.SANDBOX).trim() === '1') {
       log.info(`ℹ️ [Sandbox] Checking repository root for auto-ingest CSV...`);
-      const specifiedCsv = process.env.SANDBOX_INPUT_CSV || (options.inputCsv && !options.inputCsv.includes('candidates.csv') ? options.inputCsv : null);
+      const specifiedCsv = process.env.SANDBOX_INPUT_CSV;
+      const isAutoIngestDisabled =
+        specifiedCsv === 'none' ||
+        specifiedCsv === 'false' ||
+        specifiedCsv === 'disabled' ||
+        specifiedCsv === '';
+
       let targetCsv: string | null = null;
 
-      if (specifiedCsv && fs.existsSync(path.resolve(process.cwd(), specifiedCsv))) {
+      if (isAutoIngestDisabled) {
+        log.info(`ℹ️ [Sandbox] Auto-ingestion explicitly disabled via SANDBOX_INPUT_CSV=${specifiedCsv}.`);
+      } else if (specifiedCsv && fs.existsSync(path.resolve(process.cwd(), specifiedCsv))) {
         targetCsv = path.basename(specifiedCsv);
       } else {
         const files = fs.readdirSync(process.cwd());
