@@ -372,10 +372,10 @@ export function resolveStandardProfileAttribute(
     return profile.client_name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
   }
 
-  // Email — strictly company email, never personal (must not match referral questions containing "email address")
+  // Email — strictly company email, never personal (must not match referral or communication consent questions containing "email")
   if (
     (/email/i.test(combined) || normId === 'email' || normName === 'email') &&
-    !/referred|referral/i.test(combined)
+    !/referred|referral|communication|sms|text message/i.test(combined)
   ) {
     if (profile.company_email && profile.company_email.trim().length > 0) {
       return profile.company_email.trim();
@@ -434,6 +434,16 @@ export function resolveStandardProfileAttribute(
   // Family / Personal Relationships / Referral by Employee (Always "No")
   if (
     /(family.*employ|relative.*employ|know (anyone|anybody|someone|somebody)|anyone.*work.*company|personal.*relationship.*employ|referred (to this role|by|for)|employee referral|referral source|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') return 'false';
+    return matchBestOption('No', field.options, field.label) || 'No';
+  }
+
+  // Communication & SMS/WhatsApp Consent (Always "No" / false)
+  if (
+    /(communications? via (?:sms|whatsapp|text)|receive text messages|text message communications?|opt-in.*(?:sms|text message)|consent to receive text)/i.test(
       combined
     )
   ) {
