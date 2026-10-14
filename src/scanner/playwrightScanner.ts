@@ -285,12 +285,9 @@ export class PlaywrightScanner {
     }
 
     const total = urls.length;
-    const compact = isPipelineCompactLogging();
-    if (!compact) {
-      log.info(
-        `[Playwright Scanner] 🚀 Launching scanner pool: ${this.workerPoolSize} workers for ${total.toLocaleString()} unique URLs (Timeout: ${this.timeoutMs}ms, Jitter: ${this.minJitterMs}-${this.maxJitterMs}ms)...`
-      );
-    }
+    log.info(
+      `[Playwright Scanner] 🚀 Starting scan for ${total.toLocaleString()} unique URLs (workers: ${this.workerPoolSize}, timeout: ${this.timeoutMs}ms)`
+    );
 
     const results: ScannedJobTemplate[] = new Array(total);
     let currentIndex = 0;
@@ -299,9 +296,7 @@ export class PlaywrightScanner {
     let expiredJobs = 0;
     let totalFields = 0;
     const scanStartedAt = Date.now();
-    let lastCompactProgressLogAt = scanStartedAt;
-    const compactProgressEvery = 100;
-    const compactProgressMinIntervalMs = 120_000;
+    const compact = isPipelineCompactLogging();
 
     let browser: Browser | null = null;
 
@@ -367,29 +362,14 @@ export class PlaywrightScanner {
                   this.onJobScanned(template, completedCount, total);
                 }
 
-                if (compact) {
-                  const now = Date.now();
-                  const milestone =
-                    completedCount === total ||
-                    completedCount % compactProgressEvery === 0;
-                  const heartbeat = now - lastCompactProgressLogAt >= compactProgressMinIntervalMs;
-                  if (milestone || heartbeat) {
-                    lastCompactProgressLogAt = now;
-                    const elapsedSec = ((now - scanStartedAt) / 1000).toFixed(0);
-                    log.info(
-                      `[Playwright Scanner] progress ${completedCount}/${total} active=${activeJobs} expired=${expiredJobs} elapsed=${elapsedSec}s`
-                    );
-                  }
-                }
-
-                if (!compact) {
-                  const statusIcon = template.isExpired ? '❌ [Expired/404]' : `✅ [${template.fields.length} fields]`;
+                const isMilestone = completedCount === total || completedCount % 50 === 0;
+                if (isMilestone) {
+                  const elapsedSec = ((Date.now() - scanStartedAt) / 1000).toFixed(0);
                   log.info(
-                    `[Playwright Scanner] [${completedCount}/${total}] ${statusIcon} ${template.companyName ? `${template.companyName} — ` : ''}${template.jobTitle || 'Job'} (${targetUrl})`
+                    `[Playwright Scanner] Progress: ${completedCount}/${total} scanned (active: ${activeJobs}, expired: ${expiredJobs}, elapsed: ${elapsedSec}s)`
                   );
                 }
               } finally {
-                log.info(`[Playwright Scanner] worker=${workerId} page.close start job=${jobIndex}`);
                 await Promise.race([
                   page.close(),
                   new Promise<void>((_, reject) =>
@@ -401,7 +381,6 @@ export class PlaywrightScanner {
                     err
                   );
                 });
-                log.info(`[Playwright Scanner] worker=${workerId} page.close complete job=${jobIndex}`);
               }
 
               // Check abort immediately after each URL completes
@@ -413,9 +392,7 @@ export class PlaywrightScanner {
               }
             }
           } finally {
-            log.info(`[Playwright Scanner] worker=${workerId} context.close start`);
             await context.close().catch(() => {});
-            log.info(`[Playwright Scanner] worker=${workerId} context.close complete`);
           }
         })();
 
@@ -431,7 +408,7 @@ export class PlaywrightScanner {
 
     const elapsedSec = ((Date.now() - scanStartedAt) / 1000).toFixed(1);
     log.info(
-      `[Playwright Scanner] scan complete urls=${completedCount}/${total} active=${activeJobs} expired=${expiredJobs} fields=${totalFields} workers=${Math.min(this.workerPoolSize, total)} elapsed=${elapsedSec}s`
+      `[Playwright Scanner] ✅ Scan complete: ${completedCount}/${total} URLs processed (active: ${activeJobs}, expired: ${expiredJobs}, total_fields: ${totalFields}, workers: ${Math.min(this.workerPoolSize, total)}, elapsed: ${elapsedSec}s)`
     );
     return results.filter(Boolean);
   }
@@ -858,7 +835,6 @@ export class PlaywrightScanner {
           for (const field of allFields) {
             const key = `${field.name}:${field.fieldId}`;
             if (
-              !field.isRequired ||
               (field.type !== 'select' && field.type !== 'radio') ||
               (Array.isArray(field.options) && field.options.length > 0) ||
               attemptedChoiceOptionFields.has(key)

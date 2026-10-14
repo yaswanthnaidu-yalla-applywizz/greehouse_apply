@@ -1,3 +1,20 @@
+2026-10-14 session-checkpoint: shipped TDD fixes for dynamic select cascade retry (race dropdown) and composite education multi-field year sanitization (YYYY); all unit tests pass (9/9); no new observations
+2026-10-14 session-checkpoint: audited race and composite education failures against DB2 resolved_fields; reset 20 failed OTP applications back to QUEUED for worker pickup; no new observations
+2026-10-14 session-checkpoint: backfilled 'submitted' metric in gh_application_stats_daily for all non-READY_FOR_REVIEW/SKIPPED/FILTERED_OUT applications (exactly 320 rows); now 100% aligned with ground truth (total: 702, submitted: 320, applied: 80, failed: 16); no new observations
+2026-10-14 session-checkpoint: purged 10,431 orphaned historical rows in gh_application_stats_daily left behind by previously deleted CSV applications; global daily stats total now accurately reflects 702 (was 1,320); aligned gh_stats_rollups and verified trigger behavior; no new observations
+2026-10-14 session-checkpoint: synchronized stats across DB2; updated gh_stats_rollups to match ground truth (total: 702, submitted: 320, applied: 73, failed: 4); purged 65 stale failed records from gh_application_stats_daily; no new observations
+2026-10-14 session-checkpoint: copied all 635 resolved gh_candidate_applications from local DB1 to remote DB2 (253 QUEUED, 382 READY_FOR_REVIEW); total DB2 applications is now 702 (48 APPLIED, 19 EMAIL_PROOF_PENDING, plus incoming queue); active worker in DB2 is actively picking up and processing QUEUED applications; no new observations
+2026-10-14 session-checkpoint: re-resolved remaining 427 applications with Tier 5 LLM answering; 45 additional applications promoted to QUEUED (253 total); large question categories resolved (Why Anthropic, DoorDash, Quebec location, Upstart, etc. dropped to 0); no new observations
+2026-10-14 session-checkpoint: deleted 639 applications matching queued_applications_export_2026-10-14T05-26-46-231Z.csv in remote DB2; preserved 48 APPLIED and 19 EMAIL_PROOF_PENDING records; no new observations
+2026-10-14 session-checkpoint: audited unresolved LinkedIn applications in DB1; verified 100% genuine data absence (0 resolution bugs; 171 unresolved entries are from profiles with no LinkedIn in DB, payload, or resume text); no new observations
+2026-10-14 session-checkpoint: re-resolved DB1 applications; fixed country resolution on incomplete options selects; 174 applications promoted to QUEUED (208 total); unresolved Country dropped from 593 to 16; no new observations
+2026-10-14 session-checkpoint: local DB1 profiles table verified synchronized with remote DB2 (373 rows, identical counts across country, phone, location, linkedin_url); no new observations
+2026-10-14 session-checkpoint: DB1 cleaned — truncated all applications, templates, qa bank, events, stats, diagnostics, and runs; profiles preserved (376 rows); no new observations
+2026-10-14 session-checkpoint: backfilled country, phone, location, linkedin_url in DB1 profiles from remote DB2 (373 matched rows updated); empty country reduced from 224 to 18; no new observations
+2026-10-14 session-checkpoint: gh_candidate_applications cleared in DB1 (637 rows); profiles table audited for empty country/phone/location/linkedin_url; no new observations
+2026-10-14 session-checkpoint: profiles table copied from DB2 to DB1 (373 rows); gh_scanned_job_templates and gh_candidate_applications cleared; no new observations
+2026-10-14 session-end: LLM_ANSWERING=false in sandbox mode shipped (bypasses Tier 5, clean 4-tier benchmark); unit tests pass (55/55); typecheck clean; no new observations
+2026-10-14 session-end: resolver fixes shipped (country dial-codes, None deadlines, 7-day start dates, negative referrals, degree aliases); all unit tests pass (55/55); typecheck clean; no new observations
 2026-10-14 session-end: kept 2-tier header layout, removed duplicate single bar; Dashboard/Stats tabs moved beside logo in Tier 1; tests pass (4/4); no new observations
 2026-10-14 session-end: mobile responsive logo and ClientInfoDrawer aside conflict fixed; operatorMobileResponsiveLayout test added (3/3 pass); typecheck and dashboard build verified; no new observations
 2026-10-13 session-end: auto-retry for browser launch & mailbox-connected OTP errors verified; no DB migration required; activeContext updated; no new observations
@@ -606,3 +623,30 @@ checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.179187715245
 2026-10-13 checkpoint: operator dashboard carousel filtering completed; no observations
 2026-10-13 deliverable flush: dual mailbox sync and candidate round-robin dequeue complete (all 6 tasks verified and committed)
 2026-10-13 deliverable flush: migration 034 applied to remote db postgres-db2 and verified via MCP query
+2026-10-14T09:35:00+05:30 [session-start] ponytail check postgres db2 profiles location
+2026-10-14T09:35:05+05:30 [checkpoint] no observations
+2026-10-14T09:40:00+05:30 [session-start] ponytail systematic-debugging ingest pipeline wrong scanned options and unresolved country fields
+2026-10-14T09:41:15+05:30 [checkpoint] no observations
+2026-10-14 session-start scan: investigated db2 failure screenshots & diagnostics; no new observations
+2026-10-14T09:54:30+05:30 [checkpoint] no observations
+2026-10-14T09:59:15+05:30 [checkpoint] no observations
+2026-10-14 session-start scan: ponytail activated
+2026-10-14 session-end: OTP regex hardened for Greenhouse 8-char codes; unconfigured mailboxes fast-fail with MAILBOX_NOT_CONFIGURED; connector poll interval increased to 4s; resume download 2-retry loop added in ensureResumeAvailable; unit tests pass (zohoApiOtp 9/9, otpResolution 13/13); typecheck clean; no new observations
+2026-10-14T10:51:00+05:30 [checkpoint] all 5 tracks executed: scanner choice enrichment, country alias & zip_or_country fallback, consent option polarity, sms consent phone exclusion, dashboard quickpick fix. tests/pipelineFixes.test.ts passing; build clean.
+2026-10-14T10:57:00+05:30 [checkpoint] exported 639 non-applied, non-email-proof-pending applications to queued_applications_export_2026-10-14T05-26-46-231Z.csv
+2026-10-14 session-end: profile location/country/phone backfilled in db (235 updated, country code stripped, verified on postgres-db2); no new observations
+2026-10-14 session-end: profile location/country/phone backfilled in db (235 updated, country code stripped, verified on postgres-db2); activeContext updated; no new observations
+2026-10-14 session-start scan: files=0 parsed=0
+2026-10-14 session-start scan: files=19 parsed=19
+2026-10-14 12:37:41 deliverable flush: no observations
+2026-10-14 session-start scan: files=19 parsed=19
+2026-10-14 15:48:13 profile data backfilled and verified in DB1 and DB2; no observations
+2026-10-14 session-start scan: files=19 parsed=19
+2026-10-14 checkpoint: 6th subtask completed, no observations
+2026-10-14 checkpoint: all 7 subtasks completed, no observations
+2026-10-14 checkpoint: corporate policy multi-tier centralization complete, no observations
+2026-10-14 checkpoint: DB1 local sandbox sync verification complete, no observations
+2026-10-14 17:04:35 [session-start] Session started
+2026-10-14 session-start scan: files=0 parsed=0
+2026-10-14 17:15:20 [session-end] no observations
+2026-10-14 session-end: sandbox:fresh DB2 profiles sync verified (373 rows copied, ca_email dev, zoho backfilled); unit tests pass (55/55); no new observations

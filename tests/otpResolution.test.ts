@@ -428,6 +428,60 @@ describe('Phase 2: OTP Engine: Premature Break + Domain Routing + Rate Limiting'
     );
   });
 
+  it('test: MAILBOX_NOT_CONFIGURED immediately terminates session without polling 480s', async () => {
+    let recordedStatus: string | null = null;
+    let recordedErrorMessage: string | null = null;
+    let sessionCleared = false;
+    let pollAttempts = 0;
+
+    const svc = new OtpResolutionService({
+      getApplication: async () =>
+        ({
+          id: 'app-unconfigured',
+          applywizz_id: 'AWL-UNCONFIGURED',
+          job_url: 'https://gh.io/job-unconfigured',
+          status: 'OTP_REQUIRED',
+          retry_count: 0,
+        } as ApplicationRow),
+      updateStatus: async (_id, status, extra) => {
+        recordedStatus = status;
+        recordedErrorMessage = extra?.error_message ?? null;
+        return true;
+      },
+      resolvePausedSession: () => ({ session: {} as any, canonicalKey: 'session-unconfigured' }),
+      fetchZohoOtpViaApi: async () => {
+        pollAttempts++;
+        return {
+          success: false,
+          reason: 'mailbox not configured',
+          reasonCode: 'MAILBOX_NOT_CONFIGURED',
+          errorMessage: 'Candidate mailbox is not configured upstream.',
+        };
+      },
+      clearPausedSession: async () => {
+        sessionCleared = true;
+      },
+      sleep: async () => {},
+    });
+
+    const entry: OtpPendingEntry = {
+      applicationId: 'app-unconfigured',
+      email: 'unconfigured@applywizard.ai',
+      submitClickedAt: Date.now(),
+      sessionKey: 'session-unconfigured',
+      claimed: false,
+      attemptedMessageIds: [],
+      attemptedCodes: [],
+    };
+    svc.register(entry);
+    await svc.processEntryInContext(entry);
+
+    assert.equal(pollAttempts, 1, 'Must abort immediately after 1 attempt when mailbox is not configured');
+    assert.equal(sessionCleared, true, 'Must clear paused session');
+    assert.equal(recordedStatus, 'FAILED', 'Must transition to terminal FAILED status');
+    assert.ok(recordedErrorMessage?.includes('MAILBOX_NOT_CONFIGURED'), 'Error message must specify MAILBOX_NOT_CONFIGURED');
+  });
+
   it('test: budget exhaustion requeues to QUEUED when candidate mailbox is connected and under retry limit', async () => {
     let recordedStatus: string | null = null;
     let recordedRetryCount: number | null = null;

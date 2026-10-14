@@ -1,3 +1,99 @@
+## Current Session Update (2026-10-14 — Race Dropdown & Composite Education Multi-Field Fixes)
+
+- **Failure Analysis & Resolution (Remote DB2 Screenshots)**:
+  - Downloaded and analyzed 87 failure screenshots directly from Supabase storage (`proofs_failed`).
+  - Identified 2 major code-level form-filling failure causes:
+    1. **Demographic Race Dropdown Failure (`Verkada`):** Form blocked by `This field is required.` under `Please identify your race *`. Caused by sequential mounting where `#race` only appears after `#hispanic_ethnicity` is answered, combined with a blanket exclusion of `select` fields (`!isResolvedChoiceField`) in the cascade retry loop.
+    2. **Composite Education Multi-Field Failure (`Glean`):** Form blocked by red inline validation on `School`, `Discipline`, `Start date year`, and `End date year`. Caused by full ISO date strings (`YYYY-MM-DD`) being injected into `<input type="number" maxlength="4">`, which browser number validation rejected and blanked out.
+  - Reset 20 OTP timeout failed applications back to `QUEUED` for immediate worker processing.
+- **TDD Implementation & Minimal Surgical Fixes (`src/submitter/formFiller.ts`)**:
+  - Normalized education year inputs in `applyEducationFieldFallbacks()` and `isExplicitEducationField()` to extract strictly 4-digit years (`YYYY`), handling ISO dates, slash dates, and hyphenated dates cleanly.
+  - Removed the blanket `!isResolvedChoiceField` restriction from the `visibleFailedFields` retry loop in `fillForm()`, allowing dynamically revealed choice fields to be re-attempted once their prerequisite parent fields mount them to the DOM.
+- **Verification**:
+  - `tests/educationYearSanitization.test.ts` (3/3 pass).
+  - `tests/educationFallbacks.test.ts` (2/2 pass).
+  - `tests/dynamicSelectCascadeRetry.test.ts` (1/1 pass).
+  - `tests/demographicRaceMatching.test.ts` (4/4 pass).
+
+## Current Session Update (2026-10-14 — DB1 to DB2 Migration & Canonical Stats Synchronization)
+
+- **Application Database Synchronization (`gh_candidate_applications`)**:
+  - Re-resolved all target applications in DB 1 (local PostgreSQL 16) with Tier 5 LLM answering enabled (`LLM_ANSWERING=true`), promoting 45 additional applications to `QUEUED` (253 total `QUEUED`, 382 `READY_FOR_REVIEW`).
+  - Audited and verified unresolved LinkedIn fields across candidate profiles, confirming genuine data absence.
+  - Successfully copied all 635 resolved applications from local DB1 to remote DB2 (Supabase AWS ap-south-1).
+  - Preserved pre-existing 48 `APPLIED` and 19 `EMAIL_PROOF_PENDING` records in DB2 (total DB2 rows: 702).
+- **Canonical Statistics & Dashboard Alignment (`gh_application_stats_daily`, `gh_stats_rollups`)**:
+  - Identified cause of 1,320 total count on dashboards: 10,431 orphaned historical stat rows from previously deleted CSV applications remained in `gh_application_stats_daily`.
+  - Purged all orphaned stat records from `gh_application_stats_daily`.
+  - Backfilled missing `'submitted'` metric for all non-`READY_FOR_REVIEW`/`SKIPPED`/`FILTERED_OUT` applications (320 rows) so that `submitted` reflects every active/in-flight/completed application.
+  - Verified `'applied'` metric correctly includes both `APPLIED` (59) and `EMAIL_PROOF_PENDING` (29) = 88.
+  - Synced `gh_stats_rollups` to match ground truth exactly: total: 702, submitted: 320, applied: 88, failed: 19.
+
+## Current Session Update (2026-10-14 — Top Unresolved Required Questions Resolution: TDD Implementation)
+
+- **Centralized Non-Negotiable Corporate Policies & Post-Tier Guard (`src/resolver/corporatePolicies.ts`, `src/resolver/answerResolver.ts`, `src/resolver/llmSynthesizer.ts`)**:
+  - Centralized all hard non-negotiable policies into `src/resolver/corporatePolicies.ts`:
+    - Prior Interview & Employment History -> Always `"No"` (or `"false"`).
+    - Mandatory Agreements, Arbitration, Terms, Declarations, AI Policies -> Always affirmative (`"Yes"`, `"I agree"`, or `"true"`).
+    - Communication / SMS / WhatsApp Consent -> Always `"No"` (or `"false"`).
+    - Job Source / Referral -> Prefers option containing `"LinkedIn"` (with fallbacks to Job Board, Career site), or `"LinkedIn"` for text.
+  - Multi-tier enforcement:
+    - **Pre-Tier (Fast Path):** `resolvePreTierField` evaluates `matchCorporatePolicy` first, resolving immediately with Tier 1 and 1.0 confidence before checking `do you/have you/are you` patterns.
+    - **Tier 5 LLM Instructions:** Injected `CORPORATE_POLICY_PROMPT_GUIDELINES` into both single-field and batch system messages in `src/resolver/llmSynthesizer.ts`.
+    - **Post-Tier Guard (Clamping):** `AnswerResolver.resolveField` and `resolveJobApplication` wrap all resolved fields in `enforceCorporatePolicy`, ensuring any downstream tier hallucinations or legacy Q&A entries contradicting non-negotiable policy are clamped back to the policy answer.
+  - Candidate-specific fields (Candidate Location Preferences, Education Major / Discipline) remain strictly candidate profile and payload data-driven without hardcoded corporate overrides.
+- **Validation**:
+  - `tests/corporatePolicies.test.ts` (10/10 pass).
+  - `tests/corporatePoliciesIntegration.test.ts` (2/2 pass).
+  - `tests/corporatePoliciesLlmPrompt.test.ts` (1/1 pass).
+  - All 9 resolver unit test suites pass (32/32 tests).
+  - Full unit test suite `npm run test:unit` passes (55/55 tests).
+  - TypeScript compilation `npm run typecheck` passes cleanly (0 errors).
+
+
+- **Greenhouse Choice Option Matcher Enhancements (`src/utils/choiceOptions.ts`)**:
+  - Added dial-code stripping (`stripDialCodeSuffix`) for country options (e.g. `"United States +1"`, `"India +91"`), resolving the primary cause of 481 required `Country` dropdowns being marked unresolved.
+  - Added canonical degree level aliases with acronym / initials disambiguation (`ms`, `ma`, `masters`, `bs`, `ba`, `bachelors`, `doctorate`), resolving degree mismatches against strict dropdowns (`["Bachelor's", "Master's"]`, `["BS", "MS"]`).
+- **Deterministic Tier 1 Resolution Enhancements (`src/resolver/tier1Supabase.ts`)**:
+  - Guaranteed `"None"` for all deadline / timeline consideration questions.
+  - Dynamically computes start dates to exactly 1 week (7 days) ahead from run time (`Date.now() + 7 * 24 * 60 * 60 * 1000`).
+  - Broadened negative resolution regex for referrals and company connection checks (*"Do you know anyone currently at Glean?"*, *"Were you referred to this role by a current Capco employee?"*) to always resolve `"No"`.
+  - Added exclusion in email field matcher so referral questions asking for an employee's email address are not false-matched to candidate company emails.
+- **Sandbox 4-Tier-Only Resolution Flag (`LLM_ANSWERING=false`)**:
+  - Wired `LLM_ANSWERING=false` into `src/resolver/tier5LLM.ts` (`resolveTier5` and `resolveTier5Batch`).
+  - When running in sandbox mode (`SANDBOX=true` or `SANDBOX=1`) with `LLM_ANSWERING=false`, Tier 5 LLM inference is completely bypassed.
+  - Fields that miss Tiers 1–4 are cleanly marked as `source: 'unresolved'` (value `""`, confidence `0`, resolvedByTier `null`), enabling pure 4-tier benchmark evaluations without consuming LLM tokens.
+- **Clean Resolver Logging**:
+  - Removed all per-field tier waterfall logs (`[Resolver] ✅ T1...`, `[Resolver] ❌ T1...`, `T2`, `T3`, `T4`, `T5`) to keep console and container outputs clean and uncluttered.
+- **Verification**:
+  - `tests/sandboxLlmAnswering.test.ts`: 3/3 pass.
+  - `tests/choiceOptionsCountry.test.ts`: 3/3 pass.
+  - `tests/deadlinesAndStartDates.test.ts`: 2/2 pass.
+  - `tests/referralResolution.test.ts`: 2/2 pass.
+  - `tests/degreeMatching.test.ts`: 4/4 pass.
+  - Full unit test suite (`npm run test:unit`): 55/55 tests pass.
+  - `npm run typecheck`: clean (0 errors across backend and dashboard).
+
+- **Candidate Profiles Normalization & DB Backfill**:
+  - Identified 236 candidate rows in `profiles` with empty, null, or non-standard `location`, `country`, and `phone` columns.
+  - Used parsed `resume_text` as the primary source of truth, falling back to downloading and parsing the master resume PDF via S3 URLs in `raw_api_payload` and the ApplyWizz CRM API (`get-client-details`).
+  - Standardized all locations to `City, State, Country` format and normalized all USA variations to `United States`.
+  - Stripped international calling codes (`+1`, `+44`, `+353`, `+91`, `+61`, etc.) from candidate phone numbers.
+  - Successfully backfilled 235 candidate profiles live in Supabase; cleaned plus-prefix phone numbers across all remaining profiles. Only 1 synthetic test profile (`CASCADE-TEST-1`) and 2 candidates with missing CRM records (`AWL-2452`, `AWL-36027`) remain with null values where truly no data exists.
+
+
+- **Greenhouse OTP Extraction & Polling Hardening (`src/services/zoho-connector.ts`, `tests/zohoApiOtp.test.ts`)**:
+  - Improved `extractOtpCodeFromText` regex to capture 8-character alphanumeric codes across varying HTML tags, linebreaks, and labels (e.g. `Copy and paste this code into the security code field...: <CODE>` and standalone tokens) without false matching on stopwords.
+  - Increased default connector poll interval from 2000ms to 4000ms in `fetchZohoOtpViaApi` and `fetchGmailOtpViaApi` to reduce upstream rate-limiting pressure while respecting overall budgets.
+- **Fast-Fail Unconfigured Mailboxes (`src/services/zoho-connector.ts`, `src/services/otpResolutionService.ts`, `tests/otpResolution.test.ts`)**:
+  - Detected HTTP `401`, `403`, and `404` responses from both `/api/zoho/ui/inbox` and `/api/gmail/ui/inbox` as `MAILBOX_NOT_CONFIGURED`.
+  - Added `MAILBOX_NOT_CONFIGURED` to `TERMINAL_OTP_FETCH_REASONS` so worker aborts immediately on attempt 1, closing the paused browser session without looping 480 seconds.
+- **Resilient Resume Preparation (`src/submitter/liveSubmit.ts`)**:
+  - Wrapped `ensureResumeAvailable()` in a 3-attempt loop (1 initial attempt + 2 retries with 2-second backoff) to handle transient ApplyWizz download and upload hiccups gracefully.
+- **Validation**:
+  - `tests/zohoApiOtp.test.ts`: 9/9 pass.
+  - `tests/otpResolution.test.ts`: 13/13 pass.
+  - `npm run typecheck`: clean (0 errors across backend and dashboard).
 ## Current Session Update (2026-10-14 — 2-Tier Header Layout with Tabs beside Logo)
 
 - **2-Tier Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`, `tests/operatorMobileResponsiveLayout.test.ts`)**:
@@ -671,7 +767,8 @@ _Last updated: 2026-10-09_
 ### 0u. Canonical Application Statistics (migration 027 applied; 028 cutover repair pending)
 - Migrations `027_application_stats_consistency.sql` and `028_application_stats_cutover_repair.sql` define the availability cutover, transactional application facts, and global/manager/CA scopes; they intentionally do not backfill pre-trigger history.
 - `src/db/applicationStats.ts` provides the shared IST date, status, deduplication, scope, and availability contract used by Admin/Dev, Manager dashboard/operators/reports/overview/stats, and `/api/stats`.
-- `runStatsRollup()` is now a migration guard before pruning; legacy `gh_stats_rollups` is no longer used by dashboard metric APIs. Apply migration 028 to repair the currently configured future cutover.
+- `runStatsRollup()` is now a migration guard before pruning; legacy `gh_stats_rollups` is no longer used by dashboard metric APIs. It prunes non-retained applications while keeping `APPLIED` and `EMAIL_PROOF_PENDING` working rows, and prunes all `gh_scanned_job_templates`. Apply migration 028 to repair the currently configured future cutover.
+
 
 ### 0t. Answer Resolution Quality Fixes (shipped 2026-09-23)
 - **Pre-tier Consent Rule (`answerResolver.ts`):** Added a pre-tier regex match for consent, acknowledge, certify, and agree fields, immediately resolving to the affirmative dropdown/radio option or "Yes" with confidence 1.0.

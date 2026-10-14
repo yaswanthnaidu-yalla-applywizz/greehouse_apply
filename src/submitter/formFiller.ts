@@ -707,10 +707,24 @@ export function applyEducationFieldFallbacks<T extends { fieldId: string; name?:
   if (!isEducationRequiredOnDom) return fields;
 
   return fields.map((f) => {
-    if (!isExplicitEducationField(f as any) || (f.value && f.value.trim())) {
+    const combined = `${f.fieldId} ${f.name || ''} ${f.label || ''}`.toLowerCase();
+    const isYearField = /\b(start_date|end_date|start-year|end-year)\b|start year|start date|end year|end date|graduation/i.test(combined);
+
+    if (f.value && f.value.trim()) {
+      if (isYearField) {
+        const yearMatch = String(f.value).match(/\b(19\d{2}|20\d{2})\b/);
+        if (yearMatch && yearMatch[1] !== f.value.trim()) {
+          log.info(`[Form Filler] Education year normalized to "${yearMatch[1]}" from "${f.value}"`);
+          return { ...f, value: yearMatch[1] };
+        }
+      }
       return f;
     }
-    const combined = `${f.fieldId} ${f.name || ''} ${f.label || ''}`.toLowerCase();
+
+    if (!isExplicitEducationField(f as any)) {
+      return f;
+    }
+
     if (/\bdegree\b/.test(combined)) {
       log.info(`[Form Filler] Education degree defaulted to "Bachelor's Degree" — field blank`);
       return { ...f, value: "Bachelor's Degree" };
@@ -719,11 +733,11 @@ export function applyEducationFieldFallbacks<T extends { fieldId: string; name?:
       log.info(`[Form Filler] Education discipline defaulted to "Computer Science" — field blank`);
       return { ...f, value: 'Computer Science' };
     }
-    if (/\bstart_date\b|start year|start date/.test(combined)) {
+    if (/\b(start_date|start-year)\b|start year|start date/.test(combined)) {
       log.info(`[Form Filler] Education start date defaulted to "2018" — field blank`);
       return { ...f, value: '2018' };
     }
-    if (/\bend_date\b|end year|end date|graduation/.test(combined)) {
+    if (/\b(end_date|end-year)\b|end year|end date|graduation/.test(combined)) {
       log.info(`[Form Filler] Education end date defaulted to "2022" — field blank`);
       return { ...f, value: '2022' };
     }
@@ -2033,8 +2047,8 @@ function isExplicitEducationField(field: ResolvedField | ScannedField): boolean 
   const normName = (field.name || '').toLowerCase();
   const normLabel = (field.label || '').toLowerCase();
   return (
-    /^(school|degree|discipline|start_date|end_date)--\d+/i.test(normId) ||
-    /^(school|degree|discipline|start_date|end_date)--\d+/i.test(normName) ||
+    /^(school|degree|discipline|start_date|end_date|start-year|end-year)--\d+/i.test(normId) ||
+    /^(school|degree|discipline|start_date|end_date|start-year|end-year)--\d+/i.test(normName) ||
     /\beducation_attributes\b/i.test(normName) ||
     (/\b(school|degree|discipline)\b/i.test(normLabel) && /--\d+/.test(`${normId} ${normName}`))
   );
@@ -2231,10 +2245,7 @@ export async function fillForm(
     const visibleFailedFields: Array<{ result: FieldFillResult; index: number; field: ResolvedField }> = [];
     for (const { result, index } of failedInitialFields) {
       const field = fields[index];
-      const fieldType = String(field?.type || '').toLowerCase();
-      const isResolvedChoiceField =
-        fieldType === 'select' || fieldType === 'radio' || fieldType === 'checkbox' || fieldType === 'location_autocomplete';
-      if (field && !isResolvedChoiceField && await isResolvedFieldVisible(page, field)) {
+      if (field && await isResolvedFieldVisible(page, field)) {
         visibleFailedFields.push({ result, index, field });
       }
     }
