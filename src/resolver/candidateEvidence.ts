@@ -50,6 +50,7 @@ function firstResumeHeaderLines(resumeFacts: unknown, resumeText: string): strin
 export function isPhoneNumberField(field: Pick<ScannedField, 'label' | 'name' | 'fieldId'>): boolean {
   const combined = `${field.label} ${field.name} ${field.fieldId}`;
   if (/\b(?:country|calling|dialing)\s*code\b|\bphone\s*extension\b/i.test(combined)) return false;
+  if (/\b(?:consent|sms|text message|communication preference|opt[- ]?in)\b/i.test(combined)) return false;
   return /\b(?:phone|mobile|cell|telephone|contact number)\b/i.test(combined);
 }
 

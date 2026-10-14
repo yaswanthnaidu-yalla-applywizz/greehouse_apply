@@ -41,8 +41,8 @@
     "ingest:storage": "tsx src/scanner/storageCsvIngestion.ts",
     "scan:zoho-connected": "npx tsx scripts/scanZohoConnected.ts",
     "delete:old-jobs": "npx tsx scripts/deleteOldJobsAndApplications.ts",
-    "sandbox": "npm run build:dashboard && cross-env SANDBOX=true ENABLE_QUEUE_WORKER=true DASHBOARD_MODE=tsx tsx src/index.ts",
-    "sandbox:fresh": "npm run build:dashboard && cross-env SANDBOX=true tsx scripts/resetSandboxDb.ts && cross-env SANDBOX=true ENABLE_QUEUE_WORKER=true DASHBOARD_MODE=tsx tsx src/index.ts"
+    "sandbox": "npm run build:dashboard && cross-env SANDBOX=true DASHBOARD_MODE=tsx tsx src/index.ts",
+    "sandbox:fresh": "npm run build:dashboard && cross-env SANDBOX=true tsx scripts/resetSandboxDb.ts && cross-env SANDBOX=true DASHBOARD_MODE=tsx tsx src/index.ts"
   },
   "keywords": [
     "greenhouse",
