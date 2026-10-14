@@ -3,21 +3,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 
-describe('Mobile Header 2-Tier Layout in App.tsx', () => {
-  it('contains desktop-only and mobile-only 2-tier header containers', () => {
+describe('2-Tier Header Layout in App.tsx', () => {
+  it('contains Tier 1 with logo + Dashboard/Stats tabs, and Tier 2 with date filter and controls', () => {
     const appTsxPath = path.resolve(process.cwd(), 'dashboard/App.tsx');
     const content = fs.readFileSync(appTsxPath, 'utf8');
 
-    // Desktop container must hide on mobile (hidden md:flex)
-    assert.match(content, /hidden\s+md:flex/);
+    // Both Tier 1 and Tier 2 must exist
+    assert.match(content, /data-testid="header-tier-1"/);
+    assert.match(content, /data-testid="header-tier-2"/);
 
-    // Mobile container must be visible on mobile and hidden on desktop (flex\s+md:hidden\s+flex-col)
-    assert.match(content, /flex\s+md:hidden\s+flex-col/);
+    // Extract tier 1 content to verify tabs are placed beside the logo
+    const tier1Match = content.match(/data-testid="header-tier-1"[\s\S]*?data-testid="header-tier-2"/);
+    assert.ok(tier1Match, 'header-tier-1 block must be present');
+    const tier1Content = tier1Match[0];
 
-    // Mobile tier 1 should have ApplyWizz logo/branding and notification/signout
-    assert.match(content, /data-testid="mobile-header-tier-1"/);
+    assert.match(tier1Content, /setActiveTab\('dashboard'\)/);
+    assert.match(tier1Content, /setActiveTab\('stats'\)/);
 
-    // Mobile tier 2 should have date picker, refresh, dev switcher
-    assert.match(content, /data-testid="mobile-header-tier-2"/);
+    // Old duplicate desktop row must NOT be present
+    assert.doesNotMatch(content, /data-testid="unified-header"/);
   });
 });
