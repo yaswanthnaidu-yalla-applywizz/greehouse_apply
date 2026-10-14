@@ -94,7 +94,6 @@
   - `tests/zohoApiOtp.test.ts`: 9/9 pass.
   - `tests/otpResolution.test.ts`: 13/13 pass.
   - `npm run typecheck`: clean (0 errors across backend and dashboard).
-
 ## Current Session Update (2026-10-14 — 2-Tier Header Layout with Tabs beside Logo)
 
 - **2-Tier Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`, `tests/operatorMobileResponsiveLayout.test.ts`)**:

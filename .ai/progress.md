@@ -19,7 +19,6 @@
   - Backfilled `'submitted'` daily metric for all non-`READY_FOR_REVIEW`/`SKIPPED`/`FILTERED_OUT` applications (320 rows).
   - Verified `'applied'` metric properly sums `APPLIED` and `EMAIL_PROOF_PENDING` applications (88 total).
   - Aligned `gh_stats_rollups` with live application counts.
-
 ### 2-Tier Header Layout with Tabs Beside Logo (2026-10-14 Complete)
 - [x] **2-Tier Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`):**
   - Removed the standalone single-row header bar entirely.
