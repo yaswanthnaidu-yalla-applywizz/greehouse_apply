@@ -94,6 +94,24 @@ export function classifyLlmError(err: unknown): LlmFailureInfo {
 
 let synthesizerInstance: LLMSynthesizer | null = null;
 
+let sessionLlmCost = 0;
+let sessionPromptTokens = 0;
+let sessionCompletionTokens = 0;
+
+export function getSessionLlmMetrics() {
+  return {
+    cost: sessionLlmCost,
+    promptTokens: sessionPromptTokens,
+    completionTokens: sessionCompletionTokens,
+  };
+}
+
+export function resetSessionLlmMetrics() {
+  sessionLlmCost = 0;
+  sessionPromptTokens = 0;
+  sessionCompletionTokens = 0;
+}
+
 function getSynthesizer(): LLMSynthesizer {
   if (!synthesizerInstance) {
     synthesizerInstance = new LLMSynthesizer();
@@ -111,6 +129,11 @@ function toCandidateProfile(profile: ProfileRow) {
   };
 }
 
+function isSandboxLlmAnsweringDisabled(): boolean {
+  const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
+  return isSandbox && String(process.env.LLM_ANSWERING).trim().toLowerCase() === 'false';
+}
+
 /**
  * Attempts Tier 5 resolution using LLM synthesis (Gemini/OpenRouter/OpenAI).
  * Automatically writes the synthesized answer to `candidate_qa_bank` with source: 'ai'.
@@ -124,6 +147,11 @@ export async function resolveTier5(
   jobContext: { companyName: string; jobTitle: string },
   resumeText: string = ''
 ): Promise<ResolvedField | null> {
+  if (isSandboxLlmAnsweringDisabled()) {
+    log.debug(`[Resolver] 🛑 Sandbox LLM answering disabled (LLM_ANSWERING=false) — skipping T5 for ${field.label}`);
+    return null;
+  }
+
   const synthesizer = getSynthesizer();
   const context: JobContext = {
     title: jobContext.jobTitle || 'Position',
@@ -260,6 +288,10 @@ export async function resolveTier5Batch(
   jobDescription: string = ''
 ): Promise<(ResolvedField | null)[]> {
   if (fields.length === 0) return [];
+  if (isSandboxLlmAnsweringDisabled()) {
+    log.debug(`[Resolver] 🛑 Sandbox LLM answering disabled (LLM_ANSWERING=false) — skipping T5 batch for ${fields.length} fields`);
+    return new Array(fields.length).fill(null);
+  }
 
   const synthesizer = getSynthesizer();
   const context: JobContext = {
@@ -349,6 +381,11 @@ export async function resolveTier5Batch(
 
     // Record token usage if available and jobUrl is present
     if (batchResult.usage && jobContext.jobUrl) {
+      const callCost = batchResult.usage.cost ?? 0;
+      sessionLlmCost += callCost;
+      sessionPromptTokens += batchResult.usage.promptTokens ?? 0;
+      sessionCompletionTokens += batchResult.usage.completionTokens ?? 0;
+
       recordApplicationTokenUsage({
         applywizzId,
         jobUrl: jobContext.jobUrl,
