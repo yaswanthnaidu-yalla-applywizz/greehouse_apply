@@ -260,6 +260,12 @@ export function getDbClient(): SupabaseClient {
   return supabaseClientInstance;
 }
 
+/** Testing helper to inject a mock SupabaseClient. */
+export function setDbClient(client: SupabaseClient | null): void {
+  supabaseClientInstance = client;
+}
+
+
 /**
  * Default Supabase client instance.
  * Lazily instantiated proxy to avoid runtime initialization errors before env is parsed.
