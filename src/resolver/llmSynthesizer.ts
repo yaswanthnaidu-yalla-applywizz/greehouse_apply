@@ -854,9 +854,6 @@ export class LLMSynthesizer {
       const matched = matchChoiceOption(answer, choiceOptions);
 
       if (!matched) {
-        log.warn(
-          `[Resolver] ❌ T5 no option match label="${field.label}" options=${JSON.stringify(choiceOptions)}`
-        );
         return unresolvedField(field);
       }
       answer = matched;
