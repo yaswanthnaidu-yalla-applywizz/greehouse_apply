@@ -8,5 +8,8 @@ Internal ApplyWizz Greenhouse application automation (V2+). Operators ingest CSV
 
 Production: https://gh.applywizz.ai · `npm run dashboard` locally · see `.ai/techContext.md` for env and commands.
 
-
-using this to re-push github edits
+### Key Capabilities
+- **Playwright-Based Job Scanning:** Accurate DOM extraction of single-page and multi-step Greenhouse applications.
+- **5-Tier Waterfall Resolver:** Answers questions using Supabase candidates data, parsed resumes, Q&A memory banks, corporate policies, and LLM reasoning.
+- **Dynamic Cascade & Searchable Dropdowns:** Handles cascading form fields (e.g. conditional demographic disclosures) and React-Select autocomplete interfaces.
+- **Automated Zoho & Gmail OTP Handling:** Resolves email verification challenges via high-speed REST endpoints.
