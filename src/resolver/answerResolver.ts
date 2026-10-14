@@ -26,6 +26,7 @@ import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getSessionLlmM
 import { getEffectiveFieldOptions } from './llmSynthesizer.js';
 import { normalizeText } from './fingerprint.js';
 import { isPhoneNumberField, resumeAnswerMatchesPhone } from './candidateEvidence.js';
+import { matchCorporatePolicy, enforceCorporatePolicy } from './corporatePolicies.js';
 import {
   enqueueApplication,
   getApplicationByCandidateAndJob,
@@ -197,12 +198,6 @@ export function resolvePreTierField(
   const availability = resolveAvailabilityField(field, isRequired, now);
   if (availability) return availability;
 
-  const isOnsiteWillingness = /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
-    field.label
-  );
-
-  if (!isOnsiteWillingness && /^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
-
   const options = getFieldOptions(field);
   const base = {
     fieldId: field.fieldId,
@@ -217,6 +212,19 @@ export function resolvePreTierField(
     ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
     ...(field.metadata ? { metadata: field.metadata } : {}),
   };
+
+  // Check Non-Negotiable Corporate Policies first
+  const policyVal = matchCorporatePolicy(field);
+  if (policyVal !== null) {
+    const finalVal = alignResolvedChoiceOrNull(field, policyVal);
+    if (finalVal) return { ...base, value: finalVal };
+  }
+
+  const isOnsiteWillingness = /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
+    field.label
+  );
+
+  if (!isOnsiteWillingness && /^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
 
   if (/work\.auth|authorized\.to\.work|eligible\.to\.work/i.test(field.label)) {
     const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
@@ -445,7 +453,8 @@ export class AnswerResolver {
     }
   ): Promise<ResolvedField> {
     const resolved = await this.resolveFieldRaw(applywizzId, field, context);
-    return alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field));
+    const aligned = alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field));
+    return enforceCorporatePolicy(field, aligned);
   }
 
   private async resolveFieldRaw(
@@ -822,16 +831,18 @@ export class AnswerResolver {
       }
     }
 
-    // Ensure every resolved field retains choice metadata from the scanned template
+    // Ensure every resolved field retains choice metadata and satisfies corporate policies
     for (let i = 0; i < template.fields.length; i++) {
       const field = template.fields[i];
-      const resolved = resolvedFields[i];
+      let resolved = resolvedFields[i];
       if (resolved) {
+        resolved = enforceCorporatePolicy(field, resolved);
         if (field.metadata) resolved.metadata = { ...field.metadata, ...resolved.metadata };
         if (field.options) resolved.options = field.options;
         if (field.optionsComplete !== undefined) {
           resolved.optionsComplete = field.optionsComplete;
         }
+        resolvedFields[i] = resolved;
       }
     }
 
