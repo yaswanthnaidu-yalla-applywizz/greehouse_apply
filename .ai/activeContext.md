@@ -1,3 +1,26 @@
+## Current Session Update (2026-10-14 — Profiles Location, Country & Phone Number Backfill)
+
+- **Candidate Profiles Normalization & DB Backfill**:
+  - Identified 236 candidate rows in `profiles` with empty, null, or non-standard `location`, `country`, and `phone` columns.
+  - Used parsed `resume_text` as the primary source of truth, falling back to downloading and parsing the master resume PDF via S3 URLs in `raw_api_payload` and the ApplyWizz CRM API (`get-client-details`).
+  - Standardized all locations to `City, State, Country` format and normalized all USA variations to `United States`.
+  - Stripped international calling codes (`+1`, `+44`, `+353`, `+91`, `+61`, etc.) from candidate phone numbers.
+  - Successfully backfilled 235 candidate profiles live in Supabase; cleaned plus-prefix phone numbers across all remaining profiles. Only 1 synthetic test profile (`CASCADE-TEST-1`) and 2 candidates with missing CRM records (`AWL-2452`, `AWL-36027`) remain with null values where truly no data exists.
+
+
+- **Greenhouse OTP Extraction & Polling Hardening (`src/services/zoho-connector.ts`, `tests/zohoApiOtp.test.ts`)**:
+  - Improved `extractOtpCodeFromText` regex to capture 8-character alphanumeric codes across varying HTML tags, linebreaks, and labels (e.g. `Copy and paste this code into the security code field...: <CODE>` and standalone tokens) without false matching on stopwords.
+  - Increased default connector poll interval from 2000ms to 4000ms in `fetchZohoOtpViaApi` and `fetchGmailOtpViaApi` to reduce upstream rate-limiting pressure while respecting overall budgets.
+- **Fast-Fail Unconfigured Mailboxes (`src/services/zoho-connector.ts`, `src/services/otpResolutionService.ts`, `tests/otpResolution.test.ts`)**:
+  - Detected HTTP `401`, `403`, and `404` responses from both `/api/zoho/ui/inbox` and `/api/gmail/ui/inbox` as `MAILBOX_NOT_CONFIGURED`.
+  - Added `MAILBOX_NOT_CONFIGURED` to `TERMINAL_OTP_FETCH_REASONS` so worker aborts immediately on attempt 1, closing the paused browser session without looping 480 seconds.
+- **Resilient Resume Preparation (`src/submitter/liveSubmit.ts`)**:
+  - Wrapped `ensureResumeAvailable()` in a 3-attempt loop (1 initial attempt + 2 retries with 2-second backoff) to handle transient ApplyWizz download and upload hiccups gracefully.
+- **Validation**:
+  - `tests/zohoApiOtp.test.ts`: 9/9 pass.
+  - `tests/otpResolution.test.ts`: 13/13 pass.
+  - `npm run typecheck`: clean (0 errors across backend and dashboard).
+
 ## Current Session Update (2026-10-14 — 2-Tier Header Layout with Tabs beside Logo)
 
 - **2-Tier Header Layout (`dashboard/App.tsx`, `tests/mobileHeaderLayout.test.ts`, `tests/operatorMobileResponsiveLayout.test.ts`)**:
@@ -671,7 +694,8 @@ _Last updated: 2026-10-09_
 ### 0u. Canonical Application Statistics (migration 027 applied; 028 cutover repair pending)
 - Migrations `027_application_stats_consistency.sql` and `028_application_stats_cutover_repair.sql` define the availability cutover, transactional application facts, and global/manager/CA scopes; they intentionally do not backfill pre-trigger history.
 - `src/db/applicationStats.ts` provides the shared IST date, status, deduplication, scope, and availability contract used by Admin/Dev, Manager dashboard/operators/reports/overview/stats, and `/api/stats`.
-- `runStatsRollup()` is now a migration guard before pruning; legacy `gh_stats_rollups` is no longer used by dashboard metric APIs. Apply migration 028 to repair the currently configured future cutover.
+- `runStatsRollup()` is now a migration guard before pruning; legacy `gh_stats_rollups` is no longer used by dashboard metric APIs. It prunes non-retained applications while keeping `APPLIED` and `EMAIL_PROOF_PENDING` working rows, and prunes all `gh_scanned_job_templates`. Apply migration 028 to repair the currently configured future cutover.
+
 
 ### 0t. Answer Resolution Quality Fixes (shipped 2026-09-23)
 - **Pre-tier Consent Rule (`answerResolver.ts`):** Added a pre-tier regex match for consent, acknowledge, certify, and agree fields, immediately resolving to the affirmative dropdown/radio option or "Yes" with confidence 1.0.
