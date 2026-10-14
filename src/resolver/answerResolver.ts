@@ -197,7 +197,11 @@ export function resolvePreTierField(
   const availability = resolveAvailabilityField(field, isRequired, now);
   if (availability) return availability;
 
-  if (/^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
+  const isOnsiteWillingness = /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
+    field.label
+  );
+
+  if (!isOnsiteWillingness && /^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
 
   const options = getFieldOptions(field);
   const base = {
@@ -228,9 +232,31 @@ export function resolvePreTierField(
     return { ...base, value: finalVal };
   }
 
-  if (/\b(?:I agree|I consent|I certify|I acknowledge|by checking|by selecting|by submitting)\b/i.test(field.label)) {
-    const targetVal = field.type === 'checkbox' ? 'true' : 'Yes';
-    const finalVal = alignResolvedChoiceOrNull(field, targetVal);
+  // Mandatory Agreements, Acknowledgements, and Policies (Always affirmative)
+  if (
+    /\b(?:I agree|I consent|I certify|I acknowledge|by checking|by selecting|by submitting|arbitration agreement|ai policy|application policy|read the arbitration|terms and conditions)\b/i.test(
+      field.label
+    )
+  ) {
+    if (field.type === 'checkbox') return { ...base, value: 'true' };
+    // Find affirmative agreement choice option (e.g. "I will read...", "I agree", "Yes")
+    const affirmativeMatch =
+      field.options?.find((opt) =>
+        /\b(?:i agree|i will read|agree|yes|accept|understood|acknowledge)\b/i.test(opt)
+      ) || 'Yes';
+    const finalVal = alignResolvedChoiceOrNull(field, affirmativeMatch);
+    if (!finalVal) return null;
+    return { ...base, value: finalVal };
+  }
+
+  // Onsite / In-person / Office Willingness (Always affirmative / Yes)
+  if (
+    /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
+      field.label
+    )
+  ) {
+    if (field.type === 'checkbox') return { ...base, value: 'true' };
+    const finalVal = alignResolvedChoiceOrNull(field, 'Yes');
     if (!finalVal) return null;
     return { ...base, value: finalVal };
   }
