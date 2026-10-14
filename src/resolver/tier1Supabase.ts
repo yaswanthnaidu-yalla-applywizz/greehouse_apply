@@ -612,6 +612,51 @@ export function resolveStandardProfileAttribute(
     return matchBestOption(willing ? 'Yes' : 'No', field.options, field.label);
   }
 
+  // Location Preferences / Office Selection (Choice options)
+  if (
+    /(location preference|preferred location|office location|which office|which location|preferred office)/i.test(
+      combined
+    ) &&
+    Array.isArray(field.options) &&
+    field.options.length > 0
+  ) {
+    // 1. Check client.location_preferences in raw_api_payload
+    const rawPrefs = profile.raw_api_payload?.client?.location_preferences;
+    const prefList: string[] = Array.isArray(rawPrefs)
+      ? rawPrefs.map((p: any) => String(p).trim()).filter(Boolean)
+      : [];
+
+    for (const pref of prefList) {
+      const match = matchBestOption(pref, field.options, field.label);
+      if (match) return match;
+    }
+
+    // 2. Fallback: match candidate's profile.location
+    if (profile.location) {
+      const directMatch = matchBestOption(profile.location, field.options, field.label);
+      if (directMatch) return directMatch;
+
+      // Check tokens of location (e.g. "Memphis, Tennessee, United States" -> "Tennessee", "Memphis")
+      const locParts = profile.location
+        .split(/[,/]+/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 2 && !/^(united states|usa|us)$/i.test(p));
+
+      for (const part of locParts) {
+        const partMatch = matchBestOption(part, field.options, field.label);
+        if (partMatch) return partMatch;
+
+        // Also check if any option contains the part as a whole word or substring
+        const foundOpt = field.options.find((opt) => {
+          const normOpt = normalizeText(opt);
+          const normPart = normalizeText(part);
+          return normOpt.includes(normPart) || normPart.includes(normOpt);
+        });
+        if (foundOpt) return foundOpt;
+      }
+    }
+  }
+
   // Location (City, State, Residence) - must not match "United States" in visa questions
   if (
     /(candidate location|current location|\bcity\b|\bresidence\b|\baddress\b|\bpostal code\b|\bzip code\b)/i.test(combined) ||
