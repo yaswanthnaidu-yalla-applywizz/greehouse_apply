@@ -25,6 +25,7 @@ import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { buildQuestionRelevantEvidence } from './candidateEvidence.js';
 import { isBehavioralOrMotivationalQuestion } from './starClassifier.js';
+import { CORPORATE_POLICY_PROMPT_GUIDELINES } from './corporatePolicies.js';
 
 const log = createLogger('LLM Synthesizer');
 
@@ -596,11 +597,12 @@ export class LLMSynthesizer {
 
     const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
     const incompleteChoice = field.type === 'select' && field.optionsComplete === false;
-    const systemMessage = incompleteChoice
+    const baseSystemMessage = incompleteChoice
       ? 'You are an automated job application assistant. Return only one concise, exact choice label supported by candidate data. The scanned choice list is incomplete; do not invent a value. If candidate data does not support an answer, return NONE.'
       : isChoiceField
       ? 'You are an automated job application assistant. You MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.'
       : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
+    const systemMessage = `${baseSystemMessage}\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
     // If API key is configured or provider is bedrock or ollama, execute real LLM call
     if (this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock') {
@@ -898,7 +900,9 @@ CREATIVE RULE: For open-ended behavioral/experience questions ("Have you worked 
 
 OPTION RULE: For select/radio/checkbox fields with complete options provided, return exactly one provided option. For a select marked with incomplete options, do not constrain the answer to the partial sample; return a concise exact choice supported by candidate data, or NONE if unsupported.
 
-US LOCATION RULE: If asked whether the candidate is currently located in the US, and the profile shows state_of_residence or zip_or_country containing a US state or "United States", answer Yes.`;
+US LOCATION RULE: If asked whether the candidate is currently located in the US, and the profile shows state_of_residence or zip_or_country containing a US state or "United States", answer Yes.
+
+${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
     if (!(this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock')) {
       throw new Error('No LLM provider credentials configured.');
