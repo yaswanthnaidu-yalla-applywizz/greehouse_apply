@@ -152,6 +152,28 @@ function canonicalAlias(value: string): string | null {
   if (/^decline(?: to self identify)?$|^prefer not to (?:say|answer)$|^i dont wish to answer$|^choose not to disclose$/.test(normalized)) {
     return 'decline';
   }
+  // Degree levels
+  if (/\b(?:master of science|m\.s\.|ms)\b/.test(normalized)) {
+    return 'ms';
+  }
+  if (/\b(?:master of arts|m\.a\.|ma)\b/.test(normalized)) {
+    return 'ma';
+  }
+  if (/\b(?:master(?:s|\x27s)?|master of engineering)\b/.test(normalized)) {
+    return 'masters';
+  }
+  if (/\b(?:bachelor of science|b\.s\.|bs|bachelor of technology|b\.tech|btech)\b/.test(normalized)) {
+    return 'bs';
+  }
+  if (/\b(?:bachelor of arts|b\.a\.|ba)\b/.test(normalized)) {
+    return 'ba';
+  }
+  if (/\b(?:bachelor(?:s|\x27s)?|undergraduate)\b/.test(normalized)) {
+    return 'bachelors';
+  }
+  if (/\b(?:doctorate|doctoral|phd|ph\.d\.|doctor of philosophy)\b/.test(normalized)) {
+    return 'doctorate';
+  }
   return null;
 }
 
@@ -170,11 +192,42 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
 
   const alias = canonicalAlias(answer);
   if (alias) {
+    const isDegreeAlias = ['ms', 'ma', 'masters', 'bs', 'ba', 'bachelors', 'doctorate'].includes(alias);
     const aliasMatches = options.filter((option) => {
       const optionAlias = canonicalAlias(option);
-      return optionAlias === alias || normalize(option) === alias;
+      if (optionAlias === alias || normalize(option) === alias) return true;
+      if (isDegreeAlias && optionAlias) {
+        if ((alias === 'ms' || alias === 'ma') && optionAlias === 'masters') return true;
+        if (alias === 'masters' && (optionAlias === 'ms' || optionAlias === 'ma')) return true;
+        if ((alias === 'bs' || alias === 'ba') && optionAlias === 'bachelors') return true;
+        if (alias === 'bachelors' && (optionAlias === 'bs' || optionAlias === 'ba')) return true;
+      }
+      return false;
     });
     if (aliasMatches.length === 1) return aliasMatches[0];
+    if (aliasMatches.length > 1) {
+      // Disambiguate when multiple options match (e.g. MS vs MA)
+      // 1. Direct acronym match (e.g. "Master of Science" -> "MS")
+      const directAcronym = aliasMatches.find((opt) => normalize(opt) === alias);
+      if (directAcronym) return directAcronym;
+
+      // 2. Acronym from initials
+      const initials = normalizedAnswer
+        .split(' ')
+        .filter(Boolean)
+        .map((w) => w[0])
+        .join('');
+      const initialMatch = aliasMatches.find((opt) => normalize(opt) === initials);
+      if (initialMatch) return initialMatch;
+
+      // 3. Substring or highest similarity
+      const rankedMatches = aliasMatches
+        .map((opt) => ({ opt, score: fuzzySimilarity(normalizedAnswer, normalize(opt)) }))
+        .sort((a, b) => b.score - a.score);
+      if (rankedMatches[0] && (!rankedMatches[1] || rankedMatches[0].score > rankedMatches[1].score)) {
+        return rankedMatches[0].opt;
+      }
+    }
   }
 
   const polarity = semanticPolarity(answer);
