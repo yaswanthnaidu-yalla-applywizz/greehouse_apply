@@ -160,26 +160,24 @@ export const ClientInfoDrawer: React.FC<ClientInfoDrawerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!candidate) return null;
+  if (!candidate || !isOpen) return null;
   const details = extractClientDetails(candidate);
 
   return (
     <>
       {/* Backdrop overlay */}
       <div
-        className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 ${
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 opacity-100 pointer-events-auto"
         onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Slide-over Drawer Sheet */}
-      <aside
-        className={`fixed inset-y-0 right-0 z-50 w-full sm:max-w-md lg:max-w-lg bg-[#141416] border-l border-[#2c2c2e] shadow-2xl flex flex-col transform transition-transform duration-300 ease-in-out ${
-          isOpen ? 'translate-x-0' : 'translate-x-full'
-        }`}
+      <div
+        role="dialog"
+        aria-modal="true"
         aria-label="Client Information"
+        className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-md lg:max-w-lg bg-[#141416] border-l border-[#2c2c2e] shadow-2xl flex flex-col transform transition-transform duration-300 ease-in-out translate-x-0"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 bg-[#1c1c1e] border-b border-[#2c2c2e]">
@@ -363,7 +361,7 @@ export const ClientInfoDrawer: React.FC<ClientInfoDrawerProps> = ({
             </section>
           )}
         </div>
-      </aside>
+      </div>
     </>
   );
 };
