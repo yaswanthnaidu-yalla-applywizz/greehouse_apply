@@ -1,19 +1,24 @@
-## Current Session Update (2026-10-15 — Glean & Moloco Form Fill Hardening, Pre-Submit Fast-Fail & Requeue)
+## Current Session Update (2026-10-15 — Glean School Combobox Pointer Blocking Fix, Other Fallback & Number Fill)
 
-- **Root Cause Fixes for Form-Filling Failures (Glean & Moloco)**:
-  - **Education Fallback Hardening (`src/submitter/formFiller.ts`, `src/resolver/tier1Supabase.ts`)**:
-    - Discovered candidates' degree/discipline resided under `profile.resume_facts.education` rather than `profile.education`. Updated Tier 1 to resolve degree discipline directly from `resume_facts.education[0].degree`.
-    - Clamped future education start/end years (e.g. `>= 2025` like `2026-08-01`) to realistic past completion years (`2018` start, `2022` end) in `applyEducationFieldFallbacks`.
-    - Defaulted missing or blank discipline to `"Computer Science"` whenever Education is active/required.
-  - **Location Autocomplete Keyboard Commit (`src/submitter/formFiller.ts`)**:
-    - Added `ArrowDown` + `Enter` + `Tab` keyboard sequence under `rawType === 'location_autocomplete'` to reliably commit Greenhouse React-Select highlighted options when exact click target count is 0.
-  - **Pre-Submit Fast-Fail on Inline Validation Errors (`src/submitter/liveSubmit.ts`, `src/submitter/otpSession.ts`)**:
-    - Expanded error selectors to detect Greenhouse `.field__error-text`, `.inline-error`, `[class*="error-message"]`, and `.field:has(.field__error-text)`.
-    - Fails fast with `SUBMIT_FORM_FILL_ERROR` in ~2.5s instead of stalling 75s and misattributing failures to `SUBMIT_CONFIRMATION_TIMEOUT`.
-- **Requeue & Stats Sync**:
-  - Re-queued 28 failed applications (24 Glean, 4 Moloco) from `FAILED` to `QUEUED` in remote DB2.
-  - Purged 82 stale failed metrics from `gh_application_stats_daily` and synced `gh_stats_rollups`:
+- **Root Cause Fixes for Form-Filling Failures (Glean & Downstream Education Inputs)**:
+  - **Escape Dismissal on Failed Combobox Match (`src/submitter/formFiller.ts`)**:
+    - Discovered that when an uncommitted React-Select menu remains open, it floats directly over and intercepts pointer events for downstream inputs, completely blocking clicks to `#start-year--0`. Added `Escape` key press and `.blur()` if no option could be clicked to dismiss the floating menu.
+  - **School Fuzzy Match & Fallback to "Other" (`src/submitter/formFiller.ts`)**:
+    - Added `isSchool` (`/school/i.test(...)`) to use `fuzzyOptionTextMatch` instead of strict `exactOptionTextMatch`.
+    - If a candidate's school does not match any entry in Greenhouse's catalog, automatically attempts to select `"Other"`.
+  - **Hardened Number Input Filling (`src/submitter/formFiller.ts`)**:
+    - Used `found.locator.fill(val)` with a fallback to DOM evaluation for `type="number"` fields so React state transitions fire reliably.
+  - **MFA QR Code Improvement (`src/server/routes/auth.ts`, `dashboard/`)**:
+    - Integrated standard `qrcode` library to generate high-contrast PNG data URLs and added a 1-click **"Copy Key"** button with temporary feedback in the MFA enrollment modal.
+
+- **Requeue & Re-Resolution Replacement**:
+  - Re-resolved all 28 applications (24 Glean, 4 Moloco) using deterministic Tiers 1-4 and updated `applyEducationFieldFallbacks`.
+  - Replaced the `resolved_fields` in DB2 for all 28 rows with corrected values:
+    - Education discipline correctly extracted from `resume_facts.education` (e.g., Computer Science, Information Systems, Business).
+    - Education start and end years clamped from invalid/future dates (`2026-09-17`) to valid completion windows (`2018` start, `2022` end).
+  - Maintained status as `QUEUED`, cleared failure messages/screenshots, and synced daily stats:
     - Total: 705, Ready For Review: 381, Queued: 19, Applying: 9, Applied: 228 (144 APPLIED + 84 EMAIL_PROOF_PENDING), Failed: 36, Filtered Out: 32.
+
   - All unit tests (`dashboardDateRange`, `educationFallbacks`) and full TypeScript typechecks pass cleanly.
 
 ## Current Session Update (2026-10-15 — CA Email Backfill & Notification Email Dispatch)

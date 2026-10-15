@@ -116,6 +116,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
   const [mfaTotpCode, setMfaTotpCode] = useState('');
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaError, setMfaError] = useState('');
+  const [copiedSecret, setCopiedSecret] = useState(false);
   const [pendingUser, setPendingUser] = useState<AuthUser | null>(null);
 
   // Resend cooldown timer
@@ -137,6 +138,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
     setMfaTotpCode('');
     setMfaQrCode('');
     setMfaSecret('');
+    setCopiedSecret(false);
     setMfaFactorId('');
     setMfaTempToken('');
     setPendingUser(null);
@@ -376,24 +378,39 @@ export const AuthView: React.FC<AuthViewProps> = ({ onAuthSuccess, apiBaseUrl = 
             </p>
             {mfaQrCode ? (
               <div className="flex justify-center my-3">
-                <img
-                  src={formatQrCodeSrc(mfaQrCode)}
-                  alt="MFA QR Code"
-                  className="w-44 h-44 border border-[#3a3a3c] rounded-xl p-1 bg-white object-contain"
-                />
+                <div className="p-3 bg-white rounded-2xl border-2 border-[#3a3a3c] shadow-md inline-block">
+                  <img
+                    src={formatQrCodeSrc(mfaQrCode)}
+                    alt="MFA QR Code"
+                    className="w-48 h-48 block object-contain image-rendering-pixelated"
+                  />
+                </div>
               </div>
             ) : (
-              <div className="w-44 h-44 mx-auto border border-[#3a3a3c] rounded-xl flex items-center justify-center bg-[#1c1c1e] text-xs font-mono text-[#8e8e93]">
+              <div className="w-48 h-48 mx-auto border border-[#3a3a3c] rounded-xl flex items-center justify-center bg-[#1c1c1e] text-xs font-mono text-[#8e8e93]">
                 Loading QR Code...
               </div>
             )}
 
             {mfaSecret && (
-              <div className="mt-2 text-left">
-                <span className="text-[10px] uppercase font-semibold tracking-wider text-[#8e8e93] block">
-                  Manual Entry Key:
-                </span>
-                <code className="text-xs font-mono font-medium text-[#ffffff] break-all bg-[#1c1c1e] px-2 py-1 rounded border border-[#3a3a3c] inline-block mt-0.5">
+              <div className="mt-3 text-left bg-[#1c1c1e] p-2.5 rounded-xl border border-[#3a3a3c]">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-[#8e8e93]">
+                    Can't scan? Enter key manually:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(mfaSecret);
+                      setCopiedSecret(true);
+                      setTimeout(() => setCopiedSecret(false), 2000);
+                    }}
+                    className="text-[11px] font-semibold text-[#0a84ff] hover:underline cursor-pointer"
+                  >
+                    {copiedSecret ? '✓ Copied' : 'Copy Key'}
+                  </button>
+                </div>
+                <code className="text-xs font-mono font-bold text-[#ffffff] break-all select-all block bg-[#2c2c2e] px-2.5 py-1.5 rounded border border-[#3a3a3c]">
                   {mfaSecret}
                 </code>
               </div>
