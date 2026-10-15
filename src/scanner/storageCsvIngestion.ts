@@ -34,6 +34,11 @@ import crypto from 'crypto';
 import { upsertIngestRun } from '../db/ingestRuns.js';
 import { runStatsRollup } from '../db/statsRollup.js';
 import { selectCsvIngestionTarget } from '../candidate/csvUploadValidation.js';
+import { sendEmail } from '../services/azureEmail.js';
+import {
+  clearCurrentIngestFilterReport,
+  writeCurrentIngestFilterReport,
+} from './ingestFilterReport.js';
 
 const log = createLogger('Storage Csv Ingestion');
 
@@ -46,6 +51,7 @@ export interface StorageIngestionResult {
   message: string;
   /** Set when an operator stopped the run via dev stop control */
   aborted?: boolean;
+  notificationError?: string;
 }
 
 type DropzoneCsv = { name: string; createdAt: string | null };
@@ -115,6 +121,7 @@ export async function ingestCsvFromStorage(options?: {
   limit?: number;
   fileName?: string;
 }): Promise<StorageIngestionResult> {
+  await clearCurrentIngestFilterReport();
   const runId = options?.runId || crypto.randomUUID();
   const triggeredBy = options?.triggeredBy;
 
@@ -331,6 +338,30 @@ export async function ingestCsvFromStorage(options?: {
       if (!compact) log.info(`[Storage CSV Ingestion] 📦 Archived storage file to: ${archiveDest}`);
     }
 
+    let notificationError: string | undefined;
+    if (pipelineResult && ['SUCCESS', 'PARTIAL'].includes(pipelineResult.status)) {
+      try {
+        const reportPath = await writeCurrentIngestFilterReport(pipelineResult.ingestFilterReport);
+        const content = await fs.promises.readFile(reportPath);
+        const emailResult = await sendEmail({
+          to: 'yaswanthnaiduyalla@applywizz.ai',
+          subject: `ApplyWizz ingestion filter report - ${new Date().toISOString()}`,
+          text: 'The CSV report of applications filtered during ingestion is attached.',
+          attachments: [{
+            name: 'ingest-filter-report.csv',
+            contentType: 'text/csv',
+            contentBytes: content.toString('base64'),
+          }],
+        });
+        if (!emailResult.success) {
+          throw new Error(emailResult.error || 'Report email could not be sent.');
+        }
+      } catch (error) {
+        notificationError = error instanceof Error ? error.message : String(error);
+        log.error(`[Storage CSV Ingestion] Filter report notification failed: ${notificationError}`);
+      }
+    }
+
     void upsertIngestRun({
       id: runId,
       status: 'completed',
@@ -349,6 +380,7 @@ export async function ingestCsvFromStorage(options?: {
       archivePath: archiveDest,
       pipelineResult,
       message: `Successfully processed and archived ${targetFile.name}.`,
+      ...(notificationError ? { notificationError } : {}),
     };
   } finally {
     console.log = originalConsoleLog;

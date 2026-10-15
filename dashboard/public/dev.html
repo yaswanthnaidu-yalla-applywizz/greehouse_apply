@@ -160,6 +160,29 @@
         }
       };
 
+      const downloadCurrentIngestReport = async () => {
+        setError('');
+        try {
+          const response = await fetch('/api/dev/ingest-filter-report', {
+            headers: ApplyWizzRoles.getAuthHeaders(),
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.error || 'Unable to download the current ingest filter report.');
+          }
+          const url = window.URL.createObjectURL(await response.blob());
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = 'ingest-filter-report.csv';
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+        } catch (e) {
+          setError(e.message || 'Unable to download the current ingest filter report.');
+        }
+      };
+
       if (!token || access.reason === 'anon') {
         return (
           <main className="min-h-screen flex items-center justify-center p-6">
@@ -214,6 +237,9 @@
                 <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-bold border-2 border-[#1A1A2E] rounded capitalize ${tab === id ? 'bg-[#E88474] text-white' : 'bg-white'}`}>{id}</button>
               ))}
             </nav>
+            <button type="button" onClick={downloadCurrentIngestReport} className="mb-4 bg-white border-2 border-[#1A1A2E] rounded px-3 py-1.5 text-xs font-bold">
+              Download current ingest filter report
+            </button>
             {error && <div className="mb-4 bg-[#FECACA] border-2 border-[#991B1B] rounded p-3 text-sm font-bold">{error}</div>}
             {loading && <p className="text-xs font-mono font-bold mb-4">Loading…</p>}
 

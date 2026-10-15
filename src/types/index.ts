@@ -229,6 +229,17 @@ export interface CandidateSegment {
   syncedAt: string;
 }
 
+export interface IngestFilterApplication {
+  applywizzId: string;
+  jobUrl: string;
+}
+
+export interface IngestFilterReport {
+  clearanceLinks: string[];
+  excludedCompanyApplications: IngestFilterApplication[];
+  latestEmployerApplications: IngestFilterApplication[];
+}
+
 // ============================================================================
 // Multi-Tier Answer Resolution & Queue Schemas
 // ============================================================================

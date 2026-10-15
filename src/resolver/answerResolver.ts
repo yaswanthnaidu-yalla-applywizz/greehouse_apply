@@ -35,10 +35,13 @@ import {
 } from '../db/applications.js';
 import { isWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
 import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
+import { hasSecurityClearanceQuestion } from '../scanner/securityClearance.js';
+import { getApplicationExclusionReasons } from './applicationExclusions.js';
 import type {
   ApplicationStatus,
   CandidateJobApplication,
   CandidateSegment,
+  IngestFilterApplication,
   ResolvedField,
   ScannedField,
   ScannedJobTemplate,
@@ -870,7 +873,13 @@ export class AnswerResolver {
    */
   public async resolveAllApplications(
     segments: CandidateSegment[],
-    templates: ScannedJobTemplate[]
+    templates: ScannedJobTemplate[],
+    options?: {
+      onFilteredApplication?: (
+        application: IngestFilterApplication,
+        reason: 'excluded_company' | 'latest_employer'
+      ) => void;
+    }
   ): Promise<CandidateJobApplication[]> {
     this.pendingAutoQueue = [];
     const templateMap = new Map<string, ScannedJobTemplate>();
@@ -980,6 +989,27 @@ export class AnswerResolver {
               `[Resolver] ⏭️ Skipping candidate_applications upsert for ${seg.applywizzId} ${persistJobUrl} — no scan template`
             );
           }
+          continue;
+        }
+
+        if (hasSecurityClearanceQuestion(template)) {
+          log.info(
+            `[Resolver] ⏭️ Skipping ${seg.applywizzId} ${persistJobUrl} — security clearance question`
+          );
+          continue;
+        }
+
+        const exclusionReasons = getApplicationExclusionReasons(seg.profile, template.companyName || '');
+        if (exclusionReasons.length > 0) {
+          for (const reason of exclusionReasons) {
+            options?.onFilteredApplication?.(
+              { applywizzId: seg.applywizzId, jobUrl: persistJobUrl },
+              reason
+            );
+          }
+          log.info(
+            `[Resolver] ⏭️ Skipping ${seg.applywizzId} ${persistJobUrl} — company exclusion (${exclusionReasons.join(', ')})`
+          );
           continue;
         }
 
