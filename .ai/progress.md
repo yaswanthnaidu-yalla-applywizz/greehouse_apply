@@ -536,6 +536,12 @@ _Last updated: 2026-10-07_
 
 ## ✅ Fully Shipped (V2 — Production on Railway)
 
+### Security Clearance and Company Exclusion Ingestion Filters (2026-10-15)
+- [x] Excluded scanned templates containing security-clearance questions from template persistence and skipped matching applications before answer resolution.
+- [x] Skipped applications matching the candidate's exact excluded-company list or an unambiguous latest employer from cached, dated resume facts.
+- [x] Generated a three-section CSV for filtered links, emailed it after completed storage ingestion, and added an authenticated Dev dashboard download.
+- [x] Verified focused exclusion/report tests, the unit suite, and source/dashboard typechecks; implementation is local and has not been deployed.
+
 ### Responsive TSX Operator Mobile Flow (2026-10-07)
 - [x] Added a mobile-only candidates → jobs → application screen flow at ≤768px with back navigation that preserves the selected candidate and job.
 - [x] Mobile candidate cards show only name and job count; the job queue becomes a scrollable application list, and application review keeps the carousel/full-list toggle with a fixed Dry-Run and Approve & Submit bar.

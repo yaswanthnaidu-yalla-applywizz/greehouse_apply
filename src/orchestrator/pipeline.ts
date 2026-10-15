@@ -29,13 +29,28 @@ import { sendCaNotificationEmails } from '../services/caNotificationEmail.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
+  IngestFilterApplication,
+  IngestFilterReport,
   ScannedJobTemplate,
 } from '../types/index.js';
+import { hasSecurityClearanceQuestion } from '../scanner/securityClearance.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { isPipelineAbortedError, resetPipelineAbort, throwIfPipelineAborted } from './pipelineAbort.js';
 
 const log = createLogger('Pipeline');
+
+function addUniqueIngestFilterApplication(
+  applications: IngestFilterApplication[],
+  application: IngestFilterApplication
+): void {
+  if (!applications.some((item) =>
+    item.applywizzId.toUpperCase() === application.applywizzId.toUpperCase() &&
+    item.jobUrl === application.jobUrl
+  )) {
+    applications.push(application);
+  }
+}
 
 /**
  * Options configuring the End-to-End V1Pipeline execution.
@@ -66,6 +81,7 @@ export interface PipelineResult {
   maxQuestionThreshold?: number;
   supabaseTaggedCount: number;
   aiTaggedCount: number;
+  ingestFilterReport: IngestFilterReport;
   durationMs: number;
   status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
   outputFiles: {
@@ -137,6 +153,11 @@ export class V1Pipeline {
     let scannedTemplates: ScannedJobTemplate[] = [];
     let candidateSegments: CandidateSegment[] = [];
     let resolvedApplications: CandidateJobApplication[] = [];
+    const ingestFilterReport: IngestFilterReport = {
+      clearanceLinks: [],
+      excludedCompanyApplications: [],
+      latestEmployerApplications: [],
+    };
 
     // -------------------------------------------------------------
     // Phase A: Ingestion & URL Deduplication (Branch 1)
@@ -211,6 +232,9 @@ export class V1Pipeline {
       }
     }
     throwIfPipelineAborted('Phase B');
+    ingestFilterReport.clearanceLinks = Array.from(new Set(
+      scannedTemplates.filter(hasSecurityClearanceQuestion).map((template) => template.jobUrl)
+    ));
 
     // -------------------------------------------------------------
     // Phase C: Candidate Segregation & Profile Sync (Branch 2)
@@ -292,7 +316,15 @@ export class V1Pipeline {
     try {
       resolvedApplications = await this.resolver.resolveAllApplications(
         candidateSegments,
-        scannedTemplates
+        scannedTemplates,
+        {
+          onFilteredApplication: (application, reason) => {
+            const rows = reason === 'excluded_company'
+              ? ingestFilterReport.excludedCompanyApplications
+              : ingestFilterReport.latestEmployerApplications;
+            addUniqueIngestFilterApplication(rows, application);
+          },
+        }
       );
 
       await exportResolvedApplications(resolvedApplications, resolvedOutputDir);
@@ -343,6 +375,7 @@ export class V1Pipeline {
       maxQuestionThreshold: config.MAX_JOB_QUESTIONS,
       supabaseTaggedCount: supabaseCount,
       aiTaggedCount: aiCount,
+      ingestFilterReport,
       durationMs,
       status: resolvedApplications.length > 0 ? 'SUCCESS' : 'PARTIAL',
       outputFiles: {
