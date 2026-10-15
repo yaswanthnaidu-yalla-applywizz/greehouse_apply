@@ -183,11 +183,18 @@ export async function verifySubmissionSignals(
         '.field-error',
         '.field_error',
         '.field-with-errors',
+        '.field__error-text',
+        '.inline-error',
         '.errors',
         '.error-message',
+        '[class*="error-message"]',
         '.flash-error',
         '.validation-error',
         '[aria-invalid="true"]',
+        'span.error:not(:empty)',
+        'div.error:not(:empty)',
+        'p.error:not(:empty)',
+        'label.error:not(:empty)',
       ];
       for (const sel of errorSelectors) {
         const loc = page.locator(sel);

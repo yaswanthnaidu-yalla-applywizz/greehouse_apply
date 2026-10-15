@@ -654,8 +654,11 @@ export async function detectFormFillingErrors(
       '.field-error',
       '.field_error',
       '.field-with-errors',
+      '.field__error-text',
+      '.inline-error',
       '.errors',
       '.error-message',
+      '[class*="error-message"]',
       '.flash-error',
       '.validation-error',
       '[aria-invalid="true"]',
@@ -663,6 +666,7 @@ export async function detectFormFillingErrors(
       'div.error:not(:empty)',
       'p.error:not(:empty)',
       'label.error:not(:empty)',
+      '.field:has(.field__error-text)',
     ];
 
     for (const sel of errorSelectors) {

@@ -4,6 +4,7 @@ import {
   defaultDashboardCreatedAtRange,
   listIstDatesInclusive,
   parseDashboardCreatedAtRange,
+  parseDashboardStatsRange,
 } from '../src/server/dashboardDateRange.js';
 
 describe('dashboardDateRange', () => {
@@ -38,5 +39,15 @@ describe('dashboardDateRange', () => {
       '2026-09-11',
       '2026-09-12',
     ]);
+  });
+
+  it('parses single date in parseDashboardStatsRange', () => {
+    const parsed = parseDashboardStatsRange({ date: '2026-10-14' });
+    assert.ok(!('error' in parsed));
+    if ('error' in parsed) return;
+    assert.equal(parsed.preset, 'custom');
+    assert.equal(parsed.fromDate, '2026-10-14');
+    assert.equal(parsed.toDate, '2026-10-14');
+    assert.equal(parsed.label, '2026-10-14 - 2026-10-14');
   });
 });
