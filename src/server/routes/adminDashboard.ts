@@ -592,6 +592,7 @@ adminDashboardRouter.post(
         processedFile: result.processedFile,
         message: result.success ? result.message : result.aborted ? 'Pipeline stopped by operator.' : undefined,
         error: result.success ? undefined : result.message,
+        notificationError: result.notificationError,
       });
       void upsertIngestRun({
         id: runId,

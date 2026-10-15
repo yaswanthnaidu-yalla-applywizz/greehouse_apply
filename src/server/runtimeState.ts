@@ -14,6 +14,7 @@ export interface IngestRunState {
   processedFile?: string;
   message?: string;
   error?: string;
+  notificationError?: string;
 }
 
 let queueDaemon: SubmissionQueueDaemon | null = null;
