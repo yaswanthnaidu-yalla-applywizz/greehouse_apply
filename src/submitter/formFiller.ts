@@ -631,6 +631,11 @@ async function fillInteractiveSelectDropdown(
     if (!verified && retryCount === 0) {
       return fillInteractiveSelectDropdown(page, control, answerText, matchOption, 1);
     }
+  } else {
+    // If no option could be clicked, press Escape to dismiss the open dropdown menu
+    // so it doesn't float over and block pointer events for downstream inputs
+    await page.keyboard.press('Escape').catch(() => {});
+    await searchInput?.blur().catch(() => {});
   }
 
   return clicked;
@@ -1357,6 +1362,7 @@ export async function fillSingleField(
         if (interactive) {
           const isEeoField = isDemographicOrEeoField(fieldId, name, label);
           const eeoFallback = isEeoField && field.options ? resolveEeoFallbackOption(field.options) : null;
+          const isSchool = /school/i.test(`${fieldId} ${name} ${label}`);
           const selectAttempts = isReferralSource
             ? referralOptionValues
             : (selectValue ? [selectValue] : (eeoFallback ? [eeoFallback] : [selectValue]));
@@ -1374,11 +1380,22 @@ export async function fillSingleField(
               isCountryCode ? targetCountryName : attempt,
               isCountryCode
                 ? countryMatcher
-                : isSponsorship || booleanValue || isReferralSource || isEeoField
+                : isSponsorship || booleanValue || isReferralSource || isEeoField || isSchool
                 ? fuzzyOptionTextMatch
                 : exactOptionTextMatch
             );
             if (selected) break;
+          }
+
+          if (!selected && isSchool) {
+            log.info(`[Submitter] School option for "${val}" not matched directly — attempting "Other" or first catalog match`);
+            selected = await fillSearchableSelectInput(
+              page,
+              found.locator,
+              found.selector,
+              'Other',
+              fuzzyOptionTextMatch
+            );
           }
 
           if (selected) {
@@ -1901,11 +1918,15 @@ export async function fillSingleField(
           await found.locator.click().catch(() => {});
           const inputType = await found.locator.getAttribute('type').catch(() => null);
           if (inputType === 'number') {
-            await found.locator.evaluate((el, v) => {
-              (el as HTMLInputElement).value = v;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-            }, val);
+            try {
+              await found.locator.fill(val, { timeout: timeoutMs });
+            } catch {
+              await found.locator.evaluate((el, v) => {
+                (el as HTMLInputElement).value = v;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              }, val);
+            }
           } else {
             await found.locator.fill(val, { timeout: timeoutMs });
             await found.locator.evaluate((el: HTMLInputElement) => {

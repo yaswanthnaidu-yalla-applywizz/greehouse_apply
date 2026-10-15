@@ -1,3 +1,14 @@
+## Current Session Update (2026-10-15 — MFA Sign-Up QR Scanner Fix)
+
+- **MFA QR Scanner Failure Root Cause**:
+  - Supabase Auth returns a 360KB raw SVG constructed with thousands of individual `<rect>` elements without standard quiet-zone margins or `viewBox` scaling. When downscaled into a small UI container and rendered on client devices, camera scanners (Microsoft Authenticator / Google Authenticator / iOS Camera) could not resolve the module boundaries or finder patterns.
+- **Fix & Enhancements**:
+  - In `src/server/routes/auth.ts`: Integrated standard `qrcode` library to generate a high-contrast, rasterized PNG Data URI (`errorCorrectionLevel: 'M', margin: 4, width: 256`) directly from the canonical TOTP URI (`otpauth://totp/...`). Added graceful fallback to Supabase raw SVG if needed.
+  - In `dashboard/components/AuthView.tsx` & `dashboard/public/index.html`:
+    - Wrapped QR code in a clean white high-contrast card with proper quiet margins.
+    - Added 1-click **"Copy Key"** button with temporary `✓ Copied` feedback for users who prefer manual key entry into Microsoft Authenticator without scanning.
+  - Rebuilt Vite frontend bundles (`npm run build:dashboard`). All typechecks and 55 unit tests pass.
+
 ## Current Session Update (2026-10-15 — Glean & Moloco Form Fill Hardening, Pre-Submit Fast-Fail & Requeue)
 
 - **Root Cause Fixes for Form-Filling Failures (Glean & Moloco)**:
