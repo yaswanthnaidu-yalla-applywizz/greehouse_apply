@@ -78,6 +78,19 @@ describe('application company exclusion policy', () => {
     }), 'Current Corp')).toEqual([]);
   });
 
+  it('does not infer a latest employer when different companies share the latest end date', () => {
+    const candidate = profile({
+      resumeFacts: {
+        experience: [
+          { company: 'Current Corp', startDate: '2022-01', endDate: 'Present' },
+          { company: 'Other Current Corp', startDate: '2023-01', endDate: 'Present' },
+        ],
+      },
+    });
+    expect(getApplicationExclusionReasons(candidate, 'Current Corp')).toEqual([]);
+    expect(getApplicationExclusionReasons(candidate, 'Other Current Corp')).toEqual([]);
+  });
+
   it('returns both matching company reasons without duplicates', () => {
     const candidate = profile({
       raw_api_payload: {
