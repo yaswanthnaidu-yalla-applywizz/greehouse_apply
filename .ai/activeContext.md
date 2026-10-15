@@ -39,7 +39,6 @@
   - Shifted `created_at` timestamps for all 673 active applications to today (`2026-10-15` IST), ensuring operators immediately see their assigned 382 `READY_FOR_REVIEW` jobs upon signing in.
   - Synchronized `gh_stats_rollups` with live ground truth: `total: 673`, `submitted: 291`, `applied: 228`, `failed: 63`.
   - Rebuilt Vite frontend dashboard bundles (`npm run build:dashboard`). All unit tests pass (5/5) and typecheck is clean.
-
 ## Current Session Update (2026-10-14 — Race Dropdown & Composite Education Multi-Field Fixes)
 
 - **Failure Analysis & Resolution (Remote DB2 Screenshots)**:
