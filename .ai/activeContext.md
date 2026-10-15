@@ -10,10 +10,13 @@
   - **Pre-Submit Fast-Fail on Inline Validation Errors (`src/submitter/liveSubmit.ts`, `src/submitter/otpSession.ts`)**:
     - Expanded error selectors to detect Greenhouse `.field__error-text`, `.inline-error`, `[class*="error-message"]`, and `.field:has(.field__error-text)`.
     - Fails fast with `SUBMIT_FORM_FILL_ERROR` in ~2.5s instead of stalling 75s and misattributing failures to `SUBMIT_CONFIRMATION_TIMEOUT`.
-- **Requeue & Stats Sync**:
-  - Re-queued 28 failed applications (24 Glean, 4 Moloco) from `FAILED` to `QUEUED` in remote DB2.
-  - Purged 82 stale failed metrics from `gh_application_stats_daily` and synced `gh_stats_rollups`:
-    - Total: 705, Ready For Review: 381, Queued: 19, Applying: 9, Applied: 228 (144 APPLIED + 84 EMAIL_PROOF_PENDING), Failed: 36, Filtered Out: 32.
+- **Requeue & Re-Resolution Replacement**:
+  - Re-resolved all 28 applications (24 Glean, 4 Moloco) using deterministic Tiers 1-4 and updated `applyEducationFieldFallbacks`.
+  - Replaced the `resolved_fields` in DB2 for all 28 rows with corrected values:
+    - Education discipline correctly extracted from `resume_facts.education` (e.g., Computer Science, Information Systems, Business).
+    - Education start and end years clamped from invalid/future dates (`2026-09-17`) to valid completion windows (`2018` start, `2022` end).
+  - Maintained status as `QUEUED`, cleared failure messages/screenshots, and synced daily stats:
+    - Failed: 36 (dropped by 27), Applied: 229, Ready For Review: 381, Queued: 19, Applying: 9.
   - All unit tests (`dashboardDateRange`, `educationFallbacks`) and full TypeScript typechecks pass cleanly.
 
 ## Current Session Update (2026-10-15 — CA Email Backfill & Notification Email Dispatch)
