@@ -3,6 +3,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import fs from 'node:fs/promises';
 import { getSandboxPool, isSandboxMode } from '../../db/sandboxClient.js';
 import {
   getApplication,
@@ -26,10 +27,38 @@ import {
   countAuditEventsByActionInRange,
   SUBMIT_CLICK_AUDIT_ACTION,
 } from '../../db/events.js';
+import { getCurrentIngestFilterReportPath } from '../../scanner/ingestFilterReport.js';
 
 const log = createLogger('Dev Dashboard');
 
 export const devDashboardRouter = Router();
+
+devDashboardRouter.get('/ingest-filter-report', async (_req: Request, res: Response): Promise<void> => {
+  const reportPath = getCurrentIngestFilterReportPath();
+  try {
+    const report = await fs.stat(reportPath);
+    if (!report.isFile()) {
+      res.status(404).json({ error: 'No current ingest filter report is available.' });
+      return;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      res.status(404).json({ error: 'No current ingest filter report is available.' });
+      return;
+    }
+    log.error('[Dev] ingest filter report unavailable:', error);
+    res.status(500).json({ error: 'Unable to access the current ingest filter report.' });
+    return;
+  }
+
+  res.download(reportPath, 'ingest-filter-report.csv', (error) => {
+    if (!error) return;
+    log.error('[Dev] ingest filter report download failed:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Unable to download the current ingest filter report.' });
+    }
+  });
+});
 
 function parseLimit(value: unknown, fallback = 100): number {
   const parsed = Number(value);
