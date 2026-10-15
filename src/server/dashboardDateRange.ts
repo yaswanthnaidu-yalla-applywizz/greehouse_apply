@@ -19,7 +19,8 @@ export function parseDashboardStatsRange(
 ): DashboardCreatedAtRange | { error: string } {
   const explicitRange = typeof query.range === 'string' ? query.range.trim().toLowerCase() : '';
   const hasCustomDates = typeof query.from === 'string' || typeof query.to === 'string';
-  const range = explicitRange || (hasCustomDates ? 'custom' : 'day');
+  const singleDate = typeof query.date === 'string' && ISO_DATE.test(query.date.trim()) ? query.date.trim() : '';
+  const range = explicitRange || (hasCustomDates || singleDate ? 'custom' : 'day');
   const today = getISTDateString();
   let fromDate = today;
   if (range === 'week') {
@@ -34,8 +35,8 @@ export function parseDashboardStatsRange(
   }
 
   if (range === 'custom') {
-    const from = typeof query.from === 'string' ? query.from.trim() : '';
-    const to = typeof query.to === 'string' ? query.to.trim() : '';
+    const from = (typeof query.from === 'string' ? query.from.trim() : '') || singleDate;
+    const to = (typeof query.to === 'string' ? query.to.trim() : '') || singleDate;
     if (!ISO_DATE.test(from) || !ISO_DATE.test(to) || from > to) {
       return { error: 'custom stats ranges require valid from and to dates.' };
     }
