@@ -132,6 +132,7 @@
       const [mfaTotpCode, setMfaTotpCode] = useState('');
       const [mfaLoading, setMfaLoading] = useState(false);
       const [mfaError, setMfaError] = useState('');
+      const [copiedSecret, setCopiedSecret] = useState(false);
       const [pendingUser, setPendingUser] = useState(null);
 
       useEffect(() => {
@@ -152,6 +153,7 @@
         setMfaTotpCode('');
         setMfaQrCode('');
         setMfaSecret('');
+        setCopiedSecret(false);
         setMfaFactorId('');
         setMfaTempToken('');
         setPendingUser(null);
@@ -372,24 +374,39 @@
                 </p>
                 {mfaQrCode ? (
                   <div className="flex justify-center my-3">
-                    <img
-                      src={formatQrCodeSrc(mfaQrCode)}
-                      alt="MFA QR Code"
-                      className="w-44 h-44 border-2 border-[#1A1A2E] rounded-xl p-1 bg-white shadow-[2px_2px_0px_#1A1A2E] object-contain"
-                    />
+                    <div className="p-3 bg-white rounded-2xl border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] inline-block">
+                      <img
+                        src={formatQrCodeSrc(mfaQrCode)}
+                        alt="MFA QR Code"
+                        className="w-48 h-48 block object-contain"
+                      />
+                    </div>
                   </div>
                 ) : (
-                  <div className="w-44 h-44 mx-auto border-2 border-[#1A1A2E] rounded-xl flex items-center justify-center bg-gray-100 text-xs font-mono text-gray-500">
+                  <div className="w-48 h-48 mx-auto border-2 border-[#1A1A2E] rounded-xl flex items-center justify-center bg-gray-100 text-xs font-mono text-gray-500">
                     Loading QR Code...
                   </div>
                 )}
 
                 {mfaSecret && (
-                  <div className="mt-2 text-left">
-                    <span className="text-[10px] uppercase font-bold tracking-wider text-[#64748B] block">
-                      Manual Entry Key:
-                    </span>
-                    <code className="text-xs font-mono font-bold text-[#1A1A2E] break-all bg-white px-2 py-1 rounded border border-[#1A1A2E] inline-block mt-0.5">
+                  <div className="mt-3 text-left bg-white p-2.5 rounded-xl border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-[#64748B]">
+                        Can't scan? Enter key manually:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(mfaSecret);
+                          setCopiedSecret(true);
+                          setTimeout(() => setCopiedSecret(false), 2000);
+                        }}
+                        className="text-[11px] font-bold text-[#0a84ff] hover:underline cursor-pointer"
+                      >
+                        {copiedSecret ? '✓ Copied' : 'Copy Key'}
+                      </button>
+                    </div>
+                    <code className="text-xs font-mono font-bold text-[#1A1A2E] break-all select-all block bg-[#FAF4EB] px-2.5 py-1.5 rounded border border-[#1A1A2E]">
                       {mfaSecret}
                     </code>
                   </div>

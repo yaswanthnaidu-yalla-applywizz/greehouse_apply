@@ -11,6 +11,7 @@
 
 import { Router, Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
+import QRCode from 'qrcode';
 import { getDbClient, getSupabaseServerApiKey, isSupabaseConfigured } from '../../db/client.js';
 import { config } from '../../config/env.js';
 import { sendOtpEmail } from '../../services/azureEmail.js';
@@ -655,20 +656,42 @@ authRouter.post('/verify-signup-otp', async (req: Request, res: Response): Promi
       return;
     }
 
-    // Ensure raw SVG string is formatted as a base64 Data URI for image rendering
-    let rawQr = enrollData.totp?.qr_code || enrollData.qr_code || '';
-    let qrCode = rawQr;
-    if (typeof rawQr === 'string' && rawQr.trim().length > 0) {
-      let trimmedQr = rawQr.trim();
-      if (!trimmedQr.startsWith('data:')) {
-        if (trimmedQr.includes('<svg')) {
-          if (!trimmedQr.includes('xmlns=')) {
-            trimmedQr = trimmedQr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    // Generate standard high-contrast QR code image (PNG data URI) from the totp URI
+    const totpUri = enrollData.totp?.uri || enrollData.uri || '';
+    let qrCode = '';
+    if (totpUri) {
+      try {
+        qrCode = await QRCode.toDataURL(totpUri, {
+          errorCorrectionLevel: 'M',
+          margin: 4,
+          width: 256,
+          color: {
+            dark: '#000000',
+            light: '#ffffff',
+          },
+        });
+      } catch (qrErr: any) {
+        log.warn('[Auth] Failed to generate PNG QR code with QRCode lib, falling back to raw SVG:', qrErr?.message);
+      }
+    }
+
+    // Fallback to Supabase raw SVG if QRCode generation failed
+    if (!qrCode) {
+      const rawQr = enrollData.totp?.qr_code || enrollData.qr_code || '';
+      if (typeof rawQr === 'string' && rawQr.trim().length > 0) {
+        let trimmedQr = rawQr.trim();
+        if (!trimmedQr.startsWith('data:')) {
+          if (trimmedQr.includes('<svg')) {
+            if (!trimmedQr.includes('xmlns=')) {
+              trimmedQr = trimmedQr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            const base64Svg = Buffer.from(trimmedQr, 'utf-8').toString('base64');
+            qrCode = `data:image/svg+xml;base64,${base64Svg}`;
+          } else {
+            qrCode = `data:image/svg+xml;utf-8,${encodeURIComponent(trimmedQr)}`;
           }
-          const base64Svg = Buffer.from(trimmedQr, 'utf-8').toString('base64');
-          qrCode = `data:image/svg+xml;base64,${base64Svg}`;
         } else {
-          qrCode = `data:image/svg+xml;utf-8,${encodeURIComponent(trimmedQr)}`;
+          qrCode = trimmedQr;
         }
       }
     }
@@ -891,12 +914,34 @@ authRouter.post('/mfa/enroll', async (req: Request, res: Response): Promise<void
       return;
     }
 
+    const totpUri = data.totp?.uri || data.uri || '';
+    let qrCode = '';
+    if (totpUri) {
+      try {
+        qrCode = await QRCode.toDataURL(totpUri, {
+          errorCorrectionLevel: 'M',
+          margin: 4,
+          width: 256,
+          color: {
+            dark: '#000000',
+            light: '#ffffff',
+          },
+        });
+      } catch (qrErr: any) {
+        log.warn('[Auth] Failed to generate PNG QR code with QRCode lib in /mfa/enroll:', qrErr?.message);
+      }
+    }
+
+    if (!qrCode) {
+      qrCode = data.totp?.qr_code || data.qr_code || '';
+    }
+
     res.json({
       success: true,
       factorId: data.id,
-      qrCode: data.totp?.qr_code,
-      secret: data.totp?.secret,
-      uri: data.totp?.uri,
+      qrCode,
+      secret: data.totp?.secret || data.secret,
+      uri: totpUri,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'MFA enrollment failed.' });
