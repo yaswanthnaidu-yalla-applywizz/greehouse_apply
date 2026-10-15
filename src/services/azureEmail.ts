@@ -162,13 +162,18 @@ export interface SendEmailOptions {
   subject: string;
   html?: string;
   text?: string;
+  attachments?: Array<{
+    name: string;
+    contentType: string;
+    contentBytes: string;
+  }>;
 }
 
 /**
  * Sends a generic email using Microsoft Graph sendMail API.
  */
 export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
-  const { to, subject, html, text } = options;
+  const { to, subject, html, text, attachments } = options;
 
   if (!isAzureEmailConfigured()) {
     throw new Error('Azure Communication Services / Microsoft 365 credentials are not configured on the server.');
@@ -191,6 +196,14 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
           },
         },
       ],
+      ...(attachments?.length
+        ? {
+            attachments: attachments.map((attachment) => ({
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              ...attachment,
+            })),
+          }
+        : {}),
     },
     saveToSentItems: false,
   };
@@ -232,4 +245,3 @@ export async function sendOtpEmail(options: SendOtpEmailOptions): Promise<SendEm
     text: `Your ApplyWizz verification code is: ${otp}. It expires in 10 minutes.`,
   });
 }
-
