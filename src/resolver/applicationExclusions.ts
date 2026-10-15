@@ -53,16 +53,23 @@ function latestResumeEmployer(profile: ApplyWizzCandidateProfile): string | null
   if (!facts || typeof facts !== 'object' || !Array.isArray((facts as Record<string, unknown>).experience)) {
     return null;
   }
-  let latest: { company: string; endDate: number } | null = null;
+  let latestEndDate: number | null = null;
+  const latestCompanies = new Map<string, string>();
   for (const item of (facts as { experience: unknown[] }).experience) {
     if (!item || typeof item !== 'object') continue;
     const experience = item as Record<string, unknown>;
     const company = typeof experience.company === 'string' ? experience.company.trim() : '';
     const endDate = experienceEndDate(experience);
     if (!company || endDate === null) continue;
-    if (!latest || endDate > latest.endDate) latest = { company, endDate };
+    if (latestEndDate === null || endDate > latestEndDate) {
+      latestEndDate = endDate;
+      latestCompanies.clear();
+    }
+    if (endDate === latestEndDate) {
+      latestCompanies.set(normalizeCompanyName(company), company);
+    }
   }
-  return latest?.company ?? null;
+  return latestCompanies.size === 1 ? latestCompanies.values().next().value ?? null : null;
 }
 
 export function getApplicationExclusionReasons(
