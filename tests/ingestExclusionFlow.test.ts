@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ApplyWizzCandidateProfile, CandidateJobApplication, CandidateSegment, ScannedJobTemplate } from '../src/types/index.js';
 import { AnswerResolver } from '../src/resolver/answerResolver.js';
+import { renderIngestFilterReportCsv } from '../src/scanner/ingestFilterReport.js';
 import { exportScannedJobs } from '../src/scanner/exportScannedJobs.js';
+import { hasSecurityClearanceQuestion } from '../src/scanner/securityClearance.js';
 
 const { upsertRows } = vi.hoisted(() => ({ upsertRows: vi.fn() }));
 
@@ -66,12 +68,15 @@ function profile(overrides: Partial<ApplyWizzCandidateProfile> = {}): ApplyWizzC
   };
 }
 
-function segment(candidateProfile: ApplyWizzCandidateProfile): CandidateSegment {
+function segment(
+  candidateProfile: ApplyWizzCandidateProfile,
+  jobs?: CandidateSegment['jobs']
+): CandidateSegment {
   return {
     applywizzId: candidateProfile.applywizzId,
     clientName: candidateProfile.clientName,
     profile: candidateProfile,
-    jobs: [{
+    jobs: jobs || [{
       rawUrl: 'https://boards.greenhouse.io/example/jobs/1',
       canonicalUrl: 'https://boards.greenhouse.io/example/jobs/1',
       date: '2026-10-15',
@@ -164,5 +169,72 @@ describe('ingestion exclusion flow', () => {
 
     expect(resolveSpy).toHaveBeenCalledOnce();
     expect(result).toEqual([application]);
+  });
+
+  it('filters clearance and both company rules while reporting the eligible scanned application flow', async () => {
+    const outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ingest-exclusion-e2e-'));
+    temporaryDirectories.push(outputDir);
+    const clearanceUrl = 'https://boards.greenhouse.io/example/jobs/clearance';
+    const excludedUrl = 'https://boards.greenhouse.io/example/jobs/excluded';
+    const eligibleUrl = 'https://boards.greenhouse.io/example/jobs/eligible';
+    const templates = [
+      template(clearanceUrl, 'Security clearance required', 'Clearance Corp'),
+      template(excludedUrl, 'Years of experience', 'Example Corp'),
+      template(eligibleUrl, 'Years of experience', 'Different Corp'),
+    ];
+    const candidateProfile = profile({
+      raw_api_payload: {
+        additional_information: { exclude_companies: '["Example Corp"]' },
+      },
+      resumeFacts: {
+        experience: [{ company: 'Example Corp', startDate: '2022-01', endDate: 'Present' }],
+      },
+    });
+    const jobs: CandidateSegment['jobs'] = templates.map(({ jobUrl }) => ({
+      rawUrl: jobUrl,
+      canonicalUrl: jobUrl,
+      date: '2026-10-15',
+      score: '',
+      scoredJobId: '',
+      status: 'PENDING',
+    }));
+    const clearanceLinks = templates.filter(hasSecurityClearanceQuestion).map(({ jobUrl }) => jobUrl);
+    const filtered: Array<{ applywizzId: string; jobUrl: string; reason: string }> = [];
+
+    await exportScannedJobs(templates, outputDir);
+
+    const resolver = new AnswerResolver();
+    const eligibleApplication = resolvedApplication(eligibleUrl);
+    const resolveSpy = vi.spyOn(resolver, 'resolveJobApplication').mockResolvedValue(eligibleApplication);
+    const resolved = await resolver.resolveAllApplications(
+      [segment(candidateProfile, jobs)],
+      templates,
+      {
+        onFilteredApplication: (application, reason) => filtered.push({ ...application, reason }),
+      }
+    );
+    const report = {
+      clearanceLinks,
+      excludedCompanyApplications: filtered
+        .filter(({ reason }) => reason === 'excluded_company')
+        .map(({ applywizzId, jobUrl }) => ({ applywizzId, jobUrl })),
+      latestEmployerApplications: filtered
+        .filter(({ reason }) => reason === 'latest_employer')
+        .map(({ applywizzId, jobUrl }) => ({ applywizzId, jobUrl })),
+    };
+
+    expect(upsertRows.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ job_url: excludedUrl }),
+      expect.objectContaining({ job_url: eligibleUrl }),
+    ]);
+    expect(resolveSpy).toHaveBeenCalledOnce();
+    expect(resolveSpy.mock.calls[0][1].jobUrl).toBe(eligibleUrl);
+    expect(resolved).toEqual([eligibleApplication]);
+    expect(renderIngestFilterReportCsv(report)).toBe(
+      'section,awl_id,job_url\r\n' +
+      `clearance,,${clearanceUrl}\r\n` +
+      `excluded_company,AWL-1,${excludedUrl}\r\n` +
+      `latest_employer,AWL-1,${excludedUrl}\r\n`
+    );
   });
 });
