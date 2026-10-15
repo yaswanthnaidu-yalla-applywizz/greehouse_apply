@@ -17,6 +17,7 @@ import { config } from '../config/env.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { isSandboxMode } from '../db/sandboxClient.js';
 import type { ScannedJobTemplate } from '../types/index.js';
+import { hasSecurityClearanceQuestion } from './securityClearance.js';
 import { createLogger } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 
@@ -91,15 +92,16 @@ export async function exportScannedJobs(
   }
 
   let dbTemplatesPersisted = 0;
-  if (isSupabaseConfigured() && templates.length > 0) {
+  const persistableTemplates = templates.filter((template) => !hasSecurityClearanceQuestion(template));
+  if (isSupabaseConfigured() && persistableTemplates.length > 0) {
     const BATCH_SIZE = 50;
-    const totalBatches = Math.ceil(templates.length / BATCH_SIZE);
+    const totalBatches = Math.ceil(persistableTemplates.length / BATCH_SIZE);
     const supabase = getDbClient();
     let persisted = 0;
 
-    for (let i = 0; i < templates.length; i += BATCH_SIZE) {
+    for (let i = 0; i < persistableTemplates.length; i += BATCH_SIZE) {
       const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      const chunk = templates.slice(i, i + BATCH_SIZE);
+      const chunk = persistableTemplates.slice(i, i + BATCH_SIZE);
       const rows = chunk.map((template) => ({
         job_url: template.jobUrl,
         company_name: template.companyName || null,
@@ -130,13 +132,13 @@ export async function exportScannedJobs(
     }
     if (persisted === 0) {
       throw new Error(
-        `Could not upsert any of ${templates.length} scanned job templates to scanned_job_templates`
+        `Could not upsert any of ${persistableTemplates.length} scanned job templates to scanned_job_templates`
       );
     }
     dbTemplatesPersisted = persisted;
     if (!compact) {
       log.info(
-        `[Export Scanned Jobs] ✅ Upserted ${persisted}/${templates.length} templates to scanned_job_templates (fields_schema)`
+        `[Export Scanned Jobs] ✅ Upserted ${persisted}/${persistableTemplates.length} templates to scanned_job_templates (fields_schema)`
       );
     }
   }
@@ -194,7 +196,9 @@ export async function exportScannedJobs(
   const csvStats = fs.statSync(csvPath);
   if (compact) {
     const persistedNote =
-      isSupabaseConfigured() && templates.length > 0 ? ` db_templates=${dbTemplatesPersisted}/${templates.length}` : '';
+      isSupabaseConfigured() && persistableTemplates.length > 0
+        ? ` db_templates=${dbTemplatesPersisted}/${persistableTemplates.length}`
+        : '';
     log.info(
       `[Export Scanned Jobs] export jobs=${templates.length} field_rows=${csvRows.length.toLocaleString()} json_kb=${(jsonStats.size / 1024).toFixed(1)} csv_kb=${(csvStats.size / 1024).toFixed(1)}${persistedNote}`
     );
