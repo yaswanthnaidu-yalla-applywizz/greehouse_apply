@@ -1,3 +1,45 @@
+## Current Session Update (2026-10-15 — Glean & Moloco Form Fill Hardening, Pre-Submit Fast-Fail & Requeue)
+
+- **Root Cause Fixes for Form-Filling Failures (Glean & Moloco)**:
+  - **Education Fallback Hardening (`src/submitter/formFiller.ts`, `src/resolver/tier1Supabase.ts`)**:
+    - Discovered candidates' degree/discipline resided under `profile.resume_facts.education` rather than `profile.education`. Updated Tier 1 to resolve degree discipline directly from `resume_facts.education[0].degree`.
+    - Clamped future education start/end years (e.g. `>= 2025` like `2026-08-01`) to realistic past completion years (`2018` start, `2022` end) in `applyEducationFieldFallbacks`.
+    - Defaulted missing or blank discipline to `"Computer Science"` whenever Education is active/required.
+  - **Location Autocomplete Keyboard Commit (`src/submitter/formFiller.ts`)**:
+    - Added `ArrowDown` + `Enter` + `Tab` keyboard sequence under `rawType === 'location_autocomplete'` to reliably commit Greenhouse React-Select highlighted options when exact click target count is 0.
+  - **Pre-Submit Fast-Fail on Inline Validation Errors (`src/submitter/liveSubmit.ts`, `src/submitter/otpSession.ts`)**:
+    - Expanded error selectors to detect Greenhouse `.field__error-text`, `.inline-error`, `[class*="error-message"]`, and `.field:has(.field__error-text)`.
+    - Fails fast with `SUBMIT_FORM_FILL_ERROR` in ~2.5s instead of stalling 75s and misattributing failures to `SUBMIT_CONFIRMATION_TIMEOUT`.
+- **Requeue & Stats Sync**:
+  - Re-queued 28 failed applications (24 Glean, 4 Moloco) from `FAILED` to `QUEUED` in remote DB2.
+  - Purged 82 stale failed metrics from `gh_application_stats_daily` and synced `gh_stats_rollups`:
+    - Total: 705, Ready For Review: 381, Queued: 19, Applying: 9, Applied: 228 (144 APPLIED + 84 EMAIL_PROOF_PENDING), Failed: 36, Filtered Out: 32.
+  - All unit tests (`dashboardDateRange`, `educationFallbacks`) and full TypeScript typechecks pass cleanly.
+
+## Current Session Update (2026-10-15 — CA Email Backfill & Notification Email Dispatch)
+
+- **Assigned CA Email Backfill & Scope Alignment (`gh_candidate_applications`, `gh_application_stats_daily`)**:
+  - Backfilled `assigned_ca_email` across 635 applications directly from their corresponding candidate profile `ca_email` (370 profiles matched).
+  - Deleted legacy scoped daily stats and rebuilt 2,471 re-aligned `ca` and `manager_ca` scoped rows in `gh_application_stats_daily`.
+- **Automated CA Notification Email Dispatch**:
+  - Grouped all 381 `READY_FOR_REVIEW` applications into 56 distinct assigned Career Associates.
+  - Successfully dispatched personalized review notification emails to all **56 CAs** via Microsoft Graph API with 0 failures (`sent: 56, failed: 0`).
+  - Verified test probe delivery to `yaswanthnaiduyalla@applywizz.ai` (HTTP 202 Accepted).
+
+## Current Session Update (2026-10-15 — Imagine Pediatrics Resolution & Dashboard Stats Alignment)
+
+- **Failed Application Resolution & Option B Execution**:
+  - Investigated 95 production failed applications and their corresponding screenshots in `proofs_failed`.
+  - Identified 32 failures on **Imagine Pediatrics** (`Data Scientist`) caused by expired job board postings returning HTTP 302 redirects.
+  - Transitioned all 32 Imagine Pediatrics applications from `FAILED` to `FILTERED_OUT`.
+  - Purged 192 corresponding orphaned daily stats rows from `gh_application_stats_daily`.
+  - Purged 8 stale `failed` records from `gh_application_stats_daily` where retried applications subsequently succeeded (`APPLIED`/`EMAIL_PROOF_PENDING`).
+- **Date Shift & Live Dashboard Synchronization**:
+  - Shifted all 2,898 daily stat events to today (`2026-10-15` IST).
+  - Shifted `created_at` timestamps for all 673 active applications to today (`2026-10-15` IST), ensuring operators immediately see their assigned 382 `READY_FOR_REVIEW` jobs upon signing in.
+  - Synchronized `gh_stats_rollups` with live ground truth: `total: 673`, `submitted: 291`, `applied: 228`, `failed: 63`.
+  - Rebuilt Vite frontend dashboard bundles (`npm run build:dashboard`). All unit tests pass (5/5) and typecheck is clean.
+
 ## Current Session Update (2026-10-14 — Race Dropdown & Composite Education Multi-Field Fixes)
 
 - **Failure Analysis & Resolution (Remote DB2 Screenshots)**:

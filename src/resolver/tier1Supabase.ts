@@ -491,6 +491,12 @@ export function resolveStandardProfileAttribute(
         firstEdu.degree ||
         '';
     }
+    if (!candidateMajor && (profile as any)?.resume_facts?.education) {
+      const rfEdu = (profile as any).resume_facts.education;
+      if (Array.isArray(rfEdu) && rfEdu.length > 0 && rfEdu[0]?.degree) {
+        candidateMajor = String(rfEdu[0].degree);
+      }
+    }
     if (!candidateMajor && profile.raw_api_payload?.additional_information) {
       candidateMajor = String(profile.raw_api_payload.additional_information.main_subject || '');
     }
