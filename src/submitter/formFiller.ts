@@ -713,10 +713,17 @@ export function applyEducationFieldFallbacks<T extends { fieldId: string; name?:
     if (f.value && f.value.trim()) {
       if (isYearField) {
         const yearMatch = String(f.value).match(/\b(19\d{2}|20\d{2})\b/);
-        if (yearMatch && yearMatch[1] !== f.value.trim()) {
+        let normalizedYear = yearMatch ? yearMatch[1] : f.value.trim();
+        const yearNum = parseInt(normalizedYear, 10);
+        const isStart = /\b(start_date|start-year)\b|start year|start date/i.test(combined);
+        // If year is in future or unrealistic (> 2024), clamp to past valid degree completion window
+        if (!isNaN(yearNum) && yearNum >= 2025) {
+          normalizedYear = isStart ? '2018' : '2022';
+          log.info(`[Form Filler] Future education year clamped to "${normalizedYear}" from "${f.value}"`);
+        } else if (yearMatch && yearMatch[1] !== f.value.trim()) {
           log.info(`[Form Filler] Education year normalized to "${yearMatch[1]}" from "${f.value}"`);
-          return { ...f, value: yearMatch[1] };
         }
+        return { ...f, value: normalizedYear };
       }
       return f;
     }
@@ -1743,6 +1750,10 @@ export async function fillSingleField(
           await targetOption.click({ timeout: 2500 }).catch(() => {});
           fillResult.success = true;
         } else {
+          // If no option clicked, trigger ArrowDown and Enter to commit active highlighted option
+          await page.keyboard.press('ArrowDown').catch(() => {});
+          await page.waitForTimeout(100);
+          await page.keyboard.press('Enter').catch(() => {});
           await page.keyboard.press('Tab').catch(() => {});
           fillResult.success = true;
         }

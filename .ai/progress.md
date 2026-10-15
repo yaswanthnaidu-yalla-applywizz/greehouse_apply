@@ -1,3 +1,22 @@
+### CA Email Backfill & Notification Email Dispatch (2026-10-15 Complete)
+- [x] **Assigned CA Email Backfill (`gh_candidate_applications`):**
+  - Backfilled `assigned_ca_email` across 635 applications from corresponding candidate `profiles.ca_email` (370 profiles mapped).
+  - Deleted legacy scoped daily stats and rebuilt 2,471 re-aligned `ca` and `manager_ca` scoped rows in `gh_application_stats_daily`.
+- [x] **Automated CA Notification Email Dispatch (`scripts/sendCaNotifications.ts`):**
+  - Grouped all 381 `READY_FOR_REVIEW` applications into 56 distinct assigned Career Associates.
+  - Successfully dispatched review notification emails to all **56 CAs** via Microsoft Graph API with 0 failures (`sent: 56, failed: 0`).
+
+### Imagine Pediatrics Resolution & Dashboard Stats Alignment (2026-10-15 Complete)
+- [x] **Imagine Pediatrics Resolution (`gh_candidate_applications`):**
+  - Updated 32 dead posting failures from `FAILED` to `FILTERED_OUT`.
+  - Purged 192 corresponding orphaned daily stats rows from `gh_application_stats_daily`.
+  - Purged 8 stale `failed` records from `gh_application_stats_daily` where retried applications succeeded.
+- [x] **Date Shift & Live Dashboard Synchronization:**
+  - Shifted 2,898 daily stat events to today (`2026-10-15` IST).
+  - Shifted `created_at` timestamps for all 673 active applications to today (`2026-10-15` IST) so operators immediately see their assigned 382 `READY_FOR_REVIEW` jobs upon signing in.
+  - Aligned `gh_stats_rollups` with live ground truth: `total: 673`, `submitted: 291`, `applied: 228`, `failed: 63`.
+  - Rebuilt Vite frontend dashboard bundles (`npm run build:dashboard`).
+
 ### Race Dropdown & Composite Education Multi-Field Fixes (2026-10-14 Complete)
 - [x] **Composite Education Year Normalization (`src/submitter/formFiller.ts`, `tests/educationYearSanitization.test.ts`):**
   - Updated `applyEducationFieldFallbacks()` and `isExplicitEducationField()` to recognize `start-year--\d+` and `end-year--\d+`.
