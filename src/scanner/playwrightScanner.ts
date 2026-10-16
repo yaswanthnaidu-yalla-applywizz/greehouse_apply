@@ -96,6 +96,14 @@ const EXPIRED_PATTERNS = [
 ];
 
 /**
+ * Checks if a page text indicates 0 jobs found on a listing/board page without an application form.
+ */
+export function isZeroJobsExpiredPage(pageText: string, hasForm: boolean): boolean {
+  if (hasForm) return false;
+  return /\b0\s+jobs?\b|there are no jobs? (that match|available|found|fit)|no open positions/i.test(pageText);
+}
+
+/**
  * Utility to generate a randomized delay within [min, max] range.
  *
  * @param minMs - Minimum delay in milliseconds.
@@ -470,6 +478,13 @@ export class PlaywrightScanner {
           template.isExpired = true;
           return template;
         }
+      }
+
+      // Check for listing-page redirect with 0 jobs and no application form
+      const formPresent = await page.$('form#application_form, form#app_form, form[action*="applications"]').catch(() => null);
+      if (isZeroJobsExpiredPage(pageText, !!formPresent)) {
+        template.isExpired = true;
+        return template;
       }
 
       // Strategy 1: Modern Remix/React State Extraction (Authoritative for job-boards.greenhouse.io)

@@ -52,6 +52,7 @@ import { createLogger } from '../utils/logger.js';
 import { assertWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
+import { captureFailureDiagnostics } from './failureDiagnostics.js';
 import { browserManager, type ManagedBrowser } from './browserManager.js';
 
 const log = createLogger('Live Submit');
@@ -1601,11 +1602,16 @@ export async function runLiveSubmit(
         summary: fillSummary,
       };
     } else {
-      const isTimeout = /time.*out/i.test(verification.error || '');
-      const isFormError = /form (filling|validation) error/i.test(verification.error || '');
+      const isServerError = (verification.error || '').startsWith('GREENHOUSE_SERVER_ERROR:');
+      const isTimeout = !isServerError && /time.*out/i.test(verification.error || '');
+      const isFormError = !isServerError && /form (filling|validation) error/i.test(verification.error || '');
       let errorMsg: string;
 
-      if (isFormError) {
+      if (isServerError) {
+        const details = (verification.error || '').replace(/^GREENHOUSE_SERVER_ERROR:\s*/, '');
+        errorMsg = `Greenhouse server error: ${details}`;
+        log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
+      } else if (isFormError) {
         errorMsg = verification.error || 'Form filling error: Validation failed.';
         log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
       } else if (isTimeout) {
@@ -1617,28 +1623,35 @@ export async function runLiveSubmit(
       }
 
       await emitFailureDiagnostic({
-        category: isFormError ? 'SUBMIT_FORM_FILL_ERROR' : 'SUBMIT_CONFIRMATION_TIMEOUT',
+        category: isServerError || isFormError
+          ? 'SUBMIT_FORM_FILL_ERROR'
+          : 'SUBMIT_CONFIRMATION_TIMEOUT',
         stage: 'submission_confirmation',
         reason: errorMsg,
         isTerminal: false,
-        isRetryable: !isTimeout,
+        isRetryable: isServerError ? true : !isTimeout,
         applicationId: application.id || applicationId,
         jobUrl: targetUrl,
         metadata: { timeoutMs: confirmationTimeoutMs },
       });
 
       let failedProof: any = null;
-      if (page && !page.isClosed() && !screenshotCaptured) {
-        failedProof = await captureFailedScreenshot(page, application).catch(() => null);
-        if (failedProof?.url) {
-          log.info(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failedProof.url}`);
+      let errorDiagnostics: any = null;
+      if (page && !page.isClosed()) {
+        errorDiagnostics = await captureFailureDiagnostics(page).catch(() => null);
+        if (!screenshotCaptured) {
+          failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+          if (failedProof?.url) {
+            log.info(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failedProof.url}`);
+          }
+          screenshotCaptured = true;
         }
-        screenshotCaptured = true;
       }
 
       if (application.id) {
         await updateStatus(application.id, 'FAILED', {
           error_message: errorMsg,
+          error_details: errorDiagnostics,
           proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
           proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
           job_url: application.job_url,
@@ -1689,18 +1702,23 @@ export async function runLiveSubmit(
     });
 
     let failedProof: any = null;
-    if (page && !page.isClosed() && !screenshotCaptured) {
-      failedProof = await captureFailedScreenshot(page, application).catch(() => null);
-      if (failedProof?.url) {
-        log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+    let errorDiagnostics: any = null;
+    if (page && !page.isClosed()) {
+      errorDiagnostics = await captureFailureDiagnostics(page).catch(() => null);
+      if (!screenshotCaptured) {
+        failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+        if (failedProof?.url) {
+          log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+        }
+        screenshotCaptured = true;
       }
-      screenshotCaptured = true;
     }
 
     if (application.id) {
       try {
         await updateStatus(application.id, 'FAILED', {
           error_message: finalErrMsg,
+          error_details: errorDiagnostics,
           proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
           proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
           job_url: application.job_url,
@@ -1727,7 +1745,9 @@ export async function runLiveSubmit(
             log.info(`[Live Submit] 📸 Pre-close failure screenshot URL: ${failed.url}`);
             const targetAppId = application.id || application.applywizz_id;
             if (targetAppId) {
+              const preCloseDiag = await captureFailureDiagnostics(page).catch(() => null);
               await updateStatus(targetAppId, 'FAILED', {
+                error_details: preCloseDiag,
                 proof_failed_url: failed.proofFailedUrl || failed.url,
                 proof_failed_captured_at: failed.proofFailedCapturedAt || failed.capturedAt,
                 job_url: application.job_url,
