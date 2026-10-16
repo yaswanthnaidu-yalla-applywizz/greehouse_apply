@@ -178,6 +178,14 @@ export async function verifySubmissionSignals(
         }
       }
 
+      // Fast check for Greenhouse server error banner
+      const SERVER_ERROR_RE =
+        /there was an error processing your application|we were unable to submit|something went wrong|internal server error|a server error occurred/i;
+      if (SERVER_ERROR_RE.test(bodyText)) {
+        const match = bodyText.match(SERVER_ERROR_RE)?.[0] || 'Greenhouse server error';
+        return { verified: false, error: `GREENHOUSE_SERVER_ERROR: ${match}` };
+      }
+
       // 4. Fast check for inline validation or server errors
       const errorSelectors = [
         '.field-error',
