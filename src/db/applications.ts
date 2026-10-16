@@ -148,6 +148,7 @@ export interface ApplicationRow {
   csv_job_score?: number | null;
   field_count?: number | null;
   retry_count?: number | null;
+  error_details?: any | null;
 }
 
 /**
@@ -714,6 +715,7 @@ export type UpdateStatusExtra =
       error_message?: string | null;
       job_url?: string | null;
       retry_count?: number | null;
+      error_details?: any | null;
       expected_status?: ApplicationStatus;
       expected_retry_count?: number;
     };
@@ -820,6 +822,7 @@ export async function updateStatus(
     if (extra.email_proof_attempted_at !== undefined) updatePayload.email_proof_attempted_at = extra.email_proof_attempted_at;
     if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
     if (extra.retry_count !== undefined) updatePayload.retry_count = extra.retry_count;
+    if (extra.error_details !== undefined) updatePayload.error_details = extra.error_details;
   }
   const expectedStatus = extra && typeof extra === 'object' ? extra.expected_status : undefined;
   const expectedRetryCount = extra && typeof extra === 'object' ? extra.expected_retry_count : undefined;
