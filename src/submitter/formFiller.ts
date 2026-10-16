@@ -124,6 +124,30 @@ function escapeAttr(str: string): string {
 }
 
 /**
+ * Returns candidate selectors for locating the resume file input element.
+ */
+export function getResumeFileSelectors(
+  metadataSelector?: string,
+  name?: string,
+  fieldId?: string
+): string[] {
+  return [
+    metadataSelector,
+    'input[type="file"][data-field*="resume" i]',
+    'input[type="file"][accept*="pdf" i]',
+    '.resume-upload-wrapper input[type="file"]',
+    '[data-testid*="resume" i] input[type="file"]',
+    'input[type="file"]#resume',
+    'input[type="file"][name*="resume"]',
+    'input[type="file"][id*="resume"]',
+    '#resume_file',
+    name ? `input[type="file"]#${escapeId(name)}` : undefined,
+    fieldId ? `input[type="file"]#${escapeId(fieldId)}` : undefined,
+    'input[type="file"]',
+  ].filter(Boolean) as string[];
+}
+
+/**
  * Tries a list of selector candidates and returns the first visible/attached Locator.
  */
 async function findElementLocator(
@@ -1064,15 +1088,11 @@ export async function fillSingleField(
       // ==========================================
       // File Upload (Master Resume PDF ONLY)
       // ==========================================
-      const fileSelectors = [
+      const fileSelectors = getResumeFileSelectors(
         (field as any).metadata?.selector,
-        'input[type="file"]#resume',
-        'input[type="file"][name*="resume"]',
-        'input[type="file"][id*="resume"]',
-        '#resume_file',
-        `input[type="file"]#${escapeId(name)}`,
-        `input[type="file"]#${escapeId(fieldId)}`,
-      ].filter(Boolean);
+        name,
+        fieldId
+      );
 
       const found = await findElementLocator(page, fileSelectors, timeoutMs);
       if (!found) {
@@ -1111,6 +1131,12 @@ export async function fillSingleField(
       }
 
       await found.locator.setInputFiles(tempResumePath, { timeout: timeoutMs });
+      const attachedCount = await found.locator
+        .evaluate((el: HTMLInputElement) => (el.files ? el.files.length : 1))
+        .catch(() => 1);
+      if (attachedCount === 0) {
+        throw new Error('RESUME_UPLOAD_FAILED: no files attached to resume input');
+      }
       fillResult.valuePopulated = tempResumePath;
       fillResult.success = true;
       log.info(`[Form Filler] ✅ Uploaded resume for ${applywizzId}`);
