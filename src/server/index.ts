@@ -92,10 +92,6 @@ import {
   resolveTeamCandidateIdsForManager,
   resolveViewAsOperatorManagerEmail,
 } from './managerTeamScope.js';
-import {
-  isWithinSubmissionQuestionLimit,
-  isWithinSubmissionQuestionLimitForDisplay,
-} from '../submission/questionLimit.js';
 import { usersRouter } from './routes/users.js';
 import {
   applicationRowHasPersistedResolution,
@@ -118,7 +114,6 @@ import {
   demoSegment,
   demoTemplate,
   toApplicationRow,
-  mergeDemoFixtures,
   DEMO_APPLYWIZZ_ID,
   DEMO_JOB_URL,
   AKSHITHA_APPLYWIZZ_ID,
@@ -380,43 +375,10 @@ export interface LoadArtifactsOptions {
  * Call once at server startup; use POST /api/admin/refresh-artifacts to reload manually.
  */
 export function loadArtifacts(
-  outputDir: string = config.OUTPUT_DIR,
+  _outputDir: string = config.OUTPUT_DIR,
   options: LoadArtifactsOptions = {}
 ): void {
-  const resolvedOutputDir = path.resolve(process.cwd(), outputDir);
-
-  const segmentsPath = path.join(resolvedOutputDir, 'candidate_segments.json');
-  const templatesPath = path.join(resolvedOutputDir, 'scanned_jobs.json');
-  const applicationsPath = path.join(resolvedOutputDir, 'resolved_applications.json');
-
-  let segments: CandidateSegment[] = [];
-  let templates: ScannedJobTemplate[] = [];
-  let applications: CandidateJobApplication[] = [];
-
-  if (fs.existsSync(segmentsPath)) {
-    try {
-      segments = JSON.parse(fs.readFileSync(segmentsPath, 'utf-8'));
-    } catch (err: any) {
-      log.warn(`[Server] ⚠️ Failed to read ${segmentsPath}: ${err.message}`);
-    }
-  }
-
-  if (fs.existsSync(templatesPath)) {
-    try {
-      templates = JSON.parse(fs.readFileSync(templatesPath, 'utf-8'));
-    } catch (err: any) {
-      log.warn(`[Server] ⚠️ Failed to read ${templatesPath}: ${err.message}`);
-    }
-  }
-
-  if (fs.existsSync(applicationsPath)) {
-    try {
-      applications = JSON.parse(fs.readFileSync(applicationsPath, 'utf-8'));
-    } catch (err: any) {
-      log.warn(`[Server] ⚠️ Failed to read ${applicationsPath}: ${err.message}`);
-    }
-  }
-
+  // V2+: Supabase is authoritative. Artifact cache holds demo fixtures only.
   const secondaryDemo = loadSecondaryDemoArtifacts();
   const secondarySegment = secondaryDemo.segment;
   const secondaryApplications = secondaryDemo.applications;
@@ -426,46 +388,19 @@ export function loadArtifacts(
   if (secondarySegment) {
     pinnedSegments.push(secondarySegment);
   }
-  const pinnedApplywizzIds = new Set(pinnedSegments.map((s) => s.applywizzId));
 
   const pinnedApplications: CandidateJobApplication[] = [demoApplication, ...secondaryApplications];
-  const pinnedApplicationKeys = new Set(
-    pinnedApplications.map((a) => `${a.applywizzId}::${a.jobUrl}`)
-  );
-  const pinnedTemplateUrls = new Set([demoTemplate.jobUrl, ...secondaryTemplates.map((t) => t.jobUrl)]);
 
-  artifactCache.candidateSegments = mergeDemoFixtures(
-    [
-      ...pinnedSegments,
-      ...segments.filter((s) => !pinnedApplywizzIds.has(s.applywizzId)),
-    ],
-    pinnedSegments,
-    (s) => s.applywizzId
-  );
-  artifactCache.scannedJobs = mergeDemoFixtures(
-    [
-      demoTemplate,
-      ...secondaryTemplates,
-      ...templates.filter((t) => !pinnedTemplateUrls.has(t.jobUrl)),
-    ],
-    [demoTemplate, ...secondaryTemplates],
-    (t) => t.jobUrl
-  );
-  artifactCache.resolvedApplications = mergeDemoFixtures(
-    [
-      ...pinnedApplications,
-      ...applications.filter((a) => !pinnedApplicationKeys.has(`${a.applywizzId}::${a.jobUrl}`)),
-    ],
-    pinnedApplications,
-    (a) => `${a.applywizzId}::${a.jobUrl}`
-  );
+  artifactCache.candidateSegments = pinnedSegments;
+  artifactCache.scannedJobs = [demoTemplate, ...secondaryTemplates];
+  artifactCache.resolvedApplications = pinnedApplications;
   artifactCache.lastLoadedAt = new Date().toISOString();
 
   rebuildLookupMaps();
 
   if (options.log) {
     log.info(
-      `[Server] ✅ Artifacts loaded: ${artifactCache.candidateSegments.length} candidates, ${artifactCache.scannedJobs.length} templates, ${artifactCache.resolvedApplications.length} applications`
+      `[Server] ✅ Artifacts initialized: V2 Supabase mode active (demo fixtures ready)`
     );
   }
 }
@@ -729,114 +664,45 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   }
   app.use('/resumes', express.static(resumesDir));
 
-  // Dashboard web assets (HTML guarded by role when Bearer token is sent)
-  const publicDir = path.resolve(process.cwd(), 'dashboard/public');
+  // Dashboard web assets — TSX/Vite dist only
   const distDashboardDir = path.resolve(process.cwd(), 'dist/client');
-  const operatorIndexPath = path.join(publicDir, 'index.html');
   const distDashboardIndexPath = path.join(distDashboardDir, 'index.html');
-  const managerHtmlPath = path.join(publicDir, 'manager.html');
   const distManagerIndexPath = path.join(distDashboardDir, 'manager/index.html');
-  const adminHtmlPath = path.join(publicDir, 'admin.html');
   const distAdminIndexPath = path.join(distDashboardDir, 'admin/index.html');
-  const devHtmlPath = path.join(publicDir, 'dev.html');
   const distDevIndexPath = path.join(distDashboardDir, 'dev/index.html');
 
-  const dashboardMode = (config.DASHBOARD_MODE ?? process.env.DASHBOARD_MODE ?? 'html').toLowerCase();
-
-  if (dashboardMode === 'tsx') {
-    app.use(express.static(distDashboardDir, { index: false }));
-  }
+  app.use(express.static(distDashboardDir, { index: false }));
 
   app.get('/', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
-    if (dashboardMode === 'tsx') {
-      if (fs.existsSync(distDashboardIndexPath)) {
-        res.sendFile(distDashboardIndexPath);
-        return;
-      }
-      log.warn('[Server] dist/client/index.html not found, falling back to public/index.html');
+    if (fs.existsSync(distDashboardIndexPath)) {
+      res.sendFile(distDashboardIndexPath);
+    } else {
+      res.status(503).send('Dashboard bundle not found. Run npm run build:dashboard.');
     }
-    if (fs.existsSync(operatorIndexPath)) {
-      res.sendFile(operatorIndexPath);
-      return;
-    }
-    res.status(404).send('Operator dashboard page not found.');
-  });
-
-  app.get('/fallback', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
-    if (fs.existsSync(operatorIndexPath)) {
-      res.sendFile(operatorIndexPath);
-      return;
-    }
-    res.status(404).send('Fallback operator dashboard page not found.');
   });
 
   app.get('/admin', requireRoleIfAuthenticated('admin', 'dev'), (_req: Request, res: Response) => {
-    if (dashboardMode === 'tsx') {
-      if (fs.existsSync(distAdminIndexPath)) {
-        res.sendFile(distAdminIndexPath);
-        return;
-      }
-      log.warn('[Server] dist/client/admin/index.html not found, falling back to public/admin.html');
+    if (fs.existsSync(distAdminIndexPath)) {
+      res.sendFile(distAdminIndexPath);
+    } else {
+      res.status(503).send('Admin dashboard bundle not found. Run npm run build:dashboard.');
     }
-    if (fs.existsSync(adminHtmlPath)) {
-      res.sendFile(adminHtmlPath);
-      return;
-    }
-    res.status(404).send('Admin dashboard page not found.');
-  });
-
-  app.get('/admin/fallback', requireRoleIfAuthenticated('admin', 'dev'), (_req: Request, res: Response) => {
-    if (fs.existsSync(adminHtmlPath)) {
-      res.sendFile(adminHtmlPath);
-      return;
-    }
-    res.status(404).send('Fallback admin dashboard page not found.');
   });
 
   app.get('/manager', requireRoleIfAuthenticated('manager', 'dev'), (_req: Request, res: Response) => {
-    if (dashboardMode === 'tsx') {
-      if (fs.existsSync(distManagerIndexPath)) {
-        res.sendFile(distManagerIndexPath);
-        return;
-      }
-      log.warn('[Server] dist/client/manager/index.html not found, falling back to public/manager.html');
+    if (fs.existsSync(distManagerIndexPath)) {
+      res.sendFile(distManagerIndexPath);
+    } else {
+      res.status(503).send('Manager dashboard bundle not found. Run npm run build:dashboard.');
     }
-    if (fs.existsSync(managerHtmlPath)) {
-      res.sendFile(managerHtmlPath);
-      return;
-    }
-    res.status(404).send('Manager dashboard page not found.');
-  });
-
-  app.get('/manager/fallback', requireRoleIfAuthenticated('manager', 'dev'), (_req: Request, res: Response) => {
-    if (fs.existsSync(managerHtmlPath)) {
-      res.sendFile(managerHtmlPath);
-      return;
-    }
-    res.status(404).send('Fallback manager dashboard page not found.');
   });
 
   app.get('/dev', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
-    if (dashboardMode === 'tsx') {
-      if (fs.existsSync(distDevIndexPath)) {
-        res.sendFile(distDevIndexPath);
-        return;
-      }
-      log.warn('[Server] dist/client/dev/index.html not found, falling back to public/dev.html');
+    if (fs.existsSync(distDevIndexPath)) {
+      res.sendFile(distDevIndexPath);
+    } else {
+      res.status(503).send('Dev dashboard bundle not found. Run npm run build:dashboard.');
     }
-    if (fs.existsSync(devHtmlPath)) {
-      res.sendFile(devHtmlPath);
-      return;
-    }
-    res.status(404).send('Developer dashboard page not found.');
-  });
-
-  app.get('/dev/fallback', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
-    if (fs.existsSync(devHtmlPath)) {
-      res.sendFile(devHtmlPath);
-      return;
-    }
-    res.status(404).send('Fallback developer dashboard page not found.');
   });
 
   app.get('/dev/db', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
@@ -961,8 +827,11 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     `);
   });
 
-  // Favicon / logo / other public assets. index:false so '/' stays on the guarded HTML routes.
-  app.use(express.static(publicDir, { index: false }));
+  // Favicon / logo / other public assets (static images, CSS).
+  const publicDir = path.resolve(process.cwd(), 'dashboard/public');
+  if (fs.existsSync(publicDir)) {
+    app.use(express.static(publicDir, { index: false }));
+  }
 
   const operatorApiGuard = [requireAuth, requireOperatorDashboardAccess] as const;
   const candidateListApiGuard = [requireAuth, requireRole('operator', 'manager', 'admin', 'dev')] as const;
@@ -1205,7 +1074,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    */
   app.post('/api/admin/refresh-artifacts', (_req: Request, res: Response) => {
     loadArtifacts(outputDir);
-    res.json({ reloaded: true, timestamp: artifactCache.lastLoadedAt });
+    res.json({ reloaded: true, timestamp: artifactCache.lastLoadedAt, message: 'V2 uses direct database queries' });
   });
 
 
@@ -1649,9 +1518,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           status: appItem?.status || (template?.isExpired ? 'EXPIRED' : 'PENDING'),
           fieldsCount,
           hasManualEdits,
-          eligibleForSubmission: isWithinSubmissionQuestionLimitForDisplay({
-            field_count: fieldsCount,
-          }),
+          eligibleForSubmission: true,
         };
       });
 
@@ -1789,12 +1656,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
           fieldsCount,
           resolved_fields: enrichResolvedFieldsWithTemplateOptions(application.resolved_fields, template),
           hasManualEdits: Boolean(application.has_manual_edits),
-          eligibleForSubmission: isWithinSubmissionQuestionLimitForDisplay({
-            field_count: application.field_count ?? fieldsCount,
-          }),
-          questionLimitBlocked: !isWithinSubmissionQuestionLimit({
-            field_count: application.field_count ?? fieldsCount,
-          }).eligible,
+          eligibleForSubmission: true,
+          questionLimitBlocked: false,
         });
       }
     }
@@ -2204,9 +2067,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * Catch-all route serving the dashboard SPA index.html.
    */
   app.get('*', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
-    const indexPath = path.resolve(process.cwd(), 'dashboard/public/index.html');
-    if (fs.existsSync(indexPath)) {
-      res.sendFile(indexPath);
+    if (fs.existsSync(distDashboardIndexPath)) {
+      res.sendFile(distDashboardIndexPath);
     } else {
       res.status(200).send(`
         <!DOCTYPE html>
