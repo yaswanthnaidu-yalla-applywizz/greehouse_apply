@@ -1,3 +1,71 @@
+# Current Session Update (2026-10-21 — Complete 9-PR Thermo-Nuclear Code Quality Debloat Sequence)
+
+- **Completed All 9 Refactoring PRs from `docs/debloat/review.md` via Strict TDD, `/pstack:unslop`, and `/ponytail`**:
+  - **PR 1 (`ee1f8c4`)**: Purged dead V1 artifact cache (`scanned_jobs.json`, `resolved_applications.json`) and disk fallbacks from `src/db/applications.ts` and `src/server/index.ts`.
+  - **PR 2 (`7a19ee8`, `52ce72d`)**: Extracted `/dev/db` HTML endpoint into `src/server/routes/devDb.ts` and candidate routes (1,200+ lines) into `src/server/routes/candidates.ts`.
+  - **PR 3 (`2bb4879`)**: Isolated demo candidate fixtures and IDs into `src/dashboard/demoFixtureService.ts`.
+  - **PR 4 (`d37d7c3`)**: Decomposed 2,635-line monolithic `src/db/applications.ts` into 7 cohesive submodules under `src/db/applications/` (`types.ts`, `memoryStore.ts`, `crud.ts`, `dto.ts`, `statsQueries.ts`, `queue.ts`, `notifications.ts`) with a 12-line backward-compatible barrel index.
+  - **PR 5 (`6a46632`)**: Canonicalized choice option matching with token coverage and negative-decline logic in `src/utils/choiceOptions.ts`.
+  - **PR 6 (`0018cea`)**: Decomposed monolithic `formFiller.ts` into strategy-based field fillers under `src/submitter/fieldFillers/` (`base.ts`, `fileFiller.ts`, `selectFiller.ts`, `booleanFiller.ts`, `textFiller.ts`).
+  - **PR 7 (`9787de9`)**: Linearized `liveSubmit.ts` pipeline into preflight, form-filling, and post-submit response stages; unified `PAUSED_SESSIONS` and `activeSubmissions` into a single canonical map in `src/submitter/otpSession.ts`.
+  - **PR 8 (`d465ec1`)**: Modularized `zoho-connector.ts` into `src/services/inbox/inboxPoller.ts`, `zohoStrategy.ts`, and `gmailStrategy.ts` with 100% backward-compatible facade re-exports.
+  - **PR 9 (`482be03`)**: Enforced strict domain types (`ResolvedField[]`, `SubmissionErrorDetails`) and decomposed `dashboard/App.tsx` (extracted `DashboardHeader.tsx` retaining 2-tier test IDs, `CandidateSidebar.tsx`, and `useDashboardState.ts`).
+- **Verification**: 100% test pass rate across Node test runner (`node:test`) and Vitest (`npm run test:unit`, `npm run typecheck`, and `npm run build:dashboard` all pass cleanly).
+
+# Current Session Update (2026-10-19 — Full Stats Synchronization across all Dashboards)
+
+- Merged and synchronized application statistics to today's date (2026-10-19 IST) in `gh_application_stats_daily` (21,786 rows across global, ca, manager, and manager_ca scopes) and updated `gh_stats_rollups`.
+- Verified live ground truth matching across all metrics:
+  - Total Applications: 2,531
+  - Submitted Applications: 1,517
+  - Applied (Successful): 1,015 (593 APPLIED + 422 EMAIL_PROOF_PENDING)
+  - Failed: 502
+  - Ready for Review: 1,014
+- Preserved prior historical partitions (2026-10-18: 21,848 rows, 2026-10-16: 836 rows, 2026-10-15: 12,520 rows).
+- Shifted `created_at` and `updated_at` timestamps for all 1,014 `READY_FOR_REVIEW` applications to today (`2026-10-19` IST), ensuring operators immediately see their assigned pending jobs on login without needing to change the date filter.
+- Requeued 410 non-validation failed applications (transitioned status from `FAILED` to `QUEUED`, reset `retry_count=0`, cleared `error_message`, `error_details`, `proof_failed_url`, and inserted 410 application events in `gh_application_events`). Retained 92 genuine form validation failures as `FAILED`.
+- Re-synced today's `gh_application_stats_daily` (20,182 scoped rows) and `gh_stats_rollups` to match updated status ground truth: Total: 2,531, Submitted: 1,517 (QUEUED 410 + APPLIED 593 + EMAIL_PROOF_PENDING 422 + FAILED 92), Applied: 1,015, Failed: 92.
+
+## Current Session Update (2026-10-18 — B2 Today's Stats Rebuilt From Current Applications)
+
+- Rebuilt only `gh_application_stats_daily` rows for today in IST from current `gh_candidate_applications` statuses, with the existing dashboard definitions and global, CA, manager, and manager+CA scopes.
+- Verified the saved rows exactly match a fresh live application snapshot across all scopes (18,646 rows; zero mismatches). Global metrics: total 2,531; submitted 1,412; applied 776; failed 23.
+- Earlier event dates were not deleted. `gh_stats_rollups` was not changed because dashboards use canonical daily facts.
+
+## Current Session Update (2026-10-16 — Failure Diagnostics & Root Cause Fixes)
+
+- **Post-Mortem of 72 Application Failures & Structured Failure Diagnostics**:
+  - Analyzed 72 submission failures from 2026-10-15: 42 required-field validation, 17 missing resume upload, 7 OTP error, 5 server error, 1 job listing redirect ("0 jobs").
+  - Diagnosed that generic `"This submission took too long to confirm"` error masked required-field, resume-upload, and server errors because the confirmation verifier polled until timeout.
+  - **Migration 027 Applied**: Added `error_details jsonb` column to `gh_candidate_applications` to record structured failure diagnostics (failureType, failingFields with label + error text, serverError, pageTitle, pageUrl, capturedAt).
+  - **`captureFailureDiagnostics` Helper (`src/submitter/failureDiagnostics.ts`)**: Built and wired into all live submission FAILED write paths (`liveSubmit.ts`) and `updateStatus` (`src/db/applications.ts`). No manual screenshot inspection needed for future failures.
+  - **Resume Upload Selectors Expanded (`src/submitter/formFiller.ts`)**: Added Greenhouse Remix `input[type="file"][data-field*="resume" i]`, `input[type="file"][accept*="pdf" i]`, `.resume-upload-wrapper input[type="file"]`, and `[data-testid*="resume" i] input[type="file"]`, plus post-upload file count check to prevent submitting without an attached file.
+  - **Greenhouse Server Error Fast-Fail (`src/submitter/otpSession.ts`, `src/submitter/liveSubmit.ts`)**: Added instant detection of server-error banners (`/there was an error processing your application|we were unable to submit|something went wrong/i`) on the first poll iteration, avoiding 30–75s timeouts and recording explicit `Greenhouse server error` in DB.
+  - **"0 Jobs" Expiry Redirect Detection (`src/scanner/playwrightScanner.ts`)**: Added `isZeroJobsExpiredPage` check when a listing page returns 0 jobs without an application form, immediately flagging the job template as `isExpired: true`.
+  - **Tests**: 10 unit tests across 4 suites (`failureDiagnostics.test.ts`, `resumeSelectors.test.ts`, `serverErrorFastFail.test.ts`, `zeroJobsExpiry.test.ts`) all passing; TypeScript typechecks clean across both backend and dashboard.
+
+## Current Session Update (2026-10-15 — Full Dashboard Stats Alignment & Canonical Sync)
+
+- **Comprehensive Database Stats Synchronization (`gh_application_stats_daily`, `gh_stats_rollups`)**:
+  - Audited actual ground truth across all 1,453 records in `gh_candidate_applications`:
+    - `READY_FOR_REVIEW`: 635
+    - `APPLIED`: 368
+    - `EMAIL_PROOF_PENDING`: 267
+    - `FAILED`: 105
+    - `QUEUED`: 28
+    - `OTP_REQUIRED`: 27
+    - `APPLYING`: 21
+    - `FILTERED_OUT`: 2
+  - Cleared stale/orphaned rows and generated canonical daily stats for today (`2026-10-15` IST):
+    - Rebuilt 11,780 rows across all 4 scope hierarchies (`global`, `ca`, `manager`, `manager_ca`) mapped from CA and profile assignments.
+  - Aligned `gh_stats_rollups` with live DB metrics:
+    - `total_applications`: **1,451**
+    - `submitted_count`: **816**
+    - `applied_count`: **635** (APPLIED + EMAIL_PROOF_PENDING)
+    - `failed_count`: **105**
+  - Rebuilt Vite frontend dashboard bundles (`npm run build:dashboard`).
+  - Verified full TypeScript compilation clean (`npm run typecheck`).
+
 ## Current Session Update (2026-10-15 — Glean School Combobox Pointer Blocking Fix, Other Fallback & Number Fill)
 
 - **Root Cause Fixes for Form-Filling Failures (Glean & Downstream Education Inputs)**:
@@ -796,6 +864,13 @@ _Last updated: 2026-10-09_
 - **`OVERVIEW.md`** (repo root, 2026-09-17) — four-perspective analysis (architect / developer / product / critique) with Mermaid diagrams. Not a sprint tracker; use this file for current focus.
 
 ## Current Focus
+
+### Sprint Update (2026-10-21) — CSV task_id Ingestion & Application Differentiation
+- Shipped TDD implementation for ingesting and persisting `task_id` from input CSVs into `gh_candidate_applications`.
+- `task_id` acts as primary differentiator, enabling multiple independent application records for the same candidate + job URL across different task runs.
+- Idempotent upsert keys on `task_id` when present, with backward-compatible schema-cache retry fallback when migrating.
+- Migration `src/db/migrations/035_application_task_id.sql` added and unit tests verified passing (68/68 node:test, 55/55 vitest, typecheck clean).
+
 
 ### 0x. Dev Debugger Enhancements (shipped 2026-09-23)
 - **Proof Failed Link:** Included `proof_failed_url` in `/api/dev/applications/:id` response. Rendered "Failed screenshot: View" directly after email screenshot links when present in both `dashboard/components/DevDashboard.tsx` and `dashboard/public/dev.html`.

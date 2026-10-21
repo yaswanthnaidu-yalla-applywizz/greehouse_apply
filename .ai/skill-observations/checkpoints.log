@@ -1,3 +1,11 @@
+2026-10-21 session-checkpoint: completed all 9 PRs of thermo-nuclear code quality debloat refactor; purged V1 artifact disk fallbacks; extracted devDb & candidates express routers; isolated demo fixtures; decomposed applications.ts into 7 submodules; canonicalized choice matching; decomposed formFiller into field strategies; unified OTP session registry with liveSubmit pipeline; modularized inbox connector into shared poller + Zoho/Gmail strategies; enforced strict domain types & decomposed dashboard App.tsx (DashboardHeader, CandidateSidebar, useDashboardState); 100% tests pass (node:test + vitest), typecheck clean, dashboard build clean; no new observations
+2026-10-21 session-start scan: files=2 parsed=2 (resuming debloat refactor; executing remaining PRs 2, 4-9)
+2026-10-21 session-checkpoint: installed thermo-nuclear-code-quality-review skill globally from cursor-team-kit; verified SKILL.md; no new observations
+2026-10-21 session-checkpoint: installed pstack plugin v0.15.29 globally (56 skills, 2 agents); verified active in agy plugin list; no new observations
+2026-10-21 session-checkpoint: shipped CSV task_id ingestion & application differentiation via TDD; migration 035 added; parsed task_id in segregator; preserved multi-task jobs; upsertApplication keys on task_id with schema-cache fallback; tests pass (68/68 node:test, 55/55 vitest) & typecheck clean; no new observations
+2026-10-21 session-start scan: read-only DB query session for total application stats and failure breakdown
+2026-10-15 session-checkpoint: synchronized stats across all dashboards with actual DB ground truth; cleared orphaned & stale stats; rebuilt 11,780 scoped daily stat rows (global, ca, manager, manager_ca) for today's IST date (2026-10-15); updated gh_stats_rollups (Total: 1451, Submitted: 816, Applied: 635, Failed: 105); rebuilt frontend dashboard; typecheck clean; no new observations
+2026-10-15 session-checkpoint: fixed MFA signup QR code scanning by generating crisp standard PNG QR code (with quiet zone) from totpUri via qrcode library, adding 1-click manual key copy in AuthView.tsx and index.html, rebuilt frontend dashboard and verified all tests pass; no new observations
 2026-10-15 session-checkpoint: shipped Glean/Moloco form-filling fixes (education degree/discipline from resume_facts, future year clamping to 2018/2022, location autocomplete ArrowDown+Enter commit, inline error fast-fail); all tests pass & typecheck clean; re-queued 28 Glean/Moloco applications in DB2; synced stats (failed dropped from 63 to 36, queued increased); no new observations
 2026-10-15 session-checkpoint: backfilled assigned_ca_email on 635 applications from profiles; rebuilt 2,471 re-aligned ca/manager_ca daily stats rows; successfully dispatched automated review notifications to all 56 assigned CAs via Microsoft Graph API with 0 failures; no new observations
 2026-10-15 session-checkpoint: completed Option B: updated 32 dead Imagine Pediatrics apps to FILTERED_OUT; purged 192 orphaned + 8 stale failed stats; shifted 2,898 daily stat events and 673 application created_at timestamps to today (2026-10-15); aligned gh_stats_rollups (Total: 673, Submitted: 291, Applied: 228, Failed: 63, Ready: 382); dashboard build complete; no new observations
@@ -654,3 +662,68 @@ checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.179187715245
 2026-10-14 session-start scan: files=0 parsed=0
 2026-10-14 17:15:20 [session-end] no observations
 2026-10-14 session-end: sandbox:fresh DB2 profiles sync verified (373 rows copied, ca_email dev, zoho backfilled); unit tests pass (55/55); no new observations
+2026-10-15 12:34 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-15 12:35 [greehouse_apply] no observations
+2026-10-15 13:30 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-15 14:06 [greehouse_apply] no observations
+2026-10-15 14:17 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-15 14:19 [greehouse_apply] no observations
+2026-10-15 15:02 [greehouse_apply] no observations
+2026-10-15 15:06 [greehouse_apply] no observations
+2026-10-15 15:14 [greehouse_apply] no observations
+2026-10-15 15:44 [greehouse_apply] no observations
+2026-10-15 16:03 [greehouse_apply] no observations (ingestion exclusion/report feature and final review fix)
+2026-10-15 16:40 [greehouse_apply] attempted GitHub push/PR; npm test failed 4 of 32 integration checks against configured Supabase environment; no observations
+2026-10-15 19:28 [greehouse_apply] checkpoint: requeued 21 OTP-failed applications to QUEUED status on db2; verified 0 remaining FAILED OTP rows; no observations
+2026-10-15 19:50 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-15 19:57 [greehouse_apply] checkpoint: compared DB1 and DB2 profiles across missing linkedin, location, country, phone; identified 210 missing attributes in DB2 present in DB1; no observations
+2026-10-15 20:01 [greehouse_apply] checkpoint: synced 215 profiles from DB1 to DB2; missing location in DB2 dropped from 229 to 19, missing country from 230 to 20, missing phone from 230 to 21; no observations
+2026-10-15 20:05 [greehouse_apply] checkpoint: audited all 134 non-OTP failed applications in DB2 via gh_failure_diagnostics & gh_application_events; grouped counts and underlying causes; no observations
+2026-10-15 20:11 [greehouse_apply] checkpoint: downloaded 109 failure screenshots to failed_screenshots_non_otp/; visually inspected failure modes across top employers (Scale AI, Mixpanel, Care Access, Capco, Anthropic, Carta); identified root causes: location dropdown selection rejection, education sub-field omissions, and custom EEQ validation rules; no observations
+2026-10-15 20:22 [greehouse_apply] checkpoint: killed background re-resolution task (task-341) per user instruction; immediately cleared and reverted all in-flight applications back to FAILED in DB2; verified QUEUED count is 0; no observations
+2026-10-15 20:30 [greehouse_apply] checkpoint: exported resolved AI question/answer fields for APPLIED, EMAIL_PROOF_PENDING, and FAILED applications to output/ai-resolved-questions-2026-10-15.json; no observations
+2026-10-15 session-start scan: files=N parsed=N (new session; context loaded from summary; last-review-date=2026-10-05 >7 days ago; open observations present — offer review)
+2026-10-16 09:28 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
+2026-10-16 [greehouse_apply] checkpoint: queried DB2 gh_candidate_applications status counts and FAILED rows grouped by error_message; no observations
+2026-10-16 09:35 [greehouse_apply] checkpoint: requeued 20 exact OTP-timeout FAILED rows in DB2; exported 72 screenshots into output/16th oct failed across four non-OTP cause folders; 3 records had no screenshot object; no observations; user deferred overdue review until task completion
+2026-10-16 09:45 [greehouse_apply] session-start scan: files=1 parsed=1 principles=unparsed
+2026-10-16 09:43 [greehouse_apply] checkpoint: weekly task-observer review completed; applied approved #29 guidance to rules.md, archived 18 resolved entries; family registry/drift audit and missing historical test remain manual follow-ups
+2026-10-16 09:57 [greehouse_apply] session-start scan: files=1 parsed=1 principles=unparsed
+2026-10-16 09:58 [greehouse_apply] checkpoint: completed visual/diagnostic analysis for 72 failure screenshots; no application code changes; logged observation 0034 (resume scan path must match pinned anchor).
+2026-10-16 session-start scan: files=2 parsed=2 (failure-diagnostics-and-fixes plan session; open=0029,0034)
+2026-10-16 session-checkpoint: executed failure diagnostics and fixes plan (migration 027 error_details jsonb, captureFailureDiagnostics helper wired to liveSubmit, getResumeFileSelectors expanded, Greenhouse server-error fast-fail in verifySubmissionSignals, 0-jobs expiry detection in playwrightScanner); 10/10 unit tests pass; typecheck clean; no new observations
+2026-10-16 10:58 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-16 session-checkpoint: committed three focused application changes, pushed dev, merged latest main without conflicts, opened PR #59; checks passed; extended observation 0034 with repeated wrong-root scan.
+2026-10-16 session-checkpoint: DB2 status operation only (no code changes): changed 100 FAILED rows to QUEUED; verification showed 0 FAILED and workers already moving queued applications to APPLYING.
+2026-10-16 11:17 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-16 11:17 [greehouse_apply] task-observer checkpoint: no observations
+2026-10-16 task checkpoint: completed reportkaro RED phase (five baseline samples, requirements interviewed, failure patterns captured).
+2026-10-16 task checkpoint: completed reportkaro naming, frontmatter, and trigger definition.
+2026-10-16 task checkpoint: completed reportkaro overview, date interpretation, and trigger/keyword coverage.
+2026-10-16 task checkpoint: completed reportkaro evidence, output, and dated-file contracts.
+2026-10-16 task checkpoint: completed five no-skill controls and five reportkaro-guided wording tests; corrected unsupported out-of-period detail.
+2026-10-16 task checkpoint: addressed guided-test hallucination risk with explicit date-bounded evidence rule; recorded and closed that loophole.
+2026-10-16 task checkpoint: completed five fresh-context reportkaro re-tests; all stayed within supplied dates, separated baseline context from impact, and produced a consistent report structure.
+2026-10-16 task checkpoint: reportkaro quality checks complete and personal skill installed under ~/.agents/skills/reportkaro.
+2026-10-16 session-checkpoint: installed personal reportkaro skill, saved the Oct 14�16 report, and verified guided outputs; no observations.
+2026-10-16 11:45 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-16 session checkpoint: staged the reportkaro update-doc workflow; updated observation 0034 (open, structural guard proposed); no other observations.
+2026-10-16 11:56 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-16 session checkpoint: completed the two-repository reportkaro history backfill; no new observations.
+2026-10-18 19:13 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-18 session checkpoint: rebuilt B2 Oct 18 IST stats from current application statuses and verified all scoped rows match; no observations.
+2026-10-18 21:39 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-19 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-19 session-checkpoint: merged and synced application stats to 2026-10-19 IST in gh_application_stats_daily (21,786 rows across global, ca, manager, manager_ca) and aligned gh_stats_rollups (Total: 2531, Submitted: 1517, Applied: 1015, Failed: 502); prior historical partitions preserved; no new observations
+2026-10-19 session-checkpoint: shifted created_at on 1,014 READY_FOR_REVIEW applications to 2026-10-19 IST so operators immediately see their pending review queue on login; no new observations
+2026-10-19 session-checkpoint: requeued 410 non-validation failed applications back to QUEUED, recorded 410 events in gh_application_events, retained 92 form validation failures as FAILED; re-synced daily stats and rollups (Total: 2531, Submitted: 1517, Applied: 1015, Failed: 92); no new observations
+[2026-10-20 13:48:13 UTC] session-start: installed global plugins (pstack, superpowers) and skills (ponytail, thermo-nuclear-code-quality-review, task-observer/one-skill-to-rule-them-all)
+[2026-10-20 14:09:57 UTC] session-end: installed project dependencies and playwright browsers
+[2026-10-20 14:17:47 UTC] session-end: created and verified .cursor/skills/verify-greenhouse-apply verification skill
+2026-10-21 session-checkpoint: implemented filtered_out rule (required AI > 3 OR unresolved required > 3), added filtered_out to ingest report email attachment, wired approved AI answers to qa bank on submit; no observations
+2026-10-21 session-start scan: files=2 parsed=2
+2026-10-21 session-checkpoint: verified verify-greenhouse-apply verification skill, updated feature map and proof artifacts; no observations
+2026-10-21 checkpoint: Completed Batch 7 debloat (legacy HTML/JSX dashboard removal, server route consolidation, test updates) - all unit tests and typechecks passing. No new skill observations.
+2026-10-21 checkpoint: Completed thermo-nuclear code quality review; produced docs/debloat/review.md with structural cleanup plan and 9-PR sequence; no code modified; no observations
+2026-10-21 session-start scan: files=2 parsed=2
+2026-10-21 checkpoint: ashby evaluation completed
