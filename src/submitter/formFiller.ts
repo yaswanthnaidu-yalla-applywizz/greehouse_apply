@@ -10,7 +10,6 @@
 import fs from 'fs';
 import path from 'path';
 import type { Page, Locator } from 'playwright';
-import Fuse from 'fuse.js';
 import { downloadResumeTempFile, isDemoResumeApplywizzId } from '../db/storage.js';
 import { getUnmappedVisibleFields } from './cascadeDetector.js';
 import { AnswerResolver } from '../resolver/answerResolver.js';
@@ -24,7 +23,7 @@ import type {
 } from '../types/index.js';
 import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
-import { choiceOptionTextMatches } from '../utils/choiceOptions.js';
+import { choiceOptionTextMatches, matchChoiceOption } from '../utils/choiceOptions.js';
 
 const log = createLogger('Form Filler');
 
@@ -257,18 +256,12 @@ export function matchDropdownOption(
     return { matchedOption: stage2Match, stage: 2 };
   }
 
-  // Stage 3 — Token-set fuzzy (Fuse.js, threshold 0.35 equivalent to 0.85 similarity)
-  try {
-    const fuse = new Fuse(options, {
-      threshold: 0.35,
-      getFn: (o: string) => normalizeOptionText(o),
-    });
-    const results = fuse.search(normTarget);
-    if (results.length > 0 && results[0].item !== undefined) {
-      log.debug(`[FormFiller] Stage 3 match for "${target}" -> "${results[0].item}"`);
-      return { matchedOption: results[0].item, stage: 3 };
-    }
-  } catch {}
+  // Stage 3 — Canonical choice option matching (token-set fuzzy, polarity, aliases)
+  const canonicalMatch = matchChoiceOption(target, options);
+  if (canonicalMatch) {
+    log.debug(`[FormFiller] Stage 3 match for "${target}" -> "${canonicalMatch}"`);
+    return { matchedOption: canonicalMatch, stage: 3 };
+  }
 
   // All 3 stages missed: do NOT pick fallback option
   log.warn(`[FormFiller] ❌ no option match for "${target}" in [${options.join(', ')}]`);
