@@ -37,6 +37,7 @@ export interface ParsedCsvJobRow {
   score: number;
   scoredJobId: string;
   status: string;
+  taskId?: string;
 }
 
 function normalizeHeaderKey(key: string): string {
@@ -127,6 +128,7 @@ export function parseCsvJobRow(
     const date = getColumnValue(row, 'date', 'Date');
     const scoredJobId = getColumnValue(row, 'scored_jobId', 'scored_job_id');
     const status = getColumnValue(row, 'status', 'Status') || 'PENDING';
+    const taskId = getColumnValue(row, 'task_id', 'taskId', 'Task ID', 'Task_ID') || undefined;
 
     if (!applywizzId || !rawUrl) {
       return null;
@@ -140,6 +142,7 @@ export function parseCsvJobRow(
       score,
       scoredJobId,
       status,
+      taskId,
     };
   }
 
@@ -160,6 +163,7 @@ export function parseCsvJobRow(
   const score = parseScore(getColumnValue(row, 'score', 'Score') || undefined);
   const scoredJobId = getColumnValue(row, 'scored_jobId', 'scored_job_id');
   const status = getColumnValue(row, 'status', 'Status') || 'PENDING';
+  const taskId = getColumnValue(row, 'task_id', 'taskId', 'Task ID', 'Task_ID') || undefined;
 
   if (!applywizzId || !rawUrl) {
     return null;
@@ -173,6 +177,7 @@ export function parseCsvJobRow(
     score,
     scoredJobId,
     status,
+    taskId,
   };
 }
 
@@ -319,7 +324,7 @@ export async function segregateCandidatesByApplyWizzId(
           return;
         }
 
-        const { applywizzId, clientName, rawUrl, date, score, scoredJobId, status } = parsed;
+        const { applywizzId, clientName, rawUrl, date, score, scoredJobId, status, taskId } = parsed;
 
         if (candidateId && applywizzId.toUpperCase() !== candidateId.toUpperCase()) {
           return;
@@ -342,7 +347,8 @@ export async function segregateCandidatesByApplyWizzId(
 
         const segment = segmentsMap.get(applywizzId)!;
 
-        if (!segment.jobs.some((j) => j.canonicalUrl === canonicalUrl)) {
+        const alreadyExists = segment.jobs.some((j) => taskId ? j.taskId === taskId : j.canonicalUrl === canonicalUrl);
+        if (!alreadyExists) {
           if (!maxJobsPerCandidate || segment.jobs.length < maxJobsPerCandidate) {
             segment.jobs.push({
               rawUrl,
@@ -351,6 +357,7 @@ export async function segregateCandidatesByApplyWizzId(
               score,
               scoredJobId,
               status,
+              taskId,
             });
             segment.totalJobs = segment.jobs.length;
           }

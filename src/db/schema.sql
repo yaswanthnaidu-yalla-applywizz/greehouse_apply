@@ -89,8 +89,12 @@ CREATE INDEX IF NOT EXISTS idx_qa_bank_fingerprint ON gh_candidate_qa_bank(quest
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS gh_candidate_applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id TEXT,                                       -- External task UUID differentiating runs
     applywizz_id TEXT NOT NULL REFERENCES profiles(applywizz_id) ON DELETE CASCADE,
     job_url TEXT NOT NULL,
+    legacy_application_key TEXT GENERATED ALWAYS AS (
+        CASE WHEN task_id IS NULL THEN applywizz_id || chr(31) || job_url END
+    ) STORED,
     company_name TEXT,
     job_title TEXT,
     status TEXT NOT NULL DEFAULT 'READY_FOR_REVIEW'
@@ -130,9 +134,11 @@ CREATE TABLE IF NOT EXISTS gh_candidate_applications (
     submitted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
-    CONSTRAINT uq_candidate_application_pair UNIQUE(applywizz_id, job_url)
+    CONSTRAINT uq_candidate_applications_task_id UNIQUE(task_id),
+    CONSTRAINT uq_candidate_applications_legacy_key UNIQUE(legacy_application_key)
 );
 
+CREATE INDEX IF NOT EXISTS idx_candidate_applications_task_id ON gh_candidate_applications(task_id);
 CREATE INDEX IF NOT EXISTS idx_applications_applywizz ON gh_candidate_applications(applywizz_id);
 CREATE INDEX IF NOT EXISTS idx_applications_status ON gh_candidate_applications(status);
 CREATE INDEX IF NOT EXISTS idx_applications_queue_order ON gh_candidate_applications(has_manual_edits ASC, reviewed_at ASC);
@@ -230,4 +236,3 @@ CREATE TABLE IF NOT EXISTS gh_application_token_usage (
 CREATE INDEX IF NOT EXISTS idx_gh_token_usage_applywizz ON gh_application_token_usage(applywizz_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_gh_token_usage_date ON gh_application_token_usage(date DESC);
 CREATE INDEX IF NOT EXISTS idx_gh_token_usage_application_id ON gh_application_token_usage(application_id);
-
