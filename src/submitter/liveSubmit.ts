@@ -28,14 +28,37 @@ import {
 import { emailProofPoller } from './emailProofPoller.js';
 import {
   activeSubmissions,
+  PAUSED_SESSIONS,
+  storePausedSession,
+  resolvePausedSession,
+  clearPausedSession,
+  buildOtpPauseMetadata,
   registerSubmissionSession,
+  closeSubmissionSession,
   verifySubmissionSignals,
   DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
-  closeSubmissionSession,
   OTP_SESSION_TTL_MS,
+  type SubmissionSession,
+  type ActiveSubmissionSession,
+  type PausedSession,
 } from './otpSession.js';
 
-export { verifySubmissionSignals };
+export {
+  activeSubmissions,
+  PAUSED_SESSIONS,
+  storePausedSession,
+  resolvePausedSession,
+  clearPausedSession,
+  buildOtpPauseMetadata,
+  registerSubmissionSession,
+  closeSubmissionSession,
+  verifySubmissionSignals,
+  DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
+  OTP_SESSION_TTL_MS,
+  type SubmissionSession,
+  type ActiveSubmissionSession,
+  type PausedSession,
+};
 import {
   getApplication,
   updateStatus,
@@ -49,10 +72,9 @@ import { uploadResume } from '../db/storage.js';
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
 import { createLogger } from '../utils/logger.js';
-import { assertWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
-import { captureFailureDiagnostics } from './failureDiagnostics.js';
+import { captureFailureDiagnostics } from './domFailureCapture.js';
 import { browserManager, type ManagedBrowser } from './browserManager.js';
 
 const log = createLogger('Live Submit');
@@ -162,213 +184,7 @@ export interface LiveSubmitResult {
   summary?: FormFillSummary;
 }
 
-export interface PausedSession {
-  browser: Browser;
-  page: Page;
-  browserId?: string;
-  otpFieldSelector?: string;
-  applicationId: string;
-  pausedAt: number;
-  jobUrl?: string;
-  applywizzId?: string;
-  /** Timestamp (ms) when the OTP input was detected */
-  otpDetectedAt?: number;
-  /** Whether an OTP input field was detected and must be filled to continue */
-  requiresOtp?: boolean;
-  /** Whether OTP has multiple individual digit/character boxes */
-  multiBox?: boolean;
-  /** Number of OTP boxes detected if multi-box */
-  boxCount?: number;
-  /** Array of selectors for each OTP box if multi-box */
-  boxSelectors?: string[];
-  /** Whether a success or failure screenshot was already captured before closing */
-  screenshotCaptured?: boolean;
-  /** Auto-close timer handle for the paused OTP session */
-  ttlTimer?: NodeJS.Timeout;
-}
 
-/**
- * In-memory registry of Playwright browser sessions paused for OTP / verification code resolution.
- * Keyed by applicationId.
- */
-export const PAUSED_SESSIONS = new Map<string, PausedSession>();
-
-/**
- * Builds OTP pause metadata from a post-submit field detection result.
- */
-export function buildOtpPauseMetadata(
-  otpField: OTPFieldDetection
-): Pick<
-  PausedSession,
-  | 'otpFieldSelector'
-  | 'otpDetectedAt'
-  | 'requiresOtp'
-  | 'multiBox'
-  | 'boxCount'
-  | 'boxSelectors'
-> {
-  if (otpField.found && otpField.selector) {
-    return {
-      otpFieldSelector: otpField.selector,
-      otpDetectedAt: Date.now(),
-      requiresOtp: true,
-      multiBox: otpField.multiBox,
-      boxCount: otpField.boxCount,
-      boxSelectors: otpField.boxSelectors,
-    };
-  }
-
-  return {
-    requiresOtp: false,
-  };
-}
-
-/**
- * Stores a paused session in PAUSED_SESSIONS with { browser, page, otpFieldSelector, applicationId, pausedAt }.
- * Keyed by applicationId, with secondary aliases for applywizz_id or DB UUID.
- */
-export function storePausedSession(
-  applicationOrId: ApplicationRow | string,
-  session: {
-    browser: Browser;
-    page: Page;
-    browserId?: string;
-    applicationId?: string;
-    otpFieldSelector?: string;
-    pausedAt?: number;
-    jobUrl?: string;
-    applywizzId?: string;
-    otpDetectedAt?: number;
-    requiresOtp?: boolean;
-    multiBox?: boolean;
-    boxCount?: number;
-    boxSelectors?: string[];
-    screenshotCaptured?: boolean;
-  }
-): string {
-  const canonicalKey: string =
-    session.applicationId ||
-    (typeof applicationOrId === 'string'
-      ? applicationOrId
-      : applicationOrId.id || applicationOrId.applywizz_id) ||
-    'unknown';
-  const applywizzId: string =
-    typeof applicationOrId === 'string'
-      ? session.applywizzId || canonicalKey
-      : applicationOrId.applywizz_id || canonicalKey;
-  const pausedAt = session.pausedAt ?? Date.now();
-  const jobUrl =
-    session.jobUrl ??
-    (typeof applicationOrId === 'string' ? '' : applicationOrId.job_url || '');
-
-  const existing = PAUSED_SESSIONS.get(canonicalKey);
-  if (existing?.ttlTimer) {
-    clearTimeout(existing.ttlTimer);
-  }
-
-  const ttlTimer = setTimeout(async () => {
-    log.warn(
-      `[Live Submit] ⏰ Paused OTP session ${canonicalKey} timed out after ${OTP_SESSION_TTL_MS / 60000}m. Closing browser context...`
-    );
-    await clearPausedSession(canonicalKey);
-  }, OTP_SESSION_TTL_MS);
-
-  if (ttlTimer.unref) {
-    ttlTimer.unref();
-  }
-
-  const fullSession: PausedSession = {
-    browser: session.browser,
-    page: session.page,
-    browserId: session.browserId,
-    otpFieldSelector: session.otpFieldSelector,
-    applicationId: canonicalKey,
-    pausedAt,
-    jobUrl,
-    applywizzId,
-    otpDetectedAt: session.otpDetectedAt ?? pausedAt,
-    requiresOtp: session.requiresOtp ?? Boolean(session.otpFieldSelector),
-    multiBox: session.multiBox,
-    boxCount: session.boxCount,
-    boxSelectors: session.boxSelectors,
-    screenshotCaptured: session.screenshotCaptured ?? false,
-    ttlTimer,
-  };
-
-  PAUSED_SESSIONS.set(canonicalKey, fullSession);
-  if (typeof applicationOrId !== 'string' && applicationOrId.id && applicationOrId.id !== canonicalKey) {
-    PAUSED_SESSIONS.set(applicationOrId.id, fullSession);
-  }
-  if (applywizzId && applywizzId !== canonicalKey) {
-    PAUSED_SESSIONS.set(applywizzId, fullSession);
-  }
-
-  return canonicalKey;
-}
-
-/**
- * Resolves a paused session by applicationId, applywizz_id, or any alias key.
- */
-export function resolvePausedSession(
-  id: string
-): { session: PausedSession; canonicalKey: string } | null {
-  const cleanId = (id || '').trim();
-  if (!cleanId) return null;
-
-  const direct = PAUSED_SESSIONS.get(cleanId);
-  if (direct) {
-    return { session: direct, canonicalKey: cleanId };
-  }
-
-  for (const [key, session] of PAUSED_SESSIONS.entries()) {
-    if (session.applicationId === cleanId || session.applywizzId === cleanId) {
-      return { session, canonicalKey: key };
-    }
-  }
-
-  return null;
-}
-
-export async function clearPausedSession(
-  id: string,
-  options: { captureFailureProof?: boolean } = {}
-): Promise<void> {
-  const resolved = resolvePausedSession(id);
-  if (!resolved) return;
-
-  const { session } = resolved;
-  if (session.ttlTimer) {
-    clearTimeout(session.ttlTimer);
-  }
-  try {
-    if (
-      options.captureFailureProof !== false &&
-      session.page &&
-      !session.page.isClosed() &&
-      !session.screenshotCaptured
-    ) {
-      try {
-        await captureFailedScreenshot(session.page, session.applicationId);
-        session.screenshotCaptured = true;
-      } catch {}
-    }
-    await session.page?.close().catch(() => {});
-    if (session.browserId) {
-      await browserManager.releaseBrowser(session.browserId).catch(() => {});
-    } else {
-      await session.browser?.close().catch(() => {});
-    }
-  } finally {
-    for (const [key, value] of PAUSED_SESSIONS.entries()) {
-      if (value === session) {
-        PAUSED_SESSIONS.delete(key);
-        activeSubmissions.delete(key);
-      }
-    }
-    if (session.applicationId) activeSubmissions.delete(session.applicationId);
-    if (session.applywizzId) activeSubmissions.delete(session.applywizzId);
-  }
-}
 
 const OTP_KEYWORD_PATTERN =
   /otp|verification|verify.?code|one.?time|passcode|\bpin\b|2fa|mfa|auth.?code|security.?code/i;
@@ -1048,22 +864,26 @@ export async function submitOtpToPausedSession(
   }
 }
 
+export interface SubmissionPreflight {
+  application: ApplicationRow;
+  applicationId: string;
+  targetUrl: string;
+  isHeadless: boolean;
+  timeoutMs: number;
+  confirmationTimeoutMs: number;
+}
+
 /**
- * Runs a live automated submission for a candidate job application.
- *
- * @param applicationOrId - Application DB record or UUID string
- * @param options - Configuration overrides for browser and jitter
- * @returns Result with updated status and proof URL if successful
+ * Validates and prepares application record, job URL, and environment parameters before browser launch.
  */
-export async function runLiveSubmit(
+export async function prepareSubmissionPreflight(
   applicationOrId: string | ApplicationRow,
   options: LiveSubmitOptions = {}
-): Promise<LiveSubmitResult> {
+): Promise<SubmissionPreflight> {
   const timeoutMs = options.timeoutMs ?? 30000;
   const confirmationTimeoutMs =
     options.confirmationTimeoutMs ?? DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS;
 
-  // 1. Resolve application record
   let application: ApplicationRow;
   if (typeof applicationOrId === 'string') {
     const fetched = await getApplication(applicationOrId, options.jobUrl);
@@ -1075,9 +895,6 @@ export async function runLiveSubmit(
     application = applicationOrId;
   }
 
-  assertWithinSubmissionQuestionLimit(application);
-
-  // Ensure a persistent DB record exists so proof screenshots can be attached
   if (!application.id) {
     try {
       const upserted = await upsertApplication({
@@ -1100,6 +917,420 @@ export async function runLiveSubmit(
   if (!targetUrl) {
     throw new Error(`Application ${applicationId} has no job_url specified.`);
   }
+
+  const isHeadless = process.env.RAILWAY_ENV === 'true' ? true : (options.headless ?? true);
+
+  return {
+    application,
+    applicationId,
+    targetUrl,
+    isHeadless,
+    timeoutMs,
+    confirmationTimeoutMs,
+  };
+}
+
+/**
+ * Executes form population and required-field verification.
+ */
+export async function executeFormFill(
+  page: Page,
+  application: ApplicationRow,
+  options: LiveSubmitOptions = {}
+): Promise<{ fillSummary: FormFillSummary; freshApplication: ApplicationRow; unfilledRequiredLabels: string[] }> {
+  try {
+    const openResult = await captureJobOpenScreenshot(page, application);
+    if (openResult.url) {
+      log.info(`[Live Submit] 📸 Job open screenshot URL: ${openResult.url}`);
+    }
+  } catch (openErr: any) {
+    log.warn(`[Live Submit] ⚠️ Could not capture job open screenshot: ${openErr.message}`);
+  }
+
+  let freshApplication = application;
+  const targetId = application.id || application.applywizz_id || '';
+  const fresh = await getApplication(targetId, options.jobUrl || application.job_url);
+  if (fresh) {
+    freshApplication = fresh;
+  }
+
+  const fillSummary = await fillForm(page, freshApplication, {
+    minJitterMs: options.minJitterMs ?? 300,
+    maxJitterMs: options.maxJitterMs ?? 800,
+    timeoutMs: 5000,
+  });
+
+  const unfilledRequiredLabels = fillSummary.results
+    .filter(
+      (result) =>
+        result.isRequired === true &&
+        (!result.valuePopulated || result.source === 'unresolved')
+    )
+    .map((result) => result.label);
+
+  return { fillSummary, freshApplication, unfilledRequiredLabels };
+}
+
+/**
+ * Handles post-submission signals, OTP detection/pausing, and completion verification.
+ */
+export async function handlePostSubmitResponse(params: {
+  page: Page;
+  application: ApplicationRow;
+  applicationId: string;
+  targetUrl: string;
+  preSubmitUrl: string;
+  confirmationTimeoutMs: number;
+  managedBrowser: ManagedBrowser | null;
+  browser: Browser;
+  context: BrowserContext;
+  fillSummary?: FormFillSummary;
+}): Promise<{
+  result: LiveSubmitResult;
+  keepSessionOpen: boolean;
+  screenshotCaptured: boolean;
+}> {
+  const {
+    page,
+    application,
+    applicationId,
+    targetUrl,
+    preSubmitUrl,
+    confirmationTimeoutMs,
+    managedBrowser,
+    browser,
+    context,
+    fillSummary,
+  } = params;
+
+  let screenshotCaptured = false;
+
+  const currentUrl = page.url();
+  const urlChanged =
+    currentUrl !== preSubmitUrl &&
+    currentUrl.replace(/#.*$/, '') !== preSubmitUrl.replace(/#.*$/, '');
+
+  const pageText = ((await page.textContent('body').catch(() => '')) || '').toLowerCase();
+
+  const hasSuccessIndicators =
+    urlChanged ||
+    /confirmation|applied|submitted|jobs\/[a-z0-9_-]+\/applied/i.test(currentUrl) ||
+    /thank you for applying|thanks for applying|your application has been submitted|application received|we have received your application|application submitted|track your application/i.test(
+      pageText
+    );
+
+  if (hasSuccessIndicators) {
+    log.info(
+      `[Live Submit] 🚀 Submission responded successfully (urlChanged=${urlChanged}, url=${currentUrl}). Continuing to confirmation verification...`
+    );
+  } else {
+    const otpField = await detectOTPField(page);
+    if (otpField.found) {
+      log.warn(
+        `[Live Submit] 🔢 OTP input detected post-submit (${otpField.selector})` +
+          `${otpField.metadata?.type ? ` [type=${otpField.metadata.type}]` : ''}` +
+          `${otpField.metadata?.matchReason ? ` — ${otpField.metadata.matchReason}` : ''}`
+      );
+
+      await captureJobOtpScreenshot(page, application).catch(() => null);
+
+      if (application.id) {
+        try {
+          await updateStatus(application.id, 'OTP_REQUIRED');
+        } catch (err: any) {
+          log.warn(`[Live Submit] ⚠️ Could not set status OTP_REQUIRED: ${err.message}`);
+        }
+      }
+
+      const pausedAt = Date.now();
+      const sessionKey = storePausedSession(application, {
+        browser,
+        page,
+        context,
+        browserId: managedBrowser?.browserId,
+        otpFieldSelector: otpField.selector,
+        applicationId,
+        pausedAt,
+        jobUrl: targetUrl,
+        ...buildOtpPauseMetadata(otpField),
+      });
+
+      registerSubmissionSession({
+        applicationId: sessionKey,
+        browser,
+        context,
+        page,
+        application,
+        startedAt: pausedAt,
+      });
+
+      let companyEmail: string | null = null;
+      try {
+        const profile = await getProfile(application.applywizz_id);
+        if (profile) {
+          companyEmail = (profile.company_email || profile.email || '').trim() || null;
+        }
+      } catch (profErr: any) {
+        log.warn(`[Live Submit] ⚠️ Could not fetch profile for company email: ${profErr.message}`);
+      }
+
+      if (companyEmail) {
+        otpResolutionService.register({
+          applicationId,
+          email: companyEmail,
+          submitClickedAt: pausedAt,
+          sessionKey,
+        });
+      } else {
+        log.warn(
+          `[Live Submit] ⚠️ No company email found for application ${applicationId}; skipping OTP registration.`
+        );
+      }
+      return {
+        result: {
+          success: false,
+          status: 'OTP_REQUIRED',
+          applicationId,
+          requiresOtp: true,
+          summary: fillSummary,
+        },
+        keepSessionOpen: true,
+        screenshotCaptured,
+      };
+    }
+
+    const fillError = await detectFormFillingErrors(page);
+    if (fillError.hasError) {
+      const fillErrMsg = `Form filling error: ${fillError.message}`;
+      log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
+      await emitFailureDiagnostic({
+        category: 'SUBMIT_FORM_FILL_ERROR',
+        stage: 'form_filling',
+        reason: fillErrMsg,
+        isTerminal: false,
+        isRetryable: true,
+        applicationId: application.id || applicationId,
+        jobUrl: targetUrl,
+      });
+      let failedProof: any = null;
+      if (page && !page.isClosed()) {
+        failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+        if (failedProof?.url) {
+          log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
+        }
+        screenshotCaptured = true;
+      }
+      if (application.id) {
+        await updateStatus(application.id, 'FAILED', {
+          error_message: fillErrMsg,
+          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+          job_url: application.job_url,
+        }).catch(() => {});
+      }
+      return {
+        result: {
+          success: false,
+          status: 'FAILED',
+          applicationId,
+          errorMessage: fillErrMsg,
+          retryReason: /Required field validation failed/i.test(fillErrMsg)
+            ? 'UNRESOLVED_REQUIRED_FIELD'
+            : undefined,
+          summary: fillSummary,
+          proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+          proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+        },
+        keepSessionOpen: false,
+        screenshotCaptured,
+      };
+    }
+  }
+
+  log.info(
+    `[Live Submit] ⏳ Waiting up to ${confirmationTimeoutMs / 1000}s for submission confirmation signals...`
+  );
+  const verification = await verifySubmissionSignals(page, confirmationTimeoutMs);
+
+  if (verification.verified) {
+    log.info(`[Live Submit] 🎉 Submission verified! Signal: ${verification.signal}`);
+
+    let proofResult: { proofWebUrl?: string; proofCapturedAt?: string } = {};
+    try {
+      proofResult = await captureWebProof(page, application);
+      screenshotCaptured = true;
+    } catch (err: any) {
+      log.warn(`[liveSubmit] Proof capture failed after submit — marking APPLIED anyway: ${err.message}`);
+      await emitFailureDiagnostic({
+        category: 'SUBMIT_PROOF_CAPTURE',
+        stage: 'proof_capture',
+        reason: `Web proof screenshot capture failed: ${err?.message || String(err)}`,
+        error: err,
+        applicationId: application.id || applicationId,
+        applywizzId: application.applywizz_id,
+        jobUrl: targetUrl,
+        isTerminal: false,
+        isRetryable: true,
+      }).catch(() => {});
+    }
+    if (proofResult.proofWebUrl) {
+      log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
+    }
+
+    const submittedAt = new Date().toISOString();
+    const targetAppId = application.id || applicationId;
+    await updateStatus(targetAppId, 'EMAIL_PROOF_PENDING', {
+      proof_web_url: proofResult.proofWebUrl,
+      proof_captured_at: proofResult.proofCapturedAt,
+      job_url: application.job_url,
+    });
+
+    log.info(`[Live Submit] 📧 Checking for immediate confirmation email matching company & apply time...`);
+    const emailProof = await captureAndSaveEmailProof(application, {
+      timeoutMs: 15000,
+    }).catch(() => null);
+
+    if (emailProof) {
+      log.info(`[Live Submit] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
+      await updateStatus(targetAppId, 'APPLIED', {
+        proof_web_url: proofResult.proofWebUrl,
+        proof_captured_at: proofResult.proofCapturedAt,
+        proof_email_json: emailProof,
+        proof_email_captured_at: emailProof.received_at || new Date().toISOString(),
+        email_proof_status: 'captured',
+        job_url: application.job_url,
+      });
+
+      return {
+        result: {
+          success: true,
+          status: 'APPLIED',
+          applicationId,
+          proofWebUrl: proofResult.proofWebUrl,
+          proofCapturedAt: proofResult.proofCapturedAt,
+          hasEmailProof: true,
+          summary: fillSummary,
+        },
+        keepSessionOpen: false,
+        screenshotCaptured,
+      };
+    }
+
+    log.info(
+      `[Live Submit] ⏳ Confirmation email not found immediately. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
+    );
+    const appForPoller: ApplicationRow = {
+      ...application,
+      id: targetAppId,
+      submitted_at: submittedAt,
+      proof_web_url: proofResult.proofWebUrl,
+      proof_captured_at: proofResult.proofCapturedAt,
+      status: 'EMAIL_PROOF_PENDING',
+    };
+    emailProofPoller.startPolling(appForPoller);
+
+    return {
+      result: {
+        success: true,
+        status: 'EMAIL_PROOF_PENDING',
+        applicationId,
+        proofWebUrl: proofResult.proofWebUrl,
+        proofCapturedAt: proofResult.proofCapturedAt,
+        summary: fillSummary,
+      },
+      keepSessionOpen: false,
+      screenshotCaptured,
+    };
+  }
+
+  const isServerError = (verification.error || '').startsWith('GREENHOUSE_SERVER_ERROR:');
+  const isTimeout = !isServerError && /time.*out/i.test(verification.error || '');
+  const isFormError = !isServerError && /form (filling|validation) error/i.test(verification.error || '');
+  let errorMsg: string;
+
+  if (isServerError) {
+    const details = (verification.error || '').replace(/^GREENHOUSE_SERVER_ERROR:\s*/, '');
+    errorMsg = `Greenhouse server error: ${details}`;
+    log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
+  } else if (isFormError) {
+    errorMsg = verification.error || 'Form filling error: Validation failed.';
+    log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
+  } else if (isTimeout) {
+    errorMsg = `Timeout: Submission verification timed out after ${confirmationTimeoutMs}ms.`;
+    log.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
+  } else {
+    errorMsg = verification.error || 'Submission verification failed.';
+    log.warn(`[Live Submit] ❌ Submission verification failed: ${errorMsg} for application ${applicationId}`);
+  }
+
+  await emitFailureDiagnostic({
+    category: isServerError || isFormError
+      ? 'SUBMIT_FORM_FILL_ERROR'
+      : 'SUBMIT_CONFIRMATION_TIMEOUT',
+    stage: 'submission_confirmation',
+    reason: errorMsg,
+    isTerminal: false,
+    isRetryable: isServerError ? true : !isTimeout,
+    applicationId: application.id || applicationId,
+    jobUrl: targetUrl,
+    metadata: { timeoutMs: confirmationTimeoutMs },
+  });
+
+  let failedProof: any = null;
+  let errorDiagnostics: any = null;
+  if (page && !page.isClosed()) {
+    errorDiagnostics = await captureFailureDiagnostics(page).catch(() => null);
+    if (!screenshotCaptured) {
+      failedProof = await captureFailedScreenshot(page, application).catch(() => null);
+      if (failedProof?.url) {
+        log.info(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failedProof.url}`);
+      }
+      screenshotCaptured = true;
+    }
+  }
+
+  if (application.id) {
+    await updateStatus(application.id, 'FAILED', {
+      error_message: errorMsg,
+      error_details: errorDiagnostics,
+      proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
+      proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+      job_url: application.job_url,
+    }).catch(() => {});
+  }
+
+  return {
+    result: {
+      success: false,
+      status: 'FAILED',
+      applicationId,
+      errorMessage: errorMsg,
+      retryReason: isFormError && /Required field validation failed/i.test(errorMsg)
+        ? 'UNRESOLVED_REQUIRED_FIELD'
+        : undefined,
+      summary: fillSummary,
+      proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
+      proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
+    },
+    keepSessionOpen: false,
+    screenshotCaptured,
+  };
+}
+
+/**
+ * Runs a live automated submission for a candidate job application.
+ *
+ * @param applicationOrId - Application DB record or UUID string
+ * @param options - Configuration overrides for browser and jitter
+ * @returns Result with updated status and proof URL if successful
+ */
+export async function runLiveSubmit(
+  applicationOrId: string | ApplicationRow,
+  options: LiveSubmitOptions = {}
+): Promise<LiveSubmitResult> {
+  const preflight = await prepareSubmissionPreflight(applicationOrId, options);
+  let { application } = preflight;
+  const { applicationId, targetUrl, isHeadless, timeoutMs, confirmationTimeoutMs } = preflight;
 
   if (!(await ensureResumeAvailable(application))) {
     const errorMessage = 'Resume unavailable — could not fetch from ApplyWizz';
@@ -1127,12 +1358,10 @@ export async function runLiveSubmit(
     };
   }
 
-  const isHeadless = process.env.RAILWAY_ENV === 'true' ? true : (options.headless ?? true);
   log.info(
     `[Live Submit] 🚀 Initiating live submission for ${application.applywizz_id} [${targetUrl}] (headless: ${isHeadless})...`
   );
 
-  // Update DB status to APPLYING
   if (application.id) {
     try {
       await updateStatus(application.id, 'APPLYING');
@@ -1150,7 +1379,6 @@ export async function runLiveSubmit(
   let screenshotCaptured = false;
 
   try {
-    // 2. Launch browser with anti-detection flags (strictly headless on Railway; headful supported locally)
     try {
       managedBrowser = await browserManager.acquireBrowser({
         headless: isHeadless,
@@ -1201,34 +1429,45 @@ export async function runLiveSubmit(
 
     page = await context.newPage();
 
-    // 3. Navigate to the job application URL
     log.info(`[Live Submit] 🌐 Navigating to ${targetUrl}...`);
     await page.goto(targetUrl, {
       waitUntil: 'domcontentloaded',
       timeout: timeoutMs,
     });
 
-    // Capture screenshot after navigating to job URL, before filling form
     try {
-      const openResult = await captureJobOpenScreenshot(page, application);
-      if (openResult.url) {
-        log.info(`[Live Submit] 📸 Job open screenshot URL: ${openResult.url}`);
-      }
-    } catch (openErr: any) {
-      log.warn(`[Live Submit] ⚠️ Could not capture job open screenshot: ${openErr.message}`);
-    }
+      const fillResult = await executeFormFill(page, application, options);
+      fillSummary = fillResult.fillSummary;
+      application = fillResult.freshApplication;
 
-    // 4. Fill all form fields
-    try {
-      const freshApplication = await getApplication(applicationId, options.jobUrl || targetUrl);
-      if (freshApplication) {
-        application = freshApplication;
+      if (fillResult.unfilledRequiredLabels.length > 0) {
+        const requiredFieldsError = `Required fields not filled: ${fillResult.unfilledRequiredLabels.join(', ')}`;
+        log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
+        await emitFailureDiagnostic({
+          category: 'SUBMIT_REQUIRED_FIELD_EMPTY',
+          stage: 'form_validation',
+          reason: requiredFieldsError,
+          applicationId: application.id || applicationId,
+          applywizzId: application.applywizz_id,
+          jobUrl: targetUrl,
+          isTerminal: false,
+          isRetryable: true,
+        }).catch(() => {});
+        if (application.id) {
+          await updateStatus(application.id, 'FAILED', {
+            error_message: requiredFieldsError,
+            job_url: application.job_url,
+          }).catch(() => {});
+        }
+        return {
+          success: false,
+          status: 'FAILED',
+          applicationId,
+          errorMessage: requiredFieldsError,
+          retryReason: 'UNRESOLVED_REQUIRED_FIELD',
+          summary: fillSummary,
+        };
       }
-      fillSummary = await fillForm(page, application, {
-        minJitterMs: options.minJitterMs ?? 300,
-        maxJitterMs: options.maxJitterMs ?? 800,
-        timeoutMs: 5000,
-      });
     } catch (fillErr: any) {
       const fillErrMsg = `Form filling error: ${fillErr.message || 'Failed to populate application fields.'}`;
       log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
@@ -1259,44 +1498,6 @@ export async function runLiveSubmit(
       };
     }
 
-    const unfilledRequiredLabels = fillSummary.results
-      .filter(
-        (result) =>
-          result.isRequired === true &&
-          (!result.valuePopulated || result.source === 'unresolved')
-      )
-      .map((result) => result.label);
-
-    if (unfilledRequiredLabels.length > 0) {
-      const requiredFieldsError = `Required fields not filled: ${unfilledRequiredLabels.join(', ')}`;
-      log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
-      await emitFailureDiagnostic({
-        category: 'SUBMIT_REQUIRED_FIELD_EMPTY',
-        stage: 'form_validation',
-        reason: requiredFieldsError,
-        applicationId: application.id || applicationId,
-        applywizzId: application.applywizz_id,
-        jobUrl: targetUrl,
-        isTerminal: false,
-        isRetryable: true,
-      }).catch(() => {});
-      if (application.id) {
-        await updateStatus(application.id, 'FAILED', {
-          error_message: requiredFieldsError,
-          job_url: application.job_url,
-        }).catch(() => {});
-      }
-      return {
-        success: false,
-        status: 'FAILED',
-        applicationId,
-        errorMessage: requiredFieldsError,
-        retryReason: 'UNRESOLVED_REQUIRED_FIELD',
-        summary: fillSummary,
-      };
-    }
-
-    // 5. Locate and click form submit button
     const preSubmitUrl = page.url();
 
     const submitSelectors = [
@@ -1359,7 +1560,6 @@ export async function runLiveSubmit(
       };
     }
 
-    // Capture screenshot immediately after clicking submit button (before detecting block)
     try {
       const submittedResult = await captureJobSubmittedScreenshot(page, application);
       if (submittedResult.url) {
@@ -1369,308 +1569,25 @@ export async function runLiveSubmit(
       log.warn(`[Live Submit] ⚠️ Could not capture job submitted screenshot: ${subErr.message}`);
     }
 
-    // 6. Wait 2-3 seconds for page to respond after submit click
     log.info('[Live Submit] ⏳ Waiting 2-3s for page response post-submit...');
     await page.waitForTimeout(2500);
 
-    const currentUrl = page.url();
-    const urlChanged =
-      currentUrl !== preSubmitUrl &&
-      currentUrl.replace(/#.*$/, '') !== preSubmitUrl.replace(/#.*$/, '');
+    const postSubmit = await handlePostSubmitResponse({
+      page,
+      application,
+      applicationId,
+      targetUrl,
+      preSubmitUrl,
+      confirmationTimeoutMs,
+      managedBrowser,
+      browser,
+      context,
+      fillSummary,
+    });
 
-    const pageText = ((await page.textContent('body').catch(() => '')) || '').toLowerCase();
-
-    // Check if page responded successfully (URL changed or confirmation indicators)
-    const hasSuccessIndicators =
-      urlChanged ||
-      /confirmation|applied|submitted|jobs\/[a-z0-9_-]+\/applied/i.test(currentUrl) ||
-      /thank you for applying|thanks for applying|your application has been submitted|application received|we have received your application|application submitted|track your application/i.test(
-        pageText
-      );
-
-    if (hasSuccessIndicators) {
-      log.info(
-        `[Live Submit] 🚀 Submission responded successfully (urlChanged=${urlChanged}, url=${currentUrl}). Continuing to confirmation verification...`
-      );
-    } else {
-      // Check for OTP field requirement
-      const otpField = await detectOTPField(page);
-      if (otpField.found) {
-        log.warn(
-          `[Live Submit] 🔢 OTP input detected post-submit (${otpField.selector})` +
-            `${otpField.metadata?.type ? ` [type=${otpField.metadata.type}]` : ''}` +
-            `${otpField.metadata?.matchReason ? ` — ${otpField.metadata.matchReason}` : ''}`
-        );
-
-        // Capture OTP challenge modal screenshot before pausing
-        await captureJobOtpScreenshot(page, application).catch(() => null);
-
-        if (application.id) {
-          try {
-            await updateStatus(application.id, 'OTP_REQUIRED');
-          } catch (err: any) {
-            log.warn(`[Live Submit] ⚠️ Could not set status OTP_REQUIRED: ${err.message}`);
-          }
-        }
-
-        const pausedAt = Date.now();
-        const sessionKey = storePausedSession(application, {
-          browser,
-          page,
-          browserId: managedBrowser?.browserId,
-          otpFieldSelector: otpField.selector,
-          applicationId,
-          pausedAt,
-          jobUrl: targetUrl,
-          ...buildOtpPauseMetadata(otpField),
-        });
-
-        registerSubmissionSession({
-          applicationId: sessionKey,
-          browser,
-          context,
-          page,
-          application,
-          startedAt: pausedAt,
-        });
-
-        keepSessionOpen = true;
-
-        let companyEmail: string | null = null;
-        try {
-          const profile = await getProfile(application.applywizz_id);
-          if (profile) {
-            companyEmail = (profile.company_email || profile.email || '').trim() || null;
-          }
-        } catch (profErr: any) {
-          log.warn(`[Live Submit] ⚠️ Could not fetch profile for company email: ${profErr.message}`);
-        }
-
-        if (companyEmail) {
-          otpResolutionService.register({
-            applicationId,
-            email: companyEmail,
-            submitClickedAt: pausedAt,
-            sessionKey,
-          });
-        } else {
-          log.warn(`[Live Submit] ⚠️ No company email found for application ${applicationId}; skipping OTP registration.`);
-        }
-        return {
-          success: false,
-          status: 'OTP_REQUIRED',
-          applicationId,
-          requiresOtp: true,
-          summary: fillSummary,
-        };
-      }
-
-      // Check for form filling / validation errors on page
-      const fillError = await detectFormFillingErrors(page);
-      if (fillError.hasError) {
-        const fillErrMsg = `Form filling error: ${fillError.message}`;
-        log.error(`[Live Submit] ❌ ${fillErrMsg} for application ${applicationId}`);
-        await emitFailureDiagnostic({
-          category: 'SUBMIT_FORM_FILL_ERROR',
-          stage: 'form_filling',
-          reason: fillErrMsg,
-          isTerminal: false,
-          isRetryable: true,
-          applicationId: application.id || applicationId,
-          jobUrl: targetUrl,
-        });
-        let failedProof: any = null;
-        if (page && !page.isClosed()) {
-          failedProof = await captureFailedScreenshot(page, application).catch(() => null);
-          if (failedProof?.url) {
-            log.info(`[Live Submit] 📸 Failure screenshot URL: ${failedProof.url}`);
-          }
-          screenshotCaptured = true;
-        }
-        if (application.id) {
-          await updateStatus(application.id, 'FAILED', {
-            error_message: fillErrMsg,
-            proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
-            proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-            job_url: application.job_url,
-          }).catch(() => {});
-        }
-        return {
-          success: false,
-          status: 'FAILED',
-          applicationId,
-          errorMessage: fillErrMsg,
-          retryReason: /Required field validation failed/i.test(fillErrMsg)
-            ? 'UNRESOLVED_REQUIRED_FIELD'
-            : undefined,
-          summary: fillSummary,
-          proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-          proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-        };
-      }
-    }
-
-    // 7. Multi-Signal Completion Verification
-    log.info(
-      `[Live Submit] ⏳ Waiting up to ${confirmationTimeoutMs / 1000}s for submission confirmation signals...`
-    );
-    const verification = await verifySubmissionSignals(page, confirmationTimeoutMs);
-
-    if (verification.verified) {
-      log.info(`[Live Submit] 🎉 Submission verified! Signal: ${verification.signal}`);
-
-      // 8. Capture full-page proof screenshot & attach to application (like dry-run)
-      let proofResult: { proofWebUrl?: string; proofCapturedAt?: string } = {};
-      try {
-        proofResult = await captureWebProof(page, application);
-        screenshotCaptured = true;
-      } catch (err: any) {
-        log.warn(`[liveSubmit] Proof capture failed after submit — marking APPLIED anyway: ${err.message}`);
-        await emitFailureDiagnostic({
-          category: 'SUBMIT_PROOF_CAPTURE',
-          stage: 'proof_capture',
-          reason: `Web proof screenshot capture failed: ${err?.message || String(err)}`,
-          error: err,
-          applicationId: application.id || applicationId,
-          applywizzId: application.applywizz_id,
-          jobUrl: targetUrl,
-          isTerminal: false,
-          isRetryable: true,
-        }).catch(() => {});
-      }
-      if (proofResult.proofWebUrl) {
-        log.info(`[Live Submit] 📸 Success web proof screenshot URL: ${proofResult.proofWebUrl}`);
-      }
-
-      // 9. Attach web proof & set submission timestamp
-      const submittedAt = new Date().toISOString();
-      const targetAppId = application.id || applicationId;
-      await updateStatus(targetAppId, 'EMAIL_PROOF_PENDING', {
-        proof_web_url: proofResult.proofWebUrl,
-        proof_captured_at: proofResult.proofCapturedAt,
-        job_url: application.job_url,
-      });
-
-      // 10. Attempt immediate email confirmation check (up to 15s)
-      log.info(`[Live Submit] 📧 Checking for immediate confirmation email matching company & apply time...`);
-      const emailProof = await captureAndSaveEmailProof(application, {
-        timeoutMs: 15000,
-      }).catch(() => null);
-
-      if (emailProof) {
-        log.info(`[Live Submit] 🎉 Confirmation email verified immediately! Marking APPLIED.`);
-        await updateStatus(targetAppId, 'APPLIED', {
-          proof_web_url: proofResult.proofWebUrl,
-          proof_captured_at: proofResult.proofCapturedAt,
-          proof_email_json: emailProof,
-          proof_email_captured_at: emailProof.received_at || new Date().toISOString(),
-          email_proof_status: 'captured',
-          job_url: application.job_url,
-        });
-
-        return {
-          success: true,
-          status: 'APPLIED',
-          applicationId,
-          proofWebUrl: proofResult.proofWebUrl,
-          proofCapturedAt: proofResult.proofCapturedAt,
-          hasEmailProof: true,
-          summary: fillSummary,
-        };
-      }
-
-      // Zero matches on immediate check: transition to EMAIL_PROOF_PENDING & start 30s background retry
-      log.info(
-        `[Live Submit] ⏳ Confirmation email not found immediately. Retrying in background every 30s for up to 10m (EMAIL_PROOF_PENDING)...`
-      );
-      const appForPoller: ApplicationRow = {
-        ...application,
-        id: targetAppId,
-        submitted_at: submittedAt,
-        proof_web_url: proofResult.proofWebUrl,
-        proof_captured_at: proofResult.proofCapturedAt,
-        status: 'EMAIL_PROOF_PENDING',
-      };
-      emailProofPoller.startPolling(appForPoller);
-
-      return {
-        success: true,
-        status: 'EMAIL_PROOF_PENDING',
-        applicationId,
-        proofWebUrl: proofResult.proofWebUrl,
-        proofCapturedAt: proofResult.proofCapturedAt,
-        summary: fillSummary,
-      };
-    } else {
-      const isServerError = (verification.error || '').startsWith('GREENHOUSE_SERVER_ERROR:');
-      const isTimeout = !isServerError && /time.*out/i.test(verification.error || '');
-      const isFormError = !isServerError && /form (filling|validation) error/i.test(verification.error || '');
-      let errorMsg: string;
-
-      if (isServerError) {
-        const details = (verification.error || '').replace(/^GREENHOUSE_SERVER_ERROR:\s*/, '');
-        errorMsg = `Greenhouse server error: ${details}`;
-        log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
-      } else if (isFormError) {
-        errorMsg = verification.error || 'Form filling error: Validation failed.';
-        log.error(`[Live Submit] ❌ ${errorMsg} for application ${applicationId}`);
-      } else if (isTimeout) {
-        errorMsg = `Timeout: Submission verification timed out after ${confirmationTimeoutMs}ms.`;
-        log.warn(`[Live Submit] ⏱️ Timeout: ${errorMsg} for application ${applicationId}`);
-      } else {
-        errorMsg = verification.error || 'Submission verification failed.';
-        log.warn(`[Live Submit] ❌ Submission verification failed: ${errorMsg} for application ${applicationId}`);
-      }
-
-      await emitFailureDiagnostic({
-        category: isServerError || isFormError
-          ? 'SUBMIT_FORM_FILL_ERROR'
-          : 'SUBMIT_CONFIRMATION_TIMEOUT',
-        stage: 'submission_confirmation',
-        reason: errorMsg,
-        isTerminal: false,
-        isRetryable: isServerError ? true : !isTimeout,
-        applicationId: application.id || applicationId,
-        jobUrl: targetUrl,
-        metadata: { timeoutMs: confirmationTimeoutMs },
-      });
-
-      let failedProof: any = null;
-      let errorDiagnostics: any = null;
-      if (page && !page.isClosed()) {
-        errorDiagnostics = await captureFailureDiagnostics(page).catch(() => null);
-        if (!screenshotCaptured) {
-          failedProof = await captureFailedScreenshot(page, application).catch(() => null);
-          if (failedProof?.url) {
-            log.info(`[Live Submit] 📸 Submission verification failure screenshot URL: ${failedProof.url}`);
-          }
-          screenshotCaptured = true;
-        }
-      }
-
-      if (application.id) {
-        await updateStatus(application.id, 'FAILED', {
-          error_message: errorMsg,
-          error_details: errorDiagnostics,
-          proof_failed_url: failedProof?.proofFailedUrl || failedProof?.url,
-          proof_failed_captured_at: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-          job_url: application.job_url,
-        }).catch(() => {});
-      }
-
-      return {
-        success: false,
-        status: 'FAILED',
-        applicationId,
-        errorMessage: errorMsg,
-        retryReason: isFormError && /Required field validation failed/i.test(errorMsg)
-          ? 'UNRESOLVED_REQUIRED_FIELD'
-          : undefined,
-        summary: fillSummary,
-        proofFailedUrl: failedProof?.proofFailedUrl || failedProof?.url,
-        proofFailedCapturedAt: failedProof?.proofFailedCapturedAt || failedProof?.capturedAt,
-      };
-    }
+    keepSessionOpen = postSubmit.keepSessionOpen;
+    screenshotCaptured = postSubmit.screenshotCaptured;
+    return postSubmit.result;
   } catch (err: any) {
     const isTimeout = /time.*out/i.test(err.message || '');
     const isFillError = /form filling error|fillSingleField|fillForm/i.test(err.message || '');
