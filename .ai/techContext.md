@@ -52,10 +52,8 @@ npm run submit               # Live submission CLI
 
 # Database & Sandbox
 npm run db:migrate           # Run all pending migrations
-npm run db:backfill-company-email
 npm run db:fix-rollup        # Inspect yesterday/today canonical stats (read-only; no pruning)
 npm run backfill:profiles    # Refresh all Supabase profiles from ApplyWizz
-npm run db:clear             # Clear candidate_qa_bank answers
 npm run sandbox              # Run local Postgres sandbox environment (builds TSX dashboard, SANDBOX=true)
 npm run sandbox:fresh        # Reset local sandbox Postgres database and start fresh pipeline
 

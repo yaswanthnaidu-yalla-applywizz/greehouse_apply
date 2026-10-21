@@ -120,9 +120,6 @@ const envSchema = z.object({
   /** Minimum spacing in ms between consecutive browser launches to prevent CPU/memory burst spikes (default: 1500) */
   BROWSER_LAUNCH_COOLDOWN_MS: z.coerce.number().int().min(0).max(10000).default(1500),
 
-  /** Operator dashboard delivery mode: 'html' (Babel in-browser) or 'tsx' (Vite bundle) */
-  DASHBOARD_MODE: z.string().optional().default('html'),
-
   /** JWT Secret for backend session verification (falls back to default if unset) */
   JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
 
