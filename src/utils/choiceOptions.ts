@@ -149,7 +149,7 @@ function canonicalAlias(value: string): string | null {
   if (/^not a veteran$|^i am not a protected veteran$|^none of the above$/.test(normalized)) {
     return 'not veteran';
   }
-  if (/^decline(?: to self identify)?$|^prefer not to (?:say|answer)$|^i dont wish to answer$|^choose not to disclose$/.test(normalized)) {
+  if (/^decline(?: to self identify)?$|^(?:i\s+)?prefer not to (?:say|answer)$|^i dont wish to answer$|^choose not to disclose$/.test(normalized)) {
     return 'decline';
   }
   // Degree levels
