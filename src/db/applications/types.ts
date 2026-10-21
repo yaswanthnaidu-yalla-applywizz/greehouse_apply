@@ -80,6 +80,20 @@ export interface EmailProofJson {
   body_html?: string;
 }
 
+import type { ResolvedField } from '../../types/index.js';
+export type { ResolvedField };
+
+export interface SubmissionErrorDetails {
+  category?: string;
+  stage?: string;
+  reason?: string;
+  fieldErrors?: Array<{ label?: string; selector?: string; error?: string }>;
+  pageUrl?: string;
+  pageTitle?: string;
+  domErrors?: string[];
+  [key: string]: unknown;
+}
+
 export interface ApplicationRow {
   id?: string;
   applywizz_id: string;
@@ -91,7 +105,7 @@ export interface ApplicationRow {
   status: ApplicationStatus;
   submission_order?: number | null;
   assigned_ca_email?: string | null;
-  resolved_fields: any[];
+  resolved_fields: ResolvedField[];
   proof_web_url?: string | null;
   proof_captured_at?: string | null;
   proof_failed_url?: string | null;
@@ -111,7 +125,7 @@ export interface ApplicationRow {
   csv_job_score?: number | null;
   field_count?: number | null;
   retry_count?: number | null;
-  error_details?: any | null;
+  error_details?: SubmissionErrorDetails | null;
 }
 
 /**

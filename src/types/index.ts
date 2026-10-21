@@ -209,6 +209,7 @@ export interface CandidateJobRecord {
   scoredJobId: string;
   /** Status in CSV (e.g., 'PENDING') */
   status: string;
+  taskId?: string;
 }
 
 /**
@@ -238,6 +239,7 @@ export interface IngestFilterReport {
   clearanceLinks: string[];
   excludedCompanyApplications: IngestFilterApplication[];
   latestEmployerApplications: IngestFilterApplication[];
+  filteredOutApplications: IngestFilterApplication[];
 }
 
 // ============================================================================
@@ -359,6 +361,7 @@ export interface CandidateJobApplication {
   resolvedFields: ResolvedField[];
   /** Assigned Career Associate email */
   assignedCaEmail?: string | null;
+  taskId?: string | null;
 }
 
 // ============================================================================

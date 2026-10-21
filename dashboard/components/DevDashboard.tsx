@@ -271,6 +271,29 @@ export const DevDashboard: React.FC = () => {
     }
   };
 
+  const downloadCurrentIngestReport = async () => {
+    setError('');
+    try {
+      const response = await fetch('/api/dev/ingest-filter-report', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || 'Unable to download the current ingest filter report.');
+      }
+      const url = window.URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'ingest-filter-report.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to download the current ingest filter report.');
+    }
+  };
+
   if (authLoading) {
     return <main className="min-h-screen p-8 text-xs font-mono font-bold bg-[#0a0a0a] text-[#8e8e93]">Checking access…</main>;
   }
@@ -331,6 +354,9 @@ export const DevDashboard: React.FC = () => {
             <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border capitalize transition-colors ${tab === id ? 'bg-white text-black font-bold border-white' : 'bg-[#1c1c1e] text-[#8e8e93] border-[#2c2c2e] hover:text-white hover:bg-[#2c2c2e]'}`}>{id}</button>
           ))}
         </nav>
+        <button type="button" onClick={downloadCurrentIngestReport} className="mb-4 bg-[#1c1c1e] border border-[#2c2c2e] hover:border-[#3a3a3c] rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors">
+          Download current ingest filter report
+        </button>
         {error && <div className="mb-4 bg-[#ff453a]/15 border border-[#ff453a]/40 rounded-xl p-3 text-sm font-bold text-[#ff453a]">{error}</div>}
         {tab === 'system' && health?.statsAvailable === false && <div className="mb-4 bg-[#ff9f0a]/15 border border-[#ff9f0a]/40 rounded-xl p-3 text-xs font-semibold text-[#ff9f0a]">Application statistics before {health.statsAvailableFrom || 'the cutover date'} are unavailable.</div>}
         {tab === 'system' && health?.statsAvailable !== false && health?.statsPartial && <div className="mb-4 bg-[#ff9f0a]/15 border border-[#ff9f0a]/40 rounded-xl p-3 text-xs font-semibold text-[#ff9f0a]">Partial statistics: dates before {health.statsAvailableFrom} are excluded.</div>}
