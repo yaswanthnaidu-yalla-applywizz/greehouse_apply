@@ -152,6 +152,8 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 ### `gh_candidate_applications`
 | Column | Type | Notes |
 |---|---|---|
+| `task_id` | TEXT | External task UUID differentiating individual runs; UNIQUE when present |
+| `legacy_application_key` | GENERATED TEXT | Unique key for rows without `task_id` |
 | `applywizz_id` | TEXT FK | Must exist in `profiles` before upsert. Rows created at **resolve** (or SKIPPED over-cap), not at CSV segregator |
 | `template_id` | TEXT FK | References `gh_scanned_job_templates` |
 | `job_url` | TEXT | |
@@ -163,7 +165,7 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `submitted_at` | TIMESTAMPTZ | |
 | `retry_count` | INTEGER | Bounded OTP-fetch and explicitly classified browser-launch retries; max 3 before `FAILED`. Required-field and ambiguous post-submit failures are not generically retried |
 | `error_message` | TEXT | |
-| UNIQUE | | `(applywizz_id, job_url)` — idempotent upsert |
+| UNIQUE | | `task_id` (when present); generated legacy key when `task_id` IS NULL |
 
 ### `zoho_connected_profiles` (migration 011)
 Tracks Zoho Mail accounts linked to candidates for email proof capture.
@@ -196,7 +198,7 @@ Dashboard operator and manager profiles, mapping, and roles.
 
 
 ### DB Migrations (SQL files, applied via `src/db/migrate.ts`)
-`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on gh_candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` gh_audit_events + gh_application_events + service_role RLS | `016` profiles.country + country_code | `017` gh_users | `018` disable gh_users rls | `019` application_submission_metadata | `020` multi_service_state / retry_count | `021` pgvector_semantic_search | `022` unify_email_proof_pending_status | `023` backfill_submitted_at | `024` legacy stats_rollups | `025` perf_indexes & retry_status | `026` retry_status_repair | `027` canonical application stats | `028` repair cutover to earliest recorded fact | `latest` combined
+`001` company_email | `002` captcha→otp_required rename | `003` proof_email_url | `004` optimization indexes | `005` round-robin queue | `006` email proof status | `007` proof_failed_url | `008` proof_email_json | `009` email_proof_pending | `010` Realtime on gh_candidate_applications | `011` zoho_connected_profiles | `012` approved status | `013` email_unverified status | `014` skipped status | `015` gh_audit_events + gh_application_events + service_role RLS | `016` profiles.country + country_code | `017` gh_users | `018` disable gh_users rls | `019` application_submission_metadata | `020` multi_service_state / retry_count | `021` pgvector_semantic_search | `022` unify_email_proof_pending_status | `023` backfill_submitted_at | `024` legacy stats_rollups | `025` perf_indexes & retry_status | `026` retry_status_repair | `027` canonical application stats | `028` repair cutover to earliest recorded fact | `035` application task_id | `latest` combined
 
 ## Dashboard roles (email map — no DB)
 

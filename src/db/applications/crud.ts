@@ -46,7 +46,7 @@ export function cacheApplicationLocally(app: ApplicationRow): ApplicationRow {
 
 /**
  * Upserts a candidate application record into Supabase or local memory.
- * Keyed by unique constraint (applywizz_id, job_url).
+ * Keyed by task_id or the generated legacy application key.
  */
 export async function upsertApplication(
   app: Partial<ApplicationRow> & { applywizz_id: string; job_url: string; resolved_fields: any[] }
@@ -154,7 +154,7 @@ export async function upsertApplication(
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const onConflict = payload.task_id ? 'task_id' : 'applywizz_id,job_url';
+      const onConflict = payload.task_id ? 'task_id' : 'legacy_application_key';
       let { data, error } = await supabase
         .from('gh_candidate_applications')
         .upsert(payload, { onConflict })
@@ -352,6 +352,7 @@ export async function getApplicationByCandidateAndJob(
         .select('*')
         .eq('applywizz_id', applywizzId)
         .eq('job_url', jobUrl)
+        .is('task_id', null)
         .maybeSingle();
 
       if (!error && data) {
@@ -363,7 +364,11 @@ export async function getApplicationByCandidateAndJob(
   }
 
   for (const app of memoryApplications.values()) {
-    if (app.applywizz_id === applywizzId && (app.job_url === jobUrl || jobUrl.includes(app.job_url))) {
+    if (
+      app.task_id == null &&
+      app.applywizz_id === applywizzId &&
+      (app.job_url === jobUrl || jobUrl.includes(app.job_url))
+    ) {
       return app;
     }
   }
@@ -878,4 +883,3 @@ export async function listApplications(filter?: {
 
   return results;
 }
-

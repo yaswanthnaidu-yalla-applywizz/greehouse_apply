@@ -30,6 +30,7 @@ import { matchCorporatePolicy, enforceCorporatePolicy } from './corporatePolicie
 import {
   enqueueApplication,
   getApplicationByCandidateAndJob,
+  getApplicationByTaskId,
   RESOLVE_AUTO_ENQUEUE_ELIGIBLE,
   upsertApplication,
 } from '../db/applications.js';
@@ -1067,7 +1068,10 @@ export class AnswerResolver {
               app.assignedCaEmail || (seg as any).assignedCaEmail || seg.profile?.ca_email || null;
             const shouldFilterOut = applicationShouldBeFilteredOut(app.resolvedFields);
             const needsReview = applicationNeedsOperatorReview(app.resolvedFields);
-            const existing = await getApplicationByCandidateAndJob(app.applywizzId, persistJobUrl);
+            const taskId = job.taskId || app.taskId || null;
+            const existing = taskId
+              ? await getApplicationByTaskId(taskId)
+              : await getApplicationByCandidateAndJob(app.applywizzId, persistJobUrl);
             const existingStatus = existing?.status;
             const withinQuestionLimit = isWithinSubmissionQuestionLimit({
               field_count: questionCount,
@@ -1083,6 +1087,7 @@ export class AnswerResolver {
               : 'READY_FOR_REVIEW';
 
             const persistedApplication = await upsertApplication({
+              task_id: taskId,
               applywizz_id: app.applywizzId,
               job_url: persistJobUrl,
               company_name: app.companyName,
