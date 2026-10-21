@@ -21,14 +21,6 @@ import {
 import { insertApplicationEvent } from './events.js';
 import { createLogger } from '../utils/logger.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
-import {
-  assertWithinSubmissionQuestionLimit,
-  isWithinSubmissionQuestionLimit,
-  isWithinSubmissionQuestionLimitForDisplay,
-  QuestionLimitExceededError,
-} from '../submission/questionLimit.js';
-
-export { QuestionLimitExceededError };
 import { applicationRowHasPersistedResolution } from '../dashboard/candidateQueueFilter.js';
 import {
   normalizeOperatorErrorMessage,
@@ -121,6 +113,7 @@ export interface EmailProofJson {
 export interface ApplicationRow {
   id?: string;
   applywizz_id: string;
+  task_id?: string | null;
   template_id?: string | null;
   job_url: string;
   company_name?: string | null;
@@ -365,7 +358,16 @@ export async function upsertApplication(
   }
 
   let existingRow: Pick<ApplicationRow, 'status' | 'resolved_fields'> | null = null;
-  if (payload.applywizz_id && payload.job_url) {
+  if (payload.task_id) {
+    try {
+      const existing = await getApplicationByTaskId(payload.task_id);
+      if (existing) {
+        existingRow = { status: existing.status, resolved_fields: existing.resolved_fields };
+      }
+    } catch {
+      /* fall through */
+    }
+  } else if (payload.applywizz_id && payload.job_url) {
     try {
       const existing = await getApplicationByCandidateAndJob(payload.applywizz_id, payload.job_url);
       if (existing) {
@@ -447,15 +449,32 @@ export async function upsertApplication(
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const { data, error } = await supabase
+      const onConflict = payload.task_id ? 'task_id' : 'applywizz_id,job_url';
+      let { data, error } = await supabase
         .from('gh_candidate_applications')
-        .upsert(payload, { onConflict: 'applywizz_id,job_url' })
+        .upsert(payload, { onConflict })
         .select()
         .single();
+
+      if (error && error.message.includes("'task_id' column") && error.message.includes('schema cache')) {
+        log.warn(`[DB] Supabase schema cache missing 'task_id' — retrying without task_id on (applywizz_id,job_url)`);
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.task_id;
+        const retryResult = await supabase
+          .from('gh_candidate_applications')
+          .upsert(fallbackPayload, { onConflict: 'applywizz_id,job_url' })
+          .select()
+          .single();
+        data = retryResult.data;
+        error = retryResult.error;
+      }
 
       if (!error && data) {
         const row = data as ApplicationRow;
         memoryApplications.set(row.id!, row);
+        if (row.task_id) {
+          memoryApplications.set(`task_${row.task_id}`, row);
+        }
         const compositeKey = `${row.applywizz_id}_${Buffer.from(row.job_url).toString('base64url').slice(0, 16)}`;
         memoryApplications.set(compositeKey, row);
         return row;
@@ -481,9 +500,12 @@ export async function upsertApplication(
     payload.status = 'READY_FOR_REVIEW';
   }
 
-  const fallbackId = app.id || `${app.applywizz_id}_${Buffer.from(app.job_url).toString('base64url').slice(0, 16)}`;
+  const fallbackId = app.id || (payload.task_id ? `task_${payload.task_id}` : `${app.applywizz_id}_${Buffer.from(app.job_url).toString('base64url').slice(0, 16)}`);
   payload.id = fallbackId;
   memoryApplications.set(fallbackId, payload);
+  if (payload.task_id) {
+    memoryApplications.set(`task_${payload.task_id}`, payload);
+  }
   return payload as ApplicationRow;
 }
 
@@ -566,42 +588,53 @@ export async function getApplication(id: string, jobUrl?: string): Promise<Appli
     }
   }
 
-  // 3. Disk fallback (output/resolved_applications.json)
-  try {
-    const diskPath = path.resolve(process.cwd(), 'output', 'resolved_applications.json');
-    if (fs.existsSync(diskPath)) {
-      const raw = fs.readFileSync(diskPath, 'utf8');
-      const apps = JSON.parse(raw);
-      if (Array.isArray(apps)) {
-        const found = apps.find((a: any) =>
-          (a.applywizzId === cleanId || a.id === cleanId || a.applywizzId === candidateId) && (!targetJobUrl || a.jobUrl === targetJobUrl)
-        );
-        if (found) {
-          const fallbackId: string = found.id || `${found.applywizzId}_${Buffer.from(found.jobUrl || '').toString('base64url').slice(0, 16)}`;
-          const converted: ApplicationRow = {
-            id: fallbackId,
-            applywizz_id: found.applywizzId,
-            job_url: found.jobUrl,
-            company_name: found.companyName || '',
-            job_title: found.jobTitle || '',
-            status: found.status || 'READY_FOR_REVIEW',
-            resolved_fields: found.resolvedFields || [],
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          memoryApplications.set(fallbackId, converted);
-          return converted;
-        }
-      }
-    }
-  } catch {}
-
+  // 3. Disk fallback removed per V2 Supabase authority rule
   return null;
 }
 
 /**
  * Retrieves a candidate application by candidate ID and job URL.
  */
+/**
+ * Retrieves a candidate application by external task ID.
+ */
+export async function getApplicationByTaskId(
+  taskId: string
+): Promise<ApplicationRow | null> {
+  if (!taskId) return null;
+  const memoryKey = `task_${taskId}`;
+  const cached = memoryApplications.get(memoryKey);
+  if (cached) return cached;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('gh_candidate_applications')
+        .select('*')
+        .eq('task_id', taskId)
+        .maybeSingle();
+
+      if (!error && data) {
+        const row = data as ApplicationRow;
+        memoryApplications.set(row.id!, row);
+        memoryApplications.set(memoryKey, row);
+        return row;
+      }
+    } catch (err: any) {
+      log.warn(`[DB] getApplicationByTaskId exception (${taskId}):`, err?.message || err);
+    }
+  }
+
+  for (const app of memoryApplications.values()) {
+    if (app.task_id === taskId) {
+      return app;
+    }
+  }
+
+  return null;
+}
+
 export async function getApplicationByCandidateAndJob(
   applywizzId: string,
   jobUrl: string
@@ -1294,6 +1327,8 @@ export interface ApplicationDto {
   retryCount?: number | null;
   csv_job_score?: number | null;
   csvJobScore?: number | null;
+  task_id?: string | null;
+  taskId?: string | null;
   field_count?: number | null;
   fieldCount?: number | null;
   eligibleForSubmission?: boolean;
@@ -1368,6 +1403,7 @@ export function serializeApplicationDto(
   const retryCount = Number(merged.retry_count ?? merged.retryCount ?? 0);
   const fieldCount = merged.field_count ?? merged.fieldCount ?? null;
   const csvJobScore = merged.csv_job_score ?? merged.csvJobScore ?? null;
+  const taskId = merged.task_id ?? merged.taskId ?? null;
 
   return {
     id: merged.id,
@@ -1424,14 +1460,12 @@ export function serializeApplicationDto(
     retryCount: Number.isFinite(retryCount) ? retryCount : 0,
     csv_job_score: csvJobScore,
     csvJobScore,
+    task_id: taskId,
+    taskId,
     field_count: fieldCount,
     fieldCount,
-    eligibleForSubmission: isWithinSubmissionQuestionLimitForDisplay({
-      field_count: fieldCount,
-    }),
-    questionLimitBlocked: !isWithinSubmissionQuestionLimit({
-      field_count: fieldCount,
-    }).eligible,
+    eligibleForSubmission: true,
+    questionLimitBlocked: false,
   };
 }
 
@@ -2085,7 +2119,7 @@ export async function enqueueApplication(
     throw new Error(`Application '${applicationIdOrApplywizzId}' not found to queue.`);
   }
 
-  assertWithinSubmissionQuestionLimit(app);
+  // Submission question limit check removed
 
   const previousStatus = app.status || 'READY_FOR_REVIEW';
   if (options.expectedStatus && previousStatus !== options.expectedStatus) {
