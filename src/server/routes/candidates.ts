@@ -1120,7 +1120,7 @@ candidatesRouter.get('/:applywizzId/jobs/*', async (req: AuthenticatedRequest, r
         company_name: appItem.companyName,
         job_title: appItem.jobTitle,
         status: status as any || 'READY_FOR_REVIEW',
-        resolved_fields: resolvedFields,
+        resolved_fields: resolvedFields as any,
         proof_web_url: proofWebUrl,
         dry_run_screenshot_url: dryRunScreenshotUrl,
         has_manual_edits: hasManualEdits,
@@ -1132,7 +1132,7 @@ candidatesRouter.get('/:applywizzId/jobs/*', async (req: AuthenticatedRequest, r
     cacheApplicationLocally({
       ...toApplicationRow(appItem),
       id: finalId,
-      resolved_fields: resolvedFields,
+      resolved_fields: resolvedFields as any,
       status: status as any,
       proof_web_url: proofWebUrl,
       dry_run_screenshot_url: dryRunScreenshotUrl,

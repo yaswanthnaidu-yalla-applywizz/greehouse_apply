@@ -374,7 +374,7 @@ export async function getDashboardApplicationMetrics(options?: {
       totalFieldsPopulated += 1;
       if (f?.source === 'supabase') supabaseTaggedCount += 1;
       if (f?.source === 'ai') aiTaggedCount += 1;
-      if (f?.source === 'resume') resumeTaggedCount += 1;
+      if (f?.source === 'resume_parse' || (f?.source as string) === 'resume') resumeTaggedCount += 1;
     }
   };
 
