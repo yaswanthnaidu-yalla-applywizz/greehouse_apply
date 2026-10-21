@@ -1,3 +1,61 @@
+### Codebase Debloat & Structural Refactoring (2026-10-21 Complete)
+- [x] **PR 1: V1 Artifact Purge (`src/db/applications/`, `src/server/index.ts`, `tests/v1ArtifactPurge.test.ts`):**
+  - Completely purged dead V1 local JSON disk fallbacks (`scanned_jobs.json`, `resolved_applications.json`).
+  - Added unit test asserting 100% database-driven execution.
+- [x] **PR 2: Express Server Routes Extraction (`src/server/routes/devDb.ts`, `src/server/routes/candidates.ts`):**
+  - Extracted 1,200+ line `/api/candidates` endpoints and HTML `/dev/db` endpoint into modular Express routers.
+  - Added unit tests: `tests/candidatesRouter.test.ts`.
+- [x] **PR 3: Demo Candidate Fixture Isolation (`src/dashboard/demoFixtureService.ts`, `tests/demoFixtureIsolation.test.ts`):**
+  - Isolated demo candidate IDs and fixture services into dedicated submodule.
+- [x] **PR 4: Applications DB Decomposition (`src/db/applications/`, `tests/applicationsDecomposition.test.ts`):**
+  - Split 2,635-line `applications.ts` into 7 submodules (`types.ts`, `memoryStore.ts`, `crud.ts`, `dto.ts`, `statsQueries.ts`, `queue.ts`, `notifications.ts`).
+  - Maintained 100% backward compatibility via barrel re-exports.
+- [x] **PR 5: Canonical Choice Matcher (`src/utils/choiceOptions.ts`, `tests/choiceOptionsCanonical.test.ts`):**
+  - Replaced ad-hoc Fuse.js/regex dropdown matchers with unified fuzzy token coverage and negative-decline logic across resolver and submitter.
+- [x] **PR 6: Strategy-Based Field Fillers (`src/submitter/fieldFillers/`, `tests/fieldFillerStrategies.test.ts`):**
+  - Decomposed monolithic `formFiller.ts` into cohesive field strategies (`base.ts`, `fileFiller.ts`, `selectFiller.ts`, `booleanFiller.ts`, `textFiller.ts`).
+- [x] **PR 7: LiveSubmit Pipeline & Unified OTP Session Registry (`src/submitter/otpSession.ts`, `src/submitter/liveSubmit.ts`, `tests/liveSubmitPipeline.test.ts`):**
+  - Unified `PAUSED_SESSIONS` and `activeSubmissions` into a single store.
+  - Linearized `runLiveSubmit` into `prepareSubmissionPreflight`, `executeFormFill`, and `handlePostSubmitResponse`.
+- [x] **PR 8: Inbox Strategies Modularization (`src/services/inbox/`, `src/services/zoho-connector.ts`, `tests/inboxStrategies.test.ts`):**
+  - Extracted `inboxPoller.ts`, `zohoStrategy.ts`, and `gmailStrategy.ts` while preserving 5,000ms clock skew and facade re-exports.
+- [x] **PR 9: Strict Domain Typing & Dashboard Decomposition (`src/types/index.ts`, `src/db/applications/types.ts`, `dashboard/`, `tests/dashboardDecomposition.test.ts`):**
+  - Replaced `any[]` with `ResolvedField[]` and added `SubmissionErrorDetails`.
+  - Extracted `DashboardHeader.tsx` (preserving 2-tier header test IDs), `CandidateSidebar.tsx`, and `useDashboardState.ts`.
+- [x] **Verification:**
+  - All test suites passing (`68/68 node:test`, `55/55 vitest`).
+  - Full TypeScript typecheck clean across both backend and dashboard.
+  - Vite frontend bundle built successfully.
+
+### Failure Diagnostics & Root Cause Fixes (2026-10-16 Complete)
+- [x] **Database Migration 027 (`supabase/migrations/027_error_details.sql`, `src/db/migrations/027_error_details.sql`):**
+  - Added `error_details jsonb` column to `gh_candidate_applications` to store structured failure diagnostics.
+  - Applied and verified against live DB2.
+- [x] **Failure Diagnostics Capture (`src/submitter/failureDiagnostics.ts`):**
+  - Implemented `captureFailureDiagnostics(page)` extracting `failureType`, `failingFields` (label + error text), `serverError`, `pageTitle`, `pageUrl`, and `capturedAt`.
+  - Wired into all submission verification and execution failure write points in `src/submitter/liveSubmit.ts` and `updateStatus` in `src/db/applications.ts`.
+- [x] **Resume Upload Selectors Expanded (`src/submitter/formFiller.ts`):**
+  - Exported `getResumeFileSelectors()` supporting Remix `[data-field*="resume" i]`, `input[type="file"][accept*="pdf" i]`, `.resume-upload-wrapper`, and `[data-testid*="resume" i]`.
+  - Added post-upload `attachedCount === 0` check throwing explicit `RESUME_UPLOAD_FAILED` to prevent submitting without attachment.
+- [x] **Greenhouse Server Error Fast-Fail (`src/submitter/otpSession.ts`, `src/submitter/liveSubmit.ts`):**
+  - Added instant detection of server-error text on the first poll iteration, avoiding 30-75s timeouts and writing `Greenhouse server error` to DB.
+- [x] **0-Jobs Expiry Redirect Detection (`src/scanner/playwrightScanner.ts`):**
+  - Exported and wired `isZeroJobsExpiredPage` to detect search listing pages returning 0 jobs with missing application form as `isExpired: true`.
+- [x] **Test Verification:**
+  - `tests/failureDiagnostics.test.ts` (4/4 pass)
+  - `tests/resumeSelectors.test.ts` (2/2 pass)
+  - `tests/serverErrorFastFail.test.ts` (1/1 pass)
+  - `tests/zeroJobsExpiry.test.ts` (3/3 pass)
+  - Full TypeScript typecheck clean across backend and dashboard.
+
+### Full Dashboard Stats Alignment & Canonical Sync (2026-10-15 Complete)
+- [x] **Full Ground Truth Synchronization (`gh_application_stats_daily`, `gh_stats_rollups`):**
+  - Audited all 1,453 applications in database (`gh_candidate_applications`).
+  - Purged orphaned and stale daily stats rows.
+  - Rebuilt 11,780 scoped stat rows (`global`, `ca`, `manager`, `manager_ca`) for today (`2026-10-15` IST).
+  - Aligned `gh_stats_rollups`: Total = 1,451, Submitted = 816, Applied = 635, Failed = 105.
+  - Verified frontend build (`npm run build:dashboard`) and full typecheck (`npm run typecheck`).
+
 ### CA Email Backfill & Notification Email Dispatch (2026-10-15 Complete)
 - [x] **Assigned CA Email Backfill (`gh_candidate_applications`):**
   - Backfilled `assigned_ca_email` across 635 applications from corresponding candidate `profiles.ca_email` (370 profiles mapped).
