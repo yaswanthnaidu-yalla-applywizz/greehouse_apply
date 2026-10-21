@@ -36,7 +36,7 @@ export function isApplicationUuid(id: string): boolean {
 
 export function isDemoResumeApplywizzId(applywizzId: string): boolean {
   const id = (applywizzId || '').trim().toUpperCase();
-  return id === 'AWL-YASWANTH' || id === 'AWL-YASHANTH';
+  return id === 'AWL-YASWANTH' || id === 'AWL-YASHANTH' || id === 'AWL-31428';
 }
 
 export interface ResumeNamingProfile {
