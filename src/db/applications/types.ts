@@ -126,6 +126,8 @@ export interface ApplicationRow {
   field_count?: number | null;
   retry_count?: number | null;
   error_details?: SubmissionErrorDetails | null;
+  ats?: 'greenhouse' | 'ashby';
+  scheduled_not_before?: string | null;
 }
 
 /**
