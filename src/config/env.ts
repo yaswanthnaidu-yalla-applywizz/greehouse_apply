@@ -218,6 +218,18 @@ const envSchema = z.object({
   /** Additional comma-separated list of emails permitted to sign up */
   ALLOWED_SIGNUP_EMAILS: z.string().default('yaswanthnaiduyalla@applywizz.ai'),
 
+  /** DataImpulse Residential Proxy Login */
+  DATAIMPULSE_LOGIN: z.string().optional(),
+
+  /** DataImpulse Residential Proxy Password */
+  DATAIMPULSE_PASSWORD: z.string().optional(),
+
+  /** DataImpulse Proxy Gateway Host */
+  DATAIMPULSE_HOST: z.string().default('gw.dataimpulse.com'),
+
+  /** DataImpulse Proxy Gateway Port */
+  DATAIMPULSE_PORT: z.coerce.number().int().positive().default(823),
+
   /** ApplyWizz S3 Bucket Base URL for master resumes */
   APPLYWIZZ_S3_BASE_URL: z.string().default('https://applywizz-prod.s3.us-east-2.amazonaws.com'),
 
