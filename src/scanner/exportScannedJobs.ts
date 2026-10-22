@@ -18,6 +18,7 @@ import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { isSandboxMode } from '../db/sandboxClient.js';
 import type { ScannedJobTemplate } from '../types/index.js';
 import { hasSecurityClearanceQuestion } from './securityClearance.js';
+import { atsFromUrl } from './csvDeduplicator.js';
 import { createLogger } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 
@@ -110,6 +111,7 @@ export async function exportScannedJobs(
         is_expired: Boolean(template.isExpired),
         scanned_at: template.scannedAt || new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        ats: atsFromUrl(template.jobUrl),
       }));
 
       const query = supabase
