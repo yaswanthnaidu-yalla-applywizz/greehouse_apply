@@ -1,3 +1,13 @@
+### Ashby ATS Integration & Unified Browser Stealth (2026-10-22 Complete)
+- [x] **Migrations 036 & 037:** Added `ats TEXT DEFAULT 'greenhouse'` and `scheduled_not_before TIMESTAMPTZ` with rate limit RPC guards in `get_next_queued_application()`.
+- [x] **ATS Detector & Hybrid Scanner:** Added `src/scanner/atsDetector.ts` and `src/scanner/ashbyScanner.ts` (API + Playwright DOM fallback).
+- [x] **Pipeline & Resolver Integration:** Deduplicated Ashby URLs, short-circuited `_systemfield_*` profile fields, propagated `ats` to `gh_candidate_applications` and `gh_scanned_job_templates`.
+- [x] **Unified Stealth Browser:** Centralized `playwright-extra` + `puppeteer-extra-plugin-stealth` in `src/submitter/browserManager.ts` across both Greenhouse and Ashby.
+- [x] **DataImpulse Geo-Proxy:** Geo-targeted residential proxy builder enforcing candidate country + city sticky session per day.
+- [x] **Ashby Form Filler & Submitter:** Human-like Bézier cursor, micro-jitter typing, Turnstile settlement scrolling, submit button click, and confirmation verification matching green banner text (`"Your application was successfully submitted. We'll contact you if there are next steps."`).
+- [x] **Queue Worker & Route Routing:** Integrated `submitAshbyApplication` into `src/submitter/submitterPool.ts` and `src/server/routes/submissions.ts`.
+- [x] **Verification:** 28 Ashby tests passed, 55 Vitest unit tests passed, all Node test runner suites passed, `npm run typecheck` clean, dashboard build clean.
+
 ### Codebase Debloat & Structural Refactoring (2026-10-21 Complete)
 - [x] **PR 1: V1 Artifact Purge (`src/db/applications/`, `src/server/index.ts`, `tests/v1ArtifactPurge.test.ts`):**
   - Completely purged dead V1 local JSON disk fallbacks (`scanned_jobs.json`, `resolved_applications.json`).

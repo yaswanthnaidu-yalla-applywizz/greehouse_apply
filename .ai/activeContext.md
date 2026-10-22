@@ -1,3 +1,17 @@
+# Current Session Update (2026-10-22 — Ashby ATS Integration & Unified BrowserManager Stealth)
+
+- **Completed Full Ashby ATS Integration across 13 Implementation Plan Tasks**:
+  - **Migrations 036 & 037 Applied**: Added `ats TEXT DEFAULT 'greenhouse'` on `gh_scanned_job_templates` and `gh_candidate_applications`; added `scheduled_not_before TIMESTAMPTZ` with partial index for Ashby rate limiting; added atomic rate-limit guards to `get_next_queued_application()` RPC (40–60m client gap, 48hr client-company lockout, 20m inter-company gap).
+  - **ATS URL Detector (`src/scanner/atsDetector.ts`)**: Accurately classifies Ashby vs Greenhouse URLs and extracts Ashby IDs.
+  - **Ashby Scanner (`src/scanner/ashbyScanner.ts`)**: Hybrid scanner attempting Ashby JSON API schema with automatic fallback to dedicated Playwright DOM scanner extracting `[data-field-path]` elements.
+  - **Pipeline Routing (`src/scanner/csvDeduplicator.ts`, `src/orchestrator/pipeline.ts`)**: Deduplicates Ashby URLs and routes them to `scanAshbyJob`, while leaving Greenhouse URLs untouched.
+  - **System Field Interception (`src/resolver/answerResolver.ts`)**: Pre-Tier 1 short-circuit for Ashby system fields (`_systemfield_*`) directly mapped from candidate profile; `_systemfield_resume` resolved to `__FILE_UPLOAD__`.
+  - **Centralized Stealth Browser (`src/submitter/browserManager.ts`)**: Upgraded to `playwright-extra` + `puppeteer-extra-plugin-stealth` across the centralized `BrowserManager`, providing unified bot evasion across all ATS submissions (Greenhouse and Ashby) in both headless and headful modes.
+  - **Geo-targeted Residential Proxy (`src/submitter/ashbyProxy.ts`)**: Formats DataImpulse credentials (`<LOGIN>__cr.<country>;city.<city>;sid.<cleanId>_<YYYYMMDD>`) strictly enforced for Ashby submissions; halts immediately if proxy credentials are missing.
+  - **Ashby Form Filler & Submitter (`src/submitter/ashbyFormFiller.ts`, `src/submitter/ashbySubmit.ts`)**: Implements human-like Bézier cursor movements, micro-jitter typing, Turnstile settlement scrolling, submit button click, and confirmation verification matching green banner text (`"Your application was successfully submitted. We'll contact you if there are next steps."`).
+  - **Queue Worker Routing (`src/submitter/submitterPool.ts`, `src/server/routes/submissions.ts`)**: Seamlessly routes Ashby applications to `submitAshbyApplication` and Greenhouse applications to `liveSubmit`.
+  - **Verification**: 28 Ashby tests passed, 55 Vitest unit tests passed, all Node test runner suites passed, `npm run typecheck` clean (src + dashboard), `npm run build:dashboard` clean, live Ashby URL scan verified on real Constructor job posting with 12 fields extracted.
+
 # Current Session Update (2026-10-21 — Complete 9-PR Thermo-Nuclear Code Quality Debloat Sequence)
 
 - **Completed All 9 Refactoring PRs from `docs/debloat/review.md` via Strict TDD, `/pstack:unslop`, and `/ponytail`**:
