@@ -34,8 +34,7 @@ import {
   RESOLVE_AUTO_ENQUEUE_ELIGIBLE,
   upsertApplication,
 } from '../db/applications.js';
-import { isWithinSubmissionQuestionLimit } from '../submission/questionLimit.js';
-import { resolveShortlink, resolveShortlinksBatch } from '../scanner/csvDeduplicator.js';
+import { resolveShortlink, resolveShortlinksBatch, atsFromUrl } from '../scanner/csvDeduplicator.js';
 import { hasSecurityClearanceQuestion } from '../scanner/securityClearance.js';
 import { getApplicationExclusionReasons } from './applicationExclusions.js';
 import type {
@@ -352,6 +351,56 @@ export function resolveAvailabilityField(
     ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
     ...(field.metadata ? { metadata: field.metadata } : {}),
   };
+}
+
+
+export function resolveAshbySystemField(
+  field: ScannedField,
+  profile: ProfileRow | null,
+  isRequired: boolean
+): ResolvedField | null {
+  const fieldId = field.fieldId || field.name || '';
+  if (!fieldId.startsWith('_systemfield_')) {
+    return null;
+  }
+
+  let value: string | null = null;
+  if (fieldId === '_systemfield_name') {
+    value = profile?.client_name || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || null;
+  } else if (fieldId === '_systemfield_email') {
+    value = profile?.company_email || profile?.email || null;
+  } else if (fieldId === '_systemfield_phone') {
+    value = profile?.phone || null;
+  } else if (fieldId === '_systemfield_location') {
+    value = profile?.location || profile?.country || 'United States';
+  } else if (fieldId === '_systemfield_resume') {
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      type: 'file',
+      label: field.label,
+      value: '__FILE_UPLOAD__',
+      source: 'supabase',
+      resolvedByTier: 1,
+      confidence: 1.0,
+      isRequired,
+    };
+  }
+
+  if (value) {
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      type: field.type,
+      label: field.label,
+      value,
+      source: 'supabase',
+      resolvedByTier: 1,
+      confidence: 1.0,
+      isRequired,
+    };
+  }
+  return null;
 }
 
 export function resolveStructuredEeocField(
@@ -780,6 +829,7 @@ export class AnswerResolver {
         status: 'EXPIRED',
         resolvedFields: [],
         assignedCaEmail: profile?.ca_email || null,
+      ats: template.ats ?? atsFromUrl(template.jobUrl),
       };
     }
 
@@ -878,7 +928,7 @@ export class AnswerResolver {
     options?: {
       onFilteredApplication?: (
         application: IngestFilterApplication,
-        reason: 'excluded_company' | 'latest_employer'
+        reason: 'excluded_company' | 'latest_employer' | 'filtered_out'
       ) => void;
     }
   ): Promise<CandidateJobApplication[]> {
@@ -1073,13 +1123,9 @@ export class AnswerResolver {
               ? await getApplicationByTaskId(taskId)
               : await getApplicationByCandidateAndJob(app.applywizzId, persistJobUrl);
             const existingStatus = existing?.status;
-            const withinQuestionLimit = isWithinSubmissionQuestionLimit({
-              field_count: questionCount,
-            }).eligible;
             const canAutoEnqueue =
               !shouldFilterOut &&
               !needsReview &&
-              withinQuestionLimit &&
               (!existingStatus || RESOLVE_AUTO_ENQUEUE_ELIGIBLE.has(existingStatus));
 
             const initialStatus: ApplicationStatus = shouldFilterOut
@@ -1097,10 +1143,15 @@ export class AnswerResolver {
               field_count: questionCount,
               assigned_ca_email: assignedCaEmail,
               status: initialStatus,
+              ats: app.ats ?? atsFromUrl(persistJobUrl),
             });
 
             if (shouldFilterOut) {
               filteredOutApplications++;
+              options?.onFilteredApplication?.(
+                { applywizzId: app.applywizzId, jobUrl: persistJobUrl },
+                'filtered_out'
+              );
               const aiCount = countAiFields(app.resolvedFields);
               const unresCount = countUnresolvedRequiredFields(app.resolvedFields);
               log.debug(
