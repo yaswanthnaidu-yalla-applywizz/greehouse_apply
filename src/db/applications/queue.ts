@@ -522,3 +522,34 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
   return null;
 }
 
+
+/**
+ * Updates scheduled_not_before on all remaining QUEUED Ashby applications for a candidate,
+ * enforcing a random 40 to 60 minute delay between applications.
+ */
+export async function setAshbyScheduledNotBefore(applywizzId: string): Promise<void> {
+  const delayMinutes = 40 + Math.floor(Math.random() * 21); // 40-60 min
+  const notBefore = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      await supabase
+        .from('gh_candidate_applications')
+        .update({ scheduled_not_before: notBefore, updated_at: new Date().toISOString() })
+        .eq('applywizz_id', applywizzId)
+        .eq('ats', 'ashby')
+        .eq('status', 'QUEUED');
+
+      log.info(`[Queue] Set Ashby scheduled_not_before to ${notBefore} (+${delayMinutes}m) for ${applywizzId}`);
+    } catch (err: any) {
+      log.warn(`[Queue] Failed to set Ashby scheduled_not_before for ${applywizzId}: ${err.message}`);
+    }
+  }
+
+  for (const app of memoryApplications.values()) {
+    if (app.applywizz_id === applywizzId && app.ats === 'ashby' && app.status === 'QUEUED') {
+      app.scheduled_not_before = notBefore;
+    }
+  }
+}
