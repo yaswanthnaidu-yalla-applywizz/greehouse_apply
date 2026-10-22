@@ -17,6 +17,7 @@ import {
   resolvePausedSession,
   submitOtpToPausedSession,
 } from '../../submitter/liveSubmit.js';
+import { submitAshbyApplication } from '../../submitter/ashbySubmit.js';
 import { captureAndSaveEmailProof } from '../../submitter/proofCapture.js';
 import { emailProofPoller } from '../../submitter/emailProofPoller.js';
 import {
@@ -47,19 +48,11 @@ import { createLogger } from '../../utils/logger.js';
 import { insertAuditEvent, SUBMIT_CLICK_AUDIT_ACTION } from '../../db/events.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { resolveRole } from './auth.js';
-import { QuestionLimitExceededError } from '../../submission/questionLimit.js';
+import { persistApprovedAiAnswersToQaBank } from '../../db/qaBankPersistence.js';
 
 const log = createLogger('Submissions');
 
 export const submissionsRouter = Router();
-
-function respondQuestionLimitExceeded(res: Response, appId: string, message: string): void {
-  res.status(422).json({
-    success: false,
-    applicationId: appId,
-    error: message,
-  });
-}
 
 async function ensureZohoConnectedForApplication(
   req: Request,
@@ -297,6 +290,12 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         `[API] Status → QUEUED (application ${application.id || appId}, submission_order=${submissionOrder})`
       );
 
+      // Persist any AI or edited answers to candidate_qa_bank so future applications don't need operator review
+      void persistApprovedAiAnswersToQaBank(
+        application.applywizz_id || (application as any).applywizzId,
+        application.resolved_fields || (application as any).resolvedFields
+      );
+
       res.status(200).json({
         success: true,
         status: 'QUEUED',
@@ -306,11 +305,6 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
       return;
     } catch (err: unknown) {
-      if (err instanceof QuestionLimitExceededError) {
-        log.warn(`[Submissions Router] Question limit blocked ${appId}: ${err.message}`);
-        respondQuestionLimitExceeded(res, appId, err.message);
-        return;
-      }
       log.error(`[Submissions Router] ❌ Enqueue error for ${appId}:`, err);
       res.status(500).json({
         success: false,
@@ -323,12 +317,17 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
 
   // Synchronous execution fallback (when ?sync=true)
   try {
-    const result = await runLiveSubmit(appId, {
-      headless: req.body?.headless !== undefined ? req.body.headless : true,
-      timeoutMs: req.body?.timeoutMs ?? 30000,
-      confirmationTimeoutMs: req.body?.confirmationTimeoutMs,
-      jobUrl: req.body?.jobUrl,
-    });
+    const result =
+      appRow?.ats === 'ashby'
+        ? await submitAshbyApplication(appRow, {
+            headless: req.body?.headless !== undefined ? req.body.headless : true,
+          })
+        : await runLiveSubmit(appId, {
+            headless: req.body?.headless !== undefined ? req.body.headless : true,
+            timeoutMs: req.body?.timeoutMs ?? 30000,
+            confirmationTimeoutMs: req.body?.confirmationTimeoutMs,
+            jobUrl: req.body?.jobUrl,
+          });
 
     if (result.status === 'APPLIED') {
       await updateStatus(appId, 'APPLIED', {
@@ -336,6 +335,13 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         proof_captured_at: result.proofCapturedAt,
         job_url: req.body?.jobUrl,
       }).catch(() => {});
+
+      if (appRow) {
+        void persistApprovedAiAnswersToQaBank(
+          appRow.applywizz_id || (appRow as any).applywizzId,
+          appRow.resolved_fields || (appRow as any).resolvedFields
+        );
+      }
 
       res.status(200).json({
         success: true,
@@ -392,11 +398,6 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
       });
     }
   } catch (err: unknown) {
-    if (err instanceof QuestionLimitExceededError) {
-      log.warn(`[Submissions Router] Question limit blocked ${appId}: ${err.message}`);
-      respondQuestionLimitExceeded(res, appId, err.message);
-      return;
-    }
     const errMessage = err instanceof Error ? err.message : String(err);
     log.error(`[Submissions Router] ❌ Submit route error for ${appId}:`, err);
     await updateStatus(appId, 'RETRY', {
