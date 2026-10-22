@@ -152,7 +152,8 @@ export async function scanAshbyJob(
   // Custom-domain Ashby URL or API fallback
   if (fallbackScanner) {
     log.info(`[AshbyScanner] Executing Playwright DOM fallback scan for ${url}...`);
-    const template = await fallbackScanner.scanSingleUrl(url);
+    const templates = await fallbackScanner.scanUniqueUrls([url]);
+    const template = templates && templates.length > 0 ? templates[0] : null;
     if (!template || template.fields.length === 0) {
       throw new Error(`DOM fallback scan returned 0 fields for Ashby URL: ${url}`);
     }
