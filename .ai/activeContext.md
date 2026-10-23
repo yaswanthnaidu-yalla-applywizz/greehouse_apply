@@ -1,3 +1,47 @@
+# Current Session Update (2026-10-23 — Multi-Replica Batch Email Proof Fetching)
+
+- **Distributed Batch Email Proof Fetching across 3 Replicas**:
+  - **Atomic Dequeue RPC (`src/db/migrations/038_claim_email_proof_application_rpc.sql`, `src/db/applications/queue.ts`)**:
+    - Migration 038 creates `claim_next_email_proof_application` using `FOR UPDATE OF ca SKIP LOCKED`.
+    - Atomically marks claimed `EMAIL_PROOF_PENDING` application as `email_proof_status = 'fetching'` and updates `email_proof_attempted_at`.
+  - **Historical Matching & MessageId Deduplication (`src/services/inbox/zohoStrategy.ts`, `src/submitter/proofCapture.ts`)**:
+    - Added `allowHistorical` mode searching `[submitted_at - 2m, now()]` to capture late-arriving emails for historical applications.
+    - Added `isEmailMessageIdAlreadyAttached` preventing two applications from claiming the same Zoho `messageId`.
+  - **3-Lane Worker Pool per Replica (`src/submitter/emailProofWorkerPool.ts`)**:
+    - Runs up to 3 workers per replica (9 concurrent cluster-wide across 3 replicas).
+    - Subscribes to Supabase Realtime broadcast channel `email_proof_batch` (`START_BATCH` event) so all replicas wake simultaneously when triggered.
+    - Paces queries with 500ms jitter to prevent Zoho API throttling.
+  - **Dev Dashboard Trigger & API (`src/server/routes/devDashboard.ts`, `dashboard/components/DevDashboard.tsx`)**:
+    - Added `POST /api/dev/email-proofs/batch-retry` to update pending statuses to `queued_retry` and broadcast realtime start signal.
+    - Added `GET /api/dev/email-proofs/status` returning current pending count and worker snapshots.
+    - Dev Dashboard UI displays "Email Proof Recovery" action card with live pending counter, trigger button, and status messaging.
+  - **Verification**: Clean test run across `tests/claimEmailProofRpc.test.ts`, `tests/emailProofMatching.test.ts`, `tests/emailProofWorkerPool.test.ts`, `tests/devEmailProofRoutes.test.ts`, all unit and Vitest suites; `npm run typecheck:dashboard` and `npm run build:dashboard` clean.
+
+# Current Session Update (2026-10-23 — Filtered-Out Routing Hardening & CSV Ingest Filter Reporting)
+
+- **Filtered-Out Routing Hardening (`src/resolver/needsReview.ts`)**:
+  - Clarified and hardened `applicationShouldBeFilteredOut`: an application is routed to `FILTERED_OUT` when **required AI field count > 3** (`countRequiredAiFields > 3`) OR **unresolved required field count > 3** (`countUnresolvedRequiredFields > 3`).
+  - Added `countRequiredAiFields` helper.
+  - Optional AI fields or optional unresolved fields never cause an application to be filtered out.
+- **Ingest Filter Report CSV Enhancement (`src/scanner/ingestFilterReport.ts`)**:
+  - Added `filteredOutApplications` section to `renderIngestFilterReportCsv`, ensuring clearance links, excluded company applications, latest employer applications, and filtered-out applications are all accounted for in the CSV download.
+- **Root Directory Cleanup**:
+  - Removed stale root files `OVERVIEW.md` and `plantoprod.md` to keep codebase pristine and aligned with `.ai/` documentation standards.
+- **Verification**: Clean test run across `tests/filteredOutRouting.test.ts` (6/6), `tests/ingestFilterReport.test.ts` (4/4), and all unit suites.
+
+# Current Session Update (2026-10-23 — Post-Ingestion Leadership Notifications & SLA Tracking)
+
+- **Shipped Post-Ingestion Leadership Notifications & 1.5h SLA Tracking via TDD**:
+  - **Azure Email Multi-Recipient & CC (`src/services/azureEmail.ts`)**: Enhanced `sendEmail` and added `buildGraphMailPayload` supporting `to: string | string[]` and `cc?: string | string[]` mapped to Microsoft Graph `toRecipients` and `ccRecipients`.
+  - **Leadership Summary & SLA Poller (`src/services/caNotificationEmail.ts`)**:
+    - Dispatches initial summary email to Balaji & RK (CC: Anusha, Vivek, dev) upon Phase D completion detailing `X tasks for Y clients across Z CAs are ready for review` with structured HTML breakdown table.
+    - Launches background poller (`startLeadershipFollowupPoller`) tracking the exact run application IDs.
+    - **1.5h Check**: If 0 tasks remain, sends "ALL TASKS COMPLETED" congratulatory email and stops. If tasks remain, sends SLA reminder email listing CAs with pending counts and starts hourly checks.
+    - **Subsequent 1h Checks**: Exits with completion email when tasks hit 0, or terminates silently if remaining tasks stall across two consecutive checks (`currentRemaining === lastRemaining`).
+    - **Guards**: `timer.unref()` on all timers to prevent hanging CLI runs; if `SANDBOX=true` or override active, redirects strictly to dev email (`yaswanthnaiduyalla@applywizz.ai`) and empties CC.
+  - **Pipeline Wiring (`src/orchestrator/pipeline.ts`)**: Invokes `sendLeadershipIngestionSummary` alongside `sendCaNotificationEmails` in Phase D.
+  - **Verification**: Clean test run across `tests/azureEmailPayload.test.ts` (3/3), `tests/leadershipNotificationEmail.test.ts` (10/10), all 55 Vitest tests, and all Node test suites; `npm run typecheck` clean.
+
 # Current Session Update (2026-10-22 — Ashby ATS Integration & Unified BrowserManager Stealth)
 
 - **Completed Full Ashby ATS Integration across 13 Implementation Plan Tasks**:
@@ -1079,16 +1123,16 @@ _Last updated: 2026-10-09_
   - `finalizeLlmAnswer` includes 3-step fuzzy option fallback (normalized comparison, contains check for short options, Fuse.js threshold 0.85) before hard reject on choice fields.
 
 ## Immediate Blockers / Open Questions
-- Apply migration 028 to production so same-day captured facts are eligible for dashboard queries. PostgreSQL validation and production migration/deployment have not been performed in this session.
-- Operator-triggered retry is implemented locally; verify the retry button and atomic `FAILED` → `QUEUED` transition in operator smoke testing.
-- **Open question (2026-09-18):** `GET /api/manager/reports` `perOperator[].apps` is an **all-time** count (spec gave it no date predicate) while `applications` / `completed` / `approved` in the same object are **period-scoped** — confirm whether `apps` was meant to be period-scoped too; it will read as inconsistent next to its neighbours in any UI built on it — now rendered in the Reports per-operator table, so the mismatch is user-visible.
+- **Ashby Production Environment Configuration**: Configure DataImpulse proxy credentials (`DATAIMPULSE_LOGIN`, `DATAIMPULSE_PASSWORD`, `DATAIMPULSE_HOST`, `DATAIMPULSE_PORT`) in Railway variables before enabling production Ashby queue submissions.
+- **Ashby Live End-to-End Submission Smoke**: Verify full automated submission of a live Ashby posting with residential proxy in staging/sandbox.
+- **SLA Poller Timing in Prod**: Confirm background SLA poller behaves cleanly across Railway deployment restarts.
 
 ## Recent Decisions Made
-- Manager team scope uses **`users.manager_email` → operator emails → `assigned_ca_email` / work-history union**, not ApplyWizz `careerassociatemanager_id` API alone.
-- Operator queue shows **all** application rows (including SKIPPED); blocked statuses use operator-friendly **`error_message`** in the form panel.
-- Default dashboard date window: **Today & Yesterday** (IST) unless `?from=&to=` override.
-- **`candidate_applications` upsert timing:** no pre-resolve rows from segregator / `ensureApplicationRowsFromCsv`; resolver upserts only when at least one resolved field has a non-empty value (SKIPPED over-cap excepted).
-- **AI ops:** Railway + Supabase investigations/deploy checks use **MCP**, not CLI (documented in `AGENTS.md` + `.ai/techContext.md`).
-- **Prod crash fix (2026-09-16):** `X-Dashboard-Date-Range` must be visible ASCII — custom range labels use `-` not en-dash; `sanitizeHttpHeaderValue()` on `GET /api/candidates`.
-- **Application timeline writes:** `enqueueApplication` fires a fire-and-forget `application_events` insert (`previousStatus → QUEUED`, actor = assigned CA) in the success branch of the Supabase queue update (mirrors `updateStatus`); verified present in the patch tree 2026-09-18 — do not add a second copy. `getNextQueuedApplicationForRoundRobin()` now also writes the `QUEUED → APPLYING` event, in **both** dequeue branches (RPC + fallback), via a **static** `insertApplicationEvent` import — the lazy `await import` convention used twice elsewhere in the same file was rejected there because the RPC branch's `try` falls through to the fallback query on throw, so a new throw point would double-dequeue (see observation 0017).
-- **Reports Applied column (2026-09-18):** manager.html-only change — per-operator **Approved** column replaced with a clickable **Applied** count + applied-jobs modal; modal data composed client-side from `GET /api/manager/dashboard` (`completedApplications[]` where `status === 'APPLIED'`, hydrated proofs) over the same window `/reports` buckets use (daily=14d / weekly=56d / monthly=180d). `perOperator[].approved` is still returned by the API but intentionally unrendered; if `/reports` later gains applied data, replace the client-side composition (see `manager.html` `loadReports` comment).
+- **Ashby Support Added to ATS Tier**: Ashby is fully supported alongside Greenhouse as an official target ATS. Workday, Lever, Taleo, etc. remain out of scope.
+- **Filtered-Out Routing Clarification**: Filtered-out status is triggered strictly by **required AI fields > 3** OR **unresolved required fields > 3**. Optional AI fields and optional unresolved fields never cause an application to be filtered out.
+- **Unified Browser Stealth**: Bot evasion is centralized in `BrowserManager` via `playwright-extra` and `puppeteer-extra-plugin-stealth` across all submission paths (both Greenhouse and Ashby).
+- **Post-Ingestion Leadership Summary & SLA Tracking**: Automated HTML report sent to Balaji & RK upon ingest Phase D, with an initial 1.5-hour check poller followed by hourly updates until completion or 2 consecutive stalled counts.
+- **Codebase Debloat Completed**: All 9 architectural decomposition PRs merged and verified.
+- **Manager team scope uses `users.manager_email` -> operator emails -> `assigned_ca_email` / work-history union**.
+- **Default dashboard date window: Today & Yesterday (IST)** unless `?from=&to=` override.
+- **AI ops: Railway + Supabase investigations/deploy checks use MCP**, not CLI.
