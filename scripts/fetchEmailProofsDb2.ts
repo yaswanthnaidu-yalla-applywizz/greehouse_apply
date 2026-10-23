@@ -17,7 +17,8 @@
  */
 
 import pg from 'pg';
-import { queryZohoConfirmationEmail } from '../src/services/inbox/zohoStrategy.js';
+import { queryConfirmationEmail, resolveInboxProvider } from '../src/services/zoho-connector.js';
+import { isCandidateMailboxDomain } from '../src/db/profiles.js';
 import { createLogger } from '../src/utils/logger.js';
 
 const { Pool } = pg;
@@ -64,8 +65,7 @@ interface ApplicationToProcess {
   proof_captured_at: string | null;
   reviewed_at: string | null;
   created_at: string;
-  profile_company_email: string | null;
-  profile_email: string | null;
+  company_email: string | null;
 }
 
 export async function claimNextAppFromDb2(pool: pg.Pool): Promise<ApplicationToProcess | null> {
@@ -83,8 +83,7 @@ export async function claimNextAppFromDb2(pool: pg.Pool): Promise<ApplicationToP
         ca.proof_captured_at,
         ca.reviewed_at,
         ca.created_at,
-        p.company_email AS profile_company_email,
-        p.email AS profile_email
+        p.company_email
       FROM gh_candidate_applications ca
       LEFT JOIN profiles p ON ca.applywizz_id = p.applywizz_id
       WHERE ca.status = 'EMAIL_PROOF_PENDING'
@@ -239,14 +238,23 @@ async function run(): Promise<void> {
       const currentClaimIndex = totalClaimed;
       const appId = app.id;
       const companyName = (app.company_name || '').trim();
-      const candidateEmail = (app.profile_company_email || app.profile_email || '').trim().toLowerCase();
+      const candidateEmail = (app.company_email || '').trim().toLowerCase();
 
       log.info(
-        `[Worker ${workerId}] [${currentClaimIndex}/${limit ?? totalPendingInDb}] Inspecting app ${appId.slice(0, 8)} | Cand: ${app.applywizz_id} (${candidateEmail || 'NO_EMAIL'}) | Co: "${companyName || 'NO_COMPANY'}"`
+        `[Worker ${workerId}] [${currentClaimIndex}/${limit ?? totalPendingInDb}] Inspecting app ${appId.slice(0, 8)} | Cand: ${app.applywizz_id} (${candidateEmail || 'NO_COMPANY_EMAIL'}) | Co: "${companyName || 'NO_COMPANY'}"`
       );
 
       if (!candidateEmail || !companyName) {
-        log.warn(`[Worker ${workerId}] ⚠️ Missing candidateEmail or companyName for ${appId}. Marking manual_review_needed.`);
+        log.warn(`[Worker ${workerId}] ⚠️ Missing company_email in profile or companyName for ${appId}. Marking manual_review_needed.`);
+        await markAppManualReviewNeeded(pool, appId, dryRun);
+        totalNotFound++;
+        continue;
+      }
+
+      if (!isCandidateMailboxDomain(candidateEmail)) {
+        log.warn(
+          `[Worker ${workerId}] ⚠️ Candidate ${app.applywizz_id} profile company_email "${candidateEmail}" is not a recognized Zoho or Gmail mailbox. Marking manual_review_needed.`
+        );
         await markAppManualReviewNeeded(pool, appId, dryRun);
         totalNotFound++;
         continue;
@@ -255,7 +263,7 @@ async function run(): Promise<void> {
       const submissionTime = app.submitted_at || app.proof_captured_at || app.reviewed_at || app.created_at;
 
       try {
-        const queryRes = await queryZohoConfirmationEmail({
+        const queryRes = await queryConfirmationEmail({
           candidateEmail,
           companyName,
           submissionTime,
@@ -312,7 +320,7 @@ async function run(): Promise<void> {
   log.info(`📊 Summary Report:`);
   log.info(`   • Total Applications Claimed:  ${totalClaimed}`);
   log.info(`   • Promoted to APPLIED:         ${totalPromoted}`);
-  log.info(`   • Not Found in Zoho Mail:      ${totalNotFound}`);
+  log.info(`   • Not Found in Mailbox:        ${totalNotFound}`);
   log.info(`   • Duplicate Emails Prevented:  ${totalDuplicates}`);
   log.info(`   • Errors:                      ${totalErrors}`);
   log.info('================================================================');

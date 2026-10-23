@@ -26,7 +26,7 @@ import {
 } from '../db/applications.js';
 import { isApplicationUuid } from '../db/storage.js';
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
-import { queryZohoConfirmationEmail } from '../services/zoho-connector.js';
+import { queryConfirmationEmail } from '../services/zoho-connector.js';
 import { isSupabaseConfigured, getDbClient } from '../db/client.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -483,7 +483,7 @@ export async function captureAndSaveEmailProof(
       return null;
     }
 
-    const result = await queryZohoConfirmationEmail({
+    const result = await queryConfirmationEmail({
       candidateEmail: companyEmail,
       companyName,
       companyEmail: (appRow as any).company_email || undefined,

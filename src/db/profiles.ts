@@ -54,6 +54,16 @@ export function isCompanyEmailDomain(email?: string | null): boolean {
   );
 }
 
+export function isGmailDomain(email?: string | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const lower = email.trim().toLowerCase();
+  return lower.endsWith('@gmail.com') || lower.endsWith('@googlemail.com');
+}
+
+export function isCandidateMailboxDomain(email?: string | null): boolean {
+  return isCompanyEmailDomain(email) || isGmailDomain(email);
+}
+
 export function isPersonalEmailDomain(email: string): boolean {
   if (isCompanyEmailDomain(email)) return false;
   const lower = email.toLowerCase().trim();
@@ -89,10 +99,18 @@ export function extractCompanyEmailFromPayload(
  * Never returns personal emails.
  */
 export function getCompanyEmail(profile: ProfileRow): string | null {
-  if (profile.company_email && isCompanyEmailDomain(profile.company_email)) {
-    return profile.company_email.trim();
+  if (profile.company_email) {
+    const trimmed = profile.company_email.trim();
+    if (isCandidateMailboxDomain(trimmed)) {
+      return trimmed;
+    }
   }
-  return extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
+  const fromPayload = extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
+  if (fromPayload) return fromPayload;
+  if (profile.email && isCandidateMailboxDomain(profile.email)) {
+    return profile.email.trim();
+  }
+  return null;
 }
 
 /**

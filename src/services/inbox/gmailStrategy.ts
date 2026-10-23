@@ -11,7 +11,13 @@ import {
   stripHtml,
   normalizeCompanyName,
 } from './inboxPoller.js';
-import type { ZohoOtpApiQueryOptions, ZohoOtpApiResult } from './zohoStrategy.js';
+import type {
+  ZohoOtpApiQueryOptions,
+  ZohoOtpApiResult,
+  ZohoEmailQueryOptions,
+  ZohoEmailQueryResult,
+  EmailProofJson,
+} from './zohoStrategy.js';
 
 const log = createLogger('Gmail Connector');
 
@@ -344,4 +350,303 @@ export async function fetchGmailOtpViaApi(
     reasonCode: 'GMAIL_OTP_NOT_FOUND',
     errorMessage: `Automatic Gmail OTP fetch timed out after ${elapsedMs}ms across ${attempt} poll attempts.`,
   };
+}
+
+function normAddressMatchesCompany(fromAddress: string, normCompany: string, companyLower: string): boolean {
+  const atIdx = fromAddress.indexOf('@');
+  const domainPart = atIdx >= 0 ? fromAddress.slice(atIdx + 1) : fromAddress;
+  return domainPart.includes(normCompany) || domainPart.includes(companyLower);
+}
+
+export async function queryGmailConfirmationEmail(
+  options: ZohoEmailQueryOptions
+): Promise<ZohoEmailQueryResult> {
+  const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
+  const companyName = (options.companyName || '').trim();
+  const companyEmail = (options.companyEmail || '').trim().toLowerCase();
+
+  if (!candidateEmail) {
+    return {
+      success: false,
+      matched: false,
+      email: null,
+      errorMessage: 'Candidate email is required to query Gmail inbox.',
+    };
+  }
+
+  if (!companyName && !companyEmail) {
+    return {
+      success: false,
+      matched: false,
+      email: null,
+      errorMessage: 'Company name or company email is required to verify confirmation email.',
+    };
+  }
+
+  const subDate = new Date(options.submissionTime);
+  const submissionMs = !Number.isNaN(subDate.getTime()) ? subDate.getTime() : Date.now();
+  const WINDOW_MS = 10 * 60 * 1000;
+  const minTimeMs = options.allowHistorical ? submissionMs - 2 * 60 * 1000 : submissionMs;
+  const maxTimeMs = options.allowHistorical ? Date.now() : submissionMs + WINDOW_MS;
+
+  const minTimeIso = new Date(minTimeMs).toISOString();
+  const maxTimeIso = new Date(maxTimeMs).toISOString();
+  const submissionTimeIso = new Date(submissionMs).toISOString();
+
+  const baseUrl = (config.ZOHO_CONNECTOR_URL || 'https://zoho-mail-reader.onrender.com/').replace(/\/+$/, '');
+  const normCompany = normalizeCompanyName(companyName);
+  const companyLower = companyName.toLowerCase();
+
+  log.info(
+    `[Gmail Connector] 🔍 Querying inbox for ${candidateEmail} | Window: [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] | Company: "${companyName}" (Email: "${companyEmail || 'none'}")`
+  );
+
+  let matchingMsg: RawGmailInboxMessage | null = null;
+  let matchingReceivedMs = 0;
+  let totalScanned = 0;
+  let nextPageToken: string | undefined = undefined;
+  const pageSize = 40;
+  const maxPages = options.allowHistorical ? 10 : 1;
+
+  try {
+    for (let page = 0; page < maxPages; page++) {
+      let inboxUrl = `${baseUrl}/api/gmail/ui/inbox?email=${encodeURIComponent(candidateEmail)}&limit=${pageSize}`;
+      if (nextPageToken) {
+        inboxUrl += `&pageToken=${encodeURIComponent(nextPageToken)}`;
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 25000);
+
+      log.info(`[Gmail Connector] 🌐 GET ${inboxUrl} (page ${page + 1}/${maxPages})`);
+
+      await mailboxRateLimiter.acquire();
+      const res = await fetch(inboxUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
+
+      log.info(
+        `[Gmail Connector] 🌐 Inbox response (p.${page + 1}): HTTP ${res.status} ${res.statusText} | content-type: ${
+          res.headers.get('content-type') || 'unknown'
+        }`
+      );
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        log.warn(`[Gmail Connector] ⚠️ Inbox request error: HTTP ${res.status}: ${errText.slice(0, 300)}`);
+        return {
+          success: false,
+          matched: false,
+          email: null,
+          scannedCount: totalScanned,
+          errorMessage: `Gmail connector returned HTTP ${res.status}: ${errText.slice(0, 200)}`,
+          window: { minTimeIso, maxTimeIso, submissionTimeIso },
+        };
+      }
+
+      const rawBody = await res.text();
+      let data: RawGmailInboxResponse & { error?: string; nextPageToken?: string };
+      try {
+        data = JSON.parse(rawBody);
+      } catch (parseErr: any) {
+        throw new Error(`Gmail connector returned non-JSON inbox response: ${parseErr.message}`);
+      }
+
+      if (data.error) {
+        log.warn(`[Gmail Connector] ⚠️ Connector reported error for ${candidateEmail}: ${data.error}`);
+        return {
+          success: false,
+          matched: false,
+          email: null,
+          scannedCount: totalScanned,
+          errorMessage: data.error,
+          window: { minTimeIso, maxTimeIso, submissionTimeIso },
+        };
+      }
+
+      const messages = Array.isArray(data.messages) ? data.messages : [];
+      totalScanned += messages.length;
+
+      log.info(
+        `[Gmail Connector] 📬 Parsed ${messages.length} emails on page ${page + 1} (count=${data.count ?? 'n/a'}, totalMatched=${
+          data.totalMatched ?? 'n/a'
+        })`
+      );
+
+      if (!messages.length) {
+        break;
+      }
+
+      let oldestReceivedMsOnPage: number | null = null;
+
+      for (const msg of messages) {
+        const rawReceived = msg.receivedAt;
+        const receivedMs =
+          typeof rawReceived === 'number'
+            ? rawReceived
+            : typeof rawReceived === 'string'
+            ? Date.parse(rawReceived)
+            : null;
+
+        if (receivedMs === null || Number.isNaN(receivedMs)) {
+          continue;
+        }
+
+        if (oldestReceivedMsOnPage === null || receivedMs < oldestReceivedMsOnPage) {
+          oldestReceivedMsOnPage = receivedMs;
+        }
+
+        const fromAddress = (msg.from || '').toLowerCase();
+        const subject = (msg.subject || '').toLowerCase();
+        const normSubject = normalizeCompanyName(msg.subject || '');
+
+        if (/security\s*code|\botp\b|one[-\s]?time (pass)?code/i.test(subject)) {
+          continue;
+        }
+
+        const isGreenhouseSender =
+          fromAddress.includes('greenhouse-mail.io') ||
+          fromAddress.includes('greenhouse');
+        if (!isGreenhouseSender) {
+          continue;
+        }
+
+        const matchesConfirmationPattern =
+          /thank you|application received|application confirmed|journey.*started|application.*submitted|received.*application/i.test(
+            subject
+          );
+
+        const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
+        if (!isTimeMatch) {
+          continue;
+        }
+
+        const fromContainsCompanyEmail = Boolean(
+          companyEmail && companyEmail.length > 3 && fromAddress.includes(companyEmail)
+        );
+
+        const subjectContainsCompanyName = Boolean(
+          (companyLower && companyLower.length > 2 && subject.includes(companyLower)) ||
+          (normCompany && normCompany.length > 2 && normSubject.includes(normCompany))
+        );
+
+        const fromContainsCompanyName = Boolean(
+          (companyLower && companyLower.length > 2 && fromAddress.includes(companyLower)) ||
+          (normCompany && normCompany.length > 2 && normAddressMatchesCompany(fromAddress, normCompany, companyLower))
+        );
+
+        const isCompanyMatch = fromContainsCompanyEmail || subjectContainsCompanyName || fromContainsCompanyName;
+
+        if (isCompanyMatch && (matchesConfirmationPattern || subjectContainsCompanyName)) {
+          matchingMsg = msg;
+          matchingReceivedMs = receivedMs;
+          break;
+        }
+      }
+
+      if (matchingMsg) {
+        break;
+      }
+
+      if (oldestReceivedMsOnPage !== null && oldestReceivedMsOnPage < minTimeMs) {
+        log.info(
+          `[Gmail Connector] Reached emails older than submission window (${new Date(oldestReceivedMsOnPage).toISOString()} < ${minTimeIso}). Stopping pagination.`
+        );
+        break;
+      }
+
+      if (!data.nextPageToken || messages.length < pageSize) {
+        break;
+      }
+
+      nextPageToken = data.nextPageToken;
+    }
+
+    if (!matchingMsg) {
+      log.info(
+        `[Gmail Connector] ⚠️ Zero confirmation matches for ${candidateEmail} among ${totalScanned} scanned messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
+      );
+      return {
+        success: false,
+        matched: false,
+        email: null,
+        scannedCount: totalScanned,
+        errorMessage: `Greenhouse confirmation email not found in Gmail after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
+        window: { minTimeIso, maxTimeIso, submissionTimeIso },
+      };
+    }
+
+    let textContent = '';
+    let htmlContent = '';
+    let fullSubject = matchingMsg.subject || 'Application Confirmation';
+    let fullFrom = matchingMsg.from || 'Unknown';
+    let fullTo = matchingMsg.to || candidateEmail;
+
+    if (matchingMsg.messageId) {
+      try {
+        const msgQs = new URLSearchParams({
+          email: candidateEmail,
+          messageId: matchingMsg.messageId,
+        });
+        await mailboxRateLimiter.acquire();
+        const msgRes = await fetch(`${baseUrl}/api/gmail/ui/message?${msgQs}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (msgRes.ok) {
+          const msgData = (await msgRes.json()) as RawGmailMessageResponse;
+          if (msgData?.message) {
+            fullSubject = msgData.message.subject || fullSubject;
+            fullFrom = msgData.message.from || fullFrom;
+            fullTo = msgData.message.to || fullTo;
+            htmlContent = msgData.message.htmlContent || '';
+            textContent = msgData.message.textContent || stripHtml(htmlContent);
+          }
+        }
+      } catch (err: any) {
+        log.warn(`[Gmail Connector] ⚠️ Failed to fetch full message body: ${err.message}`);
+      }
+    }
+
+    if (!textContent && htmlContent) {
+      textContent = stripHtml(htmlContent);
+    }
+
+    const receivedAtIso = new Date(matchingReceivedMs).toISOString();
+
+    log.info(
+      `[Gmail Connector] 🎉 Proof email captured: ${fullSubject} from ${fullFrom} at ${receivedAtIso}`
+    );
+
+    const emailResult: EmailProofJson = {
+      from: fullFrom,
+      to: fullTo,
+      subject: fullSubject,
+      received_at: receivedAtIso,
+      body_text: textContent || fullSubject,
+      body_html: htmlContent || undefined,
+      messageId: matchingMsg.messageId,
+      message_id: matchingMsg.messageId,
+    };
+
+    return {
+      success: true,
+      matched: true,
+      email: emailResult,
+      scannedCount: totalScanned,
+      window: { minTimeIso, maxTimeIso, submissionTimeIso },
+    };
+  } catch (err: any) {
+    log.error(`[Gmail Connector] ❌ Error checking Gmail confirmation: ${err.message}`);
+    return {
+      success: false,
+      matched: false,
+      email: null,
+      scannedCount: totalScanned,
+      errorMessage: `Gmail query failed: ${err.message}`,
+      window: { minTimeIso, maxTimeIso, submissionTimeIso },
+    };
+  }
 }

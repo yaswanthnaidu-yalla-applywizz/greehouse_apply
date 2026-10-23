@@ -1,3 +1,4 @@
+2026-10-23 session-checkpoint: shipped universal Gmail & Zoho confirmation email proof resolution across submission-time capture, post-submission polling, dashboard batch worker pool, and DB2 recovery script; added isCandidateMailboxDomain to profiles; typecheck clean (src + dashboard), all unit and Vitest suites pass (55/55); no new observations
 2026-10-22 session-checkpoint: shipped full Ashby ATS integration across 13 tasks (migrations 036 & 037, ATS URL detection, Ashby JSON API & DOM scanner with browserManager fallback, ats propagation to DB, system field short-circuit in resolver, unified playwright-extra + stealth across BrowserManager for Greenhouse and Ashby, DataImpulse geo-proxy builder, Ashby form filler with Bézier cursor & jitter, confirmation detection via green banner, queue worker routing); 100% tests pass (28 Ashby tests, 55 vitest, all unit suites), typecheck clean, dashboard build clean; no new observations
 2026-10-21 session-checkpoint: completed all 9 PRs of thermo-nuclear code quality debloat refactor; purged V1 artifact disk fallbacks; extracted devDb & candidates express routers; isolated demo fixtures; decomposed applications.ts into 7 submodules; canonicalized choice matching; decomposed formFiller into field strategies; unified OTP session registry with liveSubmit pipeline; modularized inbox connector into shared poller + Zoho/Gmail strategies; enforced strict domain types & decomposed dashboard App.tsx (DashboardHeader, CandidateSidebar, useDashboardState); 100% tests pass (node:test + vitest), typecheck clean, dashboard build clean; no new observations
 2026-10-21 session-start scan: files=2 parsed=2 (resuming debloat refactor; executing remaining PRs 2, 4-9)
@@ -741,3 +742,15 @@ checkpoint 2026-10-22T05:02:44 conversation-483c1a42-eb8d-44a8-9094-e73835f8a43c
 session-start 2026-10-22T05:10:45 conversation-2ab9b00e-be55-4e90-8bfa-8aad6eafbbe8
 checkpoint 2026-10-22T05:19:27 conversation-483c1a42-eb8d-44a8-9094-e73835f8a43c gitignore whitelist applied
 checkpoint 2026-10-22T05:30:15 conversation-2ab9b00e-be55-4e90-8bfa-8aad6eafbbe8 no observations
+session-start 2026-10-23T10:16:29 conversation-d2747b76-01f3-4ed9-bc89-9389220f5e2c
+checkpoint 2026-10-23T11:10:36 conversation-d2747b76-01f3-4ed9-bc89-9389220f5e2c post-ingest leadership notifications and 1.5h SLA poller shipped; all tests pass; no observations
+session-start 2026-10-23T11:38:21 conversation-b35b2985-c87b-48e7-80a5-5ff2a1b1a824
+checkpoint 2026-10-23T11:46:55 conversation-b35b2985-c87b-48e7-80a5-5ff2a1b1a824 updated .ai context docs (projectbrief, systemPatterns, techContext, activeContext, progress); no observations
+2026-10-23 session-start scan: files=2 parsed=2
+2026-10-23 12:13:14 checkpoint: writing-plans completed for batch email proof fetching, no observations
+2026-10-23 12:39:15 session-end checkpoint: execution of batch email proof fetching complete, no observations
+session-start 2026-10-23T13:41:00 conversation-46deb053-7953-4316-86ec-f2e101fbd7b8 files=2 parsed=2
+2026-10-23 13:52 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-23 13:54 [greehouse_apply] no observations; reportkaro completed
+checkpoint 2026-10-23T14:04:00 conversation-46deb053-7953-4316-86ec-f2e101fbd7b8 created scripts/resolveFirst5Haiku.ts, scanned 5 CSV greenhouse applications and executed 5-tier waterfall to output/resolved_first_5_haiku.json; no observations
+checkpoint 2026-10-23T15:25:00 conversation-46deb053-7953-4316-86ec-f2e101fbd7b8 successfully scanned and resolved 5 applications with claude-haiku-5-5 via ANTHROPIC_WORKSPACE_ID; no observations

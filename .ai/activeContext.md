@@ -1,3 +1,20 @@
+# Current Session Update (2026-10-23 — Universal Confirmation Email Proof for Gmail & Zoho)
+
+- **Universal Confirmation Email Proof Integration (`src/services/inbox/gmailStrategy.ts`, `src/services/zoho-connector.ts`)**:
+  - Implemented `queryGmailConfirmationEmail` matching candidate Greenhouse confirmation emails via Render connector endpoints (`/api/gmail/ui/inbox`, `/api/gmail/ui/message`).
+  - Implemented `resolveInboxProvider(candidateEmail)` routing `@gmail.com` and `@googlemail.com` to Gmail strategy and company domains (`@applywizard.ai`, etc.) to Zoho strategy.
+  - Implemented `queryConfirmationEmail` universal facade ensuring transparent provider routing.
+  - Enhanced `getCompanyEmail` and added `isCandidateMailboxDomain` in `src/db/profiles.ts` so candidates using personal Gmail for applications are resolved and routed to Gmail inbox proof verification.
+- **Submission-Time & Trigger-Time Integration**:
+  - **Submission-Time**: Updated `captureAndSaveEmailProof` in `src/submitter/proofCapture.ts` to call `queryConfirmationEmail`.
+  - **Poller**: Updated `EmailProofPoller` in `src/submitter/emailProofPoller.ts` to call `queryConfirmationEmail`.
+  - **Dev Dashboard / Batch Worker Pool**: Updated `EmailProofWorkerPool` in `src/submitter/emailProofWorkerPool.ts` to call `queryConfirmationEmail`.
+  - **DB2 Batch Script**: Updated `scripts/fetchEmailProofsDb2.ts` to process both Zoho and Gmail candidate mailboxes concurrently across worker lanes.
+- **Verification**:
+  - Clean dry run on DB2 demonstrating concurrent Zoho and Gmail queries.
+  - `npm run typecheck` clean (both backend and dashboard).
+  - All unit test suites passed (node:test + vitest, 55/55).
+
 # Current Session Update (2026-10-23 — Multi-Replica Batch Email Proof Fetching)
 
 - **Distributed Batch Email Proof Fetching across 3 Replicas**:
