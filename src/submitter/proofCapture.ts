@@ -27,6 +27,7 @@ import {
 import { isApplicationUuid } from '../db/storage.js';
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
 import { queryZohoConfirmationEmail } from '../services/zoho-connector.js';
+import { isSupabaseConfigured, getDbClient } from '../db/client.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('Proof Capture');
@@ -514,6 +515,28 @@ export async function captureAndSaveEmailProof(
     log.error(`[Email Proof] ❌ Background email proof capture error: ${err.message}`);
     await updateEmailProofStatus(appRef, 'timed_out').catch(() => {});
     return null;
+  }
+}
+
+export async function isEmailMessageIdAlreadyAttached(messageId: string): Promise<boolean> {
+  const trimmed = (messageId || '').trim();
+  if (!trimmed) return false;
+  if (!isSupabaseConfigured()) return false;
+  try {
+    const client = getDbClient();
+    const { data, error } = await client
+      .from('gh_candidate_applications')
+      .select('id')
+      .eq('proof_email_json->>messageId', trimmed)
+      .limit(1);
+    if (error) {
+      log.warn(`[Proof Capture] Error checking messageId uniqueness: ${error.message}`);
+      return false;
+    }
+    return Boolean(data && data.length > 0);
+  } catch (err: any) {
+    log.warn(`[Proof Capture] Unexpected error checking messageId uniqueness: ${err.message}`);
+    return false;
   }
 }
 
