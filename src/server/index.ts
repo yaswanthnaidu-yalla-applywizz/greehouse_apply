@@ -91,6 +91,7 @@ import { CSV_UPLOADS_BUCKET } from '../db/storage.js';
 import { isSandboxMode } from '../db/sandboxClient.js';
 import { isValidCsvUploadObjectName } from '../candidate/csvUploadValidation.js';
 import { SubmissionQueueDaemon } from '../submitter/queueWorker.js';
+import { emailProofWorkerPool } from '../submitter/emailProofWorkerPool.js';
 import {
   demoApplication,
   demoSegment,
@@ -881,9 +882,11 @@ export function startServer(
         '[Queue] ENABLE_QUEUE_WORKER is not "true" — POST /submit will set status=QUEUED but no in-process worker will run'
       );
     }
+    void emailProofWorkerPool.start();
   });
 
   const cleanup = async () => {
+    await emailProofWorkerPool.stop().catch(() => {});
     otpResolutionService.stop();
     await sweepStaleApplications().catch(() => {});
     await browserManager.closeAll().catch(() => {});
