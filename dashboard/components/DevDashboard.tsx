@@ -166,7 +166,7 @@ export const DevDashboard: React.FC = () => {
 
   const [tab, setTab] = useState<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'diagnostics' | 'guide'>('system');
   const [date, setDate] = useState<string>(getTodayIST);
-  const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month'>('day');
+  const [statsRange, setStatsRange] = useState<'day' | 'lifetime'>('day');
   const [health, setHealth] = useState<DevHealthSnapshot | null>(null);
   const [runs, setRuns] = useState<DevRunItem[]>([]);
   const [runStatus, setRunStatus] = useState<string>('');
@@ -365,8 +365,8 @@ export const DevDashboard: React.FC = () => {
             </label>
             <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Stats
               <div className="mt-1 flex gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
-                {(['day', 'week', 'month'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range}</button>
+                {(['day', 'lifetime'] as const).map((range) => (
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range === 'day' ? 'Today' : 'Lifetime'}</button>
                 ))}
               </div>
             </div>

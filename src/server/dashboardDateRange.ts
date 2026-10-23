@@ -3,7 +3,7 @@ import { getISTDateString } from '../services/workHistoryClient.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export type DashboardCreatedAtPreset = 'default' | 'day' | 'week' | 'month' | 'custom' | 'legacy_day';
+export type DashboardCreatedAtPreset = 'default' | 'day' | 'week' | 'month' | 'lifetime' | 'custom' | 'legacy_day';
 
 export interface DashboardCreatedAtRange {
   startIso: string;
@@ -17,7 +17,8 @@ export interface DashboardCreatedAtRange {
 export function parseDashboardStatsRange(
   query: Record<string, unknown>
 ): DashboardCreatedAtRange | { error: string } {
-  const explicitRange = typeof query.range === 'string' ? query.range.trim().toLowerCase() : '';
+  let explicitRange = typeof query.range === 'string' ? query.range.trim().toLowerCase() : '';
+  if (explicitRange === 'today') explicitRange = 'day';
   const hasCustomDates = typeof query.from === 'string' || typeof query.to === 'string';
   const singleDate = typeof query.date === 'string' && ISO_DATE.test(query.date.trim()) ? query.date.trim() : '';
   const range = explicitRange || (hasCustomDates || singleDate ? 'custom' : 'day');
@@ -30,8 +31,10 @@ export function parseDashboardStatsRange(
     fromDate = date.toISOString().slice(0, 10);
   } else if (range === 'month') {
     fromDate = `${today.slice(0, 7)}-01`;
+  } else if (range === 'lifetime') {
+    fromDate = '2000-01-01';
   } else if (range !== 'day' && range !== 'custom') {
-    return { error: 'range must be day, week, month, or custom.' };
+    return { error: 'range must be day, week, month, lifetime, or custom.' };
   }
 
   if (range === 'custom') {
@@ -54,7 +57,7 @@ export function parseDashboardStatsRange(
     preset: range,
     fromDate,
     toDate: today,
-    label: range === 'day' ? 'Today' : range === 'week' ? 'This Week' : 'This Month',
+    label: range === 'day' ? 'Today' : range === 'week' ? 'This Week' : range === 'month' ? 'This Month' : range === 'lifetime' ? 'Lifetime' : 'Stats',
   };
 }
 
