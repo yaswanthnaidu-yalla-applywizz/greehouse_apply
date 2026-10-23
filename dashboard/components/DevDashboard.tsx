@@ -185,6 +185,9 @@ export const DevDashboard: React.FC = () => {
   const [debug, setDebug] = useState<DevDebugPayload | null>(null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [pendingProofCount, setPendingProofCount] = useState<number>(0);
+  const [isTriggeringProofBatch, setIsTriggeringProofBatch] = useState<boolean>(false);
+  const [proofBatchMessage, setProofBatchMessage] = useState<string | null>(null);
 
   const loadJson = useCallback(async <T,>(url: string): Promise<T> => {
     const res = await apiFetch(url);
@@ -235,6 +238,12 @@ export const DevDashboard: React.FC = () => {
       if (tab === 'integrations') {
         const payload = await loadJson<{ integrations?: DevIntegrationProbe[] }>('/api/dev/integrations');
         setIntegrations(payload.integrations || []);
+      }
+      try {
+        const proofStatus = await loadJson<{ pendingProofCount?: number }>('/api/dev/email-proofs/status');
+        setPendingProofCount(proofStatus.pendingProofCount ?? 0);
+      } catch {
+        // non-blocking
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Load failed');
@@ -291,6 +300,22 @@ export const DevDashboard: React.FC = () => {
       window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to download the current ingest filter report.');
+    }
+  };
+
+  const triggerBatchEmailProofs = async () => {
+    setIsTriggeringProofBatch(true);
+    setProofBatchMessage(null);
+    try {
+      const res = await apiFetch('/api/dev/email-proofs/batch-retry', { method: 'POST' });
+      const data = await res.json() as { ok: boolean; queuedCount?: number; error?: string };
+      if (!res.ok) throw new Error(data.error || 'Failed to trigger batch proof retry');
+      setProofBatchMessage(`Batch triggered for ${data.queuedCount ?? 0} application(s) across replicas.`);
+      void refresh();
+    } catch (err: any) {
+      setProofBatchMessage(`Error: ${err.message}`);
+    } finally {
+      setIsTriggeringProofBatch(false);
     }
   };
 
@@ -354,6 +379,30 @@ export const DevDashboard: React.FC = () => {
             <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border capitalize transition-colors ${tab === id ? 'bg-white text-black font-bold border-white' : 'bg-[#1c1c1e] text-[#8e8e93] border-[#2c2c2e] hover:text-white hover:bg-[#2c2c2e]'}`}>{id}</button>
           ))}
         </nav>
+        <div className="mb-4 bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-white">Email Proof Recovery</span>
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[#ff9f0a]/20 text-[#ff9f0a] border border-[#ff9f0a]/30">
+                {pendingProofCount} Pending
+              </span>
+            </div>
+            <p className="text-xs text-[#8e8e93] mt-1">
+              Trigger distributed workers across 3 replicas (3 workers per replica = 9 total) to fetch missing confirmation emails from Zoho Mail.
+            </p>
+            {proofBatchMessage && (
+              <p className="text-xs font-medium text-[#30d158] mt-1.5">{proofBatchMessage}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={isTriggeringProofBatch}
+            onClick={() => void triggerBatchEmailProofs()}
+            className="self-start md:self-auto px-4 py-2 bg-[#0a84ff] hover:bg-[#0071e3] disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap shadow-sm"
+          >
+            {isTriggeringProofBatch ? 'Triggering Workers…' : 'Batch Fetch Email Proofs'}
+          </button>
+        </div>
         <button type="button" onClick={downloadCurrentIngestReport} className="mb-4 bg-[#1c1c1e] border border-[#2c2c2e] hover:border-[#3a3a3c] rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors">
           Download current ingest filter report
         </button>
