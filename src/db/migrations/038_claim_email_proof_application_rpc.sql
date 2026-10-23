@@ -23,7 +23,10 @@ BEGIN
         ca.email_proof_status IS NULL
         OR ca.email_proof_status IN ('pending', 'manual_review_needed', 'timed_out', 'queued_retry')
       )
-    ORDER BY ca.submitted_at ASC NULLS LAST, ca.created_at ASC
+    ORDER BY 
+      ca.email_proof_attempted_at ASC NULLS FIRST,
+      ca.submitted_at ASC NULLS LAST, 
+      ca.created_at ASC
     LIMIT 1
     FOR UPDATE OF ca SKIP LOCKED;
 
