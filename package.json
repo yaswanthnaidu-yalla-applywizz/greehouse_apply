@@ -39,6 +39,7 @@
     "ingest:storage": "tsx src/scanner/storageCsvIngestion.ts",
     "scan:zoho-connected": "npx tsx scripts/scanZohoConnected.ts",
     "delete:old-jobs": "npx tsx scripts/deleteOldJobsAndApplications.ts",
+    "fetch:email-proofs:db2": "tsx scripts/fetchEmailProofsDb2.ts",
     "sandbox": "npm run build:dashboard && cross-env SANDBOX=true tsx src/index.ts",
     "sandbox:fresh": "npm run build:dashboard && cross-env SANDBOX=true tsx scripts/resetSandboxDb.ts && cross-env SANDBOX=true tsx src/index.ts"
   },
