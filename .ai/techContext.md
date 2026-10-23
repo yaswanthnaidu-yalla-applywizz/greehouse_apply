@@ -3,33 +3,38 @@
 ## Runtime
 - **Node.js** ≥ 22.0.0
 - **TypeScript** 5.7 (strict mode, ESM — `"type": "module"`)
-- Compiled with `tsc`; dev-run with `tsx` (no compile step needed)
+- Compiled with `tsc` + `vite build`; dev-run with `tsx` (no compile step needed)
 
 ## Core Dependencies
 | Package | Role |
 |---|---|
 | `playwright` | Headless/headful Chromium — scanning + form submission |
+| `playwright-extra` | Stealth Playwright wrapper for automated bot evasion |
+| `puppeteer-extra-plugin-stealth` | Evasion plugin unified across `BrowserManager` |
 | `@supabase/supabase-js` | DB client (Postgres) + Storage (S3-compatible) |
 | `zod` | Env schema validation (`src/config/env.ts`) |
 | `dotenv` | Env loading |
-| `express` | REST API server (port 3001) |
+| `express` | REST API server (port 3000 / 3001) |
 | `ws` | WebSocket real-time status push |
 | `pdf-parse` | Resume PDF text extraction (Tier 2) |
-| `fuse.js` | Fuzzy matching for qa_bank (Tier 3) |
+| `fuse.js` | Fuzzy matching for qa_bank (Tier 4) |
 | `csv-parser` / `fast-csv` | Streaming CSV ingestion |
 | `openai` | OpenAI / OpenRouter LLM calls (Tier 5) |
 | `@google/generative-ai` | Gemini LLM calls (Tier 5) |
-| `axios` | HTTP client (ApplyWizz API, Zoho connector) |
-| `react` / `react-dom` | Operator dashboard UI (React Native Web) |
+| `@aws-sdk/client-bedrock-runtime` | AWS Bedrock Nova & Titan calls (Tier 5) |
+| `axios` | HTTP client (ApplyWizz API, Zoho connector, Microsoft Graph) |
+| `react` / `react-dom` | Operator dashboard UI (React 19 / TSX Vite bundle) |
+| `vite` / `vitest` | Frontend bundler and test runner |
 
 ## LLM Providers (Tier 5)
 Configured via `LLM_PROVIDER` env var. Supported values:
-- `openrouter` — recommended; uses `OPENROUTER_API_KEY` + `OPENROUTER_MODEL`
+- `openrouter` — recommended; uses `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` (default: `google/gemini-2.5-flash`)
 - `gemini` — uses `GEMINI_API_KEY`
 - `openai` — uses `OPENAI_API_KEY`
-- `ollama` — local Ollama instance (`llama3.1:latest` default) — **requires Ollama running locally**
+- `bedrock` — AWS Bedrock with prompt caching (`BEDROCK_MODEL_ID`, `BEDROCK_API_KEY` / AWS IAM)
+- `ollama` — local Ollama instance (`llama3.1:latest` default)
 
-Default in `.env.example`: `openrouter`. Default in code: `ollama` (local).
+Default in `.env.example`: `openrouter`.
 
 ## Build & Run Commands
 ```bash
@@ -39,32 +44,35 @@ npm run start                # Same as dev
 npm run start:sample         # Single candidate AWL-31428, max 10 jobs
 
 # Individual pipeline steps
-npm run scan                 # Branch 1 only: scan Greenhouse URLs
+npm run scan                 # Branch 1 only: scan Greenhouse/Ashby URLs
 npm run sync:candidates      # Branch 2 sync only: fetch ApplyWizz profiles
 npm run resolve              # Resolution only: run 5-tier waterfall
 npm run dashboard            # Start Express dashboard server only
 npm run daemon               # Start queue worker daemon
 
 # Submission
-npm run dry-run              # Headful fill via src/submitter/runUserApplication.ts (local demo, not dashboard API)
-npm run demo:doordash-headful # Headful, non-submitting DoorDash React-Select diagnostic; set RESUME_PATH optionally
+npm run dry-run              # Headful fill via src/submitter/runUserApplication.ts
+npm run demo:doordash-headful # Headful DoorDash React-Select diagnostic
 npm run submit               # Live submission CLI
 
 # Database & Sandbox
-npm run db:migrate           # Run all pending migrations
-npm run db:fix-rollup        # Inspect yesterday/today canonical stats (read-only; no pruning)
+npm run db:migrate           # Run all pending migrations (001–037)
+npm run db:fix-rollup        # Inspect yesterday/today canonical stats
 npm run backfill:profiles    # Refresh all Supabase profiles from ApplyWizz
-npm run sandbox              # Run local Postgres sandbox environment (builds TSX dashboard, SANDBOX=true)
+npm run sandbox              # Run local Postgres sandbox environment (SANDBOX=true)
 npm run sandbox:fresh        # Reset local sandbox Postgres database and start fresh pipeline
 
 # Build & Prod
-npm run build                # tsc compile → dist/ + dashboard Tailwind CSS
-npm run build:dashboard-css  # dashboard/public/dashboard.css from HTML/JSX class names
+npm run build                # tsc compile → dist/ + Vite dashboard build
+npm run build:dashboard      # vite build (dashboard TSX bundle)
+npm run build:dashboard-css  # dashboard/public/dashboard.css via Tailwind
 npm run start:prod           # node dist/server/index.js
 npm run daemon:prod          # node dist/submitter/queueWorker.js
 
-# Tests
+# Tests & Typecheck
 npm run test                 # e2e integration test
+npm run test:unit            # Node test runner + Vitest suite
+npm run test:vitest          # Vitest unit test suite
 npm run typecheck            # src (tsc --noEmit) + dashboard tree
 npm run typecheck:dashboard  # dashboard/**/*.tsx only (dashboard/tsconfig.json)
 
@@ -77,8 +85,8 @@ npm run delete:old-jobs      # Delete old jobs and applications
 
 ## CLI Pipeline Flags (`src/index.ts`)
 ```
---skip-migrate       Skip V1→V2 migration
---skip-scan          Skip Playwright job scanning
+--skip-migrate       Skip migration check
+--skip-scan          Skip Playwright/Ashby job scanning
 --skip-sync          Skip candidate profile sync
 --skip-resolve       Skip 5-tier answer resolution
 --skip-dashboard     Skip starting dashboard server
@@ -92,101 +100,88 @@ npm run delete:old-jobs      # Delete old jobs and applications
 --output=path        Override output directory
 ```
 
-## Headful dry-run CLI (`src/submitter/runUserApplication.ts`, `npm run dry-run`)
-
-Pass flags after `--` so npm forwards them (e.g. `npm run dry-run -- --candidate=AWL-31428 --maxJobs=1`).
-
-```
---candidate=AWL-XXXX   Load bundled fixture apps when AWL-31428 (akshithaDemoFixtures)
---applywizzId=AWL-XXXX Alias for --candidate
---maxJobs=1            With AWL-31428 and no --jobUrl: pick Prometheus job (U.S. sponsorship combobox)
---jobUrl=URL           Pin fixture app by URL substring
-[positional URL]       Default PMG demo job if no candidate fixture
-```
-
-Dashboard dry-run uses `POST /api/applications/:id/dry-run` → `dryRun.ts` (Supabase application record, uploads screenshot to storage).
-
 ## Required Environment Variables
 ```env
 # Core — required
 SUPABASE_URL=
-SUPABASE_SERVICE_KEY=              # Anon / publishable — browser (Realtime, dashboard template reads). Not service_role.
-SUPABASE_SERVICE_ROLE_KEY=         # Service role — server DB/Storage only (resolveSupabaseCredentials)
-SUPABASE_ANON_KEY=                 # Optional override for browser key (default: SUPABASE_SERVICE_KEY)
-APPLYWIZZ_API_URL=                    # ApplyWizz candidate profile endpoint
+SUPABASE_SERVICE_KEY=              # Anon / publishable — browser (Realtime, dashboard template reads)
+SUPABASE_SERVICE_ROLE_KEY=         # Service role — server DB/Storage only
+SUPABASE_ANON_KEY=                 # Optional override for browser key
+APPLYWIZZ_API_URL=                 # ApplyWizz candidate profile endpoint
 
 # LLM — at least one required (based on LLM_PROVIDER)
-LLM_PROVIDER=openrouter               # openrouter | gemini | openai | ollama
+LLM_PROVIDER=openrouter            # openrouter | gemini | openai | ollama | bedrock
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=
 GEMINI_API_KEY=
 OPENAI_API_KEY=
-LLM_TIMEOUT_MS=30000                  # Request timeout in ms for OpenRouter / OpenAI clients (default 30000)
+LLM_TIMEOUT_MS=30000
 
 # Server
-PORT=3001
+PORT=3000
 NODE_ENV=development
+JWT_SECRET=
 ```
 
-Dashboard sessions last **7 days**: login returns a Supabase `refreshToken`; `POST /api/auth/refresh` rotates it; `dashboard/public/roleAccess.js` stores it and refreshes access tokens before they expire. Sign in once after this change lands — older tokens in localStorage have no refresh token.
+Dashboard sessions last **7 days**: login returns a Supabase `refreshToken`; `POST /api/auth/refresh` rotates it.
 
 ## Optional Environment Variables
 ```env
-# Playwright tuning
+# Playwright & Concurrency
 PLAYWRIGHT_TIMEOUT=30000
-WORKER_POOL_SIZE=4                    # Parallel scanner workers (default 3, max 10)
+WORKER_POOL_SIZE=4                 # Parallel scanner workers (default 3, max 10)
+RESOLVER_WORKER_POOL_SIZE=3        # Parallel candidate×job resolution workers during ingest
+SUBMISSION_POOL_SIZE=3             # Submitter worker pool concurrency
+MAX_CONCURRENT_BROWSERS=5          # Maximum concurrent live Chromium browser instances
+BROWSER_LAUNCH_COOLDOWN_MS=1500    # Spacing between consecutive browser launches
 SCANNER_JITTER_MIN_MS=3000
 SCANNER_JITTER_MAX_MS=6000
 
-# Storage
+# Storage & Filters
 INPUT_CSV_PATH=./greenhouse_only_applywizz_prod(in).csv
 OUTPUT_DIR=./output
 RESUMES_DIR=./resumes
-MAX_JOB_QUESTIONS=35                  # Jobs with 35+ scanned questions are skipped; CSV job score never blocks submission
-
-# Supabase Storage bucket names
+MAX_JOB_QUESTIONS=35               # Jobs with 35+ scanned questions are skipped
 SUPABASE_STORAGE_BUCKET_RESUMES=resumes
 SUPABASE_STORAGE_BUCKET_PROOFS=proofs_web
 
-# Zoho Mail (email proof capture)
+# DataImpulse Residential Proxy (Ashby)
+DATAIMPULSE_LOGIN=
+DATAIMPULSE_PASSWORD=
+DATAIMPULSE_HOST=gw.dataimpulse.com
+DATAIMPULSE_PORT=823
+
+# Zoho Mail Connector (OTP & Confirmation Proofs)
 ZOHO_CONNECTOR_URL=https://zoho-mail-reader.onrender.com/
 ZOHO_CONNECTOR_USER=
 ZOHO_CONNECTOR_PASS=
-ZOHO_READER_EMAIL=
-ZOHO_READER_PASSWORD=
+OTP_RESOLUTION_POLL_INTERVAL_MS=10000
+OTP_ATTEMPT_TIMEOUT_MS=60000
 
-# Azure / MS365 (email sending + OTP)
+# Azure / Microsoft Graph (Notifications & SLA Poller)
 AZURE_CLIENT_ID=
 AZURE_CLIENT_SECRET=
-MS365_TENANT_ID=
 AZURE_TENANT_ID=
 AZURE_SENDER_EMAIL=
-AZURE_COMMUNICATION_ENDPOINT=
+MS_GRAPH_BASE_URL=https://graph.microsoft.com
+CA_NOTIFICATION_EMAIL_OVERRIDE=    # Redirect all CA/leadership emails to single address
 
-# ApplyWizz external endpoints
-APPLYWIZZ_S3_BASE_URL=https://applywizz-prod.s3.us-east-2.amazonaws.com
-AUTHORIZED_EMAILS_API=https://applywizz-ca-management.vercel.app/api/ca/emails
-ALLOWED_SIGNUP_EMAILS=
-
-# OpenRouter extra
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_HTTP_REFERER=https://apply-wizz.me
+# AWS Bedrock (if LLM_PROVIDER=bedrock)
+AWS_REGION=us-east-1
+BEDROCK_MODEL_ID=us.amazon.nova-2-lite-v1:0
+BEDROCK_API_KEY=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
 
 # Railway deployment & Service Architecture
-RAILWAY_ENV=true                      # Disables headful mode, caps memory; also enables cooperative pipeline stop
-ENABLE_PIPELINE_STOP=false            # Allow admin ⏹ Stop + CLI SIGINT (also auto-on when NODE_ENV=development or RAILWAY_ENV)
-RESOLVER_WORKER_POOL_SIZE=3           # Parallel candidate×job resolution workers during ingest (max 5)
-INGEST_ONLY=false                     # Start server in ingest-only mode (health + ingest endpoints only, no dashboards or workers)
-SUBMISSION_POOL_SIZE=3                # Configurable submission worker pool size (default 3)
-DASHBOARD_MODE=tsx                    # 'tsx' (Vite build dist/client) or 'html' (Babel in-browser legacy)
-WORKER_SERVICE_URL=                   # External worker service URL for Playwright dry-run / submissions (multi-service mode)
-WEB_SERVICE_URL=                      # Service 1 Railway private URL for cross-service events and callbacks
-INTERNAL_API_SECRET=                  # Shared secret for inter-service internal worker routes (/api/internal/*)
-PIPELINE_VERBOSE=false                # Per-URL scan + per-field resolve logs; default is one summary line per phase/candidate
-# Audit: application.submit_clicked logged on each POST /applications/:id/submit; Admin/Manager/Dev show submitClicks for IST day
+RAILWAY_ENV=true                   # Disables headful mode, caps memory
+ENABLE_PIPELINE_STOP=false         # Allow admin ⏹ Stop + CLI SIGINT
+INGEST_ONLY=false                  # Start server in ingest-only mode
+DASHBOARD_MODE=tsx                 # 'tsx' (Vite build dist/client) or 'html' (Babel in-browser legacy)
+PIPELINE_VERBOSE=false             # Compact pipeline summaries vs verbose logs
 
 # Local Sandbox Mode
-SANDBOX=true                          # Run with local PostgreSQL 17 / pgvector container (docker-compose.sandbox.yml)
+SANDBOX=true                       # Run with local PostgreSQL container
 ```
 
 ## Deployment
@@ -194,84 +189,8 @@ SANDBOX=true                          # Run with local PostgreSQL 17 / pgvector 
 - **Prod URL:** https://gh.applywizz.ai (project `alert-spontaneity`, service `greehouse_apply`, region `sfo`)
 - **Dockerfile:** root `Dockerfile`
 - **Config:** `railway.json` (healthcheck `GET /api/health`, start `node dist/server/index.js`)
-- **Prod entry:** `node dist/server/index.js` only (`railway.json` → `deploy.startCommand`). There is **no** separate worker or ingest service — the submission daemon runs in-process inside the server when `ENABLE_QUEUE_WORKER=true`, otherwise nothing dequeues `QUEUED`. `npm run daemon:prod` exists for running it standalone but is not what Railway starts.
-- **Key Railway constraint:** `RAILWAY_ENV=true` must be set — disables headful Playwright, caps memory
+- **Prod entry:** `node dist/server/index.js` only. Daemon runs in-process inside server when enabled.
+- **Key Railway constraint:** `RAILWAY_ENV=true` must be set — disables headful Playwright, caps memory.
 
 ### AI ops — Railway & Supabase (MCP)
-Authenticated **Railway** and **Supabase MCP** servers are enabled in Cursor. Agents should prefer MCP over shell CLI:
-
-| Task | Use |
-|---|---|
-| Service status, deployment logs, redeploy | Railway MCP |
-| SQL, row counts, migration sanity, RLS checks | Supabase MCP |
-
-Discover tool schemas with `GetDynamicTools` (namespace or pattern), then invoke with `CallDynamicTool`. Fall back to `railway` / `supabase` CLI only if MCP is not exposed in that agent session.
-
-## CSV Ingestion Trigger (operator-driven)
-There is **no** Supabase Storage webhook and **no** poller — a CSV appearing in the `csv_uploads` bucket does nothing on its own. The pipeline starts only when an operator triggers it:
-
-| Endpoint | Behaviour |
-|---|---|
-| `POST /api/admin/trigger-ingest-from-storage` | Admin-only (`isUserAdmin`, 403 otherwise). `409` if a run is already in flight. Otherwise returns `202 {started, startedAt}` and runs `ingestCsvFromStorage()` in the background — the full pipeline takes minutes, so it must not be awaited in the request. |
-| `POST /api/admin/stop-ingest` | Admin-only cooperative stop for the in-flight ingest pipeline. Enabled when `NODE_ENV=development`, `RAILWAY_ENV=true`, or `ENABLE_PIPELINE_STOP=true`. Returns `409` if nothing is running. |
-| `GET /api/admin/ingest-status` | Admin-only. Returns `{running, startedAt, finishedAt, processedCount, processedFile, message, error}` for the most recent run. |
-
-CSV `applywizz_id`s are the approval to fetch missing ApplyWizz profiles. **`candidate_applications` is not upserted at segregator/scan time** — only after resolution (see `answerResolver.ts`). Exception: over-cap jobs upsert as `SKIPPED` at resolve time. Empty resolution (no non-empty field values) skips upsert; expired/missing templates skip upsert. `upsertApplication` preserves existing non-empty `resolved_fields` when a write would send all-empty values. FK still requires a `profiles` row before any upsert succeeds.
-
-On ingest, logs include `Credential identity: urlProjectRef=... | jwt.role=... | jwt.ref=... | urlRefMatch=...` (see `src/db/supabaseKeyDiagnostics.ts`) — never the raw key.
-
-The server resolves credentials via `resolveSupabaseCredentials()` / `listSupabaseKeyCandidates()` in `src/db/client.ts`: a JWT with `role=service_role` wins; otherwise **`SUPABASE_SERVICE_ROLE_KEY` is used even when it is `sb_secret_`**. Keys are normalized (trim, unwrap quotes, strip `Bearer`, strip JWT whitespace). Ingest **probes each key with a fresh client** and logs `Probe SUPABASE_… jwt.role=… entries=N names=…`. An empty object list is a failed run. Admin probe: `GET /api/admin/supabase-storage-health` returns `keyProbes[]` (no secrets). `sb_secret_` / anon keys still cannot list private `csv_uploads` — use the legacy `eyJ…` service_role JWT.
-
-The dashboard's **▶ Start** button lives on the **Admin** dashboard (`dashboard/public/admin.html`, `/admin`). It calls POST `/api/admin/trigger-ingest-from-storage`, then polls `GET /api/admin/ingest-status` on every refresh and every 3s while `running` (includes `stopEnabled`). **⏹ Stop** is shown whenever a run is in flight. CLI equivalent: `npm run ingest:storage` (one-shot; Ctrl+C requests stop when stop is enabled). Ingest resolution uses batched Tier 5 (~15 fields per LLM call) with `RESOLVER_WORKER_POOL_SIZE` parallel jobs. Run state lives in server memory (`src/server/runtimeState.ts`), so a restart mid-run loses the status (the pipeline itself dies with the process too). Abort checks: `src/orchestrator/pipelineAbort.ts` (between pipeline phases, Playwright URLs, profile sync workers, resolution pairs).
-
-## External Services & Endpoints
-| Service | URL | Purpose |
-|---|---|---|
-| ApplyWizz API | `https://www.apply-wizz.me/api/get-client-details` | Candidate profile + resume |
-| ApplyWizz S3 | `https://applywizz-prod.s3.us-east-2.amazonaws.com` | Resume PDF source |
-| ApplyWizz CA Mgmt | `https://applywizz-ca-management.vercel.app/api/ca/work-history` | Work history API |
-| Zoho Mail Reader | `https://zoho-mail-reader.onrender.com/` | OTP/email proof extraction |
-| ↳ REST (used by `zoho-connector.ts` & `otpResolutionService.ts`) | `GET /api/zoho/ui/inbox?email=&limit=&start=` · `GET /api/zoho/ui/message?email=&accountId=&folderId=&messageId=` · `GET /api/zoho/ui/users` | All inbox, message body, connected users & OTP polling (pure REST API; no Playwright browser) |
-
-**Zoho connector auth model:** Mailbox access is **server-side OAuth per mailbox** managed directly on Render — no client token, session cookie, or browser login is needed. Both OTP resolution and email confirmation proof resolution poll the REST API directly with configurable intervals/budgets.
-| OpenRouter | `https://openrouter.ai/api/v1` | LLM inference |
-
-## Key File Locations
-| What | Path |
-|---|---|
-| Main entry / CLI | `src/index.ts` |
-| Env schema (Zod) | `src/config/env.ts` |
-| Central logger | `src/utils/logger.ts` — `[ISO] [LEVEL] [MODULE] message`; levels INFO/WARN/ERROR/DEBUG/HALT. `haltWithDevAlert(module, message, error?)` logs `[HALT]` + `🚨 DEV ACTION REQUIRED` and `process.exit(1)` for systemic ingest failures only |
-| Supabase client | `src/db/client.ts` |
-| Supabase key diagnostics (ingest logs) | `src/db/supabaseKeyDiagnostics.ts` |
-| Ingestion Zoho connection check | `src/services/zohoConnectionCheck.ts` — one connector snapshot per candidate-sync batch; status persistence and stored-flag fallback |
-| Empty-form hydration | `src/db/applicationFieldHydration.ts` |
-| Over-cap SKIPPED upserts (resolve-time only) | `src/db/skippedApplications.ts` — removed pre-resolve `ensureCandidateApplicationRows.ts` |
-| Operator queue filters | `src/dashboard/candidateQueueFilter.ts` |
-| DB DDL | `src/db/schema.sql` |
-| Migrations dir | `src/db/migrations/` — **015** = `audit_events` + `application_events` + service_role-only RLS (applied 2026-09-15). **016** = `profiles.country` + `country_code` (apply in SQL Editor; missing columns block new profile creates). **027–028** = canonical application facts and repair of the stats availability cutover; 028 must be applied to existing databases. |
-| Audit / application events | `src/db/events.ts` — fail-closed if 015 tables missing |
-| Manager/admin client rollup | `src/server/clientDashboard.ts` (`MANAGER_TEAM_SCOPE_ENABLED = true`) |
-| Admin managers list stats | `src/server/adminManagerStats.ts` — `GET /api/admin/managers` uses `users.manager_email` + `profiles.ca_email` (not date-scoped rollup) |
-| HTTP response header sanitization | `src/server/httpHeaders.ts` — visible ASCII only (`X-Dashboard-Date-Range`) |
-| Resolved-field value helpers | `src/utils/resolvedFields.ts` |
-| Admin / Dev health probes | `src/server/healthSnapshot.ts` — ApplyWizz GET without id: HTTP 400 = reachable |
-| Form filler (largest file, 59KB) | `src/submitter/formFiller.ts` |
-| Live submit engine (69KB) | `src/submitter/liveSubmit.ts` |
-| Playwright scanner | `src/scanner/playwrightScanner.ts` |
-| Answer resolver orchestrator | `src/resolver/answerResolver.ts` |
-| Submission question cap | `src/submission/questionLimit.ts` — no CSV-score restriction; enforces `MAX_JOB_QUESTIONS` |
-| LLM synthesizer | `src/resolver/llmSynthesizer.ts` |
-| Express server | `src/server/index.ts` |
-| **Operator UI (the one actually served)** | `dashboard/public/index.html` (auth + shell) + lazy `operator-app.jsx`; static `dashboard.css`; served at `GET /` |
-| Manager UI | `dashboard/public/manager.html` → `GET /manager` |
-| Admin UI | `dashboard/public/admin.html` → `GET /admin` |
-| Dev UI | `dashboard/public/dev.html` → `GET /dev` |
-| Shared role helper | `dashboard/public/roleAccess.js` — 7-day session via refresh_token; wraps `/api/` fetch |
-| App logo / favicon | `dashboard/public/logo.webp` — served by `express.static(dashboard/public)` |
-| Bundled Akshitha demo | `src/dashboard/akshithaDemoFixtures.ts` |
-| Searchable select tests | `tests/searchableSelect.test.ts` |
-| All TypeScript types | `src/types/index.ts` |
-
-## Known Quirks & Dev Environment
-- **Windows workspace:** creating new files via editor fails with EEXIST mkdir — use shell or write tool instead.
+- Use authenticated **Railway** and **Supabase MCP** tools for logs, deploy status, SQL, and table reads. Avoid CLI commands in production unless MCP is unavailable.
