@@ -104,4 +104,5 @@ scripts/*
 !scripts/deleteOldJobsAndApplications.ts
 !scripts/fetchEmailProofsDb2.ts
 !scripts/resetSandboxDb.ts
+!scripts/resolveFirst5Haiku.ts
 !scripts/README.md
