@@ -18,7 +18,14 @@ export type ApplicationStatus =
   | 'FILTERED_OUT';
 
 
-export type EmailProofStatus = 'pending' | 'captured' | 'timed_out' | 'manual_review_needed';
+export type EmailProofStatus =
+  | 'pending'
+  | 'captured'
+  | 'timed_out'
+  | 'manual_review_needed'
+  | 'fetching'
+  | 'queued_retry'
+  | 'verified';
 
 export const SUBMITTED_STATUSES: ApplicationStatus[] = [
   'QUEUED',
