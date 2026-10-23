@@ -23,6 +23,7 @@ export interface ZohoEmailQueryOptions {
   companyEmail?: string | null;
   submissionTime: string | number | Date;
   timeoutMs?: number;
+  allowHistorical?: boolean;
 }
 
 export interface ZohoEmailQueryResult {
@@ -126,8 +127,8 @@ export async function queryZohoConfirmationEmail(
   const subDate = new Date(options.submissionTime);
   const submissionMs = !Number.isNaN(subDate.getTime()) ? subDate.getTime() : Date.now();
   const WINDOW_MS = 10 * 60 * 1000;
-  const minTimeMs = submissionMs;
-  const maxTimeMs = submissionMs + WINDOW_MS;
+  const minTimeMs = options.allowHistorical ? submissionMs - 2 * 60 * 1000 : submissionMs;
+  const maxTimeMs = options.allowHistorical ? Date.now() : submissionMs + WINDOW_MS;
 
   const minTimeIso = new Date(minTimeMs).toISOString();
   const maxTimeIso = new Date(maxTimeMs).toISOString();
