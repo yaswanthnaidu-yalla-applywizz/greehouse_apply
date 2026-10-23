@@ -28,6 +28,7 @@ import {
   SUBMIT_CLICK_AUDIT_ACTION,
 } from '../../db/events.js';
 import { getCurrentIngestFilterReportPath } from '../../scanner/ingestFilterReport.js';
+import { emailProofWorkerPool } from '../../submitter/emailProofWorkerPool.js';
 
 const log = createLogger('Dev Dashboard');
 
@@ -468,3 +469,61 @@ devDashboardRouter.post('/db/query', async (req: Request, res: Response): Promis
     res.status(400).json({ error: err.message });
   }
 });
+
+devDashboardRouter.post('/email-proofs/batch-retry', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    let queuedCount = 0;
+    if (isSupabaseConfigured()) {
+      const client = getDbClient();
+      const nowIso = new Date().toISOString();
+      const { data, error } = await client
+        .from('gh_candidate_applications')
+        .update({ email_proof_status: 'queued_retry', updated_at: nowIso })
+        .eq('status', 'EMAIL_PROOF_PENDING')
+        .or('email_proof_status.is.null,email_proof_status.in.(pending,manual_review_needed,timed_out)')
+        .select('id');
+
+      if (!error && data) {
+        queuedCount = data.length;
+      }
+
+      // Broadcast start signal to all 3 replicas
+      try {
+        const channel = client.channel('email_proof_batch');
+        await channel.send({
+          type: 'broadcast',
+          event: 'START_BATCH',
+          payload: { timestamp: Date.now() },
+        });
+      } catch (broadcastErr: any) {
+        log.warn(`[Dev Dashboard] Realtime broadcast error: ${broadcastErr.message}`);
+      }
+    }
+
+    // Trigger local pool immediately on this replica
+    void emailProofWorkerPool.triggerBatch();
+
+    res.json({ ok: true, queuedCount });
+  } catch (err: any) {
+    log.error(`[Dev Dashboard] Batch retry failed: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+devDashboardRouter.get('/email-proofs/status', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const snapshot = emailProofWorkerPool.getSnapshot();
+    let pendingProofCount = 0;
+    if (isSupabaseConfigured()) {
+      pendingProofCount = await countApplicationsByStatus('EMAIL_PROOF_PENDING');
+    }
+    res.json({
+      ok: true,
+      pendingProofCount,
+      workerSnapshot: snapshot,
+    });
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
