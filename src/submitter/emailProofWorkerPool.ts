@@ -14,7 +14,7 @@ import {
   type ApplicationRow,
 } from '../db/applications.js';
 import { getProfile, getCompanyEmail } from '../db/profiles.js';
-import { queryZohoConfirmationEmail } from '../services/inbox/zohoStrategy.js';
+import { queryConfirmationEmail } from '../services/zoho-connector.js';
 import { isEmailMessageIdAlreadyAttached } from './proofCapture.js';
 import { isSupabaseConfigured, getDbClient } from '../db/client.js';
 import { createLogger } from '../utils/logger.js';
@@ -153,7 +153,7 @@ export class EmailProofWorkerPool {
 
     const appliedIso = app.submitted_at || app.proof_captured_at || app.reviewed_at || new Date().toISOString();
 
-    const result = await queryZohoConfirmationEmail({
+    const result = await queryConfirmationEmail({
       candidateEmail,
       companyName,
       companyEmail: (app as any).company_email || undefined,

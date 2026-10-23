@@ -4,6 +4,7 @@
 
 import { config } from '../../config/env.js';
 import type { EmailProofJson } from '../../db/applications.js';
+export type { EmailProofJson };
 import { createLogger } from '../../utils/logger.js';
 import { mailboxRateLimiter } from '../mailboxRateLimiter.js';
 import {
@@ -56,6 +57,8 @@ interface RawZohoInboxResponse {
   messages?: RawZohoInboxMessage[];
   count?: number;
   totalMatched?: number;
+  hasMore?: boolean;
+  nextStart?: number;
 }
 
 interface RawZohoMessageResponse {
@@ -344,7 +347,7 @@ export async function queryZohoConfirmationEmail(
       success: true,
       matched: true,
       email: emailResult,
-      scannedCount: messages.length,
+      scannedCount: totalScanned,
       window: { minTimeIso, maxTimeIso, submissionTimeIso },
     };
   } catch (err: any) {
