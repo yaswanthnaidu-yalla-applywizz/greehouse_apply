@@ -1,3 +1,27 @@
+### Multi-Replica Batch Email Proof Fetching (2026-10-23 Complete)
+- [x] **Atomic Dequeue RPC (`src/db/migrations/038_claim_email_proof_application_rpc.sql`, `src/db/applications/queue.ts`):** Migration 038 adds `claim_next_email_proof_application` using `FOR UPDATE OF ca SKIP LOCKED` to safely claim pending applications without multi-replica duplicate processing.
+- [x] **Historical Matching & Deduplication (`src/services/inbox/zohoStrategy.ts`, `src/submitter/proofCapture.ts`):** Extended `queryZohoConfirmationEmail` with `allowHistorical: true` searching `[submitted_at - 2m, now()]`; implemented `isEmailMessageIdAlreadyAttached` to deduplicate by unique Zoho `messageId`.
+- [x] **Multi-Replica Worker Pool (`src/submitter/emailProofWorkerPool.ts`, `src/server/index.ts`):** 3-lane worker pool per replica (9 concurrent workers cluster-wide across 3 replicas) with Supabase Realtime `email_proof_batch` listener and 500ms pacing.
+- [x] **Dev Dashboard Trigger & API (`src/server/routes/devDashboard.ts`, `dashboard/components/DevDashboard.tsx`):** Added `POST /api/dev/email-proofs/batch-retry` and `GET /api/dev/email-proofs/status`; added "Email Proof Recovery" action card with pending counter badge, trigger button, and status messaging in Dev Dashboard.
+- [x] **Verification:** `tests/claimEmailProofRpc.test.ts`, `tests/emailProofMatching.test.ts`, `tests/emailProofWorkerPool.test.ts`, `tests/devEmailProofRoutes.test.ts` passing; `npm run typecheck:dashboard` and `npm run build:dashboard` passing.
+
+### Filtered-Out Routing Hardening & CSV Ingest Filter Reporting (2026-10-23 Complete)
+- [x] **Filtered-Out Routing Hardening (`src/resolver/needsReview.ts`):** Updated `applicationShouldBeFilteredOut` to filter out applications strictly when **required AI field count > 3** (`countRequiredAiFields > 3`) OR **unresolved required field count > 3** (`countUnresolvedRequiredFields > 3`). Optional AI or unresolved fields never cause filtering.
+- [x] **Ingest Filter Report Enhancement (`src/scanner/ingestFilterReport.ts`):** Added `filteredOutApplications` section to `renderIngestFilterReportCsv`, grouping clearance links, excluded company applications, latest employer applications, and filtered-out applications in the CSV report.
+- [x] **Root Directory Cleanup:** Removed stale redundant documentation files `OVERVIEW.md` and `plantoprod.md`.
+- [x] **Verification:** `tests/filteredOutRouting.test.ts` (6/6 passing), `tests/ingestFilterReport.test.ts` (4/4 passing), all unit and integration test suites passing.
+
+### Post-Ingestion Leadership Notifications & SLA Tracking (2026-10-23 Complete)
+- [x] **Azure Email Multi-Recipient & CC (`src/services/azureEmail.ts`):** Added `buildGraphMailPayload` and extended `sendEmail` with `to: string | string[]` and `cc?: string | string[]`.
+- [x] **Leadership Summary & SLA Poller (`src/services/caNotificationEmail.ts`):**
+  - Dispatches immediate post-ingest summary email to Balaji & RK (CC: Anusha, Vivek, dev) with per-CA task counts.
+  - Schedules 1.5-hour SLA follow-up with `timer.unref()`.
+  - Sends reminder at 1.5h if tasks remain, or "ALL TASKS COMPLETED" if 0 remain.
+  - Runs subsequent 1-hour checks until tasks reach 0 (completion email) or progress stalls across two checks.
+  - Redirects to dev email when `SANDBOX=true` or override is present.
+- [x] **Pipeline Phase D Wiring (`src/orchestrator/pipeline.ts`):** Connected `sendLeadershipIngestionSummary` alongside `sendCaNotificationEmails`.
+- [x] **Verification:** `tests/azureEmailPayload.test.ts` (3/3), `tests/leadershipNotificationEmail.test.ts` (10/10), all 55 Vitest and Node test runner suites passing, `npm run typecheck` clean.
+
 ### Ashby ATS Integration & Unified Browser Stealth (2026-10-22 Complete)
 - [x] **Migrations 036 & 037:** Added `ats TEXT DEFAULT 'greenhouse'` and `scheduled_not_before TIMESTAMPTZ` with rate limit RPC guards in `get_next_queued_application()`.
 - [x] **ATS Detector & Hybrid Scanner:** Added `src/scanner/atsDetector.ts` and `src/scanner/ashbyScanner.ts` (API + Playwright DOM fallback).
