@@ -553,3 +553,72 @@ export async function setAshbyScheduledNotBefore(applywizzId: string): Promise<v
     }
   }
 }
+
+/**
+ * Claims the next EMAIL_PROOF_PENDING application across multi-replica workers.
+ * Uses atomic PostgreSQL FOR UPDATE SKIP LOCKED via RPC with fallback query.
+ */
+export async function claimNextEmailProofApplication(): Promise<ApplicationRow | null> {
+  if (isSupabaseConfigured()) {
+    const supabase = getDbClient();
+    try {
+      const { data, error } = await supabase.rpc('claim_next_email_proof_application');
+      if (!error && data && Array.isArray(data) && data.length > 0) {
+        const selected = data[0] as ApplicationRow;
+        cacheApplicationLocally(selected);
+        return selected;
+      }
+    } catch (rpcErr: any) {
+      log.warn(`[Queue] claim_next_email_proof_application RPC error: ${rpcErr.message}`);
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('gh_candidate_applications')
+        .select('*')
+        .eq('status', 'EMAIL_PROOF_PENDING')
+        .or('email_proof_status.is.null,email_proof_status.in.(pending,manual_review_needed,timed_out,queued_retry)')
+        .order('submitted_at', { ascending: true })
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        const candidate = data[0] as ApplicationRow;
+        const nowIso = new Date().toISOString();
+        const { data: updated, error: updateErr } = await supabase
+          .from('gh_candidate_applications')
+          .update({
+            email_proof_status: 'fetching',
+            email_proof_attempted_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq('id', candidate.id)
+          .select('*')
+          .maybeSingle();
+
+        if (!updateErr && updated) {
+          cacheApplicationLocally(updated as ApplicationRow);
+          return updated as ApplicationRow;
+        }
+      }
+    } catch (queryErr: any) {
+      log.warn(`[Queue] Fallback claim query error: ${queryErr.message}`);
+    }
+  }
+
+  // In-memory fallback
+  for (const app of memoryApplications.values()) {
+    if (
+      app.status === 'EMAIL_PROOF_PENDING' &&
+      (!app.email_proof_status ||
+        ['pending', 'manual_review_needed', 'timed_out', 'queued_retry'].includes(app.email_proof_status))
+    ) {
+      app.email_proof_status = 'fetching';
+      app.email_proof_attempted_at = new Date().toISOString();
+      app.updated_at = new Date().toISOString();
+      return app;
+    }
+  }
+
+  return null;
+}
+
