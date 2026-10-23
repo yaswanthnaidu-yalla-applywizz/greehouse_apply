@@ -1,3 +1,9 @@
+### Claude Haiku 5.5 LLM Synthesis Integration (2026-10-23 Complete)
+- [x] **Anthropic Provider in Resolver (`src/resolver/llmSynthesizer.ts`, `src/config/env.ts`):** Added native `anthropic` provider to `LLMSynthesizer` and environment schema. Auto-selected as primary when `CLAUDE_API_KEY` is present in env.
+- [x] **Pinned Haiku 5.5 Model & Workspace Header:** Strictly pinned to `claude-haiku-5-5` with temperature parameter omitted (per 5.5 deprecation requirements). Passes `anthropic-workspace-id` via request headers when `ANTHROPIC_WORKSPACE_ID` is present.
+- [x] **Fail-Fast Error Handling:** No secondary provider fallback on failure; errors on individual questions fail-fast and leave only that question unresolved, continuing resolution for other questions in the application.
+- [x] **Verification & TDD:** Added `tests/claudeHaikuResolution.test.ts` covering provider selection, headers, token usage tracking, and fail-fast rate-limiting. All 15 node tests and 55 vitest tests pass; full typecheck passes.
+
 ### Multi-Replica Batch Email Proof Fetching (2026-10-23 Complete)
 - [x] **Standalone DB2 Batch Script (`scripts/fetchEmailProofsDb2.ts`):** CLI script (`npm run fetch:email-proofs:db2`) connecting directly to DB2 (Supabase remote Postgres) with 3 concurrent workers, atomic `FOR UPDATE SKIP LOCKED` dequeueing, historical Zoho query window, messageId deduplication, and automatic promotion to `APPLIED`. Supports `--limit=N`, `--concurrency=N`, and `--dry-run`.
 - [x] **Atomic Dequeue RPC (`src/db/migrations/038_claim_email_proof_application_rpc.sql`, `src/db/applications/queue.ts`):** Migration 038 adds `claim_next_email_proof_application` using `FOR UPDATE OF ca SKIP LOCKED` to safely claim pending applications without multi-replica duplicate processing.

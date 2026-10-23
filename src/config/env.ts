@@ -34,7 +34,18 @@ const envSchema = z.object({
   APPLYWIZZ_API_URL: z.string().default('https://www.apply-wizz.me/api/get-client-details?applywizz_id='),
 
   /** Selected LLM provider for synthesis */
-  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama', 'bedrock']).default('openrouter'),
+  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama', 'bedrock', 'anthropic']).default('openrouter'),
+
+  /** Claude / Anthropic API Key */
+  CLAUDE_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+
+  /** Anthropic Workspace ID */
+  ANTHROPIC_WORKSPACE_ID: z.string().optional(),
+  CLAUDE_WORKSPACE_ID: z.string().optional(),
+
+  /** Claude Model ID for Tier 5 resolution */
+  CLAUDE_MODEL: z.string().default('claude-haiku-5-5'),
 
   /** AWS Region for Bedrock */
   AWS_REGION: z.string().default('us-east-1'),
@@ -272,6 +283,39 @@ if (!process.env.JWT_SECRET && rawEnv.NODE_ENV === 'production') {
   log.warn('⚠️ JWT_SECRET environment variable is not set; falling back to default key. Set JWT_SECRET in production variables.');
 }
 
+function getEnvValue(name: string): string {
+  if (process.env[name] && process.env[name]!.trim()) {
+    return process.env[name]!.trim();
+  }
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.trim() === name && value && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+const resolvedClaudeApiKey = (
+  rawEnv.CLAUDE_API_KEY ||
+  rawEnv.ANTHROPIC_API_KEY ||
+  getEnvValue('CLAUDE_API_KEY') ||
+  getEnvValue('ANTHROPIC_API_KEY') ||
+  ''
+).trim();
+
+const resolvedClaudeWorkspaceId = (
+  rawEnv.ANTHROPIC_WORKSPACE_ID ||
+  rawEnv.CLAUDE_WORKSPACE_ID ||
+  getEnvValue('ANTHROPIC_WORKSPACE_ID') ||
+  getEnvValue('CLAUDE_WORKSPACE_ID') ||
+  ''
+).trim();
+
+const resolvedLlmProvider = (
+  (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) ||
+  (resolvedClaudeApiKey ? 'anthropic' : rawEnv.LLM_PROVIDER)
+);
+
 /**
  * Resolves the active LLM API key based on the configured LLM_PROVIDER and available keys.
  *
@@ -280,7 +324,11 @@ if (!process.env.JWT_SECRET && rawEnv.NODE_ENV === 'production') {
  */
 function resolveLlmApiKey(env: typeof rawEnv): string {
   const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
-  const effectiveProvider = (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || env.LLM_PROVIDER;
+  const effectiveProvider = (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || resolvedLlmProvider;
+
+  if (effectiveProvider === 'anthropic') {
+    return resolvedClaudeApiKey;
+  }
 
   if (effectiveProvider === 'bedrock') {
     const key = (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || process.env.AWS_BEARER_TOKEN_BEDROCK || '').trim();
@@ -296,22 +344,23 @@ function resolveLlmApiKey(env: typeof rawEnv): string {
     }
     return key;
   }
-  if (env.LLM_PROVIDER === 'ollama') {
+  if (effectiveProvider === 'ollama') {
     return 'ollama';
   }
   if (env.LLM_API_KEY && env.LLM_API_KEY.trim().length > 0) {
     return env.LLM_API_KEY.trim();
   }
-  if (env.LLM_PROVIDER === 'openrouter' && env.OPENROUTER_API_KEY) {
+  if (effectiveProvider === 'openrouter' && env.OPENROUTER_API_KEY) {
     return env.OPENROUTER_API_KEY.trim();
   }
-  if (env.LLM_PROVIDER === 'gemini' && env.GEMINI_API_KEY) {
+  if (effectiveProvider === 'gemini' && env.GEMINI_API_KEY) {
     return env.GEMINI_API_KEY.trim();
   }
-  if (env.LLM_PROVIDER === 'openai' && env.OPENAI_API_KEY) {
+  if (effectiveProvider === 'openai' && env.OPENAI_API_KEY) {
     return env.OPENAI_API_KEY.trim();
   }
   // Auto-fallback: check if any key exists
+  if (resolvedClaudeApiKey) return resolvedClaudeApiKey;
   if (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK) {
     return (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK)!.trim();
   }
@@ -328,7 +377,10 @@ const isSandboxEnv = process.env.SANDBOX === 'true' || process.env.SANDBOX === '
  */
 export const config = {
   ...rawEnv,
-  LLM_PROVIDER: (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || rawEnv.LLM_PROVIDER,
+  LLM_PROVIDER: resolvedLlmProvider,
+  CLAUDE_API_KEY: resolvedClaudeApiKey || undefined,
+  ANTHROPIC_WORKSPACE_ID: resolvedClaudeWorkspaceId || undefined,
+  CLAUDE_MODEL: (getEnvValue('CLAUDE_MODEL') || rawEnv.CLAUDE_MODEL || 'claude-haiku-5-5').trim(),
   OPENROUTER_MODEL: isSandboxEnv
     ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
     : rawEnv.OPENROUTER_MODEL,

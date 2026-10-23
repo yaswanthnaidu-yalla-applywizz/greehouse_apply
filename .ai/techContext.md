@@ -28,6 +28,7 @@
 
 ## LLM Providers (Tier 5)
 Configured via `LLM_PROVIDER` env var. Supported values:
+- `anthropic` — Anthropic Claude with workspace routing (`CLAUDE_API_KEY`, `ANTHROPIC_WORKSPACE_ID`, `CLAUDE_MODEL` - defaults to `claude-haiku-5-5`; auto-selected as primary when `CLAUDE_API_KEY` is present)
 - `openrouter` — recommended; uses `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` (default: `google/gemini-2.5-flash`)
 - `gemini` — uses `GEMINI_API_KEY`
 - `openai` — uses `OPENAI_API_KEY`
@@ -110,7 +111,10 @@ SUPABASE_ANON_KEY=                 # Optional override for browser key
 APPLYWIZZ_API_URL=                 # ApplyWizz candidate profile endpoint
 
 # LLM — at least one required (based on LLM_PROVIDER)
-LLM_PROVIDER=openrouter            # openrouter | gemini | openai | ollama | bedrock
+LLM_PROVIDER=openrouter            # anthropic | openrouter | gemini | openai | ollama | bedrock
+CLAUDE_API_KEY=
+ANTHROPIC_WORKSPACE_ID=
+CLAUDE_MODEL=claude-haiku-5-5
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=
 GEMINI_API_KEY=
