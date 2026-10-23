@@ -12,18 +12,22 @@ const report: IngestFilterReport = {
   latestEmployerApplications: [
     { applywizzId: 'AWL-1', jobUrl: 'https://boards.greenhouse.io/both/jobs/3' },
   ],
+  filteredOutApplications: [
+    { applywizzId: 'AWL-2', jobUrl: 'https://boards.greenhouse.io/filtered/jobs/4' },
+  ],
 };
 
 afterEach(async () => clearCurrentIngestFilterReport());
 
 describe('ingest filter report CSV', () => {
-  it('renders three labeled sections with clearance links only and AWL IDs in company sections', () => {
+  it('renders labeled sections with clearance links only, AWL IDs in company sections, and filtered out applications', () => {
     expect(renderIngestFilterReportCsv(report)).toBe([
       'section,awl_id,job_url',
       'clearance,,https://boards.greenhouse.io/clearance/jobs/1',
       'excluded_company,AWL-1,https://boards.greenhouse.io/excluded/jobs/2',
       'excluded_company,AWL-1,https://boards.greenhouse.io/both/jobs/3',
       'latest_employer,AWL-1,https://boards.greenhouse.io/both/jobs/3',
+      'filtered_out,AWL-2,https://boards.greenhouse.io/filtered/jobs/4',
     ].join('\r\n') + '\r\n');
   });
 
@@ -32,6 +36,7 @@ describe('ingest filter report CSV', () => {
       clearanceLinks: [],
       excludedCompanyApplications: [],
       latestEmployerApplications: [],
+      filteredOutApplications: [],
     })).toBe('section,awl_id,job_url\r\n');
   });
 
@@ -43,6 +48,7 @@ describe('ingest filter report CSV', () => {
         jobUrl: 'https://example.test/jobs/1?tag=a,b',
       }],
       latestEmployerApplications: [],
+      filteredOutApplications: [],
     })).toBe('section,awl_id,job_url\r\nexcluded_company,"AWL,""1","https://example.test/jobs/1?tag=a,b"\r\n');
   });
 
