@@ -142,136 +142,149 @@ export async function queryZohoConfirmationEmail(
     `[Zoho Connector] 🔍 Querying inbox for ${candidateEmail} | Window: [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] | Company: "${companyName}" (Email: "${companyEmail || 'none'}")`
   );
 
+  let matchingMsg: RawZohoInboxMessage | null = null;
+  let matchingReceivedMs = 0;
+  let totalScanned = 0;
+  let lastData: RawZohoInboxResponse | null = null;
+  let currentStart = 1;
+  const pageSize = 40;
+  const maxPages = options.allowHistorical ? 10 : 1;
+
   try {
-    const inboxUrl = `${baseUrl}/api/zoho/ui/inbox?email=${encodeURIComponent(candidateEmail)}&limit=40&start=1`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 25000);
+    for (let page = 0; page < maxPages; page++) {
+      const inboxUrl = `${baseUrl}/api/zoho/ui/inbox?email=${encodeURIComponent(candidateEmail)}&limit=${pageSize}&start=${currentStart}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 25000);
 
-    log.info(`[Zoho Connector] 🌐 GET ${inboxUrl} (no auth header — server-side mailbox OAuth)`);
+      log.info(`[Zoho Connector] 🌐 GET ${inboxUrl} (page ${page + 1}/${maxPages})`);
 
-    const res = await fetch(inboxUrl, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-    }).finally(() => clearTimeout(timeout));
+      const res = await fetch(inboxUrl, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
 
-    log.info(
-      `[Zoho Connector] 🌐 Inbox response: HTTP ${res.status} ${res.statusText} | content-type: ${
-        res.headers.get('content-type') || 'unknown'
-      }`
-    );
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      log.error(`[Zoho Connector] ❌ Raw error body: ${errText.slice(0, 500)}`);
-      throw new Error(`Zoho connector returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
-    }
-
-    const rawBody = await res.text();
-    log.info(`[Zoho Connector] 📥 Raw inbox response (${rawBody.length} chars): ${rawBody.slice(0, 1500)}`);
-
-    let data: RawZohoInboxResponse;
-    try {
-      data = JSON.parse(rawBody) as RawZohoInboxResponse;
-    } catch (parseErr: any) {
-      throw new Error(`Zoho connector returned non-JSON inbox response: ${parseErr.message}`);
-    }
-
-    const messages = data.messages || [];
-    const accountId = data.accountId;
-
-    log.info(
-      `[Zoho Connector] 📬 Parsed ${messages.length} emails (count=${data.count ?? 'n/a'}, totalMatched=${
-        data.totalMatched ?? 'n/a'
-      }, accountId=${accountId || 'none'}, folderId=${data.folder?.folderId || 'none'})`
-    );
-    messages.forEach((m, i) => {
-      const ms = parseZohoReceivedTimestamp(m.receivedTime);
       log.info(
-        `[Zoho Connector] 📧 [${i + 1}/${messages.length}] from="${m.from || ''}" | subject="${
-          m.subject || ''
-        }" | receivedAt=${ms === null ? 'UNPARSEABLE' : new Date(ms).toISOString()}`
-      );
-    });
-
-    if (!messages.length) {
-      log.info(`[Zoho Connector] ℹ️ Inbox is empty for ${candidateEmail}. Zero matches.`);
-      return {
-        success: false,
-        matched: false,
-        email: null,
-        scannedCount: 0,
-        errorMessage: `No emails found in inbox for ${candidateEmail}.`,
-        window: { minTimeIso, maxTimeIso, submissionTimeIso },
-      };
-    }
-
-    let matchingMsg: RawZohoInboxMessage | null = null;
-    let matchingReceivedMs = 0;
-
-    for (const msg of messages) {
-      const receivedMs = parseZohoReceivedTimestamp(msg.receivedTime);
-      if (receivedMs === null) {
-        continue;
-      }
-
-      const fromAddress = (msg.from || '').toLowerCase();
-      const subject = (msg.subject || '').toLowerCase();
-      const normSubject = normalizeCompanyName(msg.subject || '');
-
-      if (OTP_SUBJECT_PATTERN.test(subject)) {
-        log.info(`[Zoho Connector] 🚫 Rejected email (OTP/security code): ${msg.subject || ''}`);
-        continue;
-      }
-
-      if (!fromAddress.includes(GREENHOUSE_PROOF_SENDER)) {
-        continue;
-      }
-      const matchesConfirmationPattern = CONFIRMATION_SUBJECT_PATTERN.test(subject);
-
-      const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
-      if (!isTimeMatch) {
-        continue;
-      }
-
-      const fromContainsCompanyEmail = Boolean(
-        companyEmail && companyEmail.length > 3 && fromAddress.includes(companyEmail)
+        `[Zoho Connector] 🌐 Inbox response (p.${page + 1}): HTTP ${res.status} ${res.statusText} | content-type: ${
+          res.headers.get('content-type') || 'unknown'
+        }`
       );
 
-      const subjectContainsCompanyName = Boolean(
-        (companyLower && companyLower.length > 2 && subject.includes(companyLower)) ||
-        (normCompany && normCompany.length > 2 && normSubject.includes(normCompany))
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        log.error(`[Zoho Connector] ❌ Raw error body: ${errText.slice(0, 500)}`);
+        throw new Error(`Zoho connector returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const rawBody = await res.text();
+      let data: RawZohoInboxResponse;
+      try {
+        data = JSON.parse(rawBody) as RawZohoInboxResponse;
+      } catch (parseErr: any) {
+        throw new Error(`Zoho connector returned non-JSON inbox response: ${parseErr.message}`);
+      }
+
+      lastData = data;
+      const messages = data.messages || [];
+      totalScanned += messages.length;
+
+      log.info(
+        `[Zoho Connector] 📬 Parsed ${messages.length} emails on page ${page + 1} (count=${data.count ?? 'n/a'}, totalMatched=${
+          data.totalMatched ?? 'n/a'
+        })`
       );
 
-      const fromContainsCompanyName = Boolean(
-        (companyLower && companyLower.length > 2 && fromAddress.includes(companyLower)) ||
-        (normCompany && normCompany.length > 2 && normAddressMatchesCompany(fromAddress, normCompany, companyLower))
-      );
-
-      const isCompanyMatch = fromContainsCompanyEmail || subjectContainsCompanyName || fromContainsCompanyName;
-
-      if (isCompanyMatch && (matchesConfirmationPattern || subjectContainsCompanyName)) {
-        matchingMsg = msg;
-        matchingReceivedMs = receivedMs;
+      if (!messages.length) {
         break;
       }
+
+      let oldestReceivedMsOnPage: number | null = null;
+
+      for (const msg of messages) {
+        const receivedMs = parseZohoReceivedTimestamp(msg.receivedTime);
+        if (receivedMs === null) {
+          continue;
+        }
+
+        if (oldestReceivedMsOnPage === null || receivedMs < oldestReceivedMsOnPage) {
+          oldestReceivedMsOnPage = receivedMs;
+        }
+
+        const fromAddress = (msg.from || '').toLowerCase();
+        const subject = (msg.subject || '').toLowerCase();
+        const normSubject = normalizeCompanyName(msg.subject || '');
+
+        if (OTP_SUBJECT_PATTERN.test(subject)) {
+          continue;
+        }
+
+        if (!fromAddress.includes(GREENHOUSE_PROOF_SENDER)) {
+          continue;
+        }
+        const matchesConfirmationPattern = CONFIRMATION_SUBJECT_PATTERN.test(subject);
+
+        const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
+        if (!isTimeMatch) {
+          continue;
+        }
+
+        const fromContainsCompanyEmail = Boolean(
+          companyEmail && companyEmail.length > 3 && fromAddress.includes(companyEmail)
+        );
+
+        const subjectContainsCompanyName = Boolean(
+          (companyLower && companyLower.length > 2 && subject.includes(companyLower)) ||
+          (normCompany && normCompany.length > 2 && normSubject.includes(normCompany))
+        );
+
+        const fromContainsCompanyName = Boolean(
+          (companyLower && companyLower.length > 2 && fromAddress.includes(companyLower)) ||
+          (normCompany && normCompany.length > 2 && normAddressMatchesCompany(fromAddress, normCompany, companyLower))
+        );
+
+        const isCompanyMatch = fromContainsCompanyEmail || subjectContainsCompanyName || fromContainsCompanyName;
+
+        if (isCompanyMatch && (matchesConfirmationPattern || subjectContainsCompanyName)) {
+          matchingMsg = msg;
+          matchingReceivedMs = receivedMs;
+          break;
+        }
+      }
+
+      if (matchingMsg) {
+        break;
+      }
+
+      if (oldestReceivedMsOnPage !== null && oldestReceivedMsOnPage < minTimeMs) {
+        log.info(
+          `[Zoho Connector] Reached emails older than submission window (${new Date(oldestReceivedMsOnPage).toISOString()} < ${minTimeIso}). Stopping pagination.`
+        );
+        break;
+      }
+
+      if (!data.hasMore || messages.length < pageSize) {
+        break;
+      }
+
+      currentStart = data.nextStart || (currentStart + pageSize);
     }
 
     if (!matchingMsg) {
       log.info(
-        `[Zoho Connector] ⚠️ Zero confirmation matches for ${candidateEmail} among ${messages.length} messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
+        `[Zoho Connector] ⚠️ Zero confirmation matches for ${candidateEmail} among ${totalScanned} scanned messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
       );
       return {
         success: false,
         matched: false,
         email: null,
-        scannedCount: messages.length,
-        errorMessage: `Greenhouse confirmation email not found within 10 minutes after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
+        scannedCount: totalScanned,
+        errorMessage: `Greenhouse confirmation email not found after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
         window: { minTimeIso, maxTimeIso, submissionTimeIso },
       };
     }
 
-    const folderId = matchingMsg.folderId || data.folder?.folderId;
+    const folderId = matchingMsg.folderId || lastData?.folder?.folderId;
+    const accountId = lastData?.accountId;
     let textContent = '';
     let htmlContent = '';
     let fullSubject = matchingMsg.subject || 'Application Confirmation';
@@ -323,6 +336,8 @@ export async function queryZohoConfirmationEmail(
       received_at: receivedAtIso,
       body_text: textContent || fullSubject,
       body_html: htmlContent || undefined,
+      messageId: matchingMsg.messageId,
+      message_id: matchingMsg.messageId,
     };
 
     return {

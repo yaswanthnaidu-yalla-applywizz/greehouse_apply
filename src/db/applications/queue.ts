@@ -578,6 +578,7 @@ export async function claimNextEmailProofApplication(): Promise<ApplicationRow |
         .select('*')
         .eq('status', 'EMAIL_PROOF_PENDING')
         .or('email_proof_status.is.null,email_proof_status.in.(pending,manual_review_needed,timed_out,queued_retry)')
+        .order('email_proof_attempted_at', { ascending: true, nullsFirst: true })
         .order('submitted_at', { ascending: true })
         .limit(1);
 
