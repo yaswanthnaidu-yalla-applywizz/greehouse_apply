@@ -27,7 +27,7 @@ import { fetchCaBatchEmailMap } from '../candidate/applywizzClient.js';
 import { upsertProfileCaEmail } from '../db/profiles.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
-import { sendCaNotificationEmails } from '../services/caNotificationEmail.js';
+import { sendCaNotificationEmails, sendLeadershipIngestionSummary } from '../services/caNotificationEmail.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -361,8 +361,9 @@ export class V1Pipeline {
       const pendingAutoQueue = this.resolver.getPendingAutoQueue();
       const excludeKeys = new Set(pendingAutoQueue.map((p) => `${p.applywizzId.trim().toUpperCase()}::${p.jobUrl}`));
       await sendCaNotificationEmails(runStartedAt, { excludeKeys });
+      await sendLeadershipIngestionSummary(runStartedAt, { excludeKeys });
     } catch (caEmailErr: any) {
-      log.warn(`[Pipeline Phase D] ⚠️ CA notification email error: ${caEmailErr?.message || caEmailErr}`);
+      log.warn(`[Pipeline Phase D] ⚠️ CA/Leadership notification email error: ${caEmailErr?.message || caEmailErr}`);
     }
 
     // -------------------------------------------------------------
