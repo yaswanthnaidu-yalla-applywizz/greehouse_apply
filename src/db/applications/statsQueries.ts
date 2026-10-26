@@ -369,13 +369,7 @@ export async function getDashboardApplicationMetrics(options?: {
     totalApplications += 1;
     candidateIds.add(row.applywizz_id.toUpperCase());
     if (row.job_url) jobUrls.add(row.job_url);
-    const fields = Array.isArray(row.resolved_fields) ? row.resolved_fields : [];
-    for (const f of fields) {
-      totalFieldsPopulated += 1;
-      if (f?.source === 'supabase') supabaseTaggedCount += 1;
-      if (f?.source === 'ai') aiTaggedCount += 1;
-      if (f?.source === 'resume_parse' || (f?.source as string) === 'resume') resumeTaggedCount += 1;
-    }
+
   };
 
   if (isSupabaseConfigured()) {
@@ -383,7 +377,7 @@ export async function getDashboardApplicationMetrics(options?: {
       const supabase = getDbClient();
       let query = supabase
         .from('gh_candidate_applications')
-        .select('applywizz_id, job_url, status, resolved_fields, created_at');
+        .select('applywizz_id, job_url, status, created_at');
       if (allowedSet && options?.allowedCandidateIds) {
         query = query.in('applywizz_id', options.allowedCandidateIds);
       }
@@ -484,7 +478,7 @@ export async function fetchCandidateApplicationAggregatesByApplywizzIds(
         .from('gh_candidate_applications')
         .select(
           scoped
-            ? 'applywizz_id, status, assigned_ca_email, resolved_fields, created_at'
+            ? 'applywizz_id, status, assigned_ca_email, created_at'
             : 'applywizz_id, status'
         )
         .in('applywizz_id', ids);

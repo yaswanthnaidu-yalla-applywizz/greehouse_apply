@@ -83,8 +83,8 @@ export interface DashboardStats {
   totalFieldsPopulated: number;
   supabaseTaggedCount: number;
   aiTaggedCount: number;
-  supabasePercentage: number;
-  aiPercentage: number;
+
+
   statsAvailable?: boolean;
   statsPartial?: boolean;
   statsAvailableFrom?: string;
