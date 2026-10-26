@@ -1,3 +1,32 @@
+# Current Session Update (2026-10-26 — Dashboard Performance Optimization & Ingestion CA Mapping)
+
+- **Eliminated Runtime Work History API Calls via Ingestion CA Mapping**:
+  - `src/config/env.ts`: Added optional `CA_MAPPING_API_URL`.
+  - `src/services/caAssignmentSync.ts`: Implemented `syncCaCandidateAssignments()` and `parseCaMappingResponse()` with fallback to admin work history.
+  - `src/scanner/storageCsvIngestion.ts`: Wired `syncCaCandidateAssignments()` into storage CSV ingestion flow to persist candidate assignments at ingestion.
+  - `src/server/routes/adminDashboard.ts`: Added on-demand `POST /api/admin/sync-ca-assignments` endpoint.
+- **Direct Database Scoping for Operator & Manager Dashboards**:
+  - `src/server/managerTeamScope.ts`: Updated `resolveDashboardCandidateAccess` and `resolveTeamCandidateIdsForManager` to check local Supabase DB assignments (`profiles.ca_email`, `assigned_ca_email`) first; only falls back to external Work History API when local DB returns 0 candidates.
+  - `src/server/workHistorySpan.ts`: Parallelized `mergeWorkHistoryForCaEmails` across CA emails with `Promise.all` (was serial loop).
+  - `src/server/workHistoryCache.ts`: Extended in-memory TTL from 5m to 30m.
+- **Removed Attribution Percentage Cards & Stripped `resolved_fields` Query Bloat**:
+  - `dashboard/components/AdminDashboard.tsx` & `dashboard/types.ts`: Removed "Supabase %", "AI %", and "Resume %" stat cards and types.
+  - `src/server/routes/adminDashboard.ts`: Removed percentage calculations and eliminated `getDashboardApplicationMetrics` query from `/overview`.
+  - `src/db/applications/statsQueries.ts`: Stripped `resolved_fields` and tag parsing from `getDashboardApplicationMetrics()` and `fetchCandidateApplicationAggregatesByApplywizzIds()`, cutting payload sizes and memory consumption dramatically.
+- **Selective Columns in Manager Dashboard (`clientDashboard.ts`)**:
+  - `src/server/clientDashboard.ts`: Replaced `select('*, profiles!inner(...)')` with explicit 16-scalar columns, preventing bulk downloads of heavy `resolved_fields`, `user_inputs`, and `error_details` JSON blobs.
+- **Express Response Compression & Smart Static Asset Caching**:
+  - `src/server/index.ts`: Installed and mounted `compression()` for JSON and HTML responses.
+  - Added smart caching: `public, max-age=31536000, immutable` for hashed chunks (`/assets/chunk-*`), and strict `no-cache` for unhashed entrypoints (`/assets/*.js`) and HTML shells.
+- **Frontend Parallelization & Realtime Debouncing**:
+  - `dashboard/App.tsx`: Parallelized `/api/candidates/:id` and `/api/candidates/:id/jobs` via `Promise.all` on candidate selection.
+  - Unblocked initial startup hydration (`ensureAdminHydrated` runs non-blocking).
+  - Debounced realtime `onGlobalUpdate` listener with a 1500ms trailing timer to prevent request storms during active worker runs.
+- **Verification**:
+  - 13/13 unit tests pass (`tests/caAssignmentSync.test.ts`, `tests/operatorCaDirectQuery.test.ts`, `tests/metricsQuerySlimming.test.ts`, `tests/clientDashboardSelectiveColumns.test.ts`, `tests/serverStaticHeaders.test.ts`).
+  - `npm run typecheck` 100% clean across backend and dashboard.
+  - `npm run build:dashboard` builds cleanly without warnings.
+
 # Current Session Update (2026-10-23 — Claude Haiku 5.5 LLM Synthesis Integration)
 
 - **Claude Haiku 5.5 Native Integration for Tier 5 Answer Resolution**:
