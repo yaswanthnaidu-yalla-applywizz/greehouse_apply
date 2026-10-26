@@ -1,11 +1,11 @@
 /**
  * @fileoverview In-memory TTL Cache for CA Work-History Candidate Access.
- * 5-minute TTL per CA email.
+ * 30-minute TTL per CA email.
  */
 
 import type { WorkHistoryCandidateRecord } from '../services/workHistoryClient.js';
 
-const TTL_MS = 5 * 60 * 1000; // 5 minutes
+const TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 const _cache = new Map<string, CachedWorkHistory>();
 
