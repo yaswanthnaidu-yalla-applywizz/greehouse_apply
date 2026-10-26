@@ -2,7 +2,7 @@
 
 - **Eliminated Runtime Work History API Calls via Ingestion CA Mapping**:
   - `src/config/env.ts`: Added optional `CA_MAPPING_API_URL`.
-  - `src/services/caAssignmentSync.ts`: Implemented `syncCaCandidateAssignments()` and `parseCaMappingResponse()` with fallback to admin work history.
+  - `src/services/caAssignmentSync.ts`: Implemented `syncCaCandidateAssignments()` and `parseCaMappingResponse()` supporting nested CA-with-clients structure (`{ data: [{ ca_email, clients: [{ applywizz_id, full_name }] }] }`) and fallback to admin work history.
   - `src/scanner/storageCsvIngestion.ts`: Wired `syncCaCandidateAssignments()` into storage CSV ingestion flow to persist candidate assignments at ingestion.
   - `src/server/routes/adminDashboard.ts`: Added on-demand `POST /api/admin/sync-ca-assignments` endpoint.
 - **Direct Database Scoping for Operator & Manager Dashboards**:
