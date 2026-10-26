@@ -169,27 +169,38 @@ export async function resolveTeamCandidateIdsForManager(
     };
   }
 
-  const wh = await mergeWorkHistoryForCaEmails(operatorEmails, dates);
+  let whRecords: WorkHistoryCandidateRecord[] = [];
+  let whUnreachable = false;
+  let whCandidateIds: string[] = [];
+
+  // Query external Work History API only if local DB has zero candidate mappings
   const profileIds = await applywizzIdsForManagerTeamProfiles(manager);
   const dbIds = await distinctApplywizzIdsForOperatorEmails(operatorEmails, createdAtRange);
+  if (profileIds.length === 0 && dbIds.length === 0) {
+    const wh = await mergeWorkHistoryForCaEmails(operatorEmails, dates);
+    whRecords = wh.records;
+    whUnreachable = wh.unreachable;
+    whCandidateIds = wh.candidateIds;
+  }
+
   const merged = new Set<string>();
-  for (const id of [...wh.candidateIds, ...profileIds, ...dbIds]) {
+  for (const id of [...whCandidateIds, ...profileIds, ...dbIds]) {
     merged.add(id.trim().toUpperCase());
   }
 
   const candidateIds = Array.from(merged);
   if (candidateIds.length === 0) {
     log.warn(
-      `[ManagerTeamScope] team candidates manager=${manager} operators=${operatorEmails.length} whIds=${wh.candidateIds.length} profileIds=${profileIds.length} dbIds=${dbIds.length} merged=0`
+      `[ManagerTeamScope] team candidates manager=${manager} operators=${operatorEmails.length} whIds=${whCandidateIds.length} profileIds=${profileIds.length} dbIds=${dbIds.length} merged=0`
     );
   }
 
   return {
     operatorEmails,
     candidateIds,
-    records: wh.records,
-    unreachable: wh.unreachable,
-    warning: wh.unreachable ? 'Work history API was unreachable for one or more operators.' : undefined,
+    records: whRecords,
+    unreachable: whUnreachable,
+    warning: whUnreachable ? 'Work history API was unreachable for one or more operators.' : undefined,
   };
 }
 
@@ -318,27 +329,45 @@ export async function resolveDashboardCandidateAccess(
     workHistoryUnreachable = team.unreachable;
   } else if (userEmail) {
     const caEmail = userEmail;
-    const merged = await mergeWorkHistoryForIstDates({
-      mode: 'ca',
-      caEmail,
-      dates: whDates,
-    });
-    candidateIds = merged.candidateIds;
-    workHistoryRecords = merged.records;
-    workHistoryUnreachable = merged.unreachable;
-    if (candidateIds.length === 0 && parsedRange.preset === 'default') {
-      const allowedResult = await fetchAllowedCandidates(caEmail);
-      if (allowedResult.candidateIds.length > 0) {
-        candidateIds = allowedResult.candidateIds;
-        workHistoryRecords = allowedResult.records;
-        workHistoryUnreachable = allowedResult.unreachable;
-        setCachedWorkHistory(
-          caEmail,
-          allowedResult.records,
-          allowedResult.candidateIds,
-          allowedResult.unreachable,
-          allowedResult.resolvedDate
-        );
+    const dbIds = await distinctApplywizzIdsForOperatorEmails([caEmail], createdAtRange);
+    let profileIds: string[] = [];
+    if (isSupabaseConfigured()) {
+      const { data } = await getDbClient()
+        .from('profiles')
+        .select('applywizz_id')
+        .eq('ca_email', caEmail);
+      if (data) {
+        profileIds = (data as { applywizz_id?: string }[])
+          .map((r) => String(r.applywizz_id || '').trim().toUpperCase())
+          .filter(Boolean);
+      }
+    }
+    const localIds = new Set([...dbIds, ...profileIds]);
+    if (localIds.size > 0) {
+      candidateIds = Array.from(localIds);
+    } else {
+      const merged = await mergeWorkHistoryForIstDates({
+        mode: 'ca',
+        caEmail,
+        dates: whDates,
+      });
+      candidateIds = merged.candidateIds;
+      workHistoryRecords = merged.records;
+      workHistoryUnreachable = merged.unreachable;
+      if (candidateIds.length === 0 && parsedRange.preset === 'default') {
+        const allowedResult = await fetchAllowedCandidates(caEmail);
+        if (allowedResult.candidateIds.length > 0) {
+          candidateIds = allowedResult.candidateIds;
+          workHistoryRecords = allowedResult.records;
+          workHistoryUnreachable = allowedResult.unreachable;
+          setCachedWorkHistory(
+            caEmail,
+            allowedResult.records,
+            allowedResult.candidateIds,
+            allowedResult.unreachable,
+            allowedResult.resolvedDate
+          );
+        }
       }
     }
   }

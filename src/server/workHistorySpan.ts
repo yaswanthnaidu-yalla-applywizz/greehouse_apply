@@ -84,8 +84,11 @@ export async function mergeWorkHistoryForCaEmails(
   const recordIds = new Set<string>();
   let unreachable = false;
 
-  for (const email of emails) {
-    const merged = await mergeWorkHistoryForIstDates({ mode: 'ca', caEmail: email, dates });
+  const results = await Promise.all(
+    emails.map((email) => mergeWorkHistoryForIstDates({ mode: 'ca', caEmail: email, dates }))
+  );
+
+  for (const merged of results) {
     unreachable = unreachable || merged.unreachable;
     for (const id of merged.candidateIds) {
       seenIds.add(id.toUpperCase());
