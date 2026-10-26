@@ -49,6 +49,17 @@ const log = createLogger('Admin Dashboard');
 
 export const adminDashboardRouter = Router();
 
+adminDashboardRouter.post('/sync-ca-assignments', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const { syncCaCandidateAssignments } = await import('../../services/caAssignmentSync.js');
+    const result = await syncCaCandidateAssignments({ force: true });
+    res.json({ success: true, ...result });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
 adminDashboardRouter.post('/cleanup-diagnostics', async (req: Request, res: Response): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
   if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
