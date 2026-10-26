@@ -50,4 +50,21 @@ describe('dashboardDateRange', () => {
     assert.equal(parsed.toDate, '2026-10-14');
     assert.equal(parsed.label, '2026-10-14 - 2026-10-14');
   });
+
+  it('parses lifetime range in parseDashboardStatsRange', () => {
+    const parsed = parseDashboardStatsRange({ range: 'lifetime' });
+    assert.ok(!('error' in parsed));
+    if ('error' in parsed) return;
+    assert.equal(parsed.preset, 'lifetime');
+    assert.equal(parsed.fromDate, '2000-01-01');
+    assert.equal(parsed.label, 'Lifetime');
+  });
+
+  it('accepts today alias for day in parseDashboardStatsRange', () => {
+    const parsed = parseDashboardStatsRange({ range: 'today' });
+    assert.ok(!('error' in parsed));
+    if ('error' in parsed) return;
+    assert.equal(parsed.preset, 'day');
+    assert.equal(parsed.label, 'Today');
+  });
 });

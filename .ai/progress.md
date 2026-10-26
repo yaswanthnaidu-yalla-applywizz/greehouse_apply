@@ -1,3 +1,111 @@
+### Dashboard Performance & Ingestion CA Mapping (2026-10-26 Complete)
+- [x] **Ingestion CA Mapping (`src/config/env.ts`, `src/services/caAssignmentSync.ts`, `src/scanner/storageCsvIngestion.ts`):** Added optional `CA_MAPPING_API_URL` env var. Automatically syncs and persists CA candidate assignments into `profiles` and `gh_candidate_applications` during CSV ingestion, with automatic fallback to admin work history. Added `POST /api/admin/sync-ca-assignments` on-demand sync endpoint.
+- [x] **Direct DB CA Scoping (`src/server/managerTeamScope.ts`, `src/server/workHistorySpan.ts`, `src/server/workHistoryCache.ts`):** Checks local database candidate mappings first for operator and manager dashboards, cutting runtime external Work History API latency from ~10s to <50ms. Parallelized team queries with `Promise.all` and extended cache TTL to 30 minutes.
+- [x] **Dropped Attribution Stat Cards & Stripped `resolved_fields` Query Bloat (`dashboard/components/AdminDashboard.tsx`, `src/server/routes/adminDashboard.ts`, `src/db/applications/statsQueries.ts`):** Removed unused Supabase %, AI %, and Resume % stat cards from admin overview. Stripped heavy `resolved_fields` JSON payloads and tallying loops from `getDashboardApplicationMetrics` and `fetchCandidateApplicationAggregatesByApplywizzIds`.
+- [x] **Selective Columns in Manager Dashboard (`src/server/clientDashboard.ts`):** Replaced `select('*, profiles!inner(...)')` with explicit 16-scalar columns, omitting multi-megabyte `resolved_fields`, `user_inputs`, and `error_details` objects.
+- [x] **Express Compression & Smart Static Caching (`src/server/index.ts`):** Installed and mounted `compression()` for JSON and HTML responses. Added 1-year immutable caching for hashed chunk files (`/assets/chunk-*`) and strict `no-cache` for unhashed entrypoints and HTML shells.
+- [x] **Frontend Parallelization & Realtime Debouncing (`dashboard/App.tsx`):** Parallelized candidate detail and job queue fetching with `Promise.all`. Unblocked initial dashboard hydration. Debounced Realtime `onGlobalUpdate` triggers with a 1500ms trailing timer to prevent request thrashing.
+- [x] **Verification:** Added comprehensive test suites (`tests/caAssignmentSync.test.ts`, `tests/operatorCaDirectQuery.test.ts`, `tests/metricsQuerySlimming.test.ts`, `tests/clientDashboardSelectiveColumns.test.ts`, `tests/serverStaticHeaders.test.ts`). All 13 tests passing, `npm run typecheck` clean, dashboard build clean.
+
+### Claude Haiku 5.5 LLM Synthesis Integration (2026-10-23 Complete)
+- [x] **Anthropic Provider in Resolver (`src/resolver/llmSynthesizer.ts`, `src/config/env.ts`):** Added native `anthropic` provider to `LLMSynthesizer` and environment schema. Auto-selected as primary when `CLAUDE_API_KEY` is present in env.
+- [x] **Pinned Haiku 5.5 Model & Workspace Header:** Strictly pinned to `claude-haiku-5-5` with temperature parameter omitted (per 5.5 deprecation requirements). Passes `anthropic-workspace-id` via request headers when `ANTHROPIC_WORKSPACE_ID` is present.
+- [x] **Fail-Fast Error Handling:** No secondary provider fallback on failure; errors on individual questions fail-fast and leave only that question unresolved, continuing resolution for other questions in the application.
+- [x] **Verification & TDD:** Added `tests/claudeHaikuResolution.test.ts` covering provider selection, headers, token usage tracking, and fail-fast rate-limiting. All 15 node tests and 55 vitest tests pass; full typecheck passes.
+
+### Multi-Replica Batch Email Proof Fetching (2026-10-23 Complete)
+- [x] **Standalone DB2 Batch Script (`scripts/fetchEmailProofsDb2.ts`):** CLI script (`npm run fetch:email-proofs:db2`) connecting directly to DB2 (Supabase remote Postgres) with 3 concurrent workers, atomic `FOR UPDATE SKIP LOCKED` dequeueing, historical Zoho query window, messageId deduplication, and automatic promotion to `APPLIED`. Supports `--limit=N`, `--concurrency=N`, and `--dry-run`.
+- [x] **Atomic Dequeue RPC (`src/db/migrations/038_claim_email_proof_application_rpc.sql`, `src/db/applications/queue.ts`):** Migration 038 adds `claim_next_email_proof_application` using `FOR UPDATE OF ca SKIP LOCKED` to safely claim pending applications without multi-replica duplicate processing.
+- [x] **Historical Matching & Deduplication (`src/services/inbox/zohoStrategy.ts`, `src/submitter/proofCapture.ts`):** Extended `queryZohoConfirmationEmail` with `allowHistorical: true` searching `[submitted_at - 2m, now()]`; implemented `isEmailMessageIdAlreadyAttached` to deduplicate by unique Zoho `messageId`.
+- [x] **Multi-Replica Worker Pool (`src/submitter/emailProofWorkerPool.ts`, `src/server/index.ts`):** 3-lane worker pool per replica (9 concurrent workers cluster-wide across 3 replicas) with Supabase Realtime `email_proof_batch` listener and 500ms pacing.
+- [x] **Dev Dashboard Trigger & API (`src/server/routes/devDashboard.ts`, `dashboard/components/DevDashboard.tsx`):** Added `POST /api/dev/email-proofs/batch-retry` and `GET /api/dev/email-proofs/status`; added "Email Proof Recovery" action card with pending counter badge, trigger button, and status messaging in Dev Dashboard.
+- [x] **Verification:** `tests/claimEmailProofRpc.test.ts`, `tests/emailProofMatching.test.ts`, `tests/emailProofWorkerPool.test.ts`, `tests/devEmailProofRoutes.test.ts` passing; `npm run typecheck:dashboard` and `npm run build:dashboard` passing.
+
+### Filtered-Out Routing Hardening & CSV Ingest Filter Reporting (2026-10-23 Complete)
+- [x] **Filtered-Out Routing Hardening (`src/resolver/needsReview.ts`):** Updated `applicationShouldBeFilteredOut` to filter out applications strictly when **required AI field count > 3** (`countRequiredAiFields > 3`) OR **unresolved required field count > 3** (`countUnresolvedRequiredFields > 3`). Optional AI or unresolved fields never cause filtering.
+- [x] **Ingest Filter Report Enhancement (`src/scanner/ingestFilterReport.ts`):** Added `filteredOutApplications` section to `renderIngestFilterReportCsv`, grouping clearance links, excluded company applications, latest employer applications, and filtered-out applications in the CSV report.
+- [x] **Root Directory Cleanup:** Removed stale redundant documentation files `OVERVIEW.md` and `plantoprod.md`.
+- [x] **Verification:** `tests/filteredOutRouting.test.ts` (6/6 passing), `tests/ingestFilterReport.test.ts` (4/4 passing), all unit and integration test suites passing.
+
+### Post-Ingestion Leadership Notifications & SLA Tracking (2026-10-23 Complete)
+- [x] **Azure Email Multi-Recipient & CC (`src/services/azureEmail.ts`):** Added `buildGraphMailPayload` and extended `sendEmail` with `to: string | string[]` and `cc?: string | string[]`.
+- [x] **Leadership Summary & SLA Poller (`src/services/caNotificationEmail.ts`):**
+  - Dispatches immediate post-ingest summary email to Balaji & RK (CC: Anusha, Vivek, dev) with per-CA task counts.
+  - Schedules 1.5-hour SLA follow-up with `timer.unref()`.
+  - Sends reminder at 1.5h if tasks remain, or "ALL TASKS COMPLETED" if 0 remain.
+  - Runs subsequent 1-hour checks until tasks reach 0 (completion email) or progress stalls across two checks.
+  - Redirects to dev email when `SANDBOX=true` or override is present.
+- [x] **Pipeline Phase D Wiring (`src/orchestrator/pipeline.ts`):** Connected `sendLeadershipIngestionSummary` alongside `sendCaNotificationEmails`.
+- [x] **Verification:** `tests/azureEmailPayload.test.ts` (3/3), `tests/leadershipNotificationEmail.test.ts` (10/10), all 55 Vitest and Node test runner suites passing, `npm run typecheck` clean.
+
+### Ashby ATS Integration & Unified Browser Stealth (2026-10-22 Complete)
+- [x] **Migrations 036 & 037:** Added `ats TEXT DEFAULT 'greenhouse'` and `scheduled_not_before TIMESTAMPTZ` with rate limit RPC guards in `get_next_queued_application()`.
+- [x] **ATS Detector & Hybrid Scanner:** Added `src/scanner/atsDetector.ts` and `src/scanner/ashbyScanner.ts` (API + Playwright DOM fallback).
+- [x] **Pipeline & Resolver Integration:** Deduplicated Ashby URLs, short-circuited `_systemfield_*` profile fields, propagated `ats` to `gh_candidate_applications` and `gh_scanned_job_templates`.
+- [x] **Unified Stealth Browser:** Centralized `playwright-extra` + `puppeteer-extra-plugin-stealth` in `src/submitter/browserManager.ts` across both Greenhouse and Ashby.
+- [x] **DataImpulse Geo-Proxy:** Geo-targeted residential proxy builder enforcing candidate country + city sticky session per day.
+- [x] **Ashby Form Filler & Submitter:** Human-like Bézier cursor, micro-jitter typing, Turnstile settlement scrolling, submit button click, and confirmation verification matching green banner text (`"Your application was successfully submitted. We'll contact you if there are next steps."`).
+- [x] **Queue Worker & Route Routing:** Integrated `submitAshbyApplication` into `src/submitter/submitterPool.ts` and `src/server/routes/submissions.ts`.
+- [x] **Verification:** 28 Ashby tests passed, 55 Vitest unit tests passed, all Node test runner suites passed, `npm run typecheck` clean, dashboard build clean.
+
+### Codebase Debloat & Structural Refactoring (2026-10-21 Complete)
+- [x] **PR 1: V1 Artifact Purge (`src/db/applications/`, `src/server/index.ts`, `tests/v1ArtifactPurge.test.ts`):**
+  - Completely purged dead V1 local JSON disk fallbacks (`scanned_jobs.json`, `resolved_applications.json`).
+  - Added unit test asserting 100% database-driven execution.
+- [x] **PR 2: Express Server Routes Extraction (`src/server/routes/devDb.ts`, `src/server/routes/candidates.ts`):**
+  - Extracted 1,200+ line `/api/candidates` endpoints and HTML `/dev/db` endpoint into modular Express routers.
+  - Added unit tests: `tests/candidatesRouter.test.ts`.
+- [x] **PR 3: Demo Candidate Fixture Isolation (`src/dashboard/demoFixtureService.ts`, `tests/demoFixtureIsolation.test.ts`):**
+  - Isolated demo candidate IDs and fixture services into dedicated submodule.
+- [x] **PR 4: Applications DB Decomposition (`src/db/applications/`, `tests/applicationsDecomposition.test.ts`):**
+  - Split 2,635-line `applications.ts` into 7 submodules (`types.ts`, `memoryStore.ts`, `crud.ts`, `dto.ts`, `statsQueries.ts`, `queue.ts`, `notifications.ts`).
+  - Maintained 100% backward compatibility via barrel re-exports.
+- [x] **PR 5: Canonical Choice Matcher (`src/utils/choiceOptions.ts`, `tests/choiceOptionsCanonical.test.ts`):**
+  - Replaced ad-hoc Fuse.js/regex dropdown matchers with unified fuzzy token coverage and negative-decline logic across resolver and submitter.
+- [x] **PR 6: Strategy-Based Field Fillers (`src/submitter/fieldFillers/`, `tests/fieldFillerStrategies.test.ts`):**
+  - Decomposed monolithic `formFiller.ts` into cohesive field strategies (`base.ts`, `fileFiller.ts`, `selectFiller.ts`, `booleanFiller.ts`, `textFiller.ts`).
+- [x] **PR 7: LiveSubmit Pipeline & Unified OTP Session Registry (`src/submitter/otpSession.ts`, `src/submitter/liveSubmit.ts`, `tests/liveSubmitPipeline.test.ts`):**
+  - Unified `PAUSED_SESSIONS` and `activeSubmissions` into a single store.
+  - Linearized `runLiveSubmit` into `prepareSubmissionPreflight`, `executeFormFill`, and `handlePostSubmitResponse`.
+- [x] **PR 8: Inbox Strategies Modularization (`src/services/inbox/`, `src/services/zoho-connector.ts`, `tests/inboxStrategies.test.ts`):**
+  - Extracted `inboxPoller.ts`, `zohoStrategy.ts`, and `gmailStrategy.ts` while preserving 5,000ms clock skew and facade re-exports.
+- [x] **PR 9: Strict Domain Typing & Dashboard Decomposition (`src/types/index.ts`, `src/db/applications/types.ts`, `dashboard/`, `tests/dashboardDecomposition.test.ts`):**
+  - Replaced `any[]` with `ResolvedField[]` and added `SubmissionErrorDetails`.
+  - Extracted `DashboardHeader.tsx` (preserving 2-tier header test IDs), `CandidateSidebar.tsx`, and `useDashboardState.ts`.
+- [x] **Verification:**
+  - All test suites passing (`68/68 node:test`, `55/55 vitest`).
+  - Full TypeScript typecheck clean across both backend and dashboard.
+  - Vite frontend bundle built successfully.
+
+### Failure Diagnostics & Root Cause Fixes (2026-10-16 Complete)
+- [x] **Database Migration 027 (`supabase/migrations/027_error_details.sql`, `src/db/migrations/027_error_details.sql`):**
+  - Added `error_details jsonb` column to `gh_candidate_applications` to store structured failure diagnostics.
+  - Applied and verified against live DB2.
+- [x] **Failure Diagnostics Capture (`src/submitter/failureDiagnostics.ts`):**
+  - Implemented `captureFailureDiagnostics(page)` extracting `failureType`, `failingFields` (label + error text), `serverError`, `pageTitle`, `pageUrl`, and `capturedAt`.
+  - Wired into all submission verification and execution failure write points in `src/submitter/liveSubmit.ts` and `updateStatus` in `src/db/applications.ts`.
+- [x] **Resume Upload Selectors Expanded (`src/submitter/formFiller.ts`):**
+  - Exported `getResumeFileSelectors()` supporting Remix `[data-field*="resume" i]`, `input[type="file"][accept*="pdf" i]`, `.resume-upload-wrapper`, and `[data-testid*="resume" i]`.
+  - Added post-upload `attachedCount === 0` check throwing explicit `RESUME_UPLOAD_FAILED` to prevent submitting without attachment.
+- [x] **Greenhouse Server Error Fast-Fail (`src/submitter/otpSession.ts`, `src/submitter/liveSubmit.ts`):**
+  - Added instant detection of server-error text on the first poll iteration, avoiding 30-75s timeouts and writing `Greenhouse server error` to DB.
+- [x] **0-Jobs Expiry Redirect Detection (`src/scanner/playwrightScanner.ts`):**
+  - Exported and wired `isZeroJobsExpiredPage` to detect search listing pages returning 0 jobs with missing application form as `isExpired: true`.
+- [x] **Test Verification:**
+  - `tests/failureDiagnostics.test.ts` (4/4 pass)
+  - `tests/resumeSelectors.test.ts` (2/2 pass)
+  - `tests/serverErrorFastFail.test.ts` (1/1 pass)
+  - `tests/zeroJobsExpiry.test.ts` (3/3 pass)
+  - Full TypeScript typecheck clean across backend and dashboard.
+
+### Full Dashboard Stats Alignment & Canonical Sync (2026-10-15 Complete)
+- [x] **Full Ground Truth Synchronization (`gh_application_stats_daily`, `gh_stats_rollups`):**
+  - Audited all 1,453 applications in database (`gh_candidate_applications`).
+  - Purged orphaned and stale daily stats rows.
+  - Rebuilt 11,780 scoped stat rows (`global`, `ca`, `manager`, `manager_ca`) for today (`2026-10-15` IST).
+  - Aligned `gh_stats_rollups`: Total = 1,451, Submitted = 816, Applied = 635, Failed = 105.
+  - Verified frontend build (`npm run build:dashboard`) and full typecheck (`npm run typecheck`).
+
 ### CA Email Backfill & Notification Email Dispatch (2026-10-15 Complete)
 - [x] **Assigned CA Email Backfill (`gh_candidate_applications`):**
   - Backfilled `assigned_ca_email` across 635 applications from corresponding candidate `profiles.ca_email` (370 profiles mapped).

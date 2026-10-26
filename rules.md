@@ -1,4 +1,4 @@
-
+never hardcode secrets.
 
 \## 1. Think Before Coding
 
@@ -59,6 +59,8 @@ When editing existing code:
 \- Don't refactor things that aren't broken.
 
 \- Match existing style, even if you'd do it differently.
+
+\- Don't use redacted or sanitized tool output as literal patch context. If a patch doesn't match, re-read the source and anchor it on nearby non-sensitive text; run a focused check to verify the intended behavior.
 
 \- If you notice unrelated dead code, mention it - don't delete it.
 

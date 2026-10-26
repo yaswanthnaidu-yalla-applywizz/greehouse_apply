@@ -9,7 +9,7 @@
  * so the operator can manually retry the email screenshot capture.
  */
 
-import { queryZohoConfirmationEmail } from '../services/zoho-connector.js';
+import { queryConfirmationEmail } from '../services/zoho-connector.js';
 import {
   getApplication,
   updateStatus,
@@ -100,7 +100,7 @@ export class EmailProofPoller {
           return;
         }
 
-        const result = await queryZohoConfirmationEmail({
+        const result = await queryConfirmationEmail({
           candidateEmail: companyEmail,
           companyName,
           companyEmail: (currentApp as any).company_email || undefined,

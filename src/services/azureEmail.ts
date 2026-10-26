@@ -158,7 +158,8 @@ function generateOtpEmailHtml(otp: string): string {
 }
 
 export interface SendEmailOptions {
-  to: string;
+  to: string | string[];
+  cc?: string | string[];
   subject: string;
   html?: string;
   text?: string;
@@ -170,35 +171,32 @@ export interface SendEmailOptions {
 }
 
 /**
- * Sends a generic email using Microsoft Graph sendMail API.
+ * Builds normalized Microsoft Graph sendMail payload supporting single/multiple TO and CC recipients.
  */
-export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
-  const { to, subject, html, text, attachments } = options;
+export function buildGraphMailPayload(options: SendEmailOptions) {
+  const toList = (Array.isArray(options.to) ? options.to : [options.to])
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  const ccList = options.cc
+    ? (Array.isArray(options.cc) ? options.cc : [options.cc])
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
 
-  if (!isAzureEmailConfigured()) {
-    throw new Error('Azure Communication Services / Microsoft 365 credentials are not configured on the server.');
-  }
-
-  const senderEmail = config.AZURE_SENDER_EMAIL!;
-  const accessToken = await getGraphAccessToken();
-
-  const mailPayload = {
+  return {
     message: {
-      subject,
+      subject: options.subject,
       body: {
-        contentType: html ? 'HTML' : 'Text',
-        content: html || text || subject,
+        contentType: options.html ? 'HTML' : 'Text',
+        content: options.html || options.text || options.subject,
       },
-      toRecipients: [
-        {
-          emailAddress: {
-            address: to.trim().toLowerCase(),
-          },
-        },
-      ],
-      ...(attachments?.length
+      toRecipients: toList.map((address) => ({ emailAddress: { address } })),
+      ...(ccList.length > 0
+        ? { ccRecipients: ccList.map((address) => ({ emailAddress: { address } })) }
+        : {}),
+      ...(options.attachments?.length
         ? {
-            attachments: attachments.map((attachment) => ({
+            attachments: options.attachments.map((attachment) => ({
               '@odata.type': '#microsoft.graph.fileAttachment',
               ...attachment,
             })),
@@ -207,6 +205,21 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
     },
     saveToSentItems: false,
   };
+}
+
+/**
+ * Sends a generic email using Microsoft Graph sendMail API.
+ */
+export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
+  const { to } = options;
+
+  if (!isAzureEmailConfigured()) {
+    throw new Error('Azure Communication Services / Microsoft 365 credentials are not configured on the server.');
+  }
+
+  const senderEmail = config.AZURE_SENDER_EMAIL!;
+  const accessToken = await getGraphAccessToken();
+  const mailPayload = buildGraphMailPayload(options);
 
   const graphBase = (config.MS_GRAPH_BASE_URL || 'https://graph.microsoft.com').replace(/\/+$/, '');
   const endpoint = `${graphBase}/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
@@ -220,16 +233,17 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
     body: JSON.stringify(mailPayload),
   });
 
+  const recipientDesc = Array.isArray(to) ? to.join(', ') : to;
   if (!res.ok) {
     const errText = await res.text();
-    log.error(`[AzureEmail] Failed to send email to ${to}: HTTP ${res.status} - ${errText}`);
+    log.error(`[AzureEmail] Failed to send email to ${recipientDesc}: HTTP ${res.status} - ${errText}`);
     return {
       success: false,
       error: `Failed to send email: HTTP ${res.status} - ${errText}`,
     };
   }
 
-  log.info(`[AzureEmail] Successfully dispatched email to ${to} (Sender: ${senderEmail})`);
+  log.info(`[AzureEmail] Successfully dispatched email to ${recipientDesc} (Sender: ${senderEmail})`);
   return { success: true };
 }
 

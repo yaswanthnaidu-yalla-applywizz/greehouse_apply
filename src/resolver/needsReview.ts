@@ -64,6 +64,14 @@ export function countAiFields(fields: NeedsReviewField[]): number {
 }
 
 /**
+ * Total count of REQUIRED fields resolved via AI (Tier 5).
+ */
+export function countRequiredAiFields(fields: NeedsReviewField[]): number {
+  if (!Array.isArray(fields)) return 0;
+  return fields.filter((f) => Boolean(f.isRequired) && f.source === 'ai').length;
+}
+
+/**
  * Total count of REQUIRED fields that remain unresolved across all tiers.
  */
 export function countUnresolvedRequiredFields(fields: NeedsReviewField[]): number {
@@ -74,14 +82,14 @@ export function countUnresolvedRequiredFields(fields: NeedsReviewField[]): numbe
 /**
  * Filtered-out routing:
  * An application is filtered out when:
- * 1. AI field count (all fields) > 3, AND
+ * 1. Required AI field count > 3, OR
  * 2. Unresolved required field count > 3.
  *
- * If either AI count <= 3 OR unresolved required count <= 3, it is NOT filtered out.
+ * Optional AI or optional unresolved fields never cause an application to be filtered out.
  */
 export function applicationShouldBeFilteredOut(fields: NeedsReviewField[]): boolean {
   if (!Array.isArray(fields) || fields.length === 0) return false;
-  return countAiFields(fields) > 3 && countUnresolvedRequiredFields(fields) > 3;
+  return countRequiredAiFields(fields) > 3 || countUnresolvedRequiredFields(fields) > 3;
 }
 
 

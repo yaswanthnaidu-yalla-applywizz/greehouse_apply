@@ -34,7 +34,18 @@ const envSchema = z.object({
   APPLYWIZZ_API_URL: z.string().default('https://www.apply-wizz.me/api/get-client-details?applywizz_id='),
 
   /** Selected LLM provider for synthesis */
-  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama', 'bedrock']).default('openrouter'),
+  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama', 'bedrock', 'anthropic']).default('openrouter'),
+
+  /** Claude / Anthropic API Key */
+  CLAUDE_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+
+  /** Anthropic Workspace ID */
+  ANTHROPIC_WORKSPACE_ID: z.string().optional(),
+  CLAUDE_WORKSPACE_ID: z.string().optional(),
+
+  /** Claude Model ID for Tier 5 resolution */
+  CLAUDE_MODEL: z.string().default('claude-haiku-5-5'),
 
   /** AWS Region for Bedrock */
   AWS_REGION: z.string().default('us-east-1'),
@@ -119,9 +130,6 @@ const envSchema = z.object({
 
   /** Minimum spacing in ms between consecutive browser launches to prevent CPU/memory burst spikes (default: 1500) */
   BROWSER_LAUNCH_COOLDOWN_MS: z.coerce.number().int().min(0).max(10000).default(1500),
-
-  /** Operator dashboard delivery mode: 'html' (Babel in-browser) or 'tsx' (Vite bundle) */
-  DASHBOARD_MODE: z.string().optional().default('html'),
 
   /** JWT Secret for backend session verification (falls back to default if unset) */
   JWT_SECRET: z.string().default('greenhouse-automation-jwt-secret-key'),
@@ -218,8 +226,23 @@ const envSchema = z.object({
     .string()
     .default('https://applywizz-ca-management.vercel.app/api/ca/work-history'),
 
+  /** Optional endpoint for daily CA-to-candidate assignment mapping */
+  CA_MAPPING_API_URL: z.string().optional(),
+
   /** Additional comma-separated list of emails permitted to sign up */
   ALLOWED_SIGNUP_EMAILS: z.string().default('yaswanthnaiduyalla@applywizz.ai'),
+
+  /** DataImpulse Residential Proxy Login */
+  DATAIMPULSE_LOGIN: z.string().optional(),
+
+  /** DataImpulse Residential Proxy Password */
+  DATAIMPULSE_PASSWORD: z.string().optional(),
+
+  /** DataImpulse Proxy Gateway Host */
+  DATAIMPULSE_HOST: z.string().default('gw.dataimpulse.com'),
+
+  /** DataImpulse Proxy Gateway Port */
+  DATAIMPULSE_PORT: z.coerce.number().int().positive().default(823),
 
   /** ApplyWizz S3 Bucket Base URL for master resumes */
   APPLYWIZZ_S3_BASE_URL: z.string().default('https://applywizz-prod.s3.us-east-2.amazonaws.com'),
@@ -263,6 +286,39 @@ if (!process.env.JWT_SECRET && rawEnv.NODE_ENV === 'production') {
   log.warn('⚠️ JWT_SECRET environment variable is not set; falling back to default key. Set JWT_SECRET in production variables.');
 }
 
+function getEnvValue(name: string): string {
+  if (process.env[name] && process.env[name]!.trim()) {
+    return process.env[name]!.trim();
+  }
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.trim() === name && value && value.trim()) {
+      return value.trim();
+    }
+  }
+  return '';
+}
+
+const resolvedClaudeApiKey = (
+  rawEnv.CLAUDE_API_KEY ||
+  rawEnv.ANTHROPIC_API_KEY ||
+  getEnvValue('CLAUDE_API_KEY') ||
+  getEnvValue('ANTHROPIC_API_KEY') ||
+  ''
+).trim();
+
+const resolvedClaudeWorkspaceId = (
+  rawEnv.ANTHROPIC_WORKSPACE_ID ||
+  rawEnv.CLAUDE_WORKSPACE_ID ||
+  getEnvValue('ANTHROPIC_WORKSPACE_ID') ||
+  getEnvValue('CLAUDE_WORKSPACE_ID') ||
+  ''
+).trim();
+
+const resolvedLlmProvider = (
+  (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) ||
+  (resolvedClaudeApiKey ? 'anthropic' : rawEnv.LLM_PROVIDER)
+);
+
 /**
  * Resolves the active LLM API key based on the configured LLM_PROVIDER and available keys.
  *
@@ -271,7 +327,11 @@ if (!process.env.JWT_SECRET && rawEnv.NODE_ENV === 'production') {
  */
 function resolveLlmApiKey(env: typeof rawEnv): string {
   const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
-  const effectiveProvider = (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || env.LLM_PROVIDER;
+  const effectiveProvider = (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || resolvedLlmProvider;
+
+  if (effectiveProvider === 'anthropic') {
+    return resolvedClaudeApiKey;
+  }
 
   if (effectiveProvider === 'bedrock') {
     const key = (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || process.env.AWS_BEARER_TOKEN_BEDROCK || '').trim();
@@ -287,22 +347,23 @@ function resolveLlmApiKey(env: typeof rawEnv): string {
     }
     return key;
   }
-  if (env.LLM_PROVIDER === 'ollama') {
+  if (effectiveProvider === 'ollama') {
     return 'ollama';
   }
   if (env.LLM_API_KEY && env.LLM_API_KEY.trim().length > 0) {
     return env.LLM_API_KEY.trim();
   }
-  if (env.LLM_PROVIDER === 'openrouter' && env.OPENROUTER_API_KEY) {
+  if (effectiveProvider === 'openrouter' && env.OPENROUTER_API_KEY) {
     return env.OPENROUTER_API_KEY.trim();
   }
-  if (env.LLM_PROVIDER === 'gemini' && env.GEMINI_API_KEY) {
+  if (effectiveProvider === 'gemini' && env.GEMINI_API_KEY) {
     return env.GEMINI_API_KEY.trim();
   }
-  if (env.LLM_PROVIDER === 'openai' && env.OPENAI_API_KEY) {
+  if (effectiveProvider === 'openai' && env.OPENAI_API_KEY) {
     return env.OPENAI_API_KEY.trim();
   }
   // Auto-fallback: check if any key exists
+  if (resolvedClaudeApiKey) return resolvedClaudeApiKey;
   if (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK) {
     return (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK)!.trim();
   }
@@ -319,7 +380,10 @@ const isSandboxEnv = process.env.SANDBOX === 'true' || process.env.SANDBOX === '
  */
 export const config = {
   ...rawEnv,
-  LLM_PROVIDER: (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || rawEnv.LLM_PROVIDER,
+  LLM_PROVIDER: resolvedLlmProvider,
+  CLAUDE_API_KEY: resolvedClaudeApiKey || undefined,
+  ANTHROPIC_WORKSPACE_ID: resolvedClaudeWorkspaceId || undefined,
+  CLAUDE_MODEL: (getEnvValue('CLAUDE_MODEL') || rawEnv.CLAUDE_MODEL || 'claude-haiku-5-5').trim(),
   OPENROUTER_MODEL: isSandboxEnv
     ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
     : rawEnv.OPENROUTER_MODEL,
