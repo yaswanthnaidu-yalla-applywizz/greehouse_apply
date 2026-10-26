@@ -168,6 +168,9 @@ AZURE_CLIENT_SECRET=
 AZURE_TENANT_ID=
 AZURE_SENDER_EMAIL=
 MS_GRAPH_BASE_URL=https://graph.microsoft.com
+
+# CA-Candidate Ingestion Mapping
+CA_MAPPING_API_URL=                  # Optional external endpoint returning daily CA-to-candidate assignments (falls back to admin work-history)
 CA_NOTIFICATION_EMAIL_OVERRIDE=    # Redirect all CA/leadership emails to single address
 
 # AWS Bedrock (if LLM_PROVIDER=bedrock)
