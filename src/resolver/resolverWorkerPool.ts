@@ -97,7 +97,7 @@ export class ResolverWorkerPool {
     const profile = await getProfile(application.applywizz_id);
     const parsedResume = await getOrParseResume(application.applywizz_id);
     const qaEntries = await findAnswersByCandidate(application.applywizz_id);
-    let existing = Array.isArray(application.resolved_fields) ? application.resolved_fields : [];
+    let existing: Array<ResolvedField | ScannedField> = Array.isArray(application.resolved_fields) ? application.resolved_fields : [];
     if (existing.length === 0) {
       const template = await findTemplateByJobUrl(application.job_url);
       const schema = template?.fields_schema;

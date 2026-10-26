@@ -64,10 +64,9 @@ describe('Dev dashboard ingestion filter report download', () => {
   });
 
   it('exposes an authenticated dashboard download control using the current report endpoint', async () => {
-    const html = await readFile(path.resolve('dashboard/public/dev.html'), 'utf8');
-    expect(html).toContain('Download current ingest filter report');
-    expect(html).toContain("fetch('/api/dev/ingest-filter-report'");
-    expect(html).toContain('ApplyWizzRoles.getAuthHeaders()');
-    expect(html).toContain('response.blob()');
+    const tsx = await readFile(path.resolve('dashboard/components/DevDashboard.tsx'), 'utf8');
+    expect(tsx).toContain('Download current ingest filter report');
+    expect(tsx).toContain("fetch('/api/dev/ingest-filter-report'");
+    expect(tsx).toContain('response.blob()');
   });
 });

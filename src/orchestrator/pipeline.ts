@@ -20,12 +20,14 @@ import { config } from '../config/env.js';
 import { readAndDeduplicateUrls } from '../scanner/csvDeduplicator.js';
 import { PlaywrightScanner } from '../scanner/playwrightScanner.js';
 import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
+import { scanAshbyJob } from '../scanner/ashbyScanner.js';
+import { atsFromUrl } from '../scanner/csvDeduplicator.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
 import { fetchCaBatchEmailMap } from '../candidate/applywizzClient.js';
 import { upsertProfileCaEmail } from '../db/profiles.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
-import { sendCaNotificationEmails } from '../services/caNotificationEmail.js';
+import { sendCaNotificationEmails, sendLeadershipIngestionSummary } from '../services/caNotificationEmail.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -157,6 +159,7 @@ export class V1Pipeline {
       clearanceLinks: [],
       excludedCompanyApplications: [],
       latestEmployerApplications: [],
+      filteredOutApplications: [],
     };
 
     // -------------------------------------------------------------
@@ -213,7 +216,19 @@ export class V1Pipeline {
           maxJitterMs: config.SCANNER_JITTER_MAX_MS,
         });
 
-        scannedTemplates = await scanner.scanUniqueUrls(uniqueUrls);
+        const ashbyUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'ashby');
+        const greenhouseUrls = uniqueUrls.filter((u) => atsFromUrl(u) !== 'ashby');
+        const ghTemplates = greenhouseUrls.length > 0 ? await scanner.scanUniqueUrls(greenhouseUrls) : [];
+        const ashbyTemplates: ScannedJobTemplate[] = [];
+        for (const aUrl of ashbyUrls) {
+          try {
+            const tmpl = await scanAshbyJob(aUrl, scanner);
+            ashbyTemplates.push(tmpl);
+          } catch (e: any) {
+            log.warn(`[Pipeline] Ashby scan failed for ${aUrl}: ${e.message}`);
+          }
+        }
+        scannedTemplates = [...ghTemplates, ...ashbyTemplates];
         scanCompleted = true;
       } catch (err: any) {
         if (isPipelineAbortedError(err)) {
@@ -321,7 +336,9 @@ export class V1Pipeline {
           onFilteredApplication: (application, reason) => {
             const rows = reason === 'excluded_company'
               ? ingestFilterReport.excludedCompanyApplications
-              : ingestFilterReport.latestEmployerApplications;
+              : reason === 'latest_employer'
+              ? ingestFilterReport.latestEmployerApplications
+              : ingestFilterReport.filteredOutApplications;
             addUniqueIngestFilterApplication(rows, application);
           },
         }
@@ -344,8 +361,9 @@ export class V1Pipeline {
       const pendingAutoQueue = this.resolver.getPendingAutoQueue();
       const excludeKeys = new Set(pendingAutoQueue.map((p) => `${p.applywizzId.trim().toUpperCase()}::${p.jobUrl}`));
       await sendCaNotificationEmails(runStartedAt, { excludeKeys });
+      await sendLeadershipIngestionSummary(runStartedAt, { excludeKeys });
     } catch (caEmailErr: any) {
-      log.warn(`[Pipeline Phase D] ⚠️ CA notification email error: ${caEmailErr?.message || caEmailErr}`);
+      log.warn(`[Pipeline Phase D] ⚠️ CA/Leadership notification email error: ${caEmailErr?.message || caEmailErr}`);
     }
 
     // -------------------------------------------------------------

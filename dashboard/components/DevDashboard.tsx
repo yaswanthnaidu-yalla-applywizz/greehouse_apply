@@ -166,7 +166,7 @@ export const DevDashboard: React.FC = () => {
 
   const [tab, setTab] = useState<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'diagnostics' | 'guide'>('system');
   const [date, setDate] = useState<string>(getTodayIST);
-  const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month'>('day');
+  const [statsRange, setStatsRange] = useState<'day' | 'lifetime'>('day');
   const [health, setHealth] = useState<DevHealthSnapshot | null>(null);
   const [runs, setRuns] = useState<DevRunItem[]>([]);
   const [runStatus, setRunStatus] = useState<string>('');
@@ -185,6 +185,9 @@ export const DevDashboard: React.FC = () => {
   const [debug, setDebug] = useState<DevDebugPayload | null>(null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [pendingProofCount, setPendingProofCount] = useState<number>(0);
+  const [isTriggeringProofBatch, setIsTriggeringProofBatch] = useState<boolean>(false);
+  const [proofBatchMessage, setProofBatchMessage] = useState<string | null>(null);
 
   const loadJson = useCallback(async <T,>(url: string): Promise<T> => {
     const res = await apiFetch(url);
@@ -236,6 +239,12 @@ export const DevDashboard: React.FC = () => {
         const payload = await loadJson<{ integrations?: DevIntegrationProbe[] }>('/api/dev/integrations');
         setIntegrations(payload.integrations || []);
       }
+      try {
+        const proofStatus = await loadJson<{ pendingProofCount?: number }>('/api/dev/email-proofs/status');
+        setPendingProofCount(proofStatus.pendingProofCount ?? 0);
+      } catch {
+        // non-blocking
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Load failed');
     } finally {
@@ -268,6 +277,45 @@ export const DevDashboard: React.FC = () => {
       setDebug(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadCurrentIngestReport = async () => {
+    setError('');
+    try {
+      const response = await fetch('/api/dev/ingest-filter-report', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || 'Unable to download the current ingest filter report.');
+      }
+      const url = window.URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'ingest-filter-report.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to download the current ingest filter report.');
+    }
+  };
+
+  const triggerBatchEmailProofs = async () => {
+    setIsTriggeringProofBatch(true);
+    setProofBatchMessage(null);
+    try {
+      const res = await apiFetch('/api/dev/email-proofs/batch-retry', { method: 'POST' });
+      const data = await res.json() as { ok: boolean; queuedCount?: number; error?: string };
+      if (!res.ok) throw new Error(data.error || 'Failed to trigger batch proof retry');
+      setProofBatchMessage(`Batch triggered for ${data.queuedCount ?? 0} application(s) across replicas.`);
+      void refresh();
+    } catch (err: any) {
+      setProofBatchMessage(`Error: ${err.message}`);
+    } finally {
+      setIsTriggeringProofBatch(false);
     }
   };
 
@@ -317,8 +365,8 @@ export const DevDashboard: React.FC = () => {
             </label>
             <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Stats
               <div className="mt-1 flex gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
-                {(['day', 'week', 'month'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range}</button>
+                {(['day', 'lifetime'] as const).map((range) => (
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range === 'day' ? 'Today' : 'Lifetime'}</button>
                 ))}
               </div>
             </div>
@@ -331,6 +379,33 @@ export const DevDashboard: React.FC = () => {
             <button key={id} type="button" onClick={() => setTab(id)} className={`px-3 py-1.5 text-xs font-semibold rounded-lg border capitalize transition-colors ${tab === id ? 'bg-white text-black font-bold border-white' : 'bg-[#1c1c1e] text-[#8e8e93] border-[#2c2c2e] hover:text-white hover:bg-[#2c2c2e]'}`}>{id}</button>
           ))}
         </nav>
+        <div className="mb-4 bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-white">Email Proof Recovery</span>
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-mono font-bold bg-[#ff9f0a]/20 text-[#ff9f0a] border border-[#ff9f0a]/30">
+                {pendingProofCount} Pending
+              </span>
+            </div>
+            <p className="text-xs text-[#8e8e93] mt-1">
+              Trigger distributed workers across 3 replicas (3 workers per replica = 9 total) to fetch missing confirmation emails from Zoho Mail.
+            </p>
+            {proofBatchMessage && (
+              <p className="text-xs font-medium text-[#30d158] mt-1.5">{proofBatchMessage}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={isTriggeringProofBatch}
+            onClick={() => void triggerBatchEmailProofs()}
+            className="self-start md:self-auto px-4 py-2 bg-[#0a84ff] hover:bg-[#0071e3] disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-colors whitespace-nowrap shadow-sm"
+          >
+            {isTriggeringProofBatch ? 'Triggering Workers…' : 'Batch Fetch Email Proofs'}
+          </button>
+        </div>
+        <button type="button" onClick={downloadCurrentIngestReport} className="mb-4 bg-[#1c1c1e] border border-[#2c2c2e] hover:border-[#3a3a3c] rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors">
+          Download current ingest filter report
+        </button>
         {error && <div className="mb-4 bg-[#ff453a]/15 border border-[#ff453a]/40 rounded-xl p-3 text-sm font-bold text-[#ff453a]">{error}</div>}
         {tab === 'system' && health?.statsAvailable === false && <div className="mb-4 bg-[#ff9f0a]/15 border border-[#ff9f0a]/40 rounded-xl p-3 text-xs font-semibold text-[#ff9f0a]">Application statistics before {health.statsAvailableFrom || 'the cutover date'} are unavailable.</div>}
         {tab === 'system' && health?.statsAvailable !== false && health?.statsPartial && <div className="mb-4 bg-[#ff9f0a]/15 border border-[#ff9f0a]/40 rounded-xl p-3 text-xs font-semibold text-[#ff9f0a]">Partial statistics: dates before {health.statsAvailableFrom} are excluded.</div>}

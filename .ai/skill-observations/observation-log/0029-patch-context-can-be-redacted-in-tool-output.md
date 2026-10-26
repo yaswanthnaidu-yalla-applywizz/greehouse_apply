@@ -1,7 +1,7 @@
 ---
 id: 29
 title: "Patch context copied from redacted tool output may not match the source file"
-status: open
+status: actioned
 type: internal
 skill: []
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "Editing against file contents displayed with automatic redaction"
 date: 2026-10-08
 session_context: "Continuing the failure-diagnostics implementation"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-10-16
+resolution: "Routed to rules.md §3; added redacted-output patch-context guidance and verified the text in the target file."
 reference: "tests/failureDiagnostics.test.ts"
 ---
 

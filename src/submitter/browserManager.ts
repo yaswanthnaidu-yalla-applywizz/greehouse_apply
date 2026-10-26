@@ -6,7 +6,12 @@
  * and 'Target crashed' errors on Railway Pro.
  */
 
-import { chromium, type Browser, type LaunchOptions } from 'playwright';
+import { chromium } from 'playwright-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import type { Browser, LaunchOptions } from 'playwright';
+
+// Initialize Playwright stealth evasion globally for all managed browser instances
+chromium.use(StealthPlugin());
 import { createLogger } from '../utils/logger.js';
 import crypto from 'crypto';
 

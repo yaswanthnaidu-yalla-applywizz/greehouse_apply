@@ -1,21 +1,24 @@
 /**
- * @fileoverview CSV Ingestion, URL Normalization, and Shortlink Resolution for Greenhouse URLs.
+ * @fileoverview CSV Ingestion, URL Normalization, and Shortlink Resolution for Greenhouse & Ashby URLs.
  *
  * Implements Branch 1 stream-parsing of candidate-job CSV inputs, tracking parameter stripping,
- * fast HTTP resolution of `grnh.se` shortlinks, and deduplication into canonical Greenhouse URLs.
- *
- * References:
- * - 02-trd.md (Section 3.1)
- * - 03-workflow.md (Step 2)
- * - 05-backend-schema.md (Section 1.1)
+ * fast HTTP resolution of `grnh.se` shortlinks, and deduplication into canonical job URLs.
  */
 
 import fs from 'fs';
 import * as fastCsv from 'fast-csv';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
+import { isAshbyUrl } from './atsDetector.js';
 
 const log = createLogger('Csv Deduplicator');
+
+/**
+ * Returns 'ashby' if URL matches Ashby patterns, else 'greenhouse'.
+ */
+export function atsFromUrl(url: string): 'greenhouse' | 'ashby' {
+  return isAshbyUrl(url) ? 'ashby' : 'greenhouse';
+}
 
 /**
  * Options configuring the CSV deduplication and shortlink resolution pipeline.
@@ -48,22 +51,49 @@ export interface DeduplicatorOptions {
 /**
  * Known marketing and analytics query parameter keys to strip from URLs.
  */
-const TRACKING_PARAM_REGEX = /^(gh_src|utm_source|utm_medium|utm_campaign|utm_term|utm_content|ref|source|fbclid|gclid|_ga|mc_cid|mc_eid)$/i;
+const TRACKING_PARAM_REGEX = /^(gh_src|utm_source|utm_medium|utm_campaign|utm_term|utm_content|ref|source|src|fbclid|gclid|_ga|mc_cid|mc_eid)$/i;
+
+/**
+ * Normalizes an Ashby job URL by stripping tracking parameters,
+ * while preserving required query params such as ashby_jid.
+ */
+export function normalizeAshbyUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return '';
+
+  try {
+    const urlObj = new URL(trimmed);
+    urlObj.protocol = 'https:';
+    urlObj.hostname = urlObj.hostname.toLowerCase();
+    urlObj.hash = '';
+
+    const keysToDelete: string[] = [];
+    urlObj.searchParams.forEach((_, key) => {
+      if (TRACKING_PARAM_REGEX.test(key)) {
+        keysToDelete.push(key);
+      }
+    });
+    for (const key of keysToDelete) {
+      urlObj.searchParams.delete(key);
+    }
+
+    let pathname = urlObj.pathname;
+    while (pathname.length > 1 && pathname.endsWith('/')) {
+      pathname = pathname.slice(0, -1);
+    }
+    urlObj.pathname = pathname;
+
+    return urlObj.toString();
+  } catch {
+    return trimmed;
+  }
+}
 
 /**
  * Normalizes a Greenhouse job URL by removing tracking query parameters, trimming whitespace,
  * normalizing protocol/hostname, and removing trailing slashes while preserving necessary
  * query arguments (e.g., `token` for embed pages).
- *
- * @param rawUrl - The raw URL string extracted from the CSV or redirect response.
- * @returns Cleaned canonical URL string, or empty string if input is invalid.
- *
- * @example
- * normalizeGreenhouseUrl('https://job-boards.greenhouse.io/pmg/jobs/8765658002?gh_src=lcrm1uib2us')
- * // Returns: 'https://job-boards.greenhouse.io/pmg/jobs/8765658002'
- *
- * normalizeGreenhouseUrl('https://app.greenhouse.io/embed/job_app?token=8095921&gh_src=be8ebc4b1')
- * // Returns: 'https://app.greenhouse.io/embed/job_app?token=8095921'
  */
 export function normalizeGreenhouseUrl(rawUrl: string): string {
   if (!rawUrl || typeof rawUrl !== 'string') {
@@ -120,9 +150,6 @@ const shortlinkCache = new Map<string, string>();
 /**
  * Resolves a single `grnh.se` shortlink to its target canonical Greenhouse URL
  * using HTTP HEAD (with GET fallback and redirect following).
- *
- * @param shortUrl - The shortlink URL (e.g., `https://grnh.se/lcrm1uib2us`).
- * @returns The resolved canonical destination URL, normalized.
  */
 export async function resolveShortlink(shortUrl: string): Promise<string> {
   const normalizedInput = normalizeGreenhouseUrl(shortUrl);
@@ -162,7 +189,6 @@ export async function resolveShortlink(shortUrl: string): Promise<string> {
     shortlinkCache.set(normalizedInput, normalizedInput);
     return normalizedInput;
   } catch {
-    // If network fails, return the original normalized URL
     shortlinkCache.set(normalizedInput, normalizedInput);
     return normalizedInput;
   }
@@ -170,10 +196,6 @@ export async function resolveShortlink(shortUrl: string): Promise<string> {
 
 /**
  * Resolves an array of `grnh.se` shortlinks concurrently with a bounded pool limit.
- *
- * @param shortUrls - Unique shortlink URLs to resolve.
- * @param concurrency - Maximum simultaneous HTTP requests.
- * @returns Map of short URL to resolved canonical destination URL.
  */
 export async function resolveShortlinksBatch(
   shortUrls: string[],
@@ -202,15 +224,8 @@ export async function resolveShortlinksBatch(
 }
 
 /**
- * Stream-parses the input CSV file, extracts the `url` column, normalizes URLs,
- * resolves `grnh.se` shortlinks to canonical URLs, and returns a deduplicated array
- * of unique Greenhouse job posting URLs.
- *
- * @param csvPath - Path to the input CSV file (e.g. `greenhouse_only_applywizz_prod(in).csv`).
- * @param options - Configurable parsing and resolution options.
- * @returns Promise resolving to an array of unique canonical Greenhouse URLs.
- *
- * @throws Error if the CSV file does not exist or stream parsing fails.
+ * Stream-parses the input CSV file, extracts the `url` column, normalizes URLs (Greenhouse or Ashby),
+ * resolves `grnh.se` shortlinks to canonical URLs, and returns a deduplicated array of unique canonical URLs.
  */
 export async function readAndDeduplicateUrls(
   csvPath: string,
@@ -251,10 +266,11 @@ export async function readAndDeduplicateUrls(
         // Case-insensitive column resolution for job URL
         const rawUrl = row.url || row.URL || row.Url || row.job_url || row['Job URL'] || '';
         if (rawUrl) {
-          const normalized = normalizeGreenhouseUrl(rawUrl);
+          const isAshby = isAshbyUrl(rawUrl);
+          const normalized = isAshby ? normalizeAshbyUrl(rawUrl) : normalizeGreenhouseUrl(rawUrl);
           if (normalized) {
             rawUrlsSet.add(normalized);
-            if (normalized.includes('grnh.se')) {
+            if (!isAshby && normalized.includes('grnh.se')) {
               shortlinkSet.add(normalized);
             }
           }

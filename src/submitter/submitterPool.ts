@@ -16,11 +16,8 @@ import {
 } from '../db/applications.js';
 import { wsManager } from '../server/ws.js';
 import { runLiveSubmit, type LiveSubmitOptions, type LiveSubmitResult } from './liveSubmit.js';
+import { submitAshbyApplication } from './ashbySubmit.js';
 import { createLogger } from '../utils/logger.js';
-import {
-  isWithinSubmissionQuestionLimit,
-  QuestionLimitExceededError,
-} from '../submission/questionLimit.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { config } from '../config/env.js';
 import { browserManager } from './browserManager.js';
@@ -33,6 +30,7 @@ export interface SubmitterPoolOptions {
   dequeueFn?: () => Promise<ApplicationRow | null>;
   updateStatusFn?: (id: string, status: any, extra?: any) => Promise<boolean>;
   submitFn?: (applicationId: string, options: LiveSubmitOptions) => Promise<LiveSubmitResult>;
+  submitAshbyFn?: (application: ApplicationRow, options: { headless?: boolean }) => Promise<LiveSubmitResult>;
   requeueFn?: typeof requeueApplicationForRetry;
 }
 
@@ -47,6 +45,7 @@ export class SubmitterPool {
   private readonly dequeueFn: () => Promise<ApplicationRow | null>;
   private readonly updateStatusFn: (id: string, status: any, extra?: any) => Promise<boolean>;
   private readonly submitFn: (applicationId: string, options: LiveSubmitOptions) => Promise<LiveSubmitResult>;
+  private readonly submitAshbyFn: (application: ApplicationRow, options: { headless?: boolean }) => Promise<LiveSubmitResult>;
   private readonly requeueFn: typeof requeueApplicationForRetry;
   private readonly poolSize: number;
   private readonly lanes: QueuedSubmission[][];
@@ -64,6 +63,7 @@ export class SubmitterPool {
     this.dequeueFn = options.dequeueFn ?? getNextQueuedApplicationForRoundRobin;
     this.updateStatusFn = options.updateStatusFn ?? updateStatus;
     this.submitFn = options.submitFn ?? runLiveSubmit;
+    this.submitAshbyFn = options.submitAshbyFn ?? submitAshbyApplication;
     this.requeueFn = options.requeueFn ?? requeueApplicationForRetry;
     const poolSize = parseInt(config.SUBMISSION_POOL_SIZE ?? '3', 10);
     this.poolSize = Number.isInteger(poolSize) && poolSize > 0 ? Math.min(poolSize, 6) : 3;
@@ -326,18 +326,6 @@ export class SubmitterPool {
       const { application } = work;
       const applicationId = application.id || application.applywizz_id;
       try {
-        const eligibility = isWithinSubmissionQuestionLimit(application);
-        if (!eligibility.eligible) {
-          const message = eligibility.reason || 'Application exceeds the question limit.';
-          log.warn(`[Submitter] application=${applicationId} blocked by question limit: ${message}`);
-          await this.updateStatusFn(applicationId, 'READY_FOR_REVIEW', {
-            error_message: message,
-            job_url: application.job_url,
-          });
-          work.reject(new QuestionLimitExceededError(message));
-          continue;
-        }
-
         await this.updateStatusFn(applicationId, 'APPLYING', {
           job_url: application.job_url,
         });
@@ -346,10 +334,13 @@ export class SubmitterPool {
         );
         await logQueueStatusChange(applicationId, 'QUEUED', 'APPLYING');
 
-        const result = await this.submitFn(applicationId, {
-          headless: true,
-          jobUrl: application.job_url,
-        });
+        const result =
+          application.ats === 'ashby'
+            ? await this.submitAshbyFn(application, { headless: true })
+            : await this.submitFn(applicationId, {
+                headless: true,
+                jobUrl: application.job_url,
+              });
         work.resolve(result);
         if (result.status === 'APPLIED') {
           const proofTag = result.hasEmailProof ? '[email proof captured]' : '[web proof captured]';

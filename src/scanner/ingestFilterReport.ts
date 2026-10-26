@@ -22,6 +22,13 @@ export function renderIngestFilterReportCsv(report: IngestFilterReport): string 
     applywizzId,
     jobUrl,
   ]));
+  if (Array.isArray(report.filteredOutApplications)) {
+    rows.push(...report.filteredOutApplications.map(({ applywizzId, jobUrl }) => [
+      'filtered_out',
+      applywizzId,
+      jobUrl,
+    ]));
+  }
   return `${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
 }
 

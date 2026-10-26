@@ -47,6 +47,8 @@ cache/
 *.pdf
 
 # Media & Temporary Artifacts
+reports/
+ashby/
 *.mp4
 *.png
 mailconnect/
@@ -70,13 +72,7 @@ Thumbs.db
 desktop.ini
 
 # Scratch Dumps, Patches, Debug data & PII files
-scripts/*.json
 scripts/__pycache__/
-scripts/inspect*
-scripts/readSummary*
-scripts/testBedrockApiKey*
-scripts/*.py
-scripts/*.sql
 *.patch
 .playwright-mcp/
 tasks/
@@ -84,3 +80,31 @@ audit.md
 captcha.md
 claude_approval.md
 rollback-plan.md
+
+# Sandbox storage & screenshots
+storage_sandbox/
+failed_screenshots_non_otp/
+scratch_screenshots/
+
+# Local AI agent cache, credentials & session state
+.agents/
+.codex/
+.aws/
+.superpowers/
+.ai/skill-updates/
+.ai/skill-observations/review-*.txt
+.ai/skill-observations/evidence/
+
+# Ignore all one-off scripts by default; whitelist only maintained/operational scripts
+scripts/*
+!scripts/demo.ts
+!scripts/syncDemoFixture31428.ts
+!scripts/runDoorDashHeadfulSelectDemo.ts
+!scripts/fixRollup.ts
+!scripts/backfillProfiles.ts
+!scripts/scanZohoConnected.ts
+!scripts/deleteOldJobsAndApplications.ts
+!scripts/fetchEmailProofsDb2.ts
+!scripts/resetSandboxDb.ts
+!scripts/resolveFirst5Haiku.ts
+!scripts/README.md

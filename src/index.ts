@@ -174,10 +174,10 @@ export async function main(): Promise<void> {
     }
 
     // -------------------------------------------------------------------------
-    // Step 2: V1 Data Migration
+    // Step 2: Database Foundation Check
     // -------------------------------------------------------------------------
     if (!options.skipMigrate && !options.limit && !options.candidateId) {
-      log.info('\n🔄 [Step 2/5] Checking V1 local cache data migration to Supabase...');
+      log.info('\n🔄 [Step 2/5] Verifying database tables and storage setup...');
       try {
         await migrate();
         log.info('✅ Migration check completed.');
@@ -189,7 +189,7 @@ export async function main(): Promise<void> {
         );
       }
     } else if (options.limit || options.candidateId) {
-      log.info('\n🔄 [Step 2/5] Skipping historical cache migration (sample/target candidate mode enabled).');
+      log.info('\n🔄 [Step 2/5] Skipping database foundation check (sample/target candidate mode enabled).');
     }
 
     // -------------------------------------------------------------------------

@@ -7,7 +7,6 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { isWithinSubmissionQuestionLimit } from '../../submission/questionLimit.js';
 import {
   applyCreatedAtRangeFilter,
   getApplication,
@@ -581,11 +580,7 @@ applicationsRouter.post('/:id/retry', requireAuth, async (req: Request, res: Res
   const jobUrl = (req.body?.jobUrl as string) || (req.query?.jobUrl as string) || (req.query?.job_url as string);
   try {
     const application = await getApplication(appId, jobUrl);
-    if (
-      !application ||
-      application.status !== 'RETRY' ||
-      !isWithinSubmissionQuestionLimit(application).eligible
-    ) {
+    if (!application || application.status !== 'RETRY') {
       res.status(400).json({ error: 'This failure cannot be retried' });
       return;
     }

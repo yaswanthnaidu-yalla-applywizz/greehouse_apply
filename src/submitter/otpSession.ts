@@ -8,9 +8,10 @@
 import type { Browser, BrowserContext, Page } from 'playwright';
 import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
+import { browserManager } from './browserManager.js';
+import { captureFailedScreenshot } from './proofCapture.js';
 import {
   DEFAULT_SUBMISSION_CONFIRMATION_TIMEOUT_MS,
-  OTP_CHALLENGE_TIMEOUT_MS,
   OTP_SESSION_TTL_MS,
   SPINNER_EXTENDED_TIMEOUT_MS,
 } from './otpTimeouts.js';
@@ -24,70 +25,239 @@ export {
 
 const log = createLogger('OTP Session');
 
-export interface ActiveSubmissionSession {
+export interface SubmissionSession {
   applicationId: string;
   browser: Browser;
-  context: BrowserContext;
   page: Page;
-  application: ApplicationRow;
-  startedAt: number;
+  context?: BrowserContext;
+  application?: ApplicationRow;
+  startedAt?: number;
+  pausedAt?: number;
+  browserId?: string;
+  otpFieldSelector?: string;
+  jobUrl?: string;
+  applywizzId?: string;
+  otpDetectedAt?: number;
+  requiresOtp?: boolean;
+  multiBox?: boolean;
+  boxCount?: number;
+  boxSelectors?: string[];
+  screenshotCaptured?: boolean;
   ttlTimer?: NodeJS.Timeout;
 }
 
-/**
- * In-memory registry of active browser contexts paused for OTP resolution.
- */
-export const activeSubmissions = new Map<string, ActiveSubmissionSession>();
+export type ActiveSubmissionSession = SubmissionSession;
+export type PausedSession = SubmissionSession;
 
 /**
- * Registers an active browser context session in memory.
- * Sets a safety timeout longer than the OTP challenge budget by the confirmation grace.
+ * Unified in-memory registry of active browser contexts paused for OTP resolution.
  */
-export function registerSubmissionSession(session: ActiveSubmissionSession): void {
-  const existing = activeSubmissions.get(session.applicationId);
+export const activeSubmissions = new Map<string, SubmissionSession>();
+export const PAUSED_SESSIONS = activeSubmissions;
+
+/**
+ * Builds OTP pause metadata from a post-submit field detection result.
+ */
+export function buildOtpPauseMetadata(otpField: {
+  found: boolean;
+  selector?: string;
+  multiBox?: boolean;
+  boxCount?: number;
+  boxSelectors?: string[];
+}): Pick<
+  SubmissionSession,
+  | 'otpFieldSelector'
+  | 'otpDetectedAt'
+  | 'requiresOtp'
+  | 'multiBox'
+  | 'boxCount'
+  | 'boxSelectors'
+> {
+  if (otpField.found && otpField.selector) {
+    return {
+      otpFieldSelector: otpField.selector,
+      otpDetectedAt: Date.now(),
+      requiresOtp: true,
+      multiBox: otpField.multiBox,
+      boxCount: otpField.boxCount,
+      boxSelectors: otpField.boxSelectors,
+    };
+  }
+
+  return {
+    requiresOtp: false,
+  };
+}
+
+/**
+ * Stores a paused session in the unified session registry.
+ * Keyed by applicationId, with secondary aliases for applywizz_id or DB UUID.
+ */
+export function storePausedSession(
+  applicationOrId: ApplicationRow | string,
+  session: {
+    browser: Browser;
+    page: Page;
+    context?: BrowserContext;
+    browserId?: string;
+    applicationId?: string;
+    otpFieldSelector?: string;
+    pausedAt?: number;
+    jobUrl?: string;
+    applywizzId?: string;
+    otpDetectedAt?: number;
+    requiresOtp?: boolean;
+    multiBox?: boolean;
+    boxCount?: number;
+    boxSelectors?: string[];
+    screenshotCaptured?: boolean;
+  }
+): string {
+  const canonicalKey: string =
+    session.applicationId ||
+    (typeof applicationOrId === 'string'
+      ? applicationOrId
+      : applicationOrId.id || applicationOrId.applywizz_id) ||
+    'unknown';
+  const applywizzId: string =
+    typeof applicationOrId === 'string'
+      ? session.applywizzId || canonicalKey
+      : applicationOrId.applywizz_id || canonicalKey;
+  const pausedAt = session.pausedAt ?? Date.now();
+  const jobUrl =
+    session.jobUrl ??
+    (typeof applicationOrId === 'string' ? '' : applicationOrId.job_url || '');
+
+  const existing = activeSubmissions.get(canonicalKey);
   if (existing?.ttlTimer) {
     clearTimeout(existing.ttlTimer);
   }
 
   const ttlTimer = setTimeout(async () => {
     log.warn(
-      `[OTP Session] ⏰ Paused session for application ${session.applicationId} reached ${OTP_SESSION_TTL_MS / 60000}m TTL. Closing browser context...`
+      `[OTP Session] ⏰ Paused OTP session ${canonicalKey} timed out after ${OTP_SESSION_TTL_MS / 60000}m. Closing browser context...`
     );
-    await closeSubmissionSession(session.applicationId);
+    await clearPausedSession(canonicalKey);
   }, OTP_SESSION_TTL_MS);
 
-  activeSubmissions.set(session.applicationId, {
-    ...session,
-    ttlTimer,
-  });
+  if (ttlTimer.unref) {
+    ttlTimer.unref();
+  }
 
-  log.info(
-    `[OTP Session] 📌 Registered paused OTP session for application ${session.applicationId} (TTL: ${OTP_SESSION_TTL_MS / 60000}m; OTP budget: ${OTP_CHALLENGE_TIMEOUT_MS / 60000}m + ${SPINNER_EXTENDED_TIMEOUT_MS / 1000}s confirmation grace)`
-  );
+  const fullSession: SubmissionSession = {
+    browser: session.browser,
+    page: session.page,
+    context: session.context,
+    browserId: session.browserId,
+    otpFieldSelector: session.otpFieldSelector,
+    applicationId: canonicalKey,
+    pausedAt,
+    startedAt: pausedAt,
+    jobUrl,
+    applywizzId,
+    otpDetectedAt: session.otpDetectedAt ?? pausedAt,
+    requiresOtp: session.requiresOtp ?? Boolean(session.otpFieldSelector),
+    multiBox: session.multiBox,
+    boxCount: session.boxCount,
+    boxSelectors: session.boxSelectors,
+    screenshotCaptured: session.screenshotCaptured ?? false,
+    ttlTimer,
+  };
+
+  activeSubmissions.set(canonicalKey, fullSession);
+  if (typeof applicationOrId !== 'string' && applicationOrId.id && applicationOrId.id !== canonicalKey) {
+    activeSubmissions.set(applicationOrId.id, fullSession);
+  }
+  if (applywizzId && applywizzId !== canonicalKey) {
+    activeSubmissions.set(applywizzId, fullSession);
+  }
+
+  return canonicalKey;
+}
+
+/**
+ * Resolves a paused session by applicationId, applywizz_id, or any alias key.
+ */
+export function resolvePausedSession(
+  id: string
+): { session: SubmissionSession; canonicalKey: string } | null {
+  const cleanId = (id || '').trim();
+  if (!cleanId) return null;
+
+  const direct = activeSubmissions.get(cleanId);
+  if (direct) {
+    return { session: direct, canonicalKey: direct.applicationId || cleanId };
+  }
+
+  for (const [key, session] of activeSubmissions.entries()) {
+    if (session.applicationId === cleanId || session.applywizzId === cleanId) {
+      return { session, canonicalKey: session.applicationId || key };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Closes and removes a registered paused submission session.
+ */
+export async function clearPausedSession(
+  id: string,
+  options: { captureFailureProof?: boolean } = {}
+): Promise<void> {
+  const resolved = resolvePausedSession(id);
+  if (!resolved) {
+    activeSubmissions.delete(id);
+    return;
+  }
+
+  const { session } = resolved;
+  if (session.ttlTimer) {
+    clearTimeout(session.ttlTimer);
+  }
+  try {
+    if (
+      options.captureFailureProof !== false &&
+      session.page &&
+      (typeof session.page.isClosed !== 'function' || !session.page.isClosed()) &&
+      !session.screenshotCaptured
+    ) {
+      try {
+        await captureFailedScreenshot(session.page, session.applicationId);
+        session.screenshotCaptured = true;
+      } catch {}
+    }
+    await session.page?.close().catch(() => {});
+    await session.context?.close().catch(() => {});
+    if (session.browserId) {
+      await browserManager.releaseBrowser(session.browserId).catch(() => {});
+    } else {
+      await session.browser?.close().catch(() => {});
+    }
+  } finally {
+    for (const [key, value] of activeSubmissions.entries()) {
+      if (value === session) {
+        activeSubmissions.delete(key);
+      }
+    }
+    if (session.applicationId) activeSubmissions.delete(session.applicationId);
+    if (session.applywizzId) activeSubmissions.delete(session.applywizzId);
+    log.info(`[OTP Session] 🧹 Cleaned up session for application ${session.applicationId || id}`);
+  }
+}
+
+/**
+ * Registers an active browser context session in memory.
+ */
+export function registerSubmissionSession(session: ActiveSubmissionSession): void {
+  storePausedSession(session.applicationId, session);
 }
 
 /**
  * Closes and removes a registered paused submission session.
  */
 export async function closeSubmissionSession(applicationId: string): Promise<void> {
-  const session = activeSubmissions.get(applicationId);
-  if (session) {
-    if (session.ttlTimer) {
-      clearTimeout(session.ttlTimer);
-    }
-    try {
-      await session.page.close().catch(() => {});
-      await session.context.close().catch(() => {});
-      await session.browser.close().catch(() => {});
-    } finally {
-      activeSubmissions.delete(applicationId);
-      try {
-        const { PAUSED_SESSIONS } = await import('./liveSubmit.js');
-        PAUSED_SESSIONS.delete(applicationId);
-      } catch {}
-      log.info(`[OTP Session] 🧹 Cleaned up session for application ${applicationId}`);
-    }
-  }
+  await clearPausedSession(applicationId);
 }
 
 /**

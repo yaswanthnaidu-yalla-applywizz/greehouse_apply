@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { captureFailureDiagnostics } from '../src/submitter/failureDiagnostics.js';
+import { captureFailureDiagnostics } from '../src/submitter/domFailureCapture.js';
 import type { Page } from 'playwright';
 
 describe('captureFailureDiagnostics', () => {

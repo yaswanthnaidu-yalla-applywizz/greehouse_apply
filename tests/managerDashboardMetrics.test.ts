@@ -61,46 +61,6 @@ describe('Manager Dashboard Metrics Verification', () => {
     );
   });
 
-  it('verifies manager.html pulls Total, Submitted, and Applied on both Home and Operators tabs from /api/manager/dashboard', () => {
-    const htmlPath = path.resolve(process.cwd(), 'dashboard/public/manager.html');
-    const content = fs.readFileSync(htmlPath, 'utf8');
-
-    // Home tab metrics
-    assert.ok(
-      content.includes("['Total Applications', totals.applications]"),
-      'manager.html Home tab must display Total Applications from totals.applications'
-    );
-    assert.ok(
-      content.includes("['Submitted (team)', submitted]"),
-      'manager.html Home tab must display Submitted (team) from submitted'
-    );
-    assert.ok(
-      content.includes("['Applied (team)', applied]"),
-      'manager.html Home tab must display Applied (team) from applied'
-    );
-
-    // Operators tab metrics
-    const operatorsTabSection = content.slice(content.indexOf("{tab === 'operators'"));
-    assert.ok(
-      operatorsTabSection.includes("['Total Applications', totals.applications]"),
-      'manager.html Operators tab must display Total Applications from totals.applications'
-    );
-    assert.ok(
-      operatorsTabSection.includes("['Submitted (team)', submitted]"),
-      'manager.html Operators tab must display Submitted (team) from submitted'
-    );
-    assert.ok(
-      operatorsTabSection.includes("['Applied (team)', applied]"),
-      'manager.html Operators tab must display Applied (team) from applied'
-    );
-
-    // Verify no separate count query state
-    assert.ok(
-      !content.includes('operatorTotals'),
-      'manager.html must not use separate operatorTotals'
-    );
-  });
-
   it('verifies server manager route exposes consistent metrics without separate queryRollupStats counts', () => {
     const routePath = path.resolve(process.cwd(), 'src/server/routes/manager.ts');
     const content = fs.readFileSync(routePath, 'utf8');

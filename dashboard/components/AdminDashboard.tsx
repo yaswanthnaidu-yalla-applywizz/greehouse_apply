@@ -67,9 +67,9 @@ interface AdminOverview {
   statsAvailable?: boolean;
   statsPartial?: boolean;
   statsAvailableFrom?: string;
-  supabasePercent: number;
-  aiPercent: number;
-  resumePercent: number;
+
+
+
   recentActivity?: Array<{ id: string; action: string; actor_email?: string; created_at: string }>;
 }
 
@@ -338,7 +338,7 @@ export const AdminDashboard: React.FC = () => {
 
   const [tab, setTab] = useState<'overview' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'>('overview');
   const [date, setDate] = useState<string>(getTodayIST);
-  const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month'>('day');
+  const [statsRange, setStatsRange] = useState<'day' | 'lifetime'>('day');
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [managers, setManagers] = useState<AdminManager[]>([]);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
@@ -655,8 +655,8 @@ export const AdminDashboard: React.FC = () => {
             </label>
             <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Stats
               <div className="mt-1 flex gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
-                {(['day', 'week', 'month'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range}</button>
+                {(['day', 'lifetime'] as const).map((range) => (
+                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range === 'day' ? 'Today' : 'Lifetime'}</button>
                 ))}
               </div>
             </div>
@@ -783,9 +783,9 @@ export const AdminDashboard: React.FC = () => {
                 ['Running', overview.running],
                 ['Queued', overview.queued],
                 ['Failed', overview.statsAvailable === false ? '—' : overview.failed],
-                ['Supabase %', overview.supabasePercent],
-                ['AI %', overview.aiPercent],
-                ['Resume %', overview.resumePercent],
+
+
+
               ].map(([label, val]) => (
                 <div key={label} className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">{label}</p>

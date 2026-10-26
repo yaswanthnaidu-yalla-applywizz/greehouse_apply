@@ -169,7 +169,9 @@ export interface BatchSynthesizeResult {
  */
 export interface LLMSynthesizerOptions {
   /** Active LLM provider ('openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock') */
-  provider?: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock';
+  provider?: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock' | 'anthropic';
+  /** Anthropic workspace ID override */
+  workspaceId?: string;
   /** LLM API Key override */
   apiKey?: string;
   /** Model name override */
@@ -499,7 +501,8 @@ export function matchFuzzyOption(text: string, options?: string[]): string | nul
  * Tier 2 Answer Synthesizer invoking OpenRouter, Google Gemini, or OpenAI.
  */
 export class LLMSynthesizer {
-  private readonly provider: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock';
+  private readonly provider: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock' | 'anthropic';
+  private readonly workspaceId?: string;
   private readonly apiKey: string;
   private readonly modelName: string;
   private geminiClient: GoogleGenerativeAI | null = null;
@@ -514,14 +517,17 @@ export class LLMSynthesizer {
     const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
     const chosenProvider = options.provider ?? config.LLM_PROVIDER;
     // In sandbox, prefer openrouter unless bedrock is explicitly requested/configured
-    this.provider = (isSandbox && chosenProvider !== 'bedrock') ? 'openrouter' : chosenProvider;
+    this.provider = (isSandbox && chosenProvider !== 'bedrock' && chosenProvider !== 'anthropic') ? 'openrouter' : chosenProvider;
+    this.workspaceId = options.workspaceId ?? config.ANTHROPIC_WORKSPACE_ID;
     this.apiKey = options.apiKey ?? config.ACTIVE_LLM_API_KEY;
 
     if (isSandbox && !this.apiKey && this.provider !== 'bedrock') {
       log.error('❌ Sandbox mode requires OPENROUTER_API_KEY. Ollama fallback is completely disabled.');
     }
 
-    if (this.provider === 'bedrock') {
+    if (this.provider === 'anthropic') {
+      this.modelName = options.modelName ?? config.CLAUDE_MODEL ?? 'claude-haiku-5-5';
+    } else if (this.provider === 'bedrock') {
       this.modelName = options.modelName ?? config.BEDROCK_MODEL_ID ?? 'us.amazon.nova-2-lite-v1:0';
     } else if (this.provider === 'ollama') {
       this.modelName = options.modelName ?? config.OLLAMA_MODEL ?? 'llama3.1:latest';
@@ -562,6 +568,87 @@ export class LLMSynthesizer {
   public getProviderDiagnostics(): { provider: string; model: string } {
     return { provider: this.provider, model: this.modelName };
   }
+
+  private async callAnthropic(
+    prompt: string,
+    systemMessage: string,
+    maxTokens: number
+  ): Promise<{
+    text: string;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      totalTokens: number;
+      cost?: number;
+      model: string;
+    };
+  }> {
+    const headers: Record<string, string> = {
+      'x-api-key': this.apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    };
+    if (this.workspaceId) {
+      headers['anthropic-workspace-id'] = this.workspaceId;
+    }
+
+    const requestBody: Record<string, unknown> = {
+      model: this.modelName,
+      max_tokens: maxTokens,
+      system: systemMessage,
+      messages: [{ role: 'user', content: prompt }],
+    };
+    if (!this.modelName.includes('5-5') && !this.modelName.includes('5.5')) {
+      requestBody.temperature = 0.2;
+    }
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.text();
+      let parsedError: any = {};
+      try {
+        parsedError = JSON.parse(errorBody);
+      } catch {
+        parsedError = { raw: errorBody };
+      }
+      const message = parsedError?.error?.message || errorBody;
+      const error = new Error(`Anthropic API returned HTTP ${res.status}: ${message}`);
+      (error as any).status = res.status;
+      (error as any).statusCode = res.status;
+      (error as any).errorType = parsedError?.error?.type;
+      throw error;
+    }
+
+    const data = (await res.json()) as any;
+    const rawText = data?.content?.find((c: any) => c.type === 'text')?.text || '';
+    const usageData = data?.usage;
+    let usage;
+    if (usageData) {
+      const inputTokens = usageData.input_tokens || 0;
+      const outputTokens = usageData.output_tokens || 0;
+      const cacheReadTokens = usageData.cache_read_input_tokens || 0;
+      const cacheWriteTokens = usageData.cache_creation_input_tokens || 0;
+      usage = {
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+        cacheReadTokens,
+        cacheWriteTokens,
+        totalTokens: inputTokens + outputTokens,
+        cost: (inputTokens * 0.0000008) + (outputTokens * 0.000004),
+        model: this.modelName,
+      };
+    }
+
+    return { text: rawText, usage };
+  }
+
 
   /**
    * Synthesizes an answer for an open-ended or custom question using LLM inference.
@@ -605,12 +692,40 @@ export class LLMSynthesizer {
     const systemMessage = `${baseSystemMessage}\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
     // If API key is configured or provider is bedrock or ollama, execute real LLM call
-    if (this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock') {
+    if (this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock' || this.provider === 'anthropic') {
       let failureDiagnosticEmitted = false;
       try {
         let providerReached = false;
 
-        if (this.provider === 'bedrock') {
+        if (this.provider === 'anthropic') {
+          const startedAt = Date.now();
+          const { text: outputText } = await this.callAnthropic(prompt, systemMessage, 350);
+          providerReached = true;
+          haltIfFirstProviderCallFailed(true);
+
+          const cleaned = cleanLLMOutput(outputText);
+          log.debug(
+            `[LLM Provider] event=request_completed operation=single provider=anthropic ` +
+              `model=${this.modelName} elapsed_ms=${Date.now() - startedAt} content_chars=${cleaned.length}`
+          );
+
+          if (cleaned && cleaned.length > 0) {
+            try {
+              return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+            } catch (error) {
+              await emitFailureDiagnostic({
+                category: 'RESOLVE_TIER5_PARSE',
+                stage: 'single_response_parse',
+                reason: 'Tier 5 Anthropic returned a response that could not be parsed into a valid answer.',
+                error,
+                isTerminal: false,
+                isRetryable: true,
+              });
+              failureDiagnosticEmitted = true;
+              throw error;
+            }
+          }
+        } else if (this.provider === 'bedrock') {
           const client = getBedrockClient();
           const command = new ConverseCommand({
             modelId: this.modelName,
@@ -904,7 +1019,7 @@ US LOCATION RULE: If asked whether the candidate is currently located in the US,
 
 ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
-    if (!(this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock')) {
+    if (!(this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock' || this.provider === 'anthropic')) {
       throw new Error('No LLM provider credentials configured.');
     }
 
@@ -912,7 +1027,22 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
     let batchUsage: BatchSynthesizeResult['usage'] = undefined;
     const requestStartedAt = Date.now();
     try {
-      if (this.provider === 'bedrock') {
+      if (this.provider === 'anthropic') {
+        const result = await this.callAnthropic(
+          prompt,
+          systemMessage,
+          Math.max(500, questions.length * 150)
+        );
+        haltIfFirstProviderCallFailed(true);
+        raw = result.text;
+        batchUsage = result.usage;
+        log.debug(
+          `[LLM Provider] event=request_completed operation=batch provider=anthropic ` +
+            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+            `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
+            `completion_tokens=${batchUsage?.completionTokens ?? 0}`
+        );
+      } else if (this.provider === 'bedrock') {
         const client = getBedrockClient();
         const enablePromptCaching = config.BEDROCK_ENABLE_PROMPT_CACHING !== false;
 
