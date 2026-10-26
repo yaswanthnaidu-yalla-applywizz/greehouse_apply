@@ -21,10 +21,10 @@ export function parseCaMappingResponse(data: unknown): CaCandidateMapping[] {
   const root = data as Record<string, unknown>;
   const rawList = Array.isArray(data)
     ? data
-    : Array.isArray(root.records)
-      ? root.records
-      : Array.isArray(root.data)
-        ? root.data
+    : Array.isArray(root.data)
+      ? root.data
+      : Array.isArray(root.records)
+        ? root.records
         : Array.isArray(root.candidates)
           ? root.candidates
           : [];
@@ -35,9 +35,41 @@ export function parseCaMappingResponse(data: unknown): CaCandidateMapping[] {
   for (const item of rawList) {
     if (!item || typeof item !== 'object') continue;
     const row = item as Record<string, unknown>;
+
+    // Case 1: Nested CA format with `clients` array
+    // e.g. { ca_email: "...", clients: [{ applywizz_id: "...", full_name: "..." }] }
+    const nestedClients = Array.isArray(row.clients)
+      ? row.clients
+      : Array.isArray(row.assigned_clients)
+        ? row.assigned_clients
+        : null;
+
+    if (nestedClients) {
+      const caEmail = String(row.ca_email || row.caEmail || row.email || '').trim().toLowerCase();
+      if (caEmail) {
+        for (const client of nestedClients) {
+          if (!client || typeof client !== 'object') continue;
+          const c = client as Record<string, unknown>;
+          const rawId = String(c.applywizz_id || c.applywizzId || c.id || '').trim().toUpperCase();
+          const clientName = String(c.full_name || c.client_name || c.name || '').trim();
+          if (rawId && !seen.has(rawId)) {
+            seen.add(rawId);
+            mappings.push({
+              applywizzId: rawId,
+              caEmail,
+              ...(clientName ? { clientName } : {}),
+            });
+          }
+        }
+      }
+      continue;
+    }
+
+    // Case 2: Flat mapping format
+    // e.g. { applywizz_id: "...", ca_email: "..." }
     const rawId = String(row.applywizz_id || row.applywizzId || row.id || '').trim().toUpperCase();
     const rawCaEmail = String(row.ca_email || row.caEmail || row.assigned_ca_email || row.client_email || '').trim().toLowerCase();
-    const clientName = String(row.client_name || row.clientName || row.name || '').trim();
+    const clientName = String(row.client_name || row.clientName || row.full_name || row.name || '').trim();
 
     if (rawId && rawCaEmail && !seen.has(rawId)) {
       seen.add(rawId);
