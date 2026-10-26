@@ -9,7 +9,7 @@ import {
   getRequiredFieldFailuresByCA,
   
   
-  getDashboardApplicationMetrics,
+
   getISTDateRangeUtc,
   type ApplicationStatus,
 } from '../../db/applications.js';
@@ -201,17 +201,17 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
     const operators = directory.filter((user) => user.role === 'operator');
     const activeOperators = operators.filter((user) => isActiveWithin(user.lastSignInAt));
 
-    const [stats, queued, applying, metrics, audit] = await Promise.all([
+    const [stats, queued, applying, audit] = await Promise.all([
       getApplicationStats({
         range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
       }),
       countApplicationsByStatus('QUEUED', createdAtRange),
       countApplicationsByStatus('APPLYING', createdAtRange),
-      getDashboardApplicationMetrics({ createdAtRange }),
+
       listAuditEvents({ limit: 15 }),
     ]);
 
-    const totalFields = metrics.totalFieldsPopulated ?? 0;
+
 
     res.json({
       operators: operators.length,
@@ -226,15 +226,15 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       statsAvailable: stats.available,
       statsPartial: stats.partial,
       statsAvailableFrom: stats.availableFrom,
-      supabasePercent: totalFields > 0
-        ? Math.round((metrics.supabaseTaggedCount / totalFields) * 100)
-        : 0,
-      aiPercent: totalFields > 0
-        ? Math.round((metrics.aiTaggedCount / totalFields) * 100)
-        : 0,
-      resumePercent: totalFields > 0
-        ? Math.round((metrics.resumeTaggedCount / totalFields) * 100)
-        : 0,
+
+
+
+
+
+
+
+
+
       recentActivity: audit.events,
       warning: audit.warning,
       dateRange: serializeDateRange(parsedRange),

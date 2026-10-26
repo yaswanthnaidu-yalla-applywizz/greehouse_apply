@@ -67,9 +67,9 @@ interface AdminOverview {
   statsAvailable?: boolean;
   statsPartial?: boolean;
   statsAvailableFrom?: string;
-  supabasePercent: number;
-  aiPercent: number;
-  resumePercent: number;
+
+
+
   recentActivity?: Array<{ id: string; action: string; actor_email?: string; created_at: string }>;
 }
 
@@ -783,9 +783,9 @@ export const AdminDashboard: React.FC = () => {
                 ['Running', overview.running],
                 ['Queued', overview.queued],
                 ['Failed', overview.statsAvailable === false ? '—' : overview.failed],
-                ['Supabase %', overview.supabasePercent],
-                ['AI %', overview.aiPercent],
-                ['Resume %', overview.resumePercent],
+
+
+
               ].map(([label, val]) => (
                 <div key={label} className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">{label}</p>
