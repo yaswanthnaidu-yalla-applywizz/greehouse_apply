@@ -1,3 +1,18 @@
+# Current Session Update (2026-10-26 — Dev Synchronization, Conflict Resolution & PR #60)
+
+- **Branch Synchronization (`dev` merged with `origin/main`)**:
+  - Successfully merged `origin/main` (incorporating Greenhouse submission failure diagnostics #59) into `dev`.
+  - Resolved 3 merge conflicts cleanly:
+    1. `src/db/applications.ts`: Kept modular barrel re-exports from `src/db/applications/` where `error_details` was already properly typed in `types.ts` and persisted in `crud.ts`.
+    2. `src/submitter/liveSubmit.ts`: Retained the clean, modular `handlePostSubmitResponse` flow which already captures DOM failure diagnostics and persists `error_details`.
+    3. `tests/failureDiagnostics.test.ts` & `src/submitter/failureDiagnostics.ts`: Re-exported from `domFailureCapture.js` in `failureDiagnostics.ts` ensuring all import paths remain 100% backward compatible.
+- **E2E & Supabase Upsert Resilience**:
+  - `src/db/applications/crud.ts`: Added robust fallback in `upsertApplication` when Supabase schema lacks a non-partial unique constraint matching `onConflict` (e.g. `legacy_application_key` or `applywizz_id,job_url`), querying existing records by `(applywizz_id, job_url)` / `task_id` and issuing an explicit update or insert.
+  - `tests/e2eIntegration.test.ts`: Updated table checks to canonical table names (`gh_scanned_job_templates`, `gh_candidate_applications`) and dynamic profile email verification.
+- **Verification & PR**:
+  - 100% test suites green: `npm test` (32/32 E2E checkpoints pass), `npm run test:unit` (15 Node suites + 7 Vitest suites [55/55 tests] pass), `npm run typecheck` clean.
+  - Pushed to `origin/dev` and opened Pull Request [#60](https://github.com/yaswanthnaidu-yalla-applywizz/greehouse_apply/pull/60) against `main`.
+
 # Current Session Update (2026-10-26 — Dashboard Performance Optimization & Ingestion CA Mapping)
 
 - **Eliminated Runtime Work History API Calls via Ingestion CA Mapping**:
