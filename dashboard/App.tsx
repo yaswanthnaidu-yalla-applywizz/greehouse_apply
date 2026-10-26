@@ -326,16 +326,9 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    let cancelled = false;
-    (async () => {
-      await ensureAdminHydrated(selectedDate);
-      if (cancelled) return;
-      fetchInitialData(false, selectedDate);
-      fetchNotifications(selectedDate);
-    })();
-    return () => {
-      cancelled = true;
-    };
+    ensureAdminHydrated(selectedDate);
+    fetchInitialData(false, selectedDate);
+    fetchNotifications(selectedDate);
   }, [currentUser, selectedDate, ensureAdminHydrated, fetchInitialData, fetchNotifications]);
 
   useEffect(() => {
@@ -353,66 +346,73 @@ export const App: React.FC = () => {
     const requestedId = normalizeApplywizzId(applywizzId);
     console.log(`[Dashboard] Selected ${requestedId} → fetching jobs assigned to this candidate only`);
     try {
-      const res = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}`);
-      if (res.ok) {
-        const detail: CandidateDetail = await res.json();
-        if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
-          return;
-        }
+      const [res, jobsRes] = await Promise.all([
+        apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}`),
+        apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`),
+      ]);
 
-        const jobsRes = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`);
+      if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
+        return;
+      }
 
-        if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
-          return;
-        }
-
-        if (jobsRes.status === 403) {
-          console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} is not assigned to current CA`);
-          setCandidateDetail({
-            ...detail,
-            applywizzId: requestedId,
-            jobs: [],
-          });
-          setSelectedJobUrl(null);
-          setApplication(null);
-          return;
-        }
-
-        const jobsPayload = jobsRes.ok ? await jobsRes.json() : null;
-        const returnedApplywizzId = jobsPayload?.applywizzId || jobsPayload?.applywizz_id;
-        console.log(
-          `[API] GET /api/candidates/${applywizzId}/jobs → filtering by applywizz_id=${applywizzId}`
-        );
-        if (returnedApplywizzId && !isSameApplywizzId(returnedApplywizzId, requestedId)) {
-          console.error(
-            `[Dashboard] Candidate mismatch: viewing ${requestedId}, jobs returned for ${returnedApplywizzId}`
-          );
-        }
-
-        const rawJobs: CandidateDetail['jobs'] = Array.isArray(jobsPayload?.jobs)
-          ? jobsPayload.jobs
-          : [];
-        const candidateJobs = filterOperatorApplicationJobs(
-          filterJobsForCandidate(rawJobs, requestedId)
-        );
-        setCandidateDetail({
-          ...detail,
-          applywizzId: requestedId,
-          jobs: candidateJobs,
-        });
-
-        setSelectedJobUrl(null);
-        setApplication(null);
-      } else if (res.status === 403) {
+      if (res.status === 403) {
         console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} not accessible`);
         setCandidateDetail(null);
         setSelectedJobUrl(null);
         setApplication(null);
+        return;
       }
+
+      if (!res.ok) {
+        return;
+      }
+
+      const detail: CandidateDetail = await res.json();
+      if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
+        return;
+      }
+
+      if (jobsRes.status === 403) {
+        console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} is not assigned to current CA`);
+        setCandidateDetail({
+          ...detail,
+          applywizzId: requestedId,
+          jobs: [],
+        });
+        setSelectedJobUrl(null);
+        setApplication(null);
+        return;
+      }
+
+      const jobsPayload = jobsRes.ok ? await jobsRes.json() : null;
+      const returnedApplywizzId = jobsPayload?.applywizzId || jobsPayload?.applywizz_id;
+      console.log(
+        `[API] GET /api/candidates/${applywizzId}/jobs → filtering by applywizz_id=${applywizzId}`
+      );
+      if (returnedApplywizzId && !isSameApplywizzId(returnedApplywizzId, requestedId)) {
+        console.error(
+          `[Dashboard] Candidate mismatch: viewing ${requestedId}, jobs returned for ${returnedApplywizzId}`
+        );
+      }
+
+      const rawJobs: CandidateDetail['jobs'] = Array.isArray(jobsPayload?.jobs)
+        ? jobsPayload.jobs
+        : [];
+      const candidateJobs = filterOperatorApplicationJobs(
+        filterJobsForCandidate(rawJobs, requestedId)
+      );
+      setCandidateDetail({
+        ...detail,
+        applywizzId: requestedId,
+        jobs: candidateJobs,
+      });
+
+      setSelectedJobUrl(null);
+      setApplication(null);
     } catch (err: any) {
       console.error(`Failed to fetch candidate ${applywizzId}:`, err);
     }
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!selectedCandidateId) {
@@ -584,11 +584,23 @@ export const App: React.FC = () => {
     onRowChange: handleRealtimeApplicationRow,
   });
 
+  const realtimeDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     onGlobalUpdate((_row, eventType) => {
-      console.log(`[Realtime] Global update detected (${eventType}) - refreshing candidates list`);
-      refreshCandidatesList();
+      console.log(`[Realtime] Global update detected (${eventType}) - debouncing candidates list refresh`);
+      if (realtimeDebounceTimerRef.current) {
+        clearTimeout(realtimeDebounceTimerRef.current);
+      }
+      realtimeDebounceTimerRef.current = setTimeout(() => {
+        refreshCandidatesList();
+      }, 1500);
     });
+    return () => {
+      if (realtimeDebounceTimerRef.current) {
+        clearTimeout(realtimeDebounceTimerRef.current);
+      }
+    };
   }, [onGlobalUpdate, refreshCandidatesList]);
 
   // Field Edit Handler
