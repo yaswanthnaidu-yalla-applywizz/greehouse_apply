@@ -226,6 +226,9 @@ const envSchema = z.object({
     .string()
     .default('https://applywizz-ca-management.vercel.app/api/ca/work-history'),
 
+  /** Optional endpoint for daily CA-to-candidate assignment mapping */
+  CA_MAPPING_API_URL: z.string().optional(),
+
   /** Additional comma-separated list of emails permitted to sign up */
   ALLOWED_SIGNUP_EMAILS: z.string().default('yaswanthnaiduyalla@applywizz.ai'),
 
