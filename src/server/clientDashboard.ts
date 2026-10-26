@@ -31,7 +31,24 @@ const log = createLogger('Client Dashboard');
  */
 export const MANAGER_TEAM_SCOPE_ENABLED = true;
 
-export interface ManagerApplicationRow extends ApplicationRow {
+export interface ManagerApplicationRow {
+  id?: string;
+  applywizz_id: string;
+  job_url: string;
+  company_name?: string | null;
+  job_title?: string | null;
+  status: string;
+  submitted_at?: string | null;
+  proof_captured_at?: string | null;
+  reviewed_at?: string | null;
+  updated_at?: string;
+  created_at?: string;
+  proof_web_url?: string | null;
+  proof_email_url?: string | null;
+  proof_email_json?: ApplicationRow['proof_email_json'] | null;
+  error_message?: string | null;
+  assigned_ca_email?: string | null;
+  resolved_fields?: unknown;
   profiles?: {
     applywizz_id?: string | null;
     client_name?: string | null;
@@ -256,7 +273,7 @@ export async function loadClientDashboard(options: {
 
   let query = getDbClient()
     .from('gh_candidate_applications')
-    .select('*, profiles!inner(applywizz_id, client_name, ca_email)')
+    .select('id, applywizz_id, job_url, company_name, job_title, status, submitted_at, proof_captured_at, reviewed_at, updated_at, created_at, proof_web_url, proof_email_url, proof_email_json, error_message, assigned_ca_email, profiles!inner(applywizz_id, client_name, ca_email)')
     .neq('status', 'FILTERED_OUT');
 
   if (createdAtRange) {
@@ -287,7 +304,7 @@ export async function loadClientDashboard(options: {
 
   if (error) throw error;
 
-  const rawRows = (data || []) as ManagerApplicationRow[];
+  const rawRows = (data || []) as unknown as ManagerApplicationRow[];
   const nameMap = await displayNameMapForEmails(rawRows.map(assignedCaEmail));
   let requestedCaEmail: string | undefined;
   if (requestedCa.toLowerCase() !== 'all') {
