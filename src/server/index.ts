@@ -35,6 +35,7 @@ setupProcessCrashGuard();
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -196,6 +197,8 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       })
     );
     app.use(express.json());
+  app.use(compression());
+    app.use(compression());
 
     /**
      * GET /api/health
@@ -421,6 +424,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     })
   );
   app.use(express.json());
+  app.use(compression());
 
   // Static directory for master resume PDFs
   const resumesDir = path.resolve(process.cwd(), config.RESUMES_DIR);
@@ -436,10 +440,23 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   const distAdminIndexPath = path.join(distDashboardDir, 'admin/index.html');
   const distDevIndexPath = path.join(distDashboardDir, 'dev/index.html');
 
-  app.use(express.static(distDashboardDir, { index: false }));
+  app.use(
+    express.static(distDashboardDir, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        const normalized = filePath.replace(/\\/g, '/');
+        if (normalized.includes('/assets/chunk-')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        } else {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      },
+    })
+  );
 
   app.get('/', requireRoleIfAuthenticated('operator', 'dev'), (_req: Request, res: Response) => {
     if (fs.existsSync(distDashboardIndexPath)) {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(distDashboardIndexPath);
     } else {
       res.status(503).send('Dashboard bundle not found. Run npm run build:dashboard.');
@@ -448,6 +465,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   app.get('/admin', requireRoleIfAuthenticated('admin', 'dev'), (_req: Request, res: Response) => {
     if (fs.existsSync(distAdminIndexPath)) {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(distAdminIndexPath);
     } else {
       res.status(503).send('Admin dashboard bundle not found. Run npm run build:dashboard.');
@@ -456,6 +474,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   app.get('/manager', requireRoleIfAuthenticated('manager', 'dev'), (_req: Request, res: Response) => {
     if (fs.existsSync(distManagerIndexPath)) {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(distManagerIndexPath);
     } else {
       res.status(503).send('Manager dashboard bundle not found. Run npm run build:dashboard.');
@@ -464,6 +483,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   app.get('/dev', requireRoleIfAuthenticated('dev'), (_req: Request, res: Response) => {
     if (fs.existsSync(distDevIndexPath)) {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(distDevIndexPath);
     } else {
       res.status(503).send('Dev dashboard bundle not found. Run npm run build:dashboard.');
