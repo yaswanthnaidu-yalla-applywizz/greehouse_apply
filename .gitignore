@@ -47,6 +47,8 @@ cache/
 *.pdf
 
 # Media & Temporary Artifacts
+reports/
+ashby/
 *.mp4
 *.png
 mailconnect/

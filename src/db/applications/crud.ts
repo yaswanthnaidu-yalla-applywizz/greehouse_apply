@@ -161,8 +161,11 @@ export async function upsertApplication(
         .select()
         .single();
 
-      if (error && error.message.includes("'task_id' column") && error.message.includes('schema cache')) {
-        log.warn(`[DB] Supabase schema cache missing 'task_id' — retrying without task_id on (applywizz_id,job_url)`);
+      if (error && (
+        (error.message.includes("'task_id' column") && error.message.includes('schema cache')) ||
+        error.message.includes('legacy_application_key')
+      )) {
+        log.warn(`[DB] Supabase schema cache missing 'task_id' or 'legacy_application_key' — retrying on (applywizz_id,job_url)`);
         const fallbackPayload = { ...payload };
         delete fallbackPayload.task_id;
         const retryResult = await supabase
@@ -172,6 +175,34 @@ export async function upsertApplication(
           .single();
         data = retryResult.data;
         error = retryResult.error;
+      }
+
+      if (error && (error.message.includes('ON CONFLICT') || error.message.includes('unique or exclusion constraint'))) {
+        let query = supabase.from('gh_candidate_applications').select('id');
+        if (payload.task_id) {
+          query = query.eq('task_id', payload.task_id);
+        } else {
+          query = query.eq('applywizz_id', payload.applywizz_id).eq('job_url', payload.job_url);
+        }
+        const { data: existingApp } = await query.limit(1).maybeSingle();
+        if (existingApp?.id) {
+          const updateRes = await supabase
+            .from('gh_candidate_applications')
+            .update(payload)
+            .eq('id', existingApp.id)
+            .select()
+            .single();
+          data = updateRes.data;
+          error = updateRes.error;
+        } else {
+          const insertRes = await supabase
+            .from('gh_candidate_applications')
+            .insert(payload)
+            .select()
+            .single();
+          data = insertRes.data;
+          error = insertRes.error;
+        }
       }
 
       if (!error && data) {
