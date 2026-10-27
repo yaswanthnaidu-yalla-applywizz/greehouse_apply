@@ -10,11 +10,7 @@
  * - 05-backend-schema.md (Section 1.4)
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import OpenAI from 'openai';
-import { ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import { config } from '../config/env.js';
-import { getBedrockClient } from '../services/bedrockClient.js';
 import type {
   ApplyWizzCandidateProfile,
   ResolvedField,
@@ -168,8 +164,8 @@ export interface BatchSynthesizeResult {
  * Options configuring the LLMSynthesizer.
  */
 export interface LLMSynthesizerOptions {
-  /** Active LLM provider ('openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock') */
-  provider?: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock' | 'anthropic';
+  /** Active LLM provider (strictly 'anthropic') */
+  provider?: 'anthropic';
   /** Anthropic workspace ID override */
   workspaceId?: string;
   /** LLM API Key override */
@@ -498,70 +494,31 @@ export function matchFuzzyOption(text: string, options?: string[]): string | nul
 }
 
 /**
- * Tier 2 Answer Synthesizer invoking OpenRouter, Google Gemini, or OpenAI.
+ * Tier 5 Answer Synthesizer invoking Anthropic Claude API.
  */
 export class LLMSynthesizer {
-  private readonly provider: 'openrouter' | 'gemini' | 'openai' | 'ollama' | 'bedrock' | 'anthropic';
+  private readonly provider = 'anthropic' as const;
   private readonly workspaceId?: string;
   private readonly apiKey: string;
   private readonly modelName: string;
-  private geminiClient: GoogleGenerativeAI | null = null;
-  private openaiClient: OpenAI | null = null;
 
   /**
-   * Initializes the LLMSynthesizer with provider selection and API key validation.
+   * Initializes the LLMSynthesizer strictly with Anthropic Claude configuration.
    *
    * @param options - Configuration overrides.
    */
   constructor(options: LLMSynthesizerOptions = {}) {
+    this.apiKey = (
+      options.apiKey !== undefined
+        ? options.apiKey
+        : (config.CLAUDE_API_KEY ?? config.ACTIVE_LLM_API_KEY ?? '')
+    ).trim();
+    this.workspaceId = (options.workspaceId ?? config.ANTHROPIC_WORKSPACE_ID ?? '').trim() || undefined;
+    this.modelName = (options.modelName ?? config.CLAUDE_MODEL ?? 'claude-haiku-5-5').trim();
+
     const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
-    const chosenProvider = options.provider ?? config.LLM_PROVIDER;
-    // In sandbox, prefer openrouter unless bedrock is explicitly requested/configured
-    this.provider = (isSandbox && chosenProvider !== 'bedrock' && chosenProvider !== 'anthropic') ? 'openrouter' : chosenProvider;
-    this.workspaceId = options.workspaceId ?? config.ANTHROPIC_WORKSPACE_ID;
-    this.apiKey = options.apiKey ?? config.ACTIVE_LLM_API_KEY;
-
-    if (isSandbox && !this.apiKey && this.provider !== 'bedrock') {
-      log.error('❌ Sandbox mode requires OPENROUTER_API_KEY. Ollama fallback is completely disabled.');
-    }
-
-    if (this.provider === 'anthropic') {
-      this.modelName = options.modelName ?? config.CLAUDE_MODEL ?? 'claude-haiku-5-5';
-    } else if (this.provider === 'bedrock') {
-      this.modelName = options.modelName ?? config.BEDROCK_MODEL_ID ?? 'us.amazon.nova-2-lite-v1:0';
-    } else if (this.provider === 'ollama') {
-      this.modelName = options.modelName ?? config.OLLAMA_MODEL ?? 'llama3.1:latest';
-      this.openaiClient = new OpenAI({
-        baseURL: config.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434/v1',
-        apiKey: 'ollama',
-        timeout: 45000,
-        maxRetries: 1,
-      });
-    } else if (this.provider === 'openrouter') {
-      this.modelName = options.modelName ?? config.OPENROUTER_MODEL;
-      if (this.apiKey) {
-        this.openaiClient = new OpenAI({
-          baseURL: config.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-          apiKey: this.apiKey,
-          timeout: config.LLM_TIMEOUT_MS,
-          maxRetries: 1,
-          defaultHeaders: {
-            'HTTP-Referer': config.OPENROUTER_HTTP_REFERER || 'https://apply-wizz.me',
-            'X-Title': 'Greenhouse Automation Operator',
-            'X-OpenRouter-Cache': 'true',
-          },
-        });
-      }
-    } else if (this.provider === 'openai') {
-      this.modelName = options.modelName ?? 'gpt-4o-mini';
-      if (this.apiKey) {
-        this.openaiClient = new OpenAI({ apiKey: this.apiKey, timeout: config.LLM_TIMEOUT_MS, maxRetries: 1 });
-      }
-    } else {
-      this.modelName = options.modelName ?? 'gemini-2.5-flash';
-      if (this.apiKey) {
-        this.geminiClient = new GoogleGenerativeAI(this.apiKey);
-      }
+    if (isSandbox && !this.apiKey) {
+      log.warn('⚠️ Sandbox mode: CLAUDE_API_KEY is not configured for LLM synthesis.');
     }
   }
 
@@ -608,6 +565,7 @@ export class LLMSynthesizer {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(config.LLM_TIMEOUT_MS || 30000),
     });
 
     if (!res.ok) {
@@ -622,7 +580,9 @@ export class LLMSynthesizer {
       const error = new Error(`Anthropic API returned HTTP ${res.status}: ${message}`);
       (error as any).status = res.status;
       (error as any).statusCode = res.status;
+      (error as any).type = parsedError?.error?.type;
       (error as any).errorType = parsedError?.error?.type;
+      (error as any).error = parsedError?.error;
       throw error;
     }
 
@@ -691,209 +651,49 @@ export class LLMSynthesizer {
       : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
     const systemMessage = `${baseSystemMessage}\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
-    // If API key is configured or provider is bedrock or ollama, execute real LLM call
-    if (this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock' || this.provider === 'anthropic') {
+    // If Anthropic Claude API key is configured, execute LLM call
+    if (this.apiKey) {
       let failureDiagnosticEmitted = false;
       try {
-        let providerReached = false;
+        const startedAt = Date.now();
+        const { text: outputText } = await this.callAnthropic(prompt, systemMessage, 350);
+        haltIfFirstProviderCallFailed(true);
 
-        if (this.provider === 'anthropic') {
-          const startedAt = Date.now();
-          const { text: outputText } = await this.callAnthropic(prompt, systemMessage, 350);
-          providerReached = true;
-          haltIfFirstProviderCallFailed(true);
+        const cleaned = cleanLLMOutput(outputText);
+        log.debug(
+          `[LLM Provider] event=request_completed operation=single provider=anthropic ` +
+            `model=${this.modelName} elapsed_ms=${Date.now() - startedAt} content_chars=${cleaned.length}`
+        );
 
-          const cleaned = cleanLLMOutput(outputText);
-          log.debug(
-            `[LLM Provider] event=request_completed operation=single provider=anthropic ` +
-              `model=${this.modelName} elapsed_ms=${Date.now() - startedAt} content_chars=${cleaned.length}`
-          );
-
-          if (cleaned && cleaned.length > 0) {
-            try {
-              return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
-            } catch (error) {
-              await emitFailureDiagnostic({
-                category: 'RESOLVE_TIER5_PARSE',
-                stage: 'single_response_parse',
-                reason: 'Tier 5 Anthropic returned a response that could not be parsed into a valid answer.',
-                error,
-                isTerminal: false,
-                isRetryable: true,
-              });
-              failureDiagnosticEmitted = true;
-              throw error;
-            }
+        if (cleaned && cleaned.length > 0) {
+          try {
+            return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+          } catch (error) {
+            await emitFailureDiagnostic({
+              category: 'RESOLVE_TIER5_PARSE',
+              stage: 'single_response_parse',
+              reason: 'Tier 5 Anthropic returned a response that could not be parsed into a valid answer.',
+              error,
+              isTerminal: false,
+              isRetryable: true,
+            });
+            failureDiagnosticEmitted = true;
+            throw error;
           }
-        } else if (this.provider === 'bedrock') {
-          const client = getBedrockClient();
-          const command = new ConverseCommand({
-            modelId: this.modelName,
-            system: [{ text: systemMessage }],
-            messages: [
-              {
-                role: 'user',
-                content: [{ text: prompt }],
-              },
-            ],
-            inferenceConfig: {
-              maxTokens: 300,
-              temperature: 0.2,
-            },
-          });
-
-          const startedAt = Date.now();
-          const response = await client.send(command);
-          providerReached = true;
-          haltIfFirstProviderCallFailed(true);
-
-          const outputText = response.output?.message?.content?.[0]?.text?.trim() || '';
-          const cleaned = cleanLLMOutput(outputText);
-          log.debug(
-            `[LLM Provider] event=request_completed operation=single provider=bedrock ` +
-              `model=${this.modelName} elapsed_ms=${Date.now() - startedAt} content_chars=${cleaned.length}`
-          );
-
-          if (cleaned && cleaned.length > 0) {
-            try {
-              return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
-            } catch (error) {
-              await emitFailureDiagnostic({
-                category: 'RESOLVE_TIER5_PARSE',
-                stage: 'single_response_parse',
-                reason: 'Tier 5 Bedrock returned a response that could not be parsed into a valid answer.',
-                error,
-                isTerminal: false,
-                isRetryable: true,
-              });
-              failureDiagnosticEmitted = true;
-              throw error;
-            }
-          }
-        }
-
-        if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
-          let rawAnswer = '';
-          const candidateModels =
-            this.provider === 'openrouter'
-              ? [
-                  this.modelName,
-                  'google/gemini-2.5-flash',
-                  'meta-llama/llama-3.3-70b-instruct',
-                ]
-              : [this.modelName];
-
-          const uniqueModels = Array.from(new Set(candidateModels));
-
-          for (const modelId of uniqueModels) {
-            const modelStartedAt = Date.now();
-            try {
-              const completion = await this.openaiClient.chat.completions.create({
-                model: modelId,
-                messages: [
-                  {
-                    role: 'system',
-                    content: systemMessage,
-                  },
-                  { role: 'user', content: prompt },
-                ],
-                temperature: 0.2,
-                max_tokens: 300,
-              });
-              providerReached = true;
-
-              const content = completion?.choices?.[0]?.message?.content?.trim();
-              const cleaned = cleanLLMOutput(content || '');
-              log.debug(
-                `[LLM Provider] event=request_completed operation=single provider=${this.provider} ` +
-                  `model=${modelId} elapsed_ms=${Date.now() - modelStartedAt} ` +
-                  `content_chars=${cleaned.length} finish_reason=${completion?.choices?.[0]?.finish_reason || 'none'}`
-              );
-              if (cleaned && cleaned.length > 0) {
-                rawAnswer = cleaned;
-                break;
-              }
-
-            } catch (modelErr: unknown) {
-              await emitFailureDiagnostic({
-                category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
-                stage: 'single_model_request',
-                reason: 'A configured Tier 5 language-model request failed.',
-                error: modelErr,
-                isTerminal: false,
-                isRetryable: true,
-              });
-              failureDiagnosticEmitted = true;
-              const diagnostics = getLlmProviderErrorDiagnostics(modelErr);
-              log.warn(
-                `[LLM Provider] event=request_failed operation=single provider=${this.provider} ` +
-                  `model=${modelId} elapsed_ms=${Date.now() - modelStartedAt} ` +
-                  `${formatProviderErrorDiagnostics(diagnostics)} fallback=next_model`
-              );
-            }
-          }
-
-          haltIfFirstProviderCallFailed(providerReached);
-
-          if (rawAnswer && rawAnswer.length > 0) {
-            try {
-              return this.finalizeLlmAnswer(rawAnswer, field, profile, jobContext, choiceOptions);
-            } catch (error) {
-              await emitFailureDiagnostic({
-                category: 'RESOLVE_TIER5_PARSE',
-                stage: 'single_response_parse',
-                reason: 'Tier 5 returned a response that could not be parsed into a valid answer.',
-                error,
-                isTerminal: false,
-                isRetryable: true,
-              });
-              failureDiagnosticEmitted = true;
-              throw error;
-            }
-          }
-        }
-
-        if (this.provider === 'gemini' && this.geminiClient) {
-          const model = this.geminiClient.getGenerativeModel({ model: this.modelName });
-          const result = await model.generateContent(prompt);
-          providerReached = true;
-          haltIfFirstProviderCallFailed(true);
-          const content = result.response.text().trim();
-          const cleaned = cleanLLMOutput(content);
-          if (cleaned && cleaned.length > 0) {
-            try {
-              return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
-            } catch (error) {
-              await emitFailureDiagnostic({
-                category: 'RESOLVE_TIER5_PARSE',
-                stage: 'single_response_parse',
-                reason: 'Tier 5 returned a response that could not be parsed into a valid answer.',
-                error,
-                isTerminal: false,
-                isRetryable: true,
-              });
-              failureDiagnosticEmitted = true;
-              throw error;
-            }
-          }
-        }
-
-        if (this.provider === 'gemini') {
-          haltIfFirstProviderCallFailed(providerReached);
         }
       } catch (err: any) {
         if (!failureDiagnosticEmitted) {
           await emitFailureDiagnostic({
             category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
             stage: 'single_provider_request',
-            reason: 'Tier 5 language-model request failed.',
+            reason: 'Tier 5 Anthropic language-model request failed.',
             error: err,
             isTerminal: false,
             isRetryable: true,
           });
         }
         log.warn(
-          `[LLM Provider] event=request_failed operation=single provider=${this.provider} ` +
+          `[LLM Provider] event=request_failed operation=single provider=anthropic ` +
             `model=${this.modelName} ${formatProviderErrorDiagnostics(getLlmProviderErrorDiagnostics(err))}`
         );
         haltIfFirstProviderCallFailed(false);
@@ -1019,7 +819,7 @@ US LOCATION RULE: If asked whether the candidate is currently located in the US,
 
 ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
-    if (!(this.apiKey || this.provider === 'ollama' || this.provider === 'bedrock' || this.provider === 'anthropic')) {
+    if (!this.apiKey) {
       throw new Error('No LLM provider credentials configured.');
     }
 
@@ -1027,148 +827,32 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
     let batchUsage: BatchSynthesizeResult['usage'] = undefined;
     const requestStartedAt = Date.now();
     try {
-      if (this.provider === 'anthropic') {
-        const result = await this.callAnthropic(
-          prompt,
-          systemMessage,
-          Math.max(500, questions.length * 150)
-        );
-        haltIfFirstProviderCallFailed(true);
-        raw = result.text;
-        batchUsage = result.usage;
-        log.debug(
-          `[LLM Provider] event=request_completed operation=batch provider=anthropic ` +
-            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
-            `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
-            `completion_tokens=${batchUsage?.completionTokens ?? 0}`
-        );
-      } else if (this.provider === 'bedrock') {
-        const client = getBedrockClient();
-        const enablePromptCaching = config.BEDROCK_ENABLE_PROMPT_CACHING !== false;
-
-        // Structured system blocks with candidate profile and prompt cache checkpoint
-        const candidateProfileSummary = _profile ? JSON.stringify({
-          clientName: _profile.clientName,
-          email: _profile.email,
-          phone: _profile.phone,
-          location: _profile.location || '',
-          workAuthorization: _profile.workAuthorization,
-          requiresSponsorship: _profile.requiresSponsorship,
-          demographics: _profile.demographics,
-        }) : '';
-
-        const systemBlocks: any[] = [{ text: systemMessage }];
-        if (candidateProfileSummary) {
-          systemBlocks.push({ text: `Candidate Profile:\n${candidateProfileSummary}` });
-        }
-        if (enablePromptCaching) {
-          systemBlocks.push({ cachePoint: { type: 'default' } });
-        }
-
-        const command = new ConverseCommand({
-          modelId: this.modelName,
-          system: systemBlocks,
-          messages: [
-            {
-              role: 'user',
-              content: [{ text: prompt }],
-            },
-          ],
-          inferenceConfig: {
-            maxTokens: Math.max(500, questions.length * 150),
-            temperature: 0.2,
-          },
-        });
-
-        const response = await client.send(command);
-        haltIfFirstProviderCallFailed(true);
-        raw = response.output?.message?.content?.[0]?.text || '';
-
-        const usageData = response.usage as any;
-        if (usageData) {
-          batchUsage = {
-            promptTokens: usageData.inputTokens || 0,
-            completionTokens: usageData.outputTokens || 0,
-            cacheReadTokens: usageData.cacheReadInputTokenCount || 0,
-            cacheWriteTokens: usageData.cacheWriteInputTokenCount || 0,
-            totalTokens: usageData.totalTokens || ((usageData.inputTokens || 0) + (usageData.outputTokens || 0)),
-            model: this.modelName,
-          };
-        }
-
-        log.debug(
-          `[LLM Provider] event=request_completed operation=batch provider=bedrock ` +
-            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
-            `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
-            `cached_tokens=${batchUsage?.cacheReadTokens ?? 0} completion_tokens=${batchUsage?.completionTokens ?? 0}`
-        );
-      } else if ((this.provider === 'openrouter' || this.provider === 'openai' || this.provider === 'ollama') && this.openaiClient) {
-        const completion = await this.openaiClient.chat.completions.create({
-          model: this.modelName,
-          messages: [{ role: 'system', content: systemMessage }, { role: 'user', content: prompt }],
-          temperature: 0.2,
-          max_tokens: Math.max(300, questions.length * 100),
-        });
-        haltIfFirstProviderCallFailed(true);
-        raw = completion?.choices?.[0]?.message?.content || '';
-        const usageData = completion?.usage as any;
-        if (usageData) {
-          const cachedTokens = usageData.prompt_tokens_details?.cached_tokens || 0;
-          const directCost = typeof usageData.cost === 'number' ? usageData.cost : undefined;
-          batchUsage = {
-            promptTokens: usageData.prompt_tokens || 0,
-            completionTokens: usageData.completion_tokens || 0,
-            cacheReadTokens: cachedTokens,
-            cacheWriteTokens: usageData.prompt_tokens_details?.cache_write_tokens || 0,
-            totalTokens: usageData.total_tokens || ((usageData.prompt_tokens || 0) + (usageData.completion_tokens || 0)),
-            cost: directCost,
-            model: this.modelName,
-          };
-        }
-        log.debug(
-          `[LLM Provider] event=request_completed operation=batch provider=${this.provider} ` +
-            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
-            `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
-            `cached_tokens=${batchUsage?.cacheReadTokens ?? 0} cost=${batchUsage?.cost !== undefined ? `$${batchUsage.cost.toFixed(6)}` : 'n/a'} ` +
-            `finish_reason=${completion?.choices?.[0]?.finish_reason || 'none'}`
-        );
-      } else if (this.provider === 'gemini' && this.geminiClient) {
-        const model = this.geminiClient.getGenerativeModel({ model: this.modelName });
-        const result = await model.generateContent(`${systemMessage}\n\n${prompt}`);
-        haltIfFirstProviderCallFailed(true);
-        raw = result.response.text();
-        const usageMetadata = result.response.usageMetadata;
-        if (usageMetadata) {
-          batchUsage = {
-            promptTokens: usageMetadata.promptTokenCount || 0,
-            completionTokens: usageMetadata.candidatesTokenCount || 0,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            totalTokens: usageMetadata.totalTokenCount || 0,
-            model: this.modelName,
-          };
-        }
-        log.debug(
-          `[LLM Provider] event=request_completed operation=batch provider=${this.provider} ` +
-            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
-            `content_chars=${raw.length}`
-        );
-      } else {
-        haltIfFirstProviderCallFailed(false);
-        throw new Error(`LLM provider ${this.provider} is unavailable.`);
-      }
+      const result = await this.callAnthropic(
+        prompt,
+        systemMessage,
+        Math.max(500, questions.length * 150)
+      );
+      haltIfFirstProviderCallFailed(true);
+      raw = result.text;
+      batchUsage = result.usage;
+      log.debug(
+        `[LLM Provider] event=request_completed operation=batch provider=anthropic ` +
+          `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+          `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
+          `completion_tokens=${batchUsage?.completionTokens ?? 0}`
+      );
     } catch (err: unknown) {
       await emitFailureDiagnostic({
         category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
         stage: 'batch_provider_request',
-        reason: 'Tier 5 batch language-model request failed.',
+        reason: 'Tier 5 batch Anthropic language-model request failed.',
         error: err,
         isTerminal: false,
         isRetryable: true,
         metadata: { matchCount: questions.length },
       });
       log.warn(
-        `[LLM Provider] event=request_failed operation=batch provider=${this.provider} ` +
+        `[LLM Provider] event=request_failed operation=batch provider=anthropic ` +
           `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
           `${formatProviderErrorDiagnostics(getLlmProviderErrorDiagnostics(err))}`
       );

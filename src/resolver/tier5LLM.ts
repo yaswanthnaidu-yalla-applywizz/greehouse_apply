@@ -135,7 +135,7 @@ function isSandboxLlmAnsweringDisabled(): boolean {
 }
 
 /**
- * Attempts Tier 5 resolution using LLM synthesis (Gemini/OpenRouter/OpenAI).
+ * Attempts Tier 5 resolution using strict Anthropic Claude LLM synthesis.
  * Automatically writes the synthesized answer to `candidate_qa_bank` with source: 'ai'.
  *
  * @returns ResolvedField with source: 'ai', resolvedByTier: 5, or null if synthesis fails.
@@ -222,7 +222,7 @@ export async function resolveTier5(
       if (isPhoneNumberField(field)) {
         const resumePhone = resumeAnswerMatchesPhone(rawResult.value, resumeFacts, resumeText);
         if (!resumePhone) {
-          log.warn(`[Resolver] Γ¥î T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${rawResult.value}"`);
+          log.warn(`[Resolver] ❌ T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${rawResult.value}"`);
           return null;
         }
         rawResult.value = resumePhone;
@@ -435,7 +435,7 @@ export async function resolveTier5Batch(
           )
         : null;
       if (isPhoneNumberField(field) && !resumePhone) {
-        log.warn(`[Resolver] Γ¥î T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${finalized.value}"`);
+        log.warn(`[Resolver] ❌ T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${finalized.value}"`);
         continue;
       }
 

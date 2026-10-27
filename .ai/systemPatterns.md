@@ -69,7 +69,7 @@ Short-circuits on first hit. Each tier feeds the next as fallback.
 | 2 | `tier2ResumeParse.ts` | `pdf-parse` on resume PDF → cached in `candidate_resume_parsed` (parse once) | Free after first parse |
 | 3 | `semanticSearch.ts` | OpenRouter `text-embedding-3-small` similarity (≥ 0.82) against candidate profile/raw-payload fact labels, then Supabase vector search against `candidate_qa_bank` | Embedding API cost |
 | 4 | `tier3FuzzyMatch.ts` | Fuse.js fuzzy match against candidate profile/raw-payload fact labels, then `candidate_qa_bank` | Free (in-memory) |
-| 5 | `tier5LLM.ts` via `llmSynthesizer.ts` | Multi-provider LLM prompt → answer and embedding written to `candidate_qa_bank` for reuse | LLM cost |
+| 5 | `tier5LLM.ts` via `llmSynthesizer.ts` | Strict Anthropic Claude prompt (`CLAUDE_API_KEY`, `ANTHROPIC_WORKSPACE_ID`, `CLAUDE_MODEL`) — answer and embedding written to `candidate_qa_bank` for reuse | LLM cost |
 
 **Rule:** LLM answers and manual edits written to `candidate_qa_bank` with embeddings (`writeEmbedding`) → resolved at Tier 1/3 on next run.
 
