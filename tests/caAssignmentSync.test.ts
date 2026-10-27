@@ -7,10 +7,11 @@ describe('caAssignmentSync', () => {
     assert.equal(typeof syncCaCandidateAssignments, 'function');
   });
 
-  it('handles missing CA_MAPPING_API_URL gracefully without throwing', async () => {
-    const result = await syncCaCandidateAssignments();
+  it('handles missing CA_MAPPING_API_URL gracefully without throwing and returns mappingMap', async () => {
+    const result = await syncCaCandidateAssignments({ applywizzIds: ['AWL-TEST-NONEXISTENT'] });
     assert.equal(typeof result, 'object');
     assert.equal(typeof result.syncedCount, 'number');
+    assert.ok(result.mappingMap instanceof Map);
   });
 
   it('parses array of mapping records correctly', () => {
