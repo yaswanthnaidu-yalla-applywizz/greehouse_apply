@@ -1,3 +1,14 @@
+2026-10-27 session-start scan: files=2 parsed=2 (investigating railway ingest service logs and tier 3 answering failure)
+2026-10-27 session-checkpoint: completed native TDD implementation for strict Anthropic Claude Tier 5 resolution & exclusive OpenRouter Tier 3 embeddings; 100% tests and typecheck clean; no new observations
+2026-10-27 session-start scan: files=2 parsed=2 (investigating resolver LLM synthesizer & batch resolver to enforce Anthropic Claude API key)
+2026-10-27 session-checkpoint: verified strict Anthropic Claude API usage in LLM synthesis; confirmed no fallback to OpenRouter or secondary providers; no new observations
+2026-10-27 session-checkpoint: calculated 2k apps/day semantic search cost projection ($0.08–$0.45/mo); no new observations
+2026-10-27 session-checkpoint: evaluated self-hosted HuggingFace NLP embeddings vs pgvector vector(1536) schema & Railway compute trade-offs; no new observations
+2026-10-27 session-checkpoint: clarified Claude Haiku pricing ($0.10 in / $0.50 out) vs embedding model requirements for Tier 3 vector search; no new observations
+2026-10-27 session-checkpoint: analyzed semantic search embedding architecture (OpenRouter text-embedding-3-small vs Bedrock Titan V2) and Claude Haiku compatibility; no new observations
+2026-10-27 session-start scan: files=3 parsed=3 (checking semantic search model, pricing, and Haiku compatibility)
+2026-10-27 session-checkpoint: completed /pstack:arena on TSX dashboard performance plan (docs/superpowers/plans/2026-10-27-perf-opt.md); synthesized Candidate 1 base with Candidate 2 grafts (node:test browser lifecycle, ChunkErrorBoundary, bidirectional session sync, alert timer ref cleanup, cross-platform cross-env NODE_ENV=production, public static no-cache); no new observations
+2026-10-27 session-start scan: files=2 parsed=2 (reviewing docs/superpowers/plans/2026-10-27-perf-opt.md)
 2026-10-26 session-checkpoint: merged origin/main into dev; resolved conflicts in src/db/applications.ts (kept modular barrel export), src/submitter/liveSubmit.ts (kept handlePostSubmitResponse flow), and tests/failureDiagnostics.test.ts (re-exported domFailureCapture in failureDiagnostics.ts); added robust upsert fallback in crud.ts; aligned e2eIntegration test table names; 100% tests pass (32/32 e2e checkpoints, 55 vitest, all unit suites), typecheck clean; pushed dev and opened PR #60; no new observations
 2026-10-26 session-checkpoint: updated parseCaMappingResponse to parse nested CA-to-clients hierarchy from production CA mapping API format; 5/5 caAssignmentSync unit tests pass; typecheck clean; no new observations
 2026-10-26 session-checkpoint: completed all 6 tasks for dashboard performance optimization (Task 1: CA mapping sync on ingestion & on-demand sync endpoint; Task 2: direct DB CA candidate scoping & parallelized work-history; Task 3: removed Supabase/AI/Resume % stat cards and stripped resolved_fields from metrics/aggregates; Task 4: selected scalar columns in loadClientDashboard; Task 5: response compression & smart static caching; Task 6: parallel candidate fetches, unblocked startup, debounced realtime); 13/13 tests pass, typecheck clean, dashboard build clean; no new observations
@@ -768,3 +779,20 @@ checkpoint 2026-10-23T17:03:00 conversation-4f39e5ca-e487-44d5-8b34-4a0a8961ff74
 session-start 2026-10-26T11:05:19+05:30 conversation-8810b77e-d87f-4e51-bbd2-b5e203c92317 files=2 parsed=2
 checkpoint 2026-10-26T11:15:00 conversation-8810b77e-d87f-4e51-bbd2-b5e203c92317 tested NEWSUPAANON and NEWSUPASERVICE against Supabase instance; verified REST, auth admin, and storage; no observations
 session-start 2026-10-26T12:45:39+05:30 conversation-6159295c-13be-4b24-99c9-07d41c4549c2 files=2 parsed=2
+checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c4549c2 installed global Codex plugin/skills; no observations
+2026-10-26 session-checkpoint: diagnosed slash-command skill discovery; project-local skills are not automatically registered as ChatGPT slash commands; no new observations
+2026-10-26 session-start scan: files=2 parsed=2
+2026-10-26 no observations
+2026-10-27 session-start scan: files=2 parsed=2
+2026-10-27 no observations: read-only Railway ingest log diagnosis; failure classified as external credential/configuration fault.
+2026-10-27 no observations: created the read-only TSX dashboard performance implementation plan; no reusable skill issue observed.
+2026-10-27 no observations: read-only TSX dashboard architecture and blast-radius review completed; no reusable skill issue observed.
+2026-10-27 no observations: read-only performance audit completed; no reusable skill issue observed.
+2026-10-27 no observations: ATS expansion context interview prepared; no reusable skill issue observed.
+2026-10-27 no observations: ATS expansion context updates verified with git diff --check.
+2026-10-27 session-start scan: files=2 parsed=2
+2026-10-27 no observations
+2026-10-27 session-start scan: files=2 parsed=2
+2026-10-27 session-start scan: files=2 parsed=2
+2026-10-27 session-start scan: files=2 parsed=2
+2026-10-27 session-checkpoint: consolidated CA assignment sync into Phase B.5 ingest, removed duplicate pre-ingest call, deleted legacy CA email mapping functions, 5/5 tests & typecheck clean; no new observations
