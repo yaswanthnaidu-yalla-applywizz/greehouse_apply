@@ -1,3 +1,11 @@
+# Current Session Update (2026-10-27 — README Two-Part Restructure)
+
+- Rewrote `README.md` following `technical-writing` (Diátaxis, Google Developer Style, STE, Global English) and `unslop` standards from `pstack`.
+- Established a two-part clean structure:
+  1. Executive and Business Overview: Problem statement, ROI & operational scale, risk mitigation (deterministic-first resolver, human review gate, 35-field complexity cap, zero-challenge bypass), and verifiable audit trail.
+  2. Engineering and Technical Architecture: System diagram, DOM scanner, 5-tier waterfall resolver, Playwright submission engine, role-based dashboards, tech stack, and developer quickstart runbook.
+- Scoped purely to Greenhouse / single-page ATS automation with zero exposure of secrets, environment variable values, or candidate data.
+
 # Current Session Update (2026-10-27 — Strict Anthropic Claude Resolver & OpenRouter Tier 3)
 
 - **Strict Anthropic Claude Provider (`src/config/env.ts`, `src/resolver/llmSynthesizer.ts`)**:
