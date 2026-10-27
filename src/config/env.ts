@@ -34,7 +34,7 @@ const envSchema = z.object({
   APPLYWIZZ_API_URL: z.string().default('https://www.apply-wizz.me/api/get-client-details?applywizz_id='),
 
   /** Selected LLM provider for synthesis */
-  LLM_PROVIDER: z.enum(['openrouter', 'gemini', 'openai', 'ollama', 'bedrock', 'anthropic']).default('openrouter'),
+  LLM_PROVIDER: z.enum(['anthropic', 'openrouter', 'gemini', 'openai', 'ollama', 'bedrock']).default('anthropic'),
 
   /** Claude / Anthropic API Key */
   CLAUDE_API_KEY: z.string().optional(),
@@ -314,63 +314,17 @@ const resolvedClaudeWorkspaceId = (
   ''
 ).trim();
 
-const resolvedLlmProvider = (
-  (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) ||
-  (resolvedClaudeApiKey ? 'anthropic' : rawEnv.LLM_PROVIDER)
-);
+const resolvedLlmProvider = 'anthropic' as const;
 
 /**
  * Resolves the active LLM API key based on the configured LLM_PROVIDER and available keys.
+ * Strictly enforces Anthropic Claude API key for Tier 5 LLM resolution.
  *
- * @param env - Parsed environment data
+ * @param _env - Parsed environment data
  * @returns The active LLM API key string, or empty string if not configured
  */
-function resolveLlmApiKey(env: typeof rawEnv): string {
-  const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
-  const effectiveProvider = (process.env.LLM_PROVIDER as typeof rawEnv.LLM_PROVIDER) || resolvedLlmProvider;
-
-  if (effectiveProvider === 'anthropic') {
-    return resolvedClaudeApiKey;
-  }
-
-  if (effectiveProvider === 'bedrock') {
-    const key = (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || process.env.AWS_BEARER_TOKEN_BEDROCK || '').trim();
-    if (key) return key;
-    if (env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID) return 'aws-iam';
-    return '';
-  }
-
-  if (isSandbox) {
-    const key = (env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || '').trim();
-    if (!key) {
-      log.warn('⚠️ OPENROUTER_API_KEY is missing in sandbox mode.');
-    }
-    return key;
-  }
-  if (effectiveProvider === 'ollama') {
-    return 'ollama';
-  }
-  if (env.LLM_API_KEY && env.LLM_API_KEY.trim().length > 0) {
-    return env.LLM_API_KEY.trim();
-  }
-  if (effectiveProvider === 'openrouter' && env.OPENROUTER_API_KEY) {
-    return env.OPENROUTER_API_KEY.trim();
-  }
-  if (effectiveProvider === 'gemini' && env.GEMINI_API_KEY) {
-    return env.GEMINI_API_KEY.trim();
-  }
-  if (effectiveProvider === 'openai' && env.OPENAI_API_KEY) {
-    return env.OPENAI_API_KEY.trim();
-  }
-  // Auto-fallback: check if any key exists
-  if (resolvedClaudeApiKey) return resolvedClaudeApiKey;
-  if (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK) {
-    return (env.BEDROCK_API_KEY || env.AWS_BEARER_TOKEN_BEDROCK)!.trim();
-  }
-  if (env.OPENROUTER_API_KEY) return env.OPENROUTER_API_KEY.trim();
-  if (env.GEMINI_API_KEY) return env.GEMINI_API_KEY.trim();
-  if (env.OPENAI_API_KEY) return env.OPENAI_API_KEY.trim();
-  return '';
+function resolveLlmApiKey(_env: typeof rawEnv): string {
+  return resolvedClaudeApiKey;
 }
 
 const isSandboxEnv = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
