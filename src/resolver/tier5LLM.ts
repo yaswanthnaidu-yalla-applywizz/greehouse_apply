@@ -222,7 +222,7 @@ export async function resolveTier5(
       if (isPhoneNumberField(field)) {
         const resumePhone = resumeAnswerMatchesPhone(rawResult.value, resumeFacts, resumeText);
         if (!resumePhone) {
-          log.warn(`[Resolver] Γ¥î T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${rawResult.value}"`);
+          log.warn(`[Resolver] ❌ T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${rawResult.value}"`);
           return null;
         }
         rawResult.value = resumePhone;
@@ -435,7 +435,7 @@ export async function resolveTier5Batch(
           )
         : null;
       if (isPhoneNumberField(field) && !resumePhone) {
-        log.warn(`[Resolver] Γ¥î T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${finalized.value}"`);
+        log.warn(`[Resolver] ❌ T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${finalized.value}"`);
         continue;
       }
 

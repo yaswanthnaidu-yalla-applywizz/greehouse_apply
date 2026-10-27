@@ -112,7 +112,7 @@ async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
       const indices = missingIndices.slice(start, start + CHUNK_SIZE);
       const postEmbedding = () =>
         axios.post(
-          'https://openrouter.ai/api/v1/embeddings',
+          `${config.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1'}/embeddings`,
           {
             model: 'text-embedding-3-small',
             input: indices.map((index) => cleanTexts[index]),

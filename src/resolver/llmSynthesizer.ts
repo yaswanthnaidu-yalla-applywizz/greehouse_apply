@@ -565,6 +565,7 @@ export class LLMSynthesizer {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(config.LLM_TIMEOUT_MS || 30000),
     });
 
     if (!res.ok) {
@@ -579,7 +580,9 @@ export class LLMSynthesizer {
       const error = new Error(`Anthropic API returned HTTP ${res.status}: ${message}`);
       (error as any).status = res.status;
       (error as any).statusCode = res.status;
+      (error as any).type = parsedError?.error?.type;
       (error as any).errorType = parsedError?.error?.type;
+      (error as any).error = parsedError?.error;
       throw error;
     }
 

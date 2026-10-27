@@ -43,6 +43,13 @@ async function runTest() {
   assert.equal(finalized.value, 'Option A');
   assert.equal(finalized.source, 'ai');
 
+  // 4. Workspace ID routing
+  const synthNoWs = new LLMSynthesizer({ apiKey: 'mock', workspaceId: '' });
+  assert.equal((synthNoWs as any).workspaceId, undefined);
+
+  const synthWithWs = new LLMSynthesizer({ apiKey: 'mock', workspaceId: 'ws_123' });
+  assert.equal((synthWithWs as any).workspaceId, 'ws_123');
+
   console.log('✅ LLMSynthesizer Claude test passed');
 }
 
