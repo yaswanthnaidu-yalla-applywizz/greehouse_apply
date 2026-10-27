@@ -23,8 +23,7 @@ import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
 import { scanAshbyJob } from '../scanner/ashbyScanner.js';
 import { atsFromUrl } from '../scanner/csvDeduplicator.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
-import { fetchCaBatchEmailMap } from '../candidate/applywizzClient.js';
-import { upsertProfileCaEmail } from '../db/profiles.js';
+import { syncCaCandidateAssignments } from '../services/caAssignmentSync.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
 import { sendCaNotificationEmails, sendLeadershipIngestionSummary } from '../services/caNotificationEmail.js';
@@ -291,26 +290,27 @@ export class V1Pipeline {
     throwIfPipelineAborted('Phase C');
 
     // -------------------------------------------------------------
-    // Phase B.5: CA Email Mapping
+    // Phase B.5: CA Assignment Sync
     // -------------------------------------------------------------
-    log.info('[Pipeline] Phase B.5 — CA email mapping');
+    log.info('[Pipeline] Phase B.5 — CA assignment sync');
     try {
       const allApplywizzIds = candidateSegments.map((c) => c.applywizzId);
       const sandboxCaEmail = getSandboxCaEmail();
-      const caEmailMap = sandboxCaEmail
-        ? new Map(allApplywizzIds.map((id) => [id.toUpperCase(), sandboxCaEmail]))
-        : await fetchCaBatchEmailMap(allApplywizzIds);
-      for (const [applywizzId, caEmail] of caEmailMap) {
-        await upsertProfileCaEmail(applywizzId, caEmail);
-        const segment = candidateSegments.find((c) => c.applywizzId.toUpperCase() === applywizzId.toUpperCase());
-        if (segment) {
+      const syncResult = await syncCaCandidateAssignments({ applywizzIds: allApplywizzIds });
+      const caEmailMap = syncResult.mappingMap;
+
+      let mappedCount = 0;
+      for (const segment of candidateSegments) {
+        const caEmail = sandboxCaEmail || caEmailMap.get(segment.applywizzId.toUpperCase()) || segment.profile?.ca_email || null;
+        if (caEmail) {
           if (segment.profile) {
             segment.profile.ca_email = caEmail;
           }
           (segment as any).assignedCaEmail = caEmail;
+          mappedCount++;
         }
       }
-      log.info(`[Pipeline] Phase B.5 complete — mapped ${caEmailMap.size} CA emails`);
+      log.info(`[Pipeline] Phase B.5 complete — synced CA assignments for ${mappedCount}/${candidateSegments.length} candidates (source=${syncResult.source})`);
     } catch (caErr: any) {
       log.warn(`[Pipeline] ⚠️ Phase B.5 warning: ${caErr.message}`);
     }

@@ -25,7 +25,7 @@ async function runTests() {
   assert(matchExactOption('maybe', ['Yes', 'No']) === null, 'matchExactOption rejects non-option');
   assert((config as any).LLM_TIMEOUT_MS === 30000, 'config.LLM_TIMEOUT_MS defaults to 30000');
 
-  const synthesizer = new LLMSynthesizer({ provider: 'openai', apiKey: '' });
+  const synthesizer = new LLMSynthesizer({ provider: 'anthropic', apiKey: '' });
   const profile = {
     applywizz_id: 'TEST-1',
     client_name: 'Test User',

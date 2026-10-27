@@ -5,6 +5,7 @@
 
 import { config } from '../config/env.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
+import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
 import { createLogger } from '../utils/logger.js';
 import { fetchAdminWorkHistoryForDate, getISTDateString } from './workHistoryClient.js';
 
@@ -84,11 +85,17 @@ export function parseCaMappingResponse(data: unknown): CaCandidateMapping[] {
   return mappings;
 }
 
-export async function syncCaCandidateAssignments(_options: { force?: boolean } = {}): Promise<{
+export interface CaSyncResult {
   syncedCount: number;
   source: string;
   warning?: string;
-}> {
+  mappingMap: Map<string, string>;
+}
+
+export async function syncCaCandidateAssignments(options: {
+  force?: boolean;
+  applywizzIds?: string[];
+} = {}): Promise<CaSyncResult> {
   const mappingUrl = config.CA_MAPPING_API_URL?.trim();
   let mappings: CaCandidateMapping[] = [];
   let source = 'none';
@@ -145,34 +152,56 @@ export async function syncCaCandidateAssignments(_options: { force?: boolean } =
     }
   }
 
+  const sandboxCaEmail = getSandboxCaEmail();
+  const mappingMap = new Map<string, string>();
+  for (const item of mappings) {
+    const email = sandboxCaEmail ? sandboxCaEmail.trim().toLowerCase() : item.caEmail.trim().toLowerCase();
+    mappingMap.set(item.applywizzId.toUpperCase(), email);
+  }
+
   if (mappings.length === 0 || !isSupabaseConfigured()) {
-    return { syncedCount: 0, source, warning };
+    return { syncedCount: 0, source, warning, mappingMap };
   }
 
   // 3. Persist mappings to database
   const supabase = getDbClient();
   let syncedCount = 0;
 
-  for (const item of mappings) {
-    try {
-      // A. Update profile ca_email
-      await supabase
-        .from('profiles')
-        .update({ ca_email: item.caEmail, updated_at: new Date().toISOString() })
-        .eq('applywizz_id', item.applywizzId);
+  const targetIdSet = options.applywizzIds && options.applywizzIds.length > 0
+    ? new Set(options.applywizzIds.map((id) => (id || '').trim().toUpperCase()).filter(Boolean))
+    : null;
 
-      // B. Stamp assigned_ca_email on gh_candidate_applications
-      await supabase
-        .from('gh_candidate_applications')
-        .update({ assigned_ca_email: item.caEmail })
-        .eq('applywizz_id', item.applywizzId);
+  const itemsToPersist = targetIdSet
+    ? mappings.filter((item) => targetIdSet.has(item.applywizzId.toUpperCase()))
+    : mappings;
 
-      syncedCount++;
-    } catch (err) {
-      log.warn(`[CaAssignmentSync] Failed persisting mapping for ${item.applywizzId}:`, err);
-    }
+  const CHUNK_SIZE = 10;
+  for (let i = 0; i < itemsToPersist.length; i += CHUNK_SIZE) {
+    const chunk = itemsToPersist.slice(i, i + CHUNK_SIZE);
+    await Promise.all(
+      chunk.map(async (item) => {
+        const caEmail = sandboxCaEmail ? sandboxCaEmail.trim().toLowerCase() : item.caEmail;
+        try {
+          // A. Update profile ca_email
+          await supabase
+            .from('profiles')
+            .update({ ca_email: caEmail, updated_at: new Date().toISOString() })
+            .eq('applywizz_id', item.applywizzId);
+
+          // B. Stamp assigned_ca_email on gh_candidate_applications
+          await supabase
+            .from('gh_candidate_applications')
+            .update({ assigned_ca_email: caEmail })
+            .eq('applywizz_id', item.applywizzId);
+
+          syncedCount++;
+        } catch (err) {
+          log.warn(`[CaAssignmentSync] Failed persisting mapping for ${item.applywizzId}:`, err);
+        }
+      })
+    );
   }
 
   log.info(`[CaAssignmentSync] Successfully synced ${syncedCount} CA mappings (source=${source})`);
-  return { syncedCount, source, warning };
+  return { syncedCount, source, warning, mappingMap };
 }
