@@ -26,16 +26,9 @@
 | `react` / `react-dom` | Operator dashboard UI (React 19 / TSX Vite bundle) |
 | `vite` / `vitest` | Frontend bundler and test runner |
 
-## LLM Providers (Tier 5)
-Configured via `LLM_PROVIDER` env var. Supported values:
-- `anthropic` — Anthropic Claude with workspace routing (`CLAUDE_API_KEY`, `ANTHROPIC_WORKSPACE_ID`, `CLAUDE_MODEL` - defaults to `claude-haiku-5-5`; auto-selected as primary when `CLAUDE_API_KEY` is present)
-- `openrouter` — recommended; uses `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` (default: `google/gemini-2.5-flash`)
-- `gemini` — uses `GEMINI_API_KEY`
-- `openai` — uses `OPENAI_API_KEY`
-- `bedrock` — AWS Bedrock with prompt caching (`BEDROCK_MODEL_ID`, `BEDROCK_API_KEY` / AWS IAM)
-- `ollama` — local Ollama instance (`llama3.1:latest` default)
-
-Default in `.env.example`: `openrouter`.
+## LLM & Embedding Providers
+- **Tier 5 Resolution**: Strictly uses `anthropic` (`CLAUDE_API_KEY`, `ANTHROPIC_WORKSPACE_ID`, `CLAUDE_MODEL` — defaults to `claude-haiku-5-5`). All multi-provider text-generation fallbacks (OpenRouter/Bedrock/Gemini) are purged from the resolver.
+- **Tier 3 Semantic Search**: Strictly uses `openrouter` (`OPENROUTER_API_KEY` for `text-embedding-3-small` 1536-dim embeddings via `https://openrouter.ai/api/v1/embeddings`).
 
 ## Build & Run Commands
 ```bash

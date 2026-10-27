@@ -1,3 +1,21 @@
+### Strict Anthropic Claude Resolver & OpenRouter Tier 3 (2026-10-27 Complete)
+- [x] **Strict Anthropic Claude Provider (`src/config/env.ts`, `src/resolver/llmSynthesizer.ts`):** `LLM_PROVIDER` default locked to `'anthropic'`. Purged Bedrock, Gemini, OpenAI, Ollama, and OpenRouter text generation branches from `LLMSynthesizer`. Strict Anthropic API calls via native `fetch` with `CLAUDE_API_KEY` and `ANTHROPIC_WORKSPACE_ID`.
+- [x] **Exclusive OpenRouter Tier 3 Semantic Search (`src/resolver/semanticSearch.ts`):** Purged Bedrock Titan V2 fallback from semantic search. Vector embeddings strictly and exclusively use OpenRouter (`text-embedding-3-small`, 1536 dims).
+- [x] **Verification & TDD:** Added `tests/claudeResolverConfig.test.ts`, `tests/llmSynthesizerClaude.test.ts`, and `tests/semanticSearchOpenRouter.test.ts`. 100% tests pass and `npm run typecheck` clean.
+
+### CA Assignment Sync Consolidation (2026-10-27 Complete)
+- [x] **Unified Single-Point Ingest Sync (`src/orchestrator/pipeline.ts`, `src/scanner/storageCsvIngestion.ts`, `src/services/caAssignmentSync.ts`):** Removed pre-pipeline call to `syncCaCandidateAssignments` from storage CSV ingestion. Consolidated CA assignment to run strictly once during Phase B.5 of ingestion, mapping candidates via `CA_MAPPING_API_URL` (or admin work-history fallback), updating Supabase database records (`profiles.ca_email`, `gh_candidate_applications.assigned_ca_email`), and attaching in-memory `segment.assignedCaEmail` for new application generation in Phase D/E.
+- [x] **Batch-Scoped Persistence & Performance (`src/services/caAssignmentSync.ts`):** Added `options.applywizzIds` to `syncCaCandidateAssignments`, scoping database updates to active batch candidates with chunked concurrent writes (`CHUNK_SIZE = 10`), avoiding slow serial updates. Added `mappingMap` return value and sandbox CA email override support.
+- [x] **Retired Legacy CA Email Mapping Functions (`src/candidate/applywizzClient.ts`):** Removed deprecated 30-day work-history scraping functions `fetchCaEmailForApplywizzId` and `fetchCaBatchEmailMap`.
+- [x] **Verification:** `tests/caAssignmentSync.test.ts` (5/5 unit tests pass), `npm run typecheck` clean.
+
+### ATS Expansion Research and Planning (2026-10-27 In Progress)
+- [ ] **Research only:** No ATS expansion implementation has been approved. Current scope is Lever single-page automation research.
+- [ ] **Sequential roadmap:** Lever, SmartRecruiters, ApplyToJob, JazzHR, Rippling, Workable, BambooHR. Lever is the only next candidate. Prepare one platform plan, implement after completing that plan, then repeat for the next platform.
+- [ ] **Per-platform decisions:** Eligibility for multi-step forms, account/SSO, SMS, CAPTCHA, redirects, and ambiguous domains, plus success confirmation criteria, remains undecided until each platform plan.
+- **Constraints:** API-based scanning is allowed; ATS submission remains Playwright-only. Preserve resolver safeguards, cached resume behavior, SHA-256 fingerprinting, idempotent upserts, headful/headless compatibility, and the explicit 35-question cap.
+- **Workload note:** ATS analysis figures are projected workload, not verified incremental successful submissions.
+
 ### Dashboard Performance & Ingestion CA Mapping (2026-10-26 Complete)
 - [x] **Ingestion CA Mapping (`src/config/env.ts`, `src/services/caAssignmentSync.ts`, `src/scanner/storageCsvIngestion.ts`):** Added optional `CA_MAPPING_API_URL` env var. Automatically syncs and persists CA candidate assignments into `profiles` and `gh_candidate_applications` during CSV ingestion, with automatic fallback to admin work history. Added `POST /api/admin/sync-ca-assignments` on-demand sync endpoint.
 - [x] **Direct DB CA Scoping (`src/server/managerTeamScope.ts`, `src/server/workHistorySpan.ts`, `src/server/workHistoryCache.ts`):** Checks local database candidate mappings first for operator and manager dashboards, cutting runtime external Work History API latency from ~10s to <50ms. Parallelized team queries with `Promise.all` and extended cache TTL to 30 minutes.
@@ -38,7 +56,7 @@
 - [x] **Pipeline Phase D Wiring (`src/orchestrator/pipeline.ts`):** Connected `sendLeadershipIngestionSummary` alongside `sendCaNotificationEmails`.
 - [x] **Verification:** `tests/azureEmailPayload.test.ts` (3/3), `tests/leadershipNotificationEmail.test.ts` (10/10), all 55 Vitest and Node test runner suites passing, `npm run typecheck` clean.
 
-### Ashby ATS Integration & Unified Browser Stealth (2026-10-22 Complete)
+### Ashby ATS Integration Code & Unified Browser Stealth (2026-10-22; Live Smoke Pending)
 - [x] **Migrations 036 & 037:** Added `ats TEXT DEFAULT 'greenhouse'` and `scheduled_not_before TIMESTAMPTZ` with rate limit RPC guards in `get_next_queued_application()`.
 - [x] **ATS Detector & Hybrid Scanner:** Added `src/scanner/atsDetector.ts` and `src/scanner/ashbyScanner.ts` (API + Playwright DOM fallback).
 - [x] **Pipeline & Resolver Integration:** Deduplicated Ashby URLs, short-circuited `_systemfield_*` profile fields, propagated `ats` to `gh_candidate_applications` and `gh_scanned_job_templates`.
@@ -46,7 +64,8 @@
 - [x] **DataImpulse Geo-Proxy:** Geo-targeted residential proxy builder enforcing candidate country + city sticky session per day.
 - [x] **Ashby Form Filler & Submitter:** Human-like Bézier cursor, micro-jitter typing, Turnstile settlement scrolling, submit button click, and confirmation verification matching green banner text (`"Your application was successfully submitted. We'll contact you if there are next steps."`).
 - [x] **Queue Worker & Route Routing:** Integrated `submitAshbyApplication` into `src/submitter/submitterPool.ts` and `src/server/routes/submissions.ts`.
-- [x] **Verification:** 28 Ashby tests passed, 55 Vitest unit tests passed, all Node test runner suites passed, `npm run typecheck` clean, dashboard build clean.
+- [x] **Code verification:** 28 Ashby tests passed, 55 Vitest unit tests passed, all Node test runner suites passed, `npm run typecheck` clean, dashboard build clean. These checks do not include a live end-to-end Ashby submission.
+- [ ] **Production readiness blockers:** Configure DataImpulse proxy credentials and complete a live end-to-end submission smoke test in staging/sandbox. Ashby is not verified live or production-ready.
 
 ### Codebase Debloat & Structural Refactoring (2026-10-21 Complete)
 - [x] **PR 1: V1 Artifact Purge (`src/db/applications/`, `src/server/index.ts`, `tests/v1ArtifactPurge.test.ts`):**
