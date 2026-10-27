@@ -4,14 +4,12 @@
 
 import axios from 'axios';
 import { LRUCache } from 'lru-cache';
-import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import config from '../config/env.js';
 import { supabase } from '../db/client.js';
 import type { ProfileRow } from '../db/profiles.js';
 import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { getProfileFacts, type ProfileFact } from './profileFacts.js';
-import { getBedrockClient, isBedrockConfigured } from '../services/bedrockClient.js';
 
 const log = createLogger('Semantic');
 
@@ -26,9 +24,6 @@ let semanticWarnLogged = false;
 export function isSemanticEnabled(): boolean {
   const apiKey = config.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
   if (apiKey) {
-    return true;
-  }
-  if (isBedrockConfigured()) {
     return true;
   }
   if (!semanticWarnLogged) {
@@ -189,49 +184,6 @@ async function embedTexts(texts: string[]): Promise<Array<number[] | null>> {
             embeddingCache.set(cleanTexts[index], embedding);
           }
         }
-      }
-    }
-    return result;
-  }
-
-  // 2. Fallback: Bedrock Titan Text Embeddings V2
-  if (isBedrockConfigured()) {
-    const client = getBedrockClient();
-    const modelId = config.BEDROCK_EMBEDDING_MODEL_ID || 'amazon.titan-embed-text-v2:0';
-
-    for (const index of missingIndices) {
-      const textToEmbed = cleanTexts[index];
-      try {
-        const payload = {
-          inputText: textToEmbed,
-          dimensions: 1024,
-          normalize: true,
-        };
-        const command = new InvokeModelCommand({
-          modelId,
-          contentType: 'application/json',
-          accept: 'application/json',
-          body: JSON.stringify(payload),
-        });
-
-        const response = await client.send(command);
-        const rawBody = new TextDecoder().decode(response.body);
-        const parsed = JSON.parse(rawBody);
-
-        if (Array.isArray(parsed?.embedding) && parsed.embedding.length > 0) {
-          result[index] = parsed.embedding;
-          embeddingCache.set(textToEmbed, parsed.embedding);
-        }
-      } catch (err: any) {
-        const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
-        await emitFailureDiagnostic({
-          category: 'RESOLVE_TIER3_EMBEDDING',
-          stage: 'embedding_generation_bedrock',
-          reason: err?.message || 'Bedrock Titan Embeddings V2 request failed',
-          error: err,
-          isTerminal: false,
-          isRetryable: true,
-        }).catch(() => {});
       }
     }
     return result;
