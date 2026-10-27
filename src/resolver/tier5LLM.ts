@@ -135,7 +135,7 @@ function isSandboxLlmAnsweringDisabled(): boolean {
 }
 
 /**
- * Attempts Tier 5 resolution using LLM synthesis (Gemini/OpenRouter/OpenAI).
+ * Attempts Tier 5 resolution using strict Anthropic Claude LLM synthesis.
  * Automatically writes the synthesized answer to `candidate_qa_bank` with source: 'ai'.
  *
  * @returns ResolvedField with source: 'ai', resolvedByTier: 5, or null if synthesis fails.

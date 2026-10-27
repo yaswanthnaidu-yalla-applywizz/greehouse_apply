@@ -1,3 +1,53 @@
+# Current Session Update (2026-10-27 — Strict Anthropic Claude Resolver & OpenRouter Tier 3)
+
+- **Strict Anthropic Claude Provider (`src/config/env.ts`, `src/resolver/llmSynthesizer.ts`)**:
+  - `LLM_PROVIDER` default locked to `'anthropic'`.
+  - Purged Bedrock, Gemini, OpenAI, Ollama, and OpenRouter text-generation branches from `LLMSynthesizer`.
+  - Enforced `CLAUDE_API_KEY` for LLM key and `ANTHROPIC_WORKSPACE_ID` for workspace routing header.
+  - Fail-closed behavior with zero text-generation fallback to other providers.
+- **Exclusive OpenRouter Tier 3 Semantic Search (`src/resolver/semanticSearch.ts`)**:
+  - Purged Bedrock Titan V2 fallback from `semanticSearch.ts`.
+  - Tier 3 vector embeddings strictly use OpenRouter (`OPENROUTER_API_KEY`, `text-embedding-3-small`, 1536 dims).
+- **Verification & TDD**:
+  - `tests/claudeResolverConfig.test.ts`, `tests/llmSynthesizerClaude.test.ts`, `tests/semanticSearchOpenRouter.test.ts`, `tests/batchLlmValidation.test.ts`, and `tests/sandboxLlmAnswering.test.ts` pass cleanly.
+  - TypeScript typecheck (`npm run typecheck`) 100% clean.
+
+# Current Session Update (2026-10-27 — Consolidate CA Assignment Sync & Retire Old CA Email Mapping)
+
+- **Consolidated CA Assignment Into Single Execution Point (Phase B.5 Ingest)**:
+  - `src/scanner/storageCsvIngestion.ts`: Removed redundant pre-pipeline call to `syncCaCandidateAssignments()`.
+  - `src/orchestrator/pipeline.ts`: Updated Phase B.5 to call `syncCaCandidateAssignments({ applywizzIds: allApplywizzIds })` directly during ingestion, synchronously mapping candidates to their CAs and populating `segment.profile.ca_email` and `segment.assignedCaEmail` in memory for downstream resolution (Phase D) and application upsert (Phase E).
+  - `src/services/caAssignmentSync.ts`:
+    - Added `options.applywizzIds` parameter to scope Supabase persistence directly to the current ingest batch candidates, drastically reducing execution time.
+    - Added concurrent chunked updates (`CHUNK_SIZE = 10`) for database writes.
+    - Added `mappingMap: Map<string, string>` to return type (`CaSyncResult`).
+    - Added `getSandboxCaEmail()` sandbox override support.
+  - `src/candidate/applywizzClient.ts`: Removed obsolete 30-day work-history scraping functions `fetchCaEmailForApplywizzId` and `fetchCaBatchEmailMap`.
+  - `tests/caAssignmentSync.test.ts`: Verified 5/5 unit tests passing cleanly with new `mappingMap` signature and batch scoping.
+  - Full project typecheck clean (`npm run typecheck`).
+
+
+
+- **Completed `/pstack:arena` Evaluation on TSX Dashboard Performance Plan (`docs/superpowers/plans/2026-10-27-perf-opt.md`)**:
+  - Two parallel candidates run on Gemini 3.8 Flash models with varying reasoning depths.
+  - Cross-judge selected Candidate 1 as base (45.0/50) due to its empirical discovery of Vite React 19 `jsxDEV` dev-marker leaks (`cross-env NODE_ENV=production`) and Express `dashboard/public` `no-cache` omission.
+  - Grafted 4 critical additions from Candidate 2:
+    1. Replacement of `@playwright/test` runner with native `node:test` + Playwright Chromium driver (`tests/dashboardWorkspaceLifecycle.test.ts`).
+    2. `ChunkErrorBoundary` around lazy workspace `<Suspense>` for deploy-boundary 404 resilience.
+    3. Bidirectional `currentUser` session synchronization (`setCurrentUser(sessionUser ?? null)`).
+    4. Deterministic cleanup of 10-second failure alert timer on unmount.
+  - Hard release gate set: Anonymous JS entry payload < 80 kB gzip, zero `jsxDEV` markers in `dist/client/assets/*.js`.
+  - Implementation plan in `docs/superpowers/plans/2026-10-27-perf-opt.md` updated and ready for execution.
+
+# Current Session Update (2026-10-27 — ATS Expansion Research Scope)
+
+- ATS expansion remains research and context maintenance only; no implementation has been approved except future sequential planning.
+- Research order: Lever, SmartRecruiters, ApplyToJob, JazzHR, Rippling, Workable, BambooHR. Lever is the only next candidate; present work is Lever single-page automation research.
+- Create one platform plan at a time. Implement a platform only after completing its plan, then repeat for the next platform.
+- Per-platform eligibility decisions remain open for multi-step forms, account/SSO, SMS, CAPTCHA, redirects, and ambiguous domains. Success confirmation criteria are also platform-specific and unset.
+- Scanning may use APIs; ATS submission remains Playwright-only. Preserve resolver safeguards, cached resume behavior, SHA-256 question fingerprinting, idempotent upserts, headful/headless compatibility, and the explicit 35-question cap.
+- Ashby scanner/submission code is implementation-ready, but proxy configuration and a live end-to-end submission smoke test remain blockers. It is not verified live.
+
 # Current Session Update (2026-10-26 — Dev Synchronization, Conflict Resolution & PR #60)
 
 - **Branch Synchronization (`dev` merged with `origin/main`)**:
@@ -997,6 +1047,13 @@ _Last updated: 2026-10-09_
 
 ## Current Focus
 
+### ATS Expansion Research (2026-10-27)
+- Research and context maintenance only; no ATS implementation is approved.
+- Lever is the only next candidate. Current scope: research Lever single-page automation, then prepare one Lever plan. Implementation follows after completing that plan.
+- Continue sequentially in this order after Lever: SmartRecruiters, ApplyToJob, JazzHR, Rippling, Workable, BambooHR.
+- Set eligibility policy and success confirmation criteria per platform plan; both remain undecided.
+- API-based scanning is allowed; ATS submissions remain Playwright-only. Keep existing resolver, cached-resume, fingerprint, idempotency, runtime-mode, and 35-question safeguards.
+
 ### Sprint Update (2026-10-21) — CSV task_id Ingestion & Application Differentiation
 - Shipped TDD implementation for ingesting and persisting `task_id` from input CSVs into `gh_candidate_applications`.
 - `task_id` acts as primary differentiator, enabling multiple independent application records for the same candidate + job URL across different task runs.
@@ -1197,12 +1254,16 @@ _Last updated: 2026-10-09_
   - `finalizeLlmAnswer` includes 3-step fuzzy option fallback (normalized comparison, contains check for short options, Fuse.js threshold 0.85) before hard reject on choice fields.
 
 ## Immediate Blockers / Open Questions
-- **Ashby Production Environment Configuration**: Configure DataImpulse proxy credentials (`DATAIMPULSE_LOGIN`, `DATAIMPULSE_PASSWORD`, `DATAIMPULSE_HOST`, `DATAIMPULSE_PORT`) in Railway variables before enabling production Ashby queue submissions.
-- **Ashby Live End-to-End Submission Smoke**: Verify full automated submission of a live Ashby posting with residential proxy in staging/sandbox.
+- **ATS expansion planning**: Lever research is current scope; no platform implementation is approved. Per-platform eligibility rules and success confirmation criteria must be decided in each sequential plan.
+- **Ashby Production Environment Configuration**: Configure DataImpulse proxy credentials (`DATAIMPULSE_LOGIN`, `DATAIMPULSE_PASSWORD`, `DATAIMPULSE_HOST`, `DATAIMPULSE_PORT`) before enabling production Ashby queue submissions.
+- **Ashby Live End-to-End Submission Smoke**: Verify a full live Ashby submission with residential proxy in staging/sandbox; implementation-ready code is not evidence of live operation.
 - **SLA Poller Timing in Prod**: Confirm background SLA poller behaves cleanly across Railway deployment restarts.
 
 ## Recent Decisions Made
-- **Ashby Support Added to ATS Tier**: Ashby is fully supported alongside Greenhouse as an official target ATS. Workday, Lever, Taleo, etc. remain out of scope.
+- **ATS Expansion Scope**: Research/context maintenance only; no implementation approval. Proceed sequentially in this order: Lever, SmartRecruiters, ApplyToJob, JazzHR, Rippling, Workable, BambooHR. Lever alone is next; make one plan, then implement after completing that plan.
+- **ATS Research Boundaries**: Present scope is Lever single-page automation research. Eligibility rules for multi-step forms, account/SSO, SMS, CAPTCHA, redirects, and ambiguous domains, plus success confirmation criteria, are undecided per platform.
+- **ATS Integration Boundaries**: API-based scanning is allowed; submissions remain Playwright-only. Preserve resolver safeguards, cached resume behavior, SHA-256 fingerprinting, idempotent upserts, headful/headless compatibility, and the 35-question hard cap.
+- **Ashby Readiness**: Ashby scanner and submission code are implementation-ready; proxy configuration and live end-to-end smoke test remain open. Do not call Ashby fully live or production-ready.
 - **Filtered-Out Routing Clarification**: Filtered-out status is triggered strictly by **required AI fields > 3** OR **unresolved required fields > 3**. Optional AI fields and optional unresolved fields never cause an application to be filtered out.
 - **Unified Browser Stealth**: Bot evasion is centralized in `BrowserManager` via `playwright-extra` and `puppeteer-extra-plugin-stealth` across all submission paths (both Greenhouse and Ashby).
 - **Post-Ingestion Leadership Summary & SLA Tracking**: Automated HTML report sent to Balaji & RK upon ingest Phase D, with an initial 1.5-hour check poller followed by hourly updates until completion or 2 consecutive stalled counts.
