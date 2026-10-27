@@ -249,6 +249,14 @@ export async function ingestCsvFromStorage(options?: {
     
     // Stats Rollup Execution
     await runStatsRollup();
+
+    // Ingestion-time CA candidate mapping sync
+    try {
+      const { syncCaCandidateAssignments } = await import('../services/caAssignmentSync.js');
+      await syncCaCandidateAssignments();
+    } catch (caSyncErr) {
+      log.warn('[Storage CSV Ingestion] CA assignment sync non-blocking warning:', caSyncErr);
+    }
     log.info('[Pipeline] stats rollup complete');
 
     // Run V1Pipeline with single worker concurrency for Railway stability
