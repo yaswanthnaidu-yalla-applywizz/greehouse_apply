@@ -724,6 +724,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
   let skippedUnresolved = 0;
 
   if (isSupabaseConfigured()) {
+    // Partitioned DTO: Preserve full detail (select('*') including resolved_fields, user_inputs)
+    // for operator review card rendering and FormRenderer.tsx
     let appQuery = getDbClient()
       .from('gh_candidate_applications')
       .select('*')
