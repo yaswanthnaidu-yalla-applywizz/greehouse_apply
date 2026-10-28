@@ -43,8 +43,10 @@ describe('Claude Haiku 5.5 LLM Synthesis', () => {
         );
       }
 
-      // Mock batch array response (system contains prompt instructions)
+      // Mock batch array response (system contains prompt instructions or structuredBatch format)
       if (
+        body.output_config?.format?.schema?.required?.includes('answers') ||
+        body.system?.includes('answers array of direct answer strings') ||
         body.system?.includes('JSON array of direct answer strings') ||
         body.messages?.[0]?.content?.includes('JSON array of direct answer strings')
       ) {
