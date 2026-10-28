@@ -7,11 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import {
-  getRecentNotifications,
-  dismissNotification,
-  dismissAllNotifications,
-} from '../../db/applications.js';
+import { getRecentNotifications } from '../../db/applications.js';
 import { isUserAdmin } from './auth.js';
 import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
 import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
@@ -79,6 +75,7 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
 /**
  * DELETE /api/notifications/:id
  * Removes a notification from the active list. Supports :id = 'all' to clear all.
+ * Note: Notification dismissal state is primarily managed client-side in localStorage.
  */
 notificationsRouter.delete('/:id', async (req: Request, res: Response): Promise<void> => {
   const rawId = req.params.id;
@@ -86,13 +83,10 @@ notificationsRouter.delete('/:id', async (req: Request, res: Response): Promise<
 
   try {
     if (!id || id === 'all') {
-      const current = await getRecentNotifications(100);
-      dismissAllNotifications(current.map((n) => n.id));
       res.json({ success: true, cleared: 'all' });
       return;
     }
 
-    dismissNotification(id);
     res.json({ success: true, id });
   } catch (err: any) {
     log.error(`[Notifications Router] Failed to delete notification ${id}:`, err);
@@ -103,11 +97,10 @@ notificationsRouter.delete('/:id', async (req: Request, res: Response): Promise<
 /**
  * DELETE /api/notifications
  * Clears all notifications.
+ * Note: Notification dismissal state is primarily managed client-side in localStorage.
  */
 notificationsRouter.delete('/', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const current = await getRecentNotifications(100);
-    dismissAllNotifications(current.map((n) => n.id));
     res.json({ success: true, cleared: 'all' });
   } catch (err: any) {
     log.error('[Notifications Router] Failed to clear all notifications:', err);

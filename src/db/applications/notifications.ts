@@ -13,49 +13,24 @@ import type { NotificationItem, CreatedAtRangeFilter } from "./types.js";
 const log = createLogger("ApplicationsNotifications");
 
 
-const DISMISSED_NOTIFS_PATH = path.resolve(process.cwd(), 'cache', 'dismissed_notifications.json');
-
-function loadDismissedNotificationIds(): Set<string> {
-  const set = new Set<string>();
-  try {
-    if (fs.existsSync(DISMISSED_NOTIFS_PATH)) {
-      const data = JSON.parse(fs.readFileSync(DISMISSED_NOTIFS_PATH, 'utf-8'));
-      if (Array.isArray(data)) {
-        for (const id of data) set.add(id);
-      }
-    }
-  } catch {}
-  return set;
-}
-
-function saveDismissedNotificationIds(set: Set<string>): void {
-  try {
-    const dir = path.dirname(DISMISSED_NOTIFS_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DISMISSED_NOTIFS_PATH, JSON.stringify(Array.from(set)), 'utf-8');
-  } catch {}
-}
-
-const dismissedNotificationIds = loadDismissedNotificationIds();
+const dismissedNotificationIds = new Set<string>();
 
 /**
- * Dismisses a notification by ID so it no longer appears in GET /api/notifications.
+ * Dismisses a notification by ID in-memory so it no longer appears in GET /api/notifications.
  */
 export function dismissNotification(id: string): boolean {
   if (!id) return false;
   dismissedNotificationIds.add(id);
-  saveDismissedNotificationIds(dismissedNotificationIds);
   return true;
 }
 
 /**
- * Dismisses all given notification IDs (or all current active).
+ * Dismisses all given notification IDs (or all current active) in-memory.
  */
 export function dismissAllNotifications(ids?: string[]): void {
   if (ids && ids.length > 0) {
     for (const id of ids) dismissedNotificationIds.add(id);
   }
-  saveDismissedNotificationIds(dismissedNotificationIds);
 }
 
 function resolveCandidateName(applywizzId: string): string {
