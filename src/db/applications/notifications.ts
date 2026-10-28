@@ -79,6 +79,10 @@ export async function getRecentNotifications(
   limit = 50,
   filter?: { date?: string; createdAtRange?: CreatedAtRangeFilter; allowedCandidateIds?: string[] }
 ): Promise<NotificationItem[]> {
+  if (filter?.allowedCandidateIds !== undefined && filter.allowedCandidateIds.length === 0) {
+    return [];
+  }
+
   const notifications: NotificationItem[] = [];
 
   const allowedSet = filter?.allowedCandidateIds && filter.allowedCandidateIds.length > 0
