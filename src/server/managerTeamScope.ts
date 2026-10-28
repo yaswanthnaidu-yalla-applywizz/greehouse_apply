@@ -13,13 +13,11 @@ import { isUserAdmin, resolveRoleFromEmail } from './routes/auth.js';
 import { getAuthenticatedCaEmail } from './workHistoryAuth.js';
 import { resolveRoleFromRequest, type AppRole } from './routes/requireRole.js';
 import {
-  fetchAllowedCandidates,
   type WorkHistoryCandidateRecord,
 } from '../services/workHistoryClient.js';
 import type { DashboardCreatedAtRange } from './dashboardDateRange.js';
 import { istDatesForWorkHistory } from './dashboardDateRange.js';
-import { mergeWorkHistoryForCaEmails, mergeWorkHistoryForIstDates } from './workHistorySpan.js';
-import { setCachedWorkHistory } from './workHistoryCache.js';
+import { mergeWorkHistoryForCaEmails } from './workHistorySpan.js';
 import type { Response } from 'express';
 import { createLogger } from '../utils/logger.js';
 
@@ -343,33 +341,7 @@ export async function resolveDashboardCandidateAccess(
       }
     }
     const localIds = new Set([...dbIds, ...profileIds]);
-    if (localIds.size > 0) {
-      candidateIds = Array.from(localIds);
-    } else {
-      const merged = await mergeWorkHistoryForIstDates({
-        mode: 'ca',
-        caEmail,
-        dates: whDates,
-      });
-      candidateIds = merged.candidateIds;
-      workHistoryRecords = merged.records;
-      workHistoryUnreachable = merged.unreachable;
-      if (candidateIds.length === 0 && parsedRange.preset === 'default') {
-        const allowedResult = await fetchAllowedCandidates(caEmail);
-        if (allowedResult.candidateIds.length > 0) {
-          candidateIds = allowedResult.candidateIds;
-          workHistoryRecords = allowedResult.records;
-          workHistoryUnreachable = allowedResult.unreachable;
-          setCachedWorkHistory(
-            caEmail,
-            allowedResult.records,
-            allowedResult.candidateIds,
-            allowedResult.unreachable,
-            allowedResult.resolvedDate
-          );
-        }
-      }
-    }
+    candidateIds = Array.from(localIds);
   }
 
   return {

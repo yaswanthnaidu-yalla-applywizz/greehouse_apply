@@ -32,17 +32,17 @@ import {
   applicationAssignedCaAllowed,
   resolveViewAsOperatorManagerEmail,
   resolveManagerViewAsOperatorScope,
+  resolveRequestAppRole,
 } from '../managerTeamScope.js';
 import { isUserAdmin } from './auth.js';
-import { fetchAllowedCandidates } from '../../services/workHistoryClient.js';
-import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
-import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
+import { parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
 import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
 import {
   applicationRowHasPersistedResolution,
   filterOperatorApplicationJobs,
 } from '../../dashboard/candidateQueueFilter.js';
+import { APPLICATION_SUMMARY_COLUMNS } from '../types/applicationDtos.js';
 import { requireAuth } from '../middleware/auth.js';
 import axios from 'axios';
 
@@ -636,6 +636,7 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let teamOperatorEmails: string[] | null = null;
     const authReq = req as AuthenticatedRequest;
     const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(authReq);
+    const role = resolveRequestAppRole(authReq, userEmail);
     const adminBypass = isAdmin && !viewAsManagerEmail;
 
     if (!adminBypass) {
@@ -652,44 +653,53 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         });
         allowedIds = scope.allowedIds;
         teamOperatorEmails = scope.teamOperatorEmails;
-      } else {
-        const caEmail = userEmail!;
-        const merged = await mergeWorkHistoryForIstDates({
-          mode: 'ca',
-          caEmail,
-          dates: istDatesForWorkHistory(parsedRange),
-        });
-        let candidateIds = merged.candidateIds;
-        if (candidateIds.length === 0 && parsedRange.preset === 'default') {
-          const allowedResult = await fetchAllowedCandidates(caEmail);
-          if (allowedResult.candidateIds.length > 0) {
-            candidateIds = allowedResult.candidateIds;
-          }
+        if (applywizzId && allowedIds && !allowedIds.has(applywizzId.toUpperCase())) {
+          log.warn(
+            `[API] GET /api/applications (manager=${viewAsManagerEmail}) → 403 (candidate ${applywizzId} not in manager team)`
+          );
+          res.status(403).json({
+            error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
+            applications: [],
+          });
+          return;
         }
-        allowedIds = new Set(candidateIds.map((id) => id.toUpperCase()));
-      }
-
-      if (applywizzId && allowedIds && !allowedIds.has(applywizzId.toUpperCase())) {
-        log.warn(
-          `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA in work-history span)`
-        );
-        res.status(403).json({
-          error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
-          applications: [],
-        });
-        return;
+      } else if (applywizzId && isSupabaseConfigured() && userEmail) {
+        const supabase = getDbClient();
+        const [{ data: prof }, { data: appRow }] = await Promise.all([
+          supabase.from('profiles').select('applywizz_id').eq('ca_email', userEmail).ilike('applywizz_id', applywizzId).limit(1),
+          supabase.from('gh_candidate_applications').select('id').eq('assigned_ca_email', userEmail).ilike('applywizz_id', applywizzId).limit(1)
+        ]);
+        if ((!prof || prof.length === 0) && (!appRow || appRow.length === 0)) {
+          log.warn(
+            `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA in DB)`
+          );
+          res.status(403).json({
+            error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
+            applications: [],
+          });
+          return;
+        }
       }
     }
 
     let applications: any[] = [];
     if (isSupabaseConfigured()) {
       const supabase = getDbClient();
-      let query = supabase.from('gh_candidate_applications').select('*').neq('status', 'FILTERED_OUT');
+      // Project scalar columns for summary list (excluding heavy JSONB payloads resolved_fields, user_inputs)
+      // Filters APPLICATION_SUMMARY_COLUMNS to physical DB columns to prevent PostgREST column missing error
+      const summaryColumns = APPLICATION_SUMMARY_COLUMNS.filter(
+        (col) => !['location', 'match_score', 'failure_reason', 'last_error', 'proof_url'].includes(col)
+      );
+      const selectProjection = summaryColumns.join(',') || APPLICATION_SUMMARY_COLUMNS.join(',');
+      let query = supabase.from('gh_candidate_applications').select(selectProjection).neq('status', 'FILTERED_OUT');
 
       if (applywizzId) {
         query = query.eq('applywizz_id', applywizzId);
       } else if (allowedIds) {
         query = query.in('applywizz_id', Array.from(allowedIds));
+      }
+      if (role === 'operator' && userEmail) {
+        query = query.eq('assigned_ca_email', userEmail);
       }
       query = applyCreatedAtRangeFilter(query, {
         startIso: parsedRange.startIso,
@@ -702,8 +712,8 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         return;
       }
       applications = filterOperatorApplicationJobs(
-        (data || []).filter((app: any) => {
-          if (!applicationRowHasPersistedResolution(app)) return false;
+        ((data as any[]) || []).filter((app: any) => {
+          if (app.resolved_fields !== undefined && !applicationRowHasPersistedResolution(app)) return false;
           if (!adminBypass && userEmail) {
             if (viewAsManagerEmail && teamOperatorEmails) {
               return applicationAssignedCaAllowed(

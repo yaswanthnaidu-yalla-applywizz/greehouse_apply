@@ -20,9 +20,6 @@ function htmlTemplatePlugin(): Plugin {
     ${cspMeta}
     <link rel="icon" type="image/webp" href="/logo.webp" />
     <link rel="apple-touch-icon" href="/logo.webp" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <title>ApplyWizz Greenhouse Operator Dashboard</title>
     <link rel="stylesheet" href="/dashboard.css" />
     <link rel="stylesheet" href="/tokens.css" />
@@ -46,9 +43,6 @@ function htmlTemplatePlugin(): Plugin {
     ${cspMeta}
     <link rel="icon" type="image/webp" href="/logo.webp" />
     <link rel="apple-touch-icon" href="/logo.webp" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <title>Apply Wizz — Admin</title>
     <link rel="stylesheet" href="/dashboard.css" />
     <link rel="stylesheet" href="/tokens.css" />
@@ -72,9 +66,6 @@ function htmlTemplatePlugin(): Plugin {
     ${cspMeta}
     <link rel="icon" type="image/webp" href="/logo.webp" />
     <link rel="apple-touch-icon" href="/logo.webp" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <title>Apply Wizz — Dev</title>
     <link rel="stylesheet" href="/dashboard.css" />
     <link rel="stylesheet" href="/tokens.css" />
@@ -98,9 +89,6 @@ function htmlTemplatePlugin(): Plugin {
     ${cspMeta}
     <link rel="icon" type="image/webp" href="/logo.webp" />
     <link rel="apple-touch-icon" href="/logo.webp" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <title>Apply Wizz — Manager</title>
     <link rel="stylesheet" href="/dashboard.css" />
     <link rel="stylesheet" href="/tokens.css" />

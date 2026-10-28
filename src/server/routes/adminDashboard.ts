@@ -7,9 +7,6 @@ import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
   getRequiredFieldFailuresByCA,
-  
-  
-
   getISTDateRangeUtc,
   type ApplicationStatus,
 } from '../../db/applications.js';
@@ -189,13 +186,15 @@ function parseLimit(value: unknown, fallback = 100): number {
 
 adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const parsedRange = parseDashboardStatsRange(_req.query as Record<string, unknown>);
+    const rawDate = typeof _req.query.date === 'string' ? _req.query.date.trim() : '';
+    const isLifetime = rawDate === 'lifetime' || rawDate === 'all-time';
+    const query = isLifetime ? { ..._req.query, range: 'lifetime' } : (_req.query as Record<string, unknown>);
+    const parsedRange = parseDashboardStatsRange(query);
     if ('error' in parsedRange) {
       res.status(400).json({ error: parsedRange.error });
       return;
     }
     const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
-    
 
     const directory = await listAuthDirectory();
     const operators = directory.filter((user) => user.role === 'operator');
@@ -207,11 +206,8 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       }),
       countApplicationsByStatus('QUEUED', createdAtRange),
       countApplicationsByStatus('APPLYING', createdAtRange),
-
       listAuditEvents({ limit: 15 }),
     ]);
-
-
 
     res.json({
       operators: operators.length,
@@ -226,15 +222,6 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       statsAvailable: stats.available,
       statsPartial: stats.partial,
       statsAvailableFrom: stats.availableFrom,
-
-
-
-
-
-
-
-
-
       recentActivity: audit.events,
       warning: audit.warning,
       dateRange: serializeDateRange(parsedRange),
@@ -247,9 +234,11 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
 });
 
 adminDashboardRouter.get('/managers', async (req: Request, res: Response): Promise<void> => {
-  const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-    ? req.query.date
-    : getISTDateString();
+  const rawDate = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+  const isLifetime = rawDate === 'lifetime' || rawDate === 'all-time';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+    ? rawDate
+    : (isLifetime ? 'lifetime' : getISTDateString());
   try {
     const directory = await listAuthDirectory();
     const byEmail = new Map(directory.map((user) => [user.email, user]));
@@ -292,24 +281,27 @@ adminDashboardRouter.get('/managers/:email/dashboard', async (req: Request, res:
     res.status(400).json({ error: 'A valid manager email is required.' });
     return;
   }
-  const requestedDate = typeof req.query.date === 'string' ? req.query.date : undefined;
-  if (requestedDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+  const requestedDate = typeof req.query.date === 'string' ? req.query.date.trim() : undefined;
+  const isLifetime = requestedDate === 'lifetime' || requestedDate === 'all-time';
+  if (requestedDate !== undefined && !isLifetime && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
     res.status(400).json({ error: 'date must use YYYY-MM-DD format.' });
     return;
   }
   const requestedCa = typeof req.query.ca === 'string' ? req.query.ca.trim() : 'all';
   try {
     const hasStatsRange = typeof req.query.range === 'string' || typeof req.query.from === 'string' || typeof req.query.to === 'string';
-    const parsedRange = !hasStatsRange && requestedDate
-      ? { ...getISTDateRangeUtc(requestedDate), preset: 'custom' as const, fromDate: requestedDate, toDate: requestedDate, label: requestedDate }
-      : parseDashboardStatsRange(req.query as Record<string, unknown>);
+    const parsedRange = isLifetime
+      ? parseDashboardStatsRange({ ...req.query, range: 'lifetime' })
+      : !hasStatsRange && requestedDate
+        ? { ...getISTDateRangeUtc(requestedDate), preset: 'custom' as const, fromDate: requestedDate, toDate: requestedDate, label: requestedDate }
+        : parseDashboardStatsRange(req.query as Record<string, unknown>);
     if ('error' in parsedRange) {
       res.status(400).json({ error: parsedRange.error });
       return;
     }
     const payload = await loadClientDashboard({
       managerEmail: email,
-      date: requestedDate,
+      date: isLifetime ? 'lifetime' : requestedDate,
       createdAtRange: { startIso: parsedRange.startIso, endIso: parsedRange.endIso },
       dateRangeMeta: serializeDateRange(parsedRange),
       ca: requestedCa,
@@ -325,9 +317,11 @@ adminDashboardRouter.get('/operators', async (req: Request, res: Response): Prom
   const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : '';
   const status = typeof req.query.status === 'string' ? req.query.status.trim().toLowerCase() : 'all';
   const managerEmail = typeof req.query.manager === 'string' ? req.query.manager.trim().toLowerCase() : '';
-  const date = typeof req.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
-    ? req.query.date
-    : getISTDateString();
+  const rawDate = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+  const isLifetime = rawDate === 'lifetime' || rawDate === 'all-time';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+    ? rawDate
+    : (isLifetime ? 'lifetime' : getISTDateString());
 
   try {
     const directory = await listAuthDirectory();
@@ -385,7 +379,8 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
     return;
   }
   const date = typeof req.query.date === 'string' ? req.query.date.trim() : '';
-  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  const isLifetime = date === 'lifetime' || date === 'all-time';
+  if (date && !isLifetime && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     res.status(400).json({ error: 'date must use YYYY-MM-DD format.' });
     return;
   }
@@ -399,25 +394,35 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
       return;
     }
 
+    const searchStr = typeof search === 'string' ? search.trim().replace(/[%_,()]/g, '') : '';
+
     let query = getDbClient()
       .from('gh_candidate_applications')
-      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, proof_web_url, proof_email_url, proof_email_json, proof_captured_at, profiles(client_name, ca_email)', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, proof_web_url, proof_email_url, proof_email_json, proof_captured_at, profiles(client_name, ca_email)', { count: 'exact' });
+
     if (status) {
       query = query.eq('status', status);
     } else {
       query = query.neq('status', 'FILTERED_OUT');
     }
 
-    if (date) {
+    if (date && !isLifetime) {
       const { startIso, endIso } = getISTDateRangeUtc(date);
       query = query.gte('created_at', startIso).lt('created_at', endIso);
     }
+
+    if (searchStr) {
+      query = query.or(`company_name.ilike.%${searchStr}%,job_title.ilike.%${searchStr}%,applywizz_id.ilike.%${searchStr}%,assigned_ca_email.ilike.%${searchStr}%`);
+    }
+
+    query = query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
     const { data, error, count } = await query;
     if (error) throw error;
 
-    let rows = (data || []).map((row: any) => {
+    const rows = (data || []).map((row: any) => {
       const candidateName = row.profiles?.client_name || row.applywizz_id || '';
       const caEmail = row.assigned_ca_email || row.profiles?.ca_email || '';
       return {
@@ -445,13 +450,6 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
         proof_captured_at: row.proof_captured_at || null,
       };
     });
-    if (search) {
-      rows = rows.filter((row) =>
-        [row.client, row.applywizzId, row.companyName, row.jobTitle, row.operator, row.jobUrl]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(search))
-      );
-    }
 
     res.json({ applications: rows, total: count ?? rows.length, limit, offset });
   } catch (error) {

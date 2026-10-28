@@ -19,6 +19,41 @@ export interface ServiceProbe {
   lastError?: string;
 }
 
+export interface HealthSnapshot {
+  generatedAt: string;
+  probes: ServiceProbe[];
+  queue: {
+    queued: number;
+    applying: number;
+    failed: number;
+    applied: number;
+    otpRequired: number;
+    emailProofPending: number;
+    stuck: number;
+  };
+  workers: ReturnType<NonNullable<ReturnType<typeof getQueueDaemon>>['getSnapshot']> | {
+    running: boolean;
+    workerCount: number;
+    idleCount: number;
+    pendingAssignments: number;
+    inFlightCount: number;
+    inFlightIds: string[];
+    laneLengths: number[];
+    enabled: boolean;
+    replicaCount?: number;
+  };
+  ingest: ReturnType<typeof getIngestRun>;
+}
+
+let cachedSnapshot: HealthSnapshot | null = null;
+let lastCheckTime = 0;
+const CACHE_TTL_MS = 10000; // 10 seconds
+
+export function clearHealthSnapshotCache(): void {
+  cachedSnapshot = null;
+  lastCheckTime = 0;
+}
+
 async function pingUrl(url: string, timeoutMs = 5000): Promise<{ ok: boolean; status?: number; responseMs: number; error?: string }> {
   const started = Date.now();
   try {
@@ -48,117 +83,129 @@ function applywizzProbeStatus(ping: { status?: number; error?: string }): {
   return { status: 'error', detail: ping.error || (code ? `HTTP ${code}` : 'request failed') };
 }
 
-export async function collectHealthSnapshot(): Promise<{
-  generatedAt: string;
-  probes: ServiceProbe[];
-  queue: {
-    queued: number;
-    applying: number;
-    failed: number;
-    applied: number;
-    otpRequired: number;
-    emailProofPending: number;
-    stuck: number;
-  };
-  workers: ReturnType<NonNullable<ReturnType<typeof getQueueDaemon>>['getSnapshot']> | {
-    running: false;
-    workerCount: number;
-    idleCount: number;
-    pendingAssignments: number;
-    inFlightCount: number;
-    inFlightIds: string[];
-    laneLengths: number[];
-    enabled: boolean;
-  };
-  ingest: ReturnType<typeof getIngestRun>;
-}> {
-  const probes: ServiceProbe[] = [];
-
+async function probeDb(): Promise<ServiceProbe> {
   if (!isSupabaseConfigured()) {
-    probes.push({ name: 'database', status: 'not_configured', detail: 'SUPABASE_URL / service key missing.' });
-    probes.push({ name: 'storage', status: 'not_configured', detail: 'Supabase Storage not configured.' });
-  } else {
-    const dbStarted = Date.now();
-    try {
-      const { error } = await getDbClient().from('profiles').select('id').limit(1);
-      probes.push({
-        name: 'database',
-        status: error ? 'error' : 'ok',
-        detail: error ? error.message : 'profiles reachable',
-        responseMs: Date.now() - dbStarted,
-        lastError: error?.message,
-      });
-    } catch (err: any) {
-      probes.push({
-        name: 'database',
-        status: 'error',
-        detail: err?.message || 'database probe failed',
-        responseMs: Date.now() - dbStarted,
-        lastError: err?.message,
-      });
-    }
-
-    const storageStarted = Date.now();
-    try {
-      const { error } = await getDbClient().storage.from(CSV_UPLOADS_BUCKET).list('', { limit: 1 });
-      probes.push({
-        name: 'storage',
-        status: error ? 'error' : 'ok',
-        detail: error ? error.message : `${CSV_UPLOADS_BUCKET} list ok`,
-        responseMs: Date.now() - storageStarted,
-        lastError: error?.message,
-      });
-    } catch (err: any) {
-      probes.push({
-        name: 'storage',
-        status: 'error',
-        detail: err?.message || 'storage probe failed',
-        responseMs: Date.now() - storageStarted,
-        lastError: err?.message,
-      });
-    }
+    return { name: 'database', status: 'not_configured', detail: 'SUPABASE_URL / service key missing.' };
   }
+  const dbStarted = Date.now();
+  try {
+    const { error } = await getDbClient().from('profiles').select('id').limit(1);
+    return {
+      name: 'database',
+      status: error ? 'error' : 'ok',
+      detail: error ? error.message : 'profiles reachable',
+      responseMs: Date.now() - dbStarted,
+      lastError: error?.message,
+    };
+  } catch (err: any) {
+    return {
+      name: 'database',
+      status: 'error',
+      detail: err?.message || 'database probe failed',
+      responseMs: Date.now() - dbStarted,
+      lastError: err?.message,
+    };
+  }
+}
 
-  probes.push({
-    name: 'email_otp',
-    status: isAzureEmailConfigured() ? 'ok' : 'not_configured',
-    detail: isAzureEmailConfigured() ? 'Azure / M365 sender configured' : 'Azure email env vars missing',
-  });
+async function probeStorage(): Promise<ServiceProbe> {
+  if (!isSupabaseConfigured()) {
+    return { name: 'storage', status: 'not_configured', detail: 'Supabase Storage not configured.' };
+  }
+  const storageStarted = Date.now();
+  try {
+    const { error } = await getDbClient().storage.from(CSV_UPLOADS_BUCKET).list('', { limit: 1 });
+    return {
+      name: 'storage',
+      status: error ? 'error' : 'ok',
+      detail: error ? error.message : `${CSV_UPLOADS_BUCKET} list ok`,
+      responseMs: Date.now() - storageStarted,
+      lastError: error?.message,
+    };
+  } catch (err: any) {
+    return {
+      name: 'storage',
+      status: 'error',
+      detail: err?.message || 'storage probe failed',
+      responseMs: Date.now() - storageStarted,
+      lastError: err?.message,
+    };
+  }
+}
 
+async function probeZoho(): Promise<ServiceProbe> {
   const zohoUrl = (config.ZOHO_CONNECTOR_URL || '').trim();
   if (!zohoUrl) {
-    probes.push({ name: 'zoho', status: 'not_configured', detail: 'ZOHO_CONNECTOR_URL missing' });
-  } else {
-    const zoho = await pingUrl(zohoUrl);
-    probes.push({
-      name: 'zoho',
-      status: zoho.ok ? 'ok' : 'error',
-      detail: zoho.ok ? `HTTP ${zoho.status}` : zoho.error || `HTTP ${zoho.status}`,
-      responseMs: zoho.responseMs,
-      lastError: zoho.error,
-    });
+    return { name: 'zoho', status: 'not_configured', detail: 'ZOHO_CONNECTOR_URL missing' };
   }
+  const zoho = await pingUrl(zohoUrl);
+  return {
+    name: 'zoho',
+    status: zoho.ok ? 'ok' : 'error',
+    detail: zoho.ok ? `HTTP ${zoho.status}` : zoho.error || `HTTP ${zoho.status}`,
+    responseMs: zoho.responseMs,
+    lastError: zoho.error,
+  };
+}
 
+async function probeApplywizz(): Promise<ServiceProbe> {
   try {
     const applywizzUrl = new URL(config.APPLYWIZZ_API_URL);
     applywizzUrl.search = '';
     const applywizz = await pingUrl(applywizzUrl.toString());
     const judged = applywizzProbeStatus(applywizz);
-    probes.push({
+    return {
       name: 'applywizz',
       status: judged.status,
       detail: judged.detail,
       responseMs: applywizz.responseMs,
       lastError: judged.status === 'error' ? applywizz.error : undefined,
-    });
+    };
   } catch (err: any) {
-    probes.push({
+    return {
       name: 'applywizz',
       status: 'error',
       detail: err?.message || 'APPLYWIZZ_API_URL invalid',
       lastError: err?.message,
-    });
+    };
   }
+}
+
+export async function collectHealthSnapshot(): Promise<HealthSnapshot> {
+  if (cachedSnapshot && Date.now() - lastCheckTime < CACHE_TTL_MS) {
+    return cachedSnapshot;
+  }
+
+  const [dbRes, storageRes, zohoRes, applywizzRes] = await Promise.allSettled([
+    probeDb(),
+    probeStorage(),
+    probeZoho(),
+    probeApplywizz(),
+  ]);
+
+  const extractProbe = (res: PromiseSettledResult<ServiceProbe>, fallbackName: string): ServiceProbe => {
+    if (res.status === 'fulfilled') {
+      return res.value;
+    }
+    return {
+      name: fallbackName,
+      status: 'error',
+      detail: res.reason?.message || `${fallbackName} probe failed`,
+      lastError: res.reason?.message,
+    };
+  };
+
+  const probes: ServiceProbe[] = [
+    extractProbe(dbRes, 'database'),
+    extractProbe(storageRes, 'storage'),
+    {
+      name: 'email_otp',
+      status: isAzureEmailConfigured() ? 'ok' : 'not_configured',
+      detail: isAzureEmailConfigured() ? 'Azure / M365 sender configured' : 'Azure email env vars missing',
+    },
+    extractProbe(zohoRes, 'zoho'),
+    extractProbe(applywizzRes, 'applywizz'),
+  ];
 
   const [queued, applying, failed, applied, otpRequired, emailProofPending] = await Promise.all([
     countApplicationsByStatus('QUEUED'),
@@ -248,14 +295,20 @@ export async function collectHealthSnapshot(): Promise<{
     detail: 'process up',
   });
 
-  return {
+  const snapshot: HealthSnapshot = {
     generatedAt: new Date().toISOString(),
     probes,
     queue: { queued, applying, failed, applied, otpRequired, emailProofPending, stuck },
     workers,
     ingest: getIngestRun(),
   };
+
+  cachedSnapshot = snapshot;
+  lastCheckTime = Date.now();
+  return snapshot;
 }
+
+export const getSystemHealthSnapshot = collectHealthSnapshot;
 
 export function trafficLights(probes: ServiceProbe[]): Record<string, ProbeStatus> {
   return Object.fromEntries(probes.map((probe) => [probe.name, probe.status]));

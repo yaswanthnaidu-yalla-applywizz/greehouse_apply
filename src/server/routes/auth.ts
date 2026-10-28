@@ -16,8 +16,8 @@ import { getDbClient, getSupabaseServerApiKey, isSupabaseConfigured } from '../.
 import { config } from '../../config/env.js';
 import { sendOtpEmail } from '../../services/azureEmail.js';
 import { checkOtpCooldown, generateAndStoreOtp, verifyStoredOtp } from '../../services/otpStore.js';
-import { fetchAllowedCandidates, getYesterdayIST } from '../../services/workHistoryClient.js';
-import { hydrateAdminProfilesFromWorkHistory } from '../../services/adminProfileHydrate.js';
+import { fetchAllowedCandidates } from '../../services/workHistoryClient.js';
+
 import { setCachedWorkHistory } from '../workHistoryCache.js';
 import { createLogger } from '../../utils/logger.js';
 import { insertAuditEvent } from '../../db/events.js';
@@ -1043,48 +1043,6 @@ authRouter.post('/mfa/verify', async (req: Request, res: Response): Promise<void
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'MFA verification failed.' });
-  }
-});
-
-/**
- * POST /api/auth/hydrate-admin
- * Awaits org-wide work-history fetch and upserts profiles (admin session restore / dashboard gate).
- */
-authRouter.post('/hydrate-admin', async (req: Request, res: Response): Promise<void> => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing Authorization header.' });
-    return;
-  }
-
-  const token = authHeader.split(' ')[1];
-
-  try {
-    if (!isSupabaseConfigured()) {
-      res.status(500).json({ error: 'Supabase is not configured on the server.' });
-      return;
-    }
-
-    const supabase = getDbClient();
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
-      res.status(401).json({ error: 'Invalid or expired session token.' });
-      return;
-    }
-
-    if (!isUserAdmin(data.user)) {
-      res.status(403).json({ error: 'Admin access required.' });
-      return;
-    }
-
-    const bodyDate = typeof req.body?.date === 'string' ? req.body.date.trim() : '';
-    const dateStr =
-      /^\d{4}-\d{2}-\d{2}$/.test(bodyDate) ? bodyDate : getYesterdayIST();
-
-    const hydratedCount = await hydrateAdminProfilesFromWorkHistory(dateStr);
-    res.json({ success: true, hydratedCount, date: dateStr });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Admin hydration failed.' });
   }
 });
 

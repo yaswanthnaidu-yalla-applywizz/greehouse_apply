@@ -182,7 +182,7 @@ export async function fillAshbyForm(
     await sleep(250, 500);
 
     // 1. Yes/No Button Toggle
-    const yesNoContainer = container.locator('.ashby-application-form-input-yesno, button[data-option]').first();
+    const yesNoContainer = container.locator('.ashby-application-form-input-yesno, .ashby-application-form-input-yesno-option, button[data-option], button:has-text("Yes")').first();
     if ((await yesNoContainer.count()) > 0) {
       const optVal = answer.toLowerCase() === 'yes' ? 'yes' : 'no';
       const btn = container.locator(`button[data-option="${optVal}"], button:has-text("${answer}")`).first();

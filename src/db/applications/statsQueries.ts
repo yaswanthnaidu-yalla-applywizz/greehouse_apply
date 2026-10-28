@@ -260,6 +260,10 @@ export async function getSubmissionOutcomeCounts(options?: {
   successfulApplications: number;
   failedApplications: number;
 }> {
+  if (options?.allowedCandidateIds !== undefined && options.allowedCandidateIds.length === 0) {
+    return { successfulApplications: 0, failedApplications: 0 };
+  }
+
   const allowedSet = options?.allowedCandidateIds && options.allowedCandidateIds.length > 0
     ? new Set(options.allowedCandidateIds.map((id) => id.toUpperCase()))
     : null;
@@ -348,6 +352,18 @@ export async function getDashboardApplicationMetrics(options?: {
   aiTaggedCount: number;
   resumeTaggedCount: number;
 }> {
+  if (options?.allowedCandidateIds !== undefined && options.allowedCandidateIds.length === 0) {
+    return {
+      totalApplications: 0,
+      totalCandidates: 0,
+      uniqueScannedJobs: 0,
+      totalFieldsPopulated: 0,
+      supabaseTaggedCount: 0,
+      aiTaggedCount: 0,
+      resumeTaggedCount: 0,
+    };
+  }
+
   const allowedSet =
     options?.allowedCandidateIds && options.allowedCandidateIds.length > 0
       ? new Set(options.allowedCandidateIds.map((id) => id.toUpperCase()))

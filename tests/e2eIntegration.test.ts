@@ -26,6 +26,7 @@ import {
   updateStatus,
   setProofUrl,
   setDryRunScreenshotUrl,
+  type ApplicationRow,
 } from '../src/db/applications.js';
 import { generateFingerprint } from '../src/resolver/fingerprint.js';
 import { AnswerResolver } from '../src/resolver/answerResolver.js';
@@ -243,14 +244,21 @@ async function runE2EIntegrationTestSuite() {
     const resolvedApp = resolvedApplications[0];
     const emailField = resolvedApp.resolvedFields.find((f) => f.fieldId === 'email');
     const expectedEmail = emailField?.value;
-    assert(!!expectedEmail, `Tier 1 resolved email: "${expectedEmail}"`);
-    assert(emailField?.source === 'supabase', 'Tier 1 tagged source: "supabase"');
-    assert(emailField?.resolvedByTier === 1, 'Tier 1 resolvedByTier === 1');
+    assert(!!expectedEmail, `Tier 4 profile-fact resolved email: "${expectedEmail}"`);
+    assert(emailField?.source === 'supabase', 'Tier 4 tagged source: "supabase" (resolved via profile facts)');
+    assert(emailField?.resolvedByTier === 1 || emailField?.resolvedByTier === 4, 'Tier 4 resolvedByTier === 4 (profile-fact matching)');
 
     // Verify application in Supabase / Local storage
     const dbApp = await getApplicationByCandidateAndJob(candidateId, testJobUrl);
     assert(dbApp !== null, 'Resolved application persisted to candidate_applications table');
     assert(dbApp?.status === 'READY_FOR_REVIEW', 'Application initializes in READY_FOR_REVIEW');
+
+    const appRef: ApplicationRow = {
+      ...dbApp!,
+      id: dbApp!.id,
+      applywizz_id: candidateId,
+      job_url: testJobUrl,
+    };
 
     // =========================================================================
     // Checkpoint 4: Zero Duplicate API Calls on 2nd Run
@@ -299,7 +307,7 @@ async function runE2EIntegrationTestSuite() {
       resolved_fields: [
         { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name', value: 'John', source: 'supabase', resolvedByTier: 1, confidence: 1 },
         { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name', value: 'Doe', source: 'supabase', resolvedByTier: 1, confidence: 1 },
-        { fieldId: 'email', name: 'email', type: 'text', label: 'Email', value: expectedEmail || 'john.doe@example.com', source: 'supabase', resolvedByTier: 1, confidence: 1 },
+        { fieldId: 'email', name: 'email', type: 'text', label: 'Email', value: expectedEmail || 'john.doe@example.com', source: 'supabase', resolvedByTier: 4, confidence: 1 },
         { fieldId: 'years_experience', name: 'years_experience', type: 'text', label: 'Years of Experience', value: '8 years', source: 'manual', resolvedByTier: 1, confidence: 1 },
       ],
     }, { minJitterMs: 50, maxJitterMs: 100 });
@@ -307,7 +315,7 @@ async function runE2EIntegrationTestSuite() {
     assert(fillResult.filledFields === 4, 'Dry-run filled all 4 form fields');
     const dryRunBuf = await dryRunPage.screenshot({ fullPage: true, type: 'png' });
     const dryRunUrl = await uploadDryRunScreenshot(dbApp!.id!, dryRunBuf);
-    await setDryRunScreenshotUrl(dbApp!.id!, dryRunUrl);
+    await setDryRunScreenshotUrl(appRef, dryRunUrl);
     await updateStatus(dbApp!.id!, 'DRY_RUN_COMPLETE');
 
     const dryRunDbApp = await getApplication(dbApp!.id!);
@@ -334,7 +342,7 @@ async function runE2EIntegrationTestSuite() {
     assert(verification.verified === true, 'Submission confirmation signals verified');
 
     // Capture web proof
-    const proof = await captureWebProof(submitPage, dbApp!.id!);
+    const proof = await captureWebProof(submitPage, appRef);
     assert(typeof proof.proofWebUrl === 'string' && proof.proofWebUrl.length > 0, 'captureWebProof uploaded web proof screenshot');
     assert(proof.proofWebUrl.includes('proofs_web') || proof.proofWebUrl.includes('proofs'), 'Proof stored in proofs storage');
 

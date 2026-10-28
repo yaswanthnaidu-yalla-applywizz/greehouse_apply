@@ -10,6 +10,7 @@ import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
   applyCreatedAtRangeFilter,
   listApplications,
+  memoryApplications,
   rowCreatedAtInRange,
   type ApplicationRow,
   type ApplicationStatus,
@@ -731,17 +732,48 @@ managerRouter.get('/queue', async (req: Request, res: Response): Promise<void> =
 
   try {
     const scoped = await scopedApplywizzIds(req);
-    const filter = (rows: ApplicationRow[]) =>
-      rows.filter((row) => inScope(row, scoped.ids)).map(serializeManagerApplication);
-    const [queued, applying, otpRequired] = await Promise.all([
-      listApplications({ status: 'QUEUED' }),
-      listApplications({ status: 'APPLYING' }),
-      listApplications({ status: 'OTP_REQUIRED' }),
-    ]);
+    if (scoped.ids && scoped.ids.length === 0) {
+      res.json({
+        queued: [],
+        applying: [],
+        otpRequired: [],
+        warning: scoped.warning || 'No clients linked to this manager.',
+      });
+      return;
+    }
+
+    let rows: any[] = [];
+    if (isSupabaseConfigured()) {
+      let query = getDbClient()
+        .from('gh_candidate_applications')
+        .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at')
+        .in('status', ['QUEUED', 'APPLYING', 'OTP_REQUIRED'])
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (scoped.ids && scoped.ids.length > 0) {
+        query = query.in('applywizz_id', scoped.ids);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      rows = (data || []).map((row) => serializeManagerApplication(row as ApplicationRow));
+    } else {
+      // fallback for offline/local
+      const all = Array.from(new Set(memoryApplications.values()));
+      rows = all
+        .filter((row) => ['QUEUED', 'APPLYING', 'OTP_REQUIRED'].includes(row.status) && inScope(row, scoped.ids))
+        .map(serializeManagerApplication);
+    }
+
+    const queued = rows.filter((r) => r.status === 'QUEUED');
+    const applying = rows.filter((r) => r.status === 'APPLYING');
+    const otpRequired = rows.filter((r) => r.status === 'OTP_REQUIRED');
+
     res.json({
-      queued: filter(queued),
-      applying: filter(applying),
-      otpRequired: filter(otpRequired),
+      queued,
+      applying,
+      otpRequired,
       warning: scoped.warning,
     });
   } catch (error) {
