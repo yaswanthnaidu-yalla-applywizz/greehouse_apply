@@ -338,10 +338,10 @@ export const AdminDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['admin']);
 
   const [tab, setTab] = useState<'overview' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'>('overview');
-  const [date, setDate] = useState<string>(getTodayIST);
-  const [dateMode, setDateMode] = useState<'today' | 'lifetime' | 'custom'>('today');
-  const [customDate, setCustomDate] = useState<string>(getTodayIST);
-  const [statsRange, setStatsRange] = useState<'day' | 'lifetime'>('day');
+  const [dateMode, setDateMode] = useState<'today' | 'week' | 'month' | 'lifetime' | 'custom'>('today');
+  const [customFrom, setCustomFrom] = useState<string>(getTodayIST);
+  const [customTo, setCustomTo] = useState<string>(getTodayIST);
+  const date = dateMode === 'lifetime' ? 'lifetime' : (dateMode === 'custom' ? customFrom : getTodayIST());
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [managers, setManagers] = useState<AdminManager[]>([]);
   const [selectedManager, setSelectedManager] = useState<string | null>(null);
@@ -479,10 +479,11 @@ export const AdminDashboard: React.FC = () => {
     setError('');
     try {
       if (tab === 'overview') {
-        const range = date === 'lifetime' ? 'lifetime' : (dateMode === 'custom' ? 'custom' : statsRange);
-        const query = range === 'custom'
-          ? `range=custom&from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`
-          : `range=${range}`;
+        let query = 'range=day';
+        if (dateMode === 'week') query = 'range=week';
+        else if (dateMode === 'month') query = 'range=month';
+        else if (dateMode === 'lifetime') query = 'range=lifetime';
+        else if (dateMode === 'custom') query = `range=custom&from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`;
         const payload = await loadJson<AdminOverview>(`/api/admin/overview?${query}`);
         setOverview(payload);
       }
@@ -525,7 +526,7 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, date, statsRange, dateMode, token, isAuthorized, opSearch, opStatus, opManager, appSearch, appStatus, loadJson]);
+  }, [tab, date, dateMode, customFrom, customTo, token, isAuthorized, opSearch, opStatus, opManager, appSearch, appStatus, loadJson]);
 
   useEffect(() => {
     void refresh();
@@ -663,37 +664,52 @@ export const AdminDashboard: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-2 items-end">
             <DevSwitcher current="/admin" />
-            {dateMode === 'custom' && (
-              <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Custom Date
-                <input type="date" value={customDate} onChange={(e) => { setCustomDate(e.target.value); setDate(e.target.value); }} className="block mt-1 border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-sm font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]" />
-              </label>
-            )}
-            <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Date
-              <div className="mt-1 flex gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
-                {(['today', 'lifetime', 'custom'] as const).map((mode) => (
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Cohort Range
+              <div className="mt-1 flex flex-wrap gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
+                {([
+                  { id: 'today', label: 'Today' },
+                  { id: 'week', label: 'This Week' },
+                  { id: 'month', label: 'This Month' },
+                  { id: 'lifetime', label: 'Lifetime' },
+                  { id: 'custom', label: 'Custom' },
+                ] as const).map((r) => (
                   <button
-                    key={mode}
+                    key={r.id}
                     type="button"
                     onClick={() => {
-                      setDateMode(mode);
-                      if (mode === 'today') {
-                        setDate(getTodayIST());
-                        setStatsRange('day');
-                      } else if (mode === 'lifetime') {
-                        setDate('lifetime');
-                        setStatsRange('lifetime');
-                      } else {
-                        setDate(customDate);
-                        setStatsRange('day');
-                      }
+                      setDateMode(r.id);
                     }}
-                    className={`rounded-md px-2.5 py-1 text-xs transition-colors ${dateMode === mode ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}
+                    className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                      dateMode === r.id
+                        ? 'bg-[#2c2c2e] text-white font-bold'
+                        : 'text-[#8e8e93] hover:text-white'
+                    }`}
                   >
-                    {mode === 'today' ? 'Today' : mode === 'lifetime' ? 'Lifetime' : 'Custom Date'}
+                    {r.label}
                   </button>
                 ))}
               </div>
             </div>
+            {dateMode === 'custom' && (
+              <div className="flex items-end gap-1">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">From
+                  <input
+                    type="date"
+                    value={customFrom}
+                    onChange={(e) => setCustomFrom(e.target.value)}
+                    className="block mt-1 border border-[#3a3a3c] rounded-lg px-2 py-1 text-xs font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]"
+                  />
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">To
+                  <input
+                    type="date"
+                    value={customTo}
+                    onChange={(e) => setCustomTo(e.target.value)}
+                    className="block mt-1 border border-[#3a3a3c] rounded-lg px-2 py-1 text-xs font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]"
+                  />
+                </label>
+              </div>
+            )}
             <button type="button" onClick={() => void refresh()} className="bg-[#2c2c2e] border border-[#3a3a3c] px-3 py-1.5 text-xs font-semibold rounded-lg text-white hover:bg-[#3a3a3c] transition-colors">Refresh</button>
             <HeaderSignOut onSignOut={signOut} />
           </div>

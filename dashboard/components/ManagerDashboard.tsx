@@ -355,7 +355,7 @@ export const ManagerDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['manager']);
 
   const [tab, setTab] = useState<'home' | 'operators' | 'activity' | 'reports' | 'guide'>('home');
-  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'lifetime' | 'custom'>('day');
+  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'week' | 'month' | 'lifetime' | 'custom'>('day');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const today = getTodayIST();
     const d = new Date(`${today}T00:00:00+05:30`);
@@ -367,7 +367,13 @@ export const ManagerDashboard: React.FC = () => {
   const dateRangeLabel =
     dateFilterMode === 'custom' && customFrom && customTo
       ? (customFrom === customTo ? customFrom : `${customFrom} – ${customTo}`)
-      : dateFilterMode === 'lifetime' ? 'Lifetime' : 'Today';
+      : dateFilterMode === 'lifetime'
+      ? 'Lifetime'
+      : dateFilterMode === 'week'
+      ? 'This Week'
+      : dateFilterMode === 'month'
+      ? 'This Month'
+      : 'Today';
   const dateQuery =
     dateFilterMode === 'custom' && customFrom && customTo
       ? `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`
@@ -680,8 +686,15 @@ export const ManagerDashboard: React.FC = () => {
                 <span className="text-sm font-bold text-white">{dateRangeLabel}</span>
                 {dateFilterMode !== 'custom' ? (
                   <>
-                    {(['day', 'lifetime'] as const).map((range) => (
-                      <button key={range} type="button" className={`uppercase text-xs font-semibold ${dateFilterMode === range ? 'text-white underline font-bold' : 'text-[#8e8e93] hover:text-white'}`} onClick={() => setDateFilterMode(range)}>{range === 'day' ? 'Today' : 'Lifetime'}</button>
+                    {(['day', 'week', 'month', 'lifetime'] as const).map((range) => (
+                      <button
+                        key={range}
+                        type="button"
+                        className={`text-xs font-semibold ${dateFilterMode === range ? 'text-white underline font-bold' : 'text-[#8e8e93] hover:text-white'}`}
+                        onClick={() => setDateFilterMode(range)}
+                      >
+                        {range === 'day' ? 'Today' : range === 'week' ? 'This Week' : range === 'month' ? 'This Month' : 'Lifetime'}
+                      </button>
                     ))}
                     <button type="button" className="text-xs text-[#8e8e93] hover:text-white underline" onClick={() => setDateFilterMode('custom')}>Custom</button>
                   </>
