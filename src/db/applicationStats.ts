@@ -6,6 +6,9 @@ import {
   DashboardCreatedAtRange,
 } from '../server/dashboardDateRange.js';
 import { listOperatorEmailsForManager } from './users.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('ApplicationStats');
 
 export const APPLICATION_STATS_METRICS = ['total', 'submitted', 'applied', 'failed'] as const;
 export type ApplicationStatsMetric = (typeof APPLICATION_STATS_METRICS)[number];
@@ -408,32 +411,39 @@ export async function fetchApplicationCohortRows(options: {
 
   const rows: ApplicationCohortRow[] = [];
   const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
-    let query = getDbClient()
-      .from('gh_candidate_applications')
-      .select('id, applywizz_id, status, assigned_ca_email, created_at, first_attempted_at')
-      .gte('created_at', startIso);
+  try {
+    for (let from = 0; ; from += pageSize) {
+      let query = getDbClient()
+        .from('gh_candidate_applications')
+        .select('id, applywizz_id, status, assigned_ca_email, created_at, first_attempted_at')
+        .gte('created_at', startIso);
 
-    if (endIso) {
-      query = query.lt('created_at', endIso);
-    }
-
-    if (allowedCaEmails) {
-      if (allowedCaEmails.length === 1) {
-        query = query.eq('assigned_ca_email', allowedCaEmails[0]);
-      } else {
-        query = query.in('assigned_ca_email', allowedCaEmails);
+      if (endIso) {
+        query = query.lt('created_at', endIso);
       }
+
+      if (allowedCaEmails) {
+        if (allowedCaEmails.length === 1) {
+          query = query.eq('assigned_ca_email', allowedCaEmails[0]);
+        } else {
+          query = query.in('assigned_ca_email', allowedCaEmails);
+        }
+      }
+
+      const { data, error } = await query
+        .order('created_at', { ascending: true })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        log.warn(`[ApplicationStats] fetchApplicationCohortRows error: ${error.message}`);
+        break;
+      }
+      const page = (data || []) as ApplicationCohortRow[];
+      rows.push(...page);
+      if (page.length < pageSize) break;
     }
-
-    const { data, error } = await query
-      .order('created_at', { ascending: true })
-      .range(from, from + pageSize - 1);
-
-    if (error) throw new Error(`Unable to query cohort applications: ${error.message}`);
-    const page = (data || []) as ApplicationCohortRow[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
+  } catch (err: any) {
+    log.warn(`[ApplicationStats] fetchApplicationCohortRows exception: ${err?.message || err}`);
   }
 
   return rows;
