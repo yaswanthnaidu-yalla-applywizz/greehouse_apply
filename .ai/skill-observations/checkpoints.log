@@ -1,3 +1,25 @@
+2026-10-28 session-start scan: files=3 parsed=3 (executing dashboard performance and security plan via subagent-driven development)
+2026-10-28 session-checkpoint: completed all 16 tasks of 2026-10-28 dashboard performance and security plan; plugged empty-scope leak (0 rows returned when allowedCandidateIds is []), made upsertProfile merge-safe to protect demographic fields, hardened WebSocket server on /ws with JWT auth and candidate scoping, purged destructive admin profile hydration loop, added migration 039 idx_profiles_ca_email and transitioned operator scoping 100% to DB indexes, partitioned application DTOs into 16-scalar summaries and full review cards, pushed admin search into SQL before pagination, consolidated manager queue to single batched query, killed 2s badge and 3s proof polling loops, paced fallback poller to 15s/45s with visibility guard, stabilized WebSocket connection across tab selection, made CSV ingest poller adaptive to halt when idle, migrated notification dismissals to client localStorage, removed blocked Google Font requests from CSP, implemented [Today | Lifetime | Custom Date] contract, accelerated health probes with Promise.allSettled and 10s TTL caching; 100% tests pass (118/118 unit, 32/32 e2e), typecheck clean, production build clean; no new observations
+2026-10-28 session-checkpoint: synchronized DB 1 and DB 2 profiles tables; synced contact and demographic columns across 385 shared profiles to DB 2 while preserving DB 2 operational columns (zoho_connected, ca_email); resolved 3 new profiles (AWL-25695, AWL-32645, AWL-45425) via ApplyWizz API and resume parsing in both DB 2 and DB 1; verified 100% standard location formatting (0 non-standard) and 256 valid LinkedIn URLs across both databases; no new observations
+2026-10-28 session-checkpoint: applied targeted location resolutions (Cincinnati, Fort Wayne, Santa Clara, St. Louis, Owings Mills, Minneapolis, Detroit, New York City) across DB 1 profiles with 0 non-standard candidate locations remaining; set AWL-32573 phone to 9620404636 with +1 country code per user instruction; preserved AWL-29518 phone; no new observations
+2026-10-28 session-checkpoint: cleaned phone numbers in DB 1 profiles table (stripped country calling codes, normalized 30 numbers to national formats e.g. (xxx) xxx-xxxx or local 0xx format with 0 phones containing '+' prefix); updated AWL-11 to authentic client data (Rajkumar Bharath, rajkumarbharath7@gmail.com, (312) 868-2355, +1, Chicago, Illinois, United States); no new observations
+2026-10-28 session-checkpoint: backfilled DB 1 profiles table; mapped country to country_code (+1, +44, +353, +61, +91); extracted LinkedIn URLs from resumes and S3 PDF annotations across 139 target profiles (updated to 255 valid, 130 N/A, 0 NULL); backfilled phone, country, and normalized 100% of populated locations to 'City, State, Country' format; fetched missing candidate records via ApplyWizz API; no new observations
+2026-10-28 session-checkpoint: shipped and confirmed Ashby fix live (URL normalization to /application, submit button targeting, yes/no container matching); verified with live execution on Momentic (AWL-43089) — all 9 fields populated, submitted, green success banner confirmed, web proof uploaded, DB2 transitioned to APPLIED; 100% tests and typecheck pass; no new observations
+2026-10-28 session-checkpoint: executed headful Ashby submit debug run on Momentic (AWL-43089); failure screenshot verified root cause: 0 fields filled because ashbySubmit navigates to overview URL instead of /application; submit locator clicked 'Apply' tab switcher instead of 'Submit Application'; no new observations
+2026-10-28 session-checkpoint: created scripts/debugAshbySubmit.ts (headful Playwright Ashby submit prober with residential proxy, DB2 write, and full production pipeline fidelity); added npm run ashby:debug script; verified typecheck and tests pass (3/3); no new observations
+2026-10-28 session-checkpoint: shipped Ashby failure screenshot capture in ashbySubmit.ts & submitterPool.ts; verified full-page screenshot upload to proofs_failed bucket, DB persistence, and queue worker propagation; 100% tests pass (3/3 routing unit tests, 55 vitest suites) & typecheck clean; no new observations
+2026-10-28 session-checkpoint: analyzed plan for capturing Ashby failure screenshots in ashbySubmit.ts & submitterPool.ts and evaluated system impact; no new observations
+2026-10-28 session-checkpoint: answered user question on Ashby failure screenshots (No — ashbySubmit.ts catch block does not invoke page.screenshot or uploadProof); no new observations
+2026-10-28 session-checkpoint: checked Ashby submission totals in DB2 (40 attempted/submitted, 40 failed, 0 succeeded, 30 READY_FOR_REVIEW, 6 FILTERED_OUT out of 76 total); no new observations
+2026-10-28 session-checkpoint: investigated 42 failed applications from 2026-10-27 in DB2 (39 Ashby confirmation timeouts across Sodalis/Cheiron/Momentic; 3 Greenhouse Parsec OTP failures — 1 OTP timeout with verified challenge screenshot, 2 mailbox not configured); noted missing failure screenshot capture in ashbySubmit.ts; no new observations
+2026-10-28 session-start scan: files=2 parsed=2 (investigating failed applications from 2026-10-27 via postgres-db2 MCP, failure reasons, ats types, screenshots)
+2026-10-27 session-checkpoint: completed fresh /rsift technical appraisal; generated complete self-contained evidence report (report.html), facts.json, scores.json, assessment.json, logs, and screenshots in rsift-report/ at root; verified 0 audit vulnerabilities and 100% test pass rate (118 unit + 32/32 e2e); no new observations
+2026-10-27 session-checkpoint: resolved all 10 dependency vulnerabilities; npm audit is 0 vulnerabilities; uninstalled unused openai package, upgraded zod to ^4.6.7, patched proxy-addr/vite/body-parser/qs/express/source-map-js/postcss-selector-parser; verified 100% pass across typecheck, build, test:unit (118/118), and test:e2e (32/32); no new observations
+2026-10-27 session-checkpoint: completed /rsift technical appraisal; generated complete self-contained evidence report (report.html), facts.json, scores.json, assessment.json, logs, and screenshots in rsift-report/ at root; verified 32/32 e2e checkpoints pass; no new observations
+2026-10-27 session-start scan: files=3 parsed=3 (executing rsift repository appraisal with output in root)
+2026-10-27 session-checkpoint: aligned tests/e2eIntegration.test.ts expectations for Tier 4 profile-fact email matching and complete composite application reference persistence; verified 100% pass across e2e, unit, vitest, and typecheck; no new observations
+2026-10-27 session-start scan: files=3 parsed=3 (updating tests/e2eIntegration.test.ts assertions for forced memory adapter and tier 4 email)
+2026-10-27 session-checkpoint: installed rsift (codebase review) skill globally to ~/.gemini/config/skills/rsift and ~/.gemini/antigravity-cli/skills/rsift; verified SKILL.md and python syntax; no new observations
 2026-10-27 session-start scan: files=2 parsed=2 (investigating railway ingest service logs and tier 3 answering failure)
 2026-10-27 session-checkpoint: completed native TDD implementation for strict Anthropic Claude Tier 5 resolution & exclusive OpenRouter Tier 3 embeddings; 100% tests and typecheck clean; no new observations
 2026-10-27 session-start scan: files=2 parsed=2 (investigating resolver LLM synthesizer & batch resolver to enforce Anthropic Claude API key)
@@ -70,6 +92,8 @@
 2026-09-15 session-start scan: files=8 parsed=8 (context-load session)
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-18 session-start scan: files=16 parsed=16 suspect=0 (fresh start-session; open=0003,0005,0011,0012,0013,0016 | branch patch/v2.6 @ 1a53b0c, 11 modified files uncommitted)
+2026-10-27 session-start scan: files=2 parsed=2 (RSift acquisition-style repository appraisal)
+2026-10-27 session-checkpoint: RSift appraisal blocked before fact collection; Python 3.11+ is not installed or on PATH, WSL is inaccessible, and winget is unavailable; no new observations
 
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-15 deliverable flush: observation 0006 resolution updated (prefer SERVICE_ROLE_KEY including sb_secret; empty dropzone list is failure); ingest listing no longer gates on listBuckets
@@ -798,3 +822,44 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-10-27 session-checkpoint: consolidated CA assignment sync into Phase B.5 ingest, removed duplicate pre-ingest call, deleted legacy CA email mapping functions, 5/5 tests & typecheck clean; no new observations
 2026-10-27 session-start scan: files=2 parsed=2
 2026-10-27 no observations: updated README with two-part business and technical architecture; no reusable skill issue observed.
+2026-10-27 16:41 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-27 16:42 loaded reportkaro — 0 open observations
+2026-10-27 no observations: staged reportkaro output-format update; no reusable skill issue observed.
+2026-10-27 16:45 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
+2026-10-27 no observations: compiled dated change report from Git history and current project notes; no reusable skill issue observed.
+2026-10-27 no observations: reformatted change report per user preference; no reusable skill issue observed.
+2026-10-27 17:00 [greehouse_apply] session-start scan: files=2 parsed=2
+2026-10-27 no observations: installed and validated the externally downloaded RSift global skill; no reusable workflow issue observed.
+2026-10-27 session-start scan: files=2 parsed=2 (installing Python for RSift appraisal and producing the report)
+2026-10-27 session-checkpoint: completed RSift repository appraisal; strict report checks passed and rsift-report.html written to repo root; build/test/audit unavailable after private-copy npm ci cache and package-fetch failures; no new observations
+2026-10-27 session-start scan: files=2 parsed=2 (finalizing RSift report verification)
+2026-10-27 session-checkpoint: revalidated rsift-report.html integrity and strict report_check.json (all checks consistent); official installer created Python program directories but no executable was observable; existing PostgreSQL Python 3.13.14 remains the confirmed interpreter; no new observations
+
+2026-10-27 session-start scan: files=2 parsed=2 (continuing RSift appraisal with npm ci investigation and private-copy execution)
+2026-10-27 session-checkpoint: refreshed RSift appraisal from a complete 460-file user-readable collection; npm ci, typecheck, build, unit tests, integration tests, audit, public evidence, strict rendering, and desktop/narrow visual checks completed; report replaced in repo root; observation 0035 logged for split-identity private-copy execution
+2026-10-27 session-start scan: files=3 parsed=3 (reproducing RSift integration failures in the original checkout)
+2026-10-27 session-checkpoint: reproduced the 29/32 integration result in the original checkout with FORCE_MEMORY_DB=true; classified one stale Tier 1 expectation and two forced-memory canonical-key defects, updated the strict RSift report and project context, and completed desktop/narrow visual verification; no new reusable observations
+2026-10-27 session-checkpoint: refreshed the private-copy RSift appraisal after the E2E test update; npm ci, typecheck, build, 118 unit checks, and all 32 E2E checkpoints passed, strict report validation and desktop/narrow visual checks completed, and rsift-report.html was replaced in the repo root; no new reusable observations
+2026-10-28 session-start scan: files=3 parsed=3 (auth signup/signin architecture walkthrough)
+2026-10-28 session-checkpoint: completed read-only signup/signin architecture walkthrough; no new reusable observations
+2026-10-28 session-checkpoint: completed read-only auth UX and efficiency audit; no new reusable observations
+2026-10-28 session-start scan: task=god-file-refactor-assessment
+2026-10-28 god-file assessment deliverable flush: no new observations; test runner blocked by uv_os_get_passwd ENOMEM
+2026-10-28 session-start scan: files=3 parsed=3 (profiles table write/overwrite investigation)
+2026-10-28 session-start scan: task=dashboard-performance-architecture-audit files=3 parsed=3
+2026-10-28 deliverable-flush: completed docs/perf.md handover file; no new reusable skill observations
+2026-10-28 session-start scan: files=3 parsed=3 (global GitHub skill installation)
+2026-10-28 session-checkpoint: installed and verified the global performance-optimization skill from addyosmani/agent-skills; no new reusable observations
+2026-10-28 session-start scan: task=dashboard-performance-requirements-interview-and-plan files=3 parsed=3 open=2
+2026-10-28 session-checkpoint: completed read-only all-dashboard performance, API, database, consistency, security, and lean audit; wrote docs/dashboard-performance-audit.md; no new reusable observations
+2026-10-28 session-start scan: files=3 parsed=3 (comparing docs/dashboard-performance-audit.md and docs/perf.md, preparing war.md performance optimization blueprint)
+2026-10-28 deliverable flush: completed war.md (reconciled docs/dashboard-performance-audit.md and docs/perf.md; audited all 9 setInterval polling loops, API endpoints, and DB queries; formulated /pstack:architect types and /pstack:blast-radius safety proofs); no new observations
+2026-10-28 deliverable flush: completed /pstack:arena on war.md (Candidate 1 Claude Sonnet 4.6 won 49/50 vs Candidate 2 Gemini 3.8 Flash High 44/50; grafted 3 elements into final war.md); no new observations
+2026-10-28 deliverable flush: completed implementation plan docs/superpowers/plans/2026-10-28-dashboard-performance-and-security.md (16 bite-sized TDD/SDD tasks across 4 phases); no new observations
+2026-10-28 session-start scan: task=execute-dashboard-performance-and-security-plan files=3 parsed=3
+2026-10-28 session-start scan: task=dashboard-realtime-stats-architecture files=3 parsed=3
+2026-10-28 session-start scan: task=dashboard-stats-research-interview files=3 parsed=3
+2026-10-28 deliverable flush: audited dashboard stats path, migration 027 event facts, polling, and current PostgreSQL/Supabase guidance; interview pending; no new observations
+2026-10-28 interview flush: status-change periods, distinct AWL per chart bucket, IST Monday weeks, success includes proof pending, final outcome only, 30d/12w/12m plus custom; no new observations
+2026-10-28 deliverable flush: researched PostgreSQL grouped aggregation/index plans and Supabase authorized Broadcast; finalized created-at cohort/current-status stats design; no new observations
+2026-10-28 deliverable flush: inventoried current dashboard polling loops; admin/manager/dev 30s, operator 45s connected or 15s disconnected, ingest 3s only while running, session check 60s, auth countdown 1s UI only; no new observations
