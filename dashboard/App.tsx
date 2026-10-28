@@ -119,11 +119,16 @@ export const App: React.FC = () => {
   const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
   const [isClientInfoOpen, setIsClientInfoOpen] = useState<boolean>(false);
   const notifRef = useRef<HTMLDivElement>(null);
-  const selectedCandidateRef = useRef<string | null>(null);
+  const selectedCandidateRef = useRef<string | null>(selectedCandidateId);
+  const selectedJobRef = useRef<string | null>(selectedJobUrl);
 
   useEffect(() => {
     selectedCandidateRef.current = selectedCandidateId;
   }, [selectedCandidateId]);
+
+  useEffect(() => {
+    selectedJobRef.current = selectedJobUrl;
+  }, [selectedJobUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -311,8 +316,9 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    const intervalMs = wsConnected ? 30000 : 3000;
+    const intervalMs = wsConnected ? 45000 : 15000;
     const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       fetchInitialData(true, selectedDate);
       fetchNotifications(selectedDate);
     }, intervalMs);
@@ -492,11 +498,13 @@ export const App: React.FC = () => {
               // Instantly refresh data & notifications
               fetchInitialData(true, selectedDate);
               fetchNotifications(selectedDate);
-              if (selectedCandidateId) {
-                fetchCandidateDetail(selectedCandidateId);
+              const activeCandidateId = selectedCandidateRef.current;
+              const activeJobUrl = selectedJobRef.current;
+              if (activeCandidateId) {
+                fetchCandidateDetail(activeCandidateId);
               }
-              if (selectedCandidateId && selectedJobUrl) {
-                fetchJobApplication(selectedCandidateId, selectedJobUrl);
+              if (activeCandidateId && activeJobUrl) {
+                fetchJobApplication(activeCandidateId, activeJobUrl);
               }
             }
           } catch (e) {
@@ -536,7 +544,7 @@ export const App: React.FC = () => {
         ws.close();
       }
     };
-  }, [currentUser, selectedDate, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
+  }, [currentUser, selectedDate, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
 
   const handleRealtimeApplicationRow = useCallback(
     (row: Record<string, unknown>) => {
