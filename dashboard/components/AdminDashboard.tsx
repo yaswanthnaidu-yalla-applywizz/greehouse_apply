@@ -581,7 +581,7 @@ export const AdminDashboard: React.FC = () => {
   useEffect(() => {
     if (!token || !isAuthorized) return;
     let cancelled = false;
-    const poll = async () => {
+    const pollIngest = async () => {
       try {
         const status = await loadJson<IngestStatus>('/api/admin/ingest-status');
         if (!cancelled) setIngestRun(status);
@@ -589,15 +589,20 @@ export const AdminDashboard: React.FC = () => {
         /* ignore poll errors */
       }
     };
-    void poll();
+    void pollIngest();
+    if (!ingestRun?.running) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const interval = setInterval(() => {
-      void poll();
+      void pollIngest();
     }, 3000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [token, isAuthorized, loadJson]);
+  }, [token, isAuthorized, loadJson, ingestRun?.running]);
 
   useEffect(() => {
     if (!ingestRun || ingestRun.running || (!ingestRun.error && !ingestRun.finishedAt)) return;
