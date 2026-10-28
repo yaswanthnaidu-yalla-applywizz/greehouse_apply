@@ -485,7 +485,8 @@ export const App: React.FC = () => {
       if (isDisposed) return;
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        const token = localStorage.getItem('applywizz_auth_token');
+        const wsUrl = `${protocol}//${window.location.host}/ws${token ? '?token=' + encodeURIComponent(token) : ''}`;
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
