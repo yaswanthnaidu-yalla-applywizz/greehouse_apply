@@ -2,6 +2,27 @@ import { getISTDateRangeUtc } from '../db/applications.js';
 import { getISTDateString } from '../services/workHistoryClient.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+export interface IstCalendarDate {
+  year: number;
+  month: number;
+  day: number;
+  isoDate: string;
+  dayOfWeek: number; // 1 = Monday, ..., 7 = Sunday
+}
+
+export function getIstCalendarDate(instant: Date | number = Date.now()): IstCalendarDate {
+  const ms = typeof instant === 'number' ? instant : instant.getTime();
+  const istDate = new Date(ms + IST_OFFSET_MS);
+  const year = istDate.getUTCFullYear();
+  const month = istDate.getUTCMonth() + 1;
+  const day = istDate.getUTCDate();
+  const utcDay = istDate.getUTCDay();
+  const dayOfWeek = utcDay === 0 ? 7 : utcDay;
+  const isoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return { year, month, day, isoDate, dayOfWeek };
+}
 
 export type DashboardCreatedAtPreset = 'default' | 'day' | 'week' | 'month' | 'lifetime' | 'custom' | 'legacy_day';
 
@@ -15,22 +36,26 @@ export interface DashboardCreatedAtRange {
 }
 
 export function parseDashboardStatsRange(
-  query: Record<string, unknown>
+  query: Record<string, unknown>,
+  referenceInstant: Date | number = Date.now()
 ): DashboardCreatedAtRange | { error: string } {
   let explicitRange = typeof query.range === 'string' ? query.range.trim().toLowerCase() : '';
   if (explicitRange === 'today') explicitRange = 'day';
   const hasCustomDates = typeof query.from === 'string' || typeof query.to === 'string';
   const singleDate = typeof query.date === 'string' && ISO_DATE.test(query.date.trim()) ? query.date.trim() : '';
   const range = explicitRange || (hasCustomDates || singleDate ? 'custom' : 'day');
-  const today = getISTDateString();
+
+  const refMs = typeof referenceInstant === 'number' ? referenceInstant : referenceInstant.getTime();
+  const istNow = getIstCalendarDate(refMs);
+  const today = istNow.isoDate;
   let fromDate = today;
+
   if (range === 'week') {
-    const date = new Date(`${today}T00:00:00+05:30`);
-    const day = date.getDay() || 7;
-    date.setDate(date.getDate() - day + 1);
-    fromDate = date.toISOString().slice(0, 10);
+    const daysSinceMonday = istNow.dayOfWeek - 1;
+    const mondayMs = refMs - daysSinceMonday * 24 * 60 * 60 * 1000;
+    fromDate = getIstCalendarDate(mondayMs).isoDate;
   } else if (range === 'month') {
-    fromDate = `${today.slice(0, 7)}-01`;
+    fromDate = `${istNow.year}-${String(istNow.month).padStart(2, '0')}-01`;
   } else if (range === 'lifetime') {
     fromDate = '2000-01-01';
   } else if (range !== 'day' && range !== 'custom') {
