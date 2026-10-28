@@ -10,7 +10,6 @@ import {
   getISTDateString,
   type WorkHistoryCandidateRecord,
 } from '../../services/workHistoryClient.js';
-import { hydrateAdminProfilesFromWorkHistory } from '../../services/adminProfileHydrate.js';
 import { sanitizeHttpHeaderValue } from '../httpHeaders.js';
 import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import {
@@ -312,11 +311,6 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
       caEmail: ADMIN_WORK_HISTORY_CACHE_KEY,
       dates: whDates,
     });
-    try {
-      await hydrateAdminProfilesFromWorkHistory(whDates[0]);
-    } catch (hydrateErr: any) {
-      log.warn('[CandidatesRoute] Admin profile hydration on candidates list failed:', hydrateErr?.message);
-    }
     workHistoryUnreachable = merged.unreachable;
     workHistoryRecords = merged.records;
   } else {
@@ -730,6 +724,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
   let skippedUnresolved = 0;
 
   if (isSupabaseConfigured()) {
+    // Partitioned DTO: Preserve full detail (select('*') including resolved_fields, user_inputs)
+    // for operator review card rendering and FormRenderer.tsx
     let appQuery = getDbClient()
       .from('gh_candidate_applications')
       .select('*')

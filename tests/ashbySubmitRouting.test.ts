@@ -94,4 +94,54 @@ describe('SubmitterPool ATS Routing', () => {
       await pool.stop();
     }
   });
+
+  it('propagates proof_failed_url when ashby submission fails', async () => {
+    let capturedExtra: any = null;
+
+    const dummyApp: ApplicationRow = {
+      id: 'app-ashby-fail-1',
+      applywizz_id: 'AWL-103',
+      job_url: 'https://jobs.ashbyhq.com/company/def-456',
+      ats: 'ashby',
+      status: 'QUEUED',
+    } as any;
+
+    const pool = new SubmitterPool({
+      pollIntervalMs: 1000,
+      updateStatusFn: async (_id: string, _status: any, extra?: any) => {
+        if (_status === 'FAILED') {
+          capturedExtra = extra;
+        }
+        return true;
+      },
+      submitFn: async () => ({} as LiveSubmitResult),
+      submitAshbyFn: async () => {
+        return {
+          success: false,
+          status: 'FAILED',
+          applicationId: 'app-ashby-fail-1',
+          errorMessage: 'Ashby application submit confirmation signal timed out after 45s',
+          proofFailedUrl: 'https://storage.supabase.co/proofs_failed/app-ashby-fail-1_failed.png',
+        } as LiveSubmitResult;
+      },
+    });
+
+    try {
+      const submission = pool.enqueue(dummyApp);
+      await (pool as any).runWorker(0);
+      const result = await submission;
+      assert.equal(result.status, 'FAILED');
+      assert.equal(
+        result.proofFailedUrl,
+        'https://storage.supabase.co/proofs_failed/app-ashby-fail-1_failed.png'
+      );
+      assert.ok(capturedExtra, 'updateStatusFn should have been called with extra');
+      assert.equal(
+        capturedExtra.proof_failed_url,
+        'https://storage.supabase.co/proofs_failed/app-ashby-fail-1_failed.png'
+      );
+    } finally {
+      await pool.stop();
+    }
+  });
 });

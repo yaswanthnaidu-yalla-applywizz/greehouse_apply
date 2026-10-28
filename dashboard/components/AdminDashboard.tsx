@@ -338,6 +338,8 @@ export const AdminDashboard: React.FC = () => {
 
   const [tab, setTab] = useState<'overview' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'>('overview');
   const [date, setDate] = useState<string>(getTodayIST);
+  const [dateMode, setDateMode] = useState<'today' | 'lifetime' | 'custom'>('today');
+  const [customDate, setCustomDate] = useState<string>(getTodayIST);
   const [statsRange, setStatsRange] = useState<'day' | 'lifetime'>('day');
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [managers, setManagers] = useState<AdminManager[]>([]);
@@ -476,7 +478,11 @@ export const AdminDashboard: React.FC = () => {
     setError('');
     try {
       if (tab === 'overview') {
-        const payload = await loadJson<AdminOverview>(`/api/admin/overview?range=${statsRange}`);
+        const range = date === 'lifetime' ? 'lifetime' : (dateMode === 'custom' ? 'custom' : statsRange);
+        const query = range === 'custom'
+          ? `range=custom&from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`
+          : `range=${range}`;
+        const payload = await loadJson<AdminOverview>(`/api/admin/overview?${query}`);
         setOverview(payload);
       }
       if (tab === 'managers') {
@@ -518,7 +524,7 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, date, statsRange, token, isAuthorized, opSearch, opStatus, opManager, appSearch, appStatus, loadJson]);
+  }, [tab, date, statsRange, dateMode, token, isAuthorized, opSearch, opStatus, opManager, appSearch, appStatus, loadJson]);
 
   useEffect(() => {
     void refresh();
@@ -581,7 +587,7 @@ export const AdminDashboard: React.FC = () => {
   useEffect(() => {
     if (!token || !isAuthorized) return;
     let cancelled = false;
-    const poll = async () => {
+    const pollIngest = async () => {
       try {
         const status = await loadJson<IngestStatus>('/api/admin/ingest-status');
         if (!cancelled) setIngestRun(status);
@@ -589,15 +595,20 @@ export const AdminDashboard: React.FC = () => {
         /* ignore poll errors */
       }
     };
-    void poll();
+    void pollIngest();
+    if (!ingestRun?.running) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const interval = setInterval(() => {
-      void poll();
+      void pollIngest();
     }, 3000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [token, isAuthorized, loadJson]);
+  }, [token, isAuthorized, loadJson, ingestRun?.running]);
 
   useEffect(() => {
     if (!ingestRun || ingestRun.running || (!ingestRun.error && !ingestRun.finishedAt)) return;
@@ -650,13 +661,34 @@ export const AdminDashboard: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-2 items-end">
             <DevSwitcher current="/admin" />
-            <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Date
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-sm font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]" />
-            </label>
-            <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Stats
+            {dateMode === 'custom' && (
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Custom Date
+                <input type="date" value={customDate} onChange={(e) => { setCustomDate(e.target.value); setDate(e.target.value); }} className="block mt-1 border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-sm font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]" />
+              </label>
+            )}
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Date
               <div className="mt-1 flex gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
-                {(['day', 'lifetime'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range === 'day' ? 'Today' : 'Lifetime'}</button>
+                {(['today', 'lifetime', 'custom'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setDateMode(mode);
+                      if (mode === 'today') {
+                        setDate(getTodayIST());
+                        setStatsRange('day');
+                      } else if (mode === 'lifetime') {
+                        setDate('lifetime');
+                        setStatsRange('lifetime');
+                      } else {
+                        setDate(customDate);
+                        setStatsRange('day');
+                      }
+                    }}
+                    className={`rounded-md px-2.5 py-1 text-xs transition-colors ${dateMode === mode ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}
+                  >
+                    {mode === 'today' ? 'Today' : mode === 'lifetime' ? 'Lifetime' : 'Custom Date'}
+                  </button>
                 ))}
               </div>
             </div>
@@ -724,7 +756,7 @@ export const AdminDashboard: React.FC = () => {
                     disabled={csvUploadBusy || csvIngestBusy || Boolean(ingestRun?.running)}
                     onChange={(event) => { void selectCsvFile(event.currentTarget.files?.[0]); }}
                   />
-                </label>
+                  </label>
                 {csvFile && !csvValidationError && <p className="mt-2 text-xs text-[#30d158] font-medium">Required CSV headers detected.</p>}
                 {csvValidationError && <p role="alert" className="mt-2 text-xs font-semibold text-[#ff453a]">{csvValidationError}</p>}
                 {csvFeedbackError && <p role="alert" className="mt-2 text-xs font-semibold text-[#ff453a]">{csvFeedbackError}</p>}

@@ -1,12 +1,12 @@
 /**
- * @fileoverview Application Status Badge component with real-time polling during APPLYING state (Phase V2-UI).
+ * @fileoverview Application Status Badge component (Phase V2-UI).
  *
  * References:
  * - 04-ui-ux.md
  * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import type { ApplicationStatus } from '../../src/db/applications.js';
 
 export interface ApplicationStatusBadgeProps {
@@ -27,91 +27,15 @@ export interface ApplicationStatusBadgeProps {
 }
 
 /**
- * Renders an application status badge and polls `GET /api/applications/:id`
- * every 2 seconds when status is `APPLYING` or `QUEUED`.
+ * Renders an application status badge.
  */
 export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
   status,
   proofWebUrl,
   proofEmailUrl,
   proofEmailJson,
-  emailProofStatus,
-  applicationId,
-  jobUrl,
-  onStatusChange,
   className = '',
-  apiBaseUrl = '',
 }) => {
-  const statusRef = useRef(status);
-  statusRef.current = status;
-  const emailProofStatusRef = useRef(emailProofStatus);
-  emailProofStatusRef.current = emailProofStatus;
-  const proofWebUrlRef = useRef(proofWebUrl);
-  proofWebUrlRef.current = proofWebUrl;
-  const proofEmailUrlRef = useRef(proofEmailUrl);
-  proofEmailUrlRef.current = proofEmailUrl;
-  const lastPolledFailedProofRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const shouldPollStatus =
-      status === 'APPLYING' ||
-      status === 'QUEUED' ||
-      status === 'OTP_REQUIRED' ||
-      status === 'EMAIL_PROOF_PENDING' ||
-      status === 'FAILED';
-    const shouldPollEmailProof = status === 'APPLIED' && emailProofStatus === 'pending';
-    if ((!shouldPollStatus && !shouldPollEmailProof) || !applicationId) {
-      return;
-    }
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
-        const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-        const url = `${apiBaseUrl}/api/applications/${encodeURIComponent(applicationId)}${jobUrl ? `?jobUrl=${encodeURIComponent(jobUrl)}` : ''}`;
-        const res = await fetch(url, { headers });
-        if (res.ok) {
-          const appData = await res.json();
-          const nextEmailStatus =
-            appData.email_proof_status || appData.emailProofStatus || emailProofStatusRef.current;
-          const nextProofWeb = appData.proof_web_url || appData.proofWebUrl || null;
-          const nextProofEmail = appData.proof_email_url || appData.proofEmailUrl || null;
-          const nextProofFailed = appData.proof_failed_url || appData.proofFailedUrl || null;
-          const nextProofEmailJson = appData.proof_email_json || appData.proofEmailJson || null;
-          const emailProofArrived =
-            Boolean(nextProofEmailJson) ||
-            (Boolean(nextProofEmail) && nextProofEmail !== proofEmailUrlRef.current);
-          const webProofArrived = Boolean(nextProofWeb) && nextProofWeb !== proofWebUrlRef.current;
-          const failedProofArrived =
-            Boolean(nextProofFailed) && nextProofFailed !== lastPolledFailedProofRef.current;
-          if (nextProofFailed) {
-            lastPolledFailedProofRef.current = nextProofFailed;
-          }
-          const emailStatusChanged =
-            nextEmailStatus && nextEmailStatus !== emailProofStatusRef.current;
-          const statusChanged = appData.status && appData.status !== statusRef.current;
-
-          if (statusChanged || emailStatusChanged || emailProofArrived || webProofArrived || failedProofArrived) {
-            if (statusChanged) {
-              console.log(
-                `[StatusBadge] 🔄 Application ${applicationId} status updated: ${statusRef.current} -> ${appData.status}`
-              );
-            }
-            if (onStatusChange) {
-              onStatusChange((appData.status || statusRef.current) as ApplicationStatus, appData, {
-                persist: false,
-              });
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[StatusBadge] Polling error for ${applicationId}:`, err);
-      }
-    }, 2000);
-
-    return () => clearInterval(pollInterval);
-  }, [status, emailProofStatus, applicationId, jobUrl, onStatusChange, apiBaseUrl, proofWebUrl, proofEmailUrl]);
-
   switch (status) {
     case 'QUEUED':
       return (
@@ -199,7 +123,6 @@ export const ApplicationStatusBadge: React.FC<ApplicationStatusBadgeProps> = ({
           <span>{status === 'SKIPPED' ? 'Skipped' : 'Closed / Expired'}</span>
         </span>
       );
-
 
     case 'READY_FOR_REVIEW':
     default:

@@ -42,6 +42,11 @@ import {
   isOpsMode,
 } from './hooks/useSession.js';
 import { ClientInfoDrawer } from './components/ClientInfoDrawer.js';
+import {
+  filterActiveNotifications,
+  dismissNotificationId,
+  dismissAllNotificationIds,
+} from './utils/notificationDismissals.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -103,7 +108,6 @@ export const App: React.FC = () => {
   );
 
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(true);
-  const [isAuthHydrating, setIsAuthHydrating] = useState<boolean>(false);
   const [isLoadingApplication, setIsLoadingApplication] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
@@ -120,11 +124,16 @@ export const App: React.FC = () => {
   const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
   const [isClientInfoOpen, setIsClientInfoOpen] = useState<boolean>(false);
   const notifRef = useRef<HTMLDivElement>(null);
-  const selectedCandidateRef = useRef<string | null>(null);
+  const selectedCandidateRef = useRef<string | null>(selectedCandidateId);
+  const selectedJobRef = useRef<string | null>(selectedJobUrl);
 
   useEffect(() => {
     selectedCandidateRef.current = selectedCandidateId;
   }, [selectedCandidateId]);
+
+  useEffect(() => {
+    selectedJobRef.current = selectedJobUrl;
+  }, [selectedJobUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -165,6 +174,7 @@ export const App: React.FC = () => {
   };
 
   const clearNotification = async (id: string) => {
+    dismissNotificationId(id);
     setNotifications((prev) => prev.filter((n) => n.id !== id));
     try {
       await apiFetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(id)}`, {
@@ -176,6 +186,7 @@ export const App: React.FC = () => {
   };
 
   const clearAllNotifs = async () => {
+    dismissAllNotificationIds(notifications.map((n) => n.id));
     setNotifications([]);
     try {
       await apiFetch(`${API_BASE_URL}/api/notifications/all`, {
@@ -211,26 +222,6 @@ export const App: React.FC = () => {
     const role = sessionRole();
     return role === 'dev' || role === 'admin';
   };
-
-  const ensureAdminHydrated = useCallback(async (dateStr: string): Promise<void> => {
-    if (!isAdminSession()) return;
-    const token = localStorage.getItem('applywizz_auth_token');
-    if (!token) return;
-    setIsAuthHydrating(true);
-    try {
-      await apiFetch(`${API_BASE_URL}/api/auth/hydrate-admin`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ date: dateStr }),
-      });
-    } catch (err) {
-      console.warn('Admin hydration request failed:', err);
-    } finally {
-      setIsAuthHydrating(false);
-    }
-  }, [currentUser]);
 
   const handleSignOut = async () => {
     setWorkHistoryUnreachable(false);
@@ -287,7 +278,7 @@ export const App: React.FC = () => {
       if (res.ok) {
         const serverNotifs = await res.json();
         if (Array.isArray(serverNotifs)) {
-          setNotifications(serverNotifs);
+          setNotifications(filterActiveNotifications(serverNotifs));
         }
       }
     } catch (err) {
@@ -326,15 +317,15 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    ensureAdminHydrated(selectedDate);
     fetchInitialData(false, selectedDate);
     fetchNotifications(selectedDate);
-  }, [currentUser, selectedDate, ensureAdminHydrated, fetchInitialData, fetchNotifications]);
+  }, [currentUser, selectedDate, fetchInitialData, fetchNotifications]);
 
   useEffect(() => {
     if (!currentUser) return;
-    const intervalMs = wsConnected ? 30000 : 3000;
+    const intervalMs = wsConnected ? 45000 : 15000;
     const pollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       fetchInitialData(true, selectedDate);
       fetchNotifications(selectedDate);
     }, intervalMs);
@@ -485,7 +476,8 @@ export const App: React.FC = () => {
       if (isDisposed) return;
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        const token = localStorage.getItem('applywizz_auth_token');
+        const wsUrl = `${protocol}//${window.location.host}/ws${token ? '?token=' + encodeURIComponent(token) : ''}`;
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
@@ -513,11 +505,13 @@ export const App: React.FC = () => {
               // Instantly refresh data & notifications
               fetchInitialData(true, selectedDate);
               fetchNotifications(selectedDate);
-              if (selectedCandidateId) {
-                fetchCandidateDetail(selectedCandidateId);
+              const activeCandidateId = selectedCandidateRef.current;
+              const activeJobUrl = selectedJobRef.current;
+              if (activeCandidateId) {
+                fetchCandidateDetail(activeCandidateId);
               }
-              if (selectedCandidateId && selectedJobUrl) {
-                fetchJobApplication(selectedCandidateId, selectedJobUrl);
+              if (activeCandidateId && activeJobUrl) {
+                fetchJobApplication(activeCandidateId, activeJobUrl);
               }
             }
           } catch (e) {
@@ -557,7 +551,7 @@ export const App: React.FC = () => {
         ws.close();
       }
     };
-  }, [currentUser, selectedDate, selectedCandidateId, selectedJobUrl, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
+  }, [currentUser, selectedDate, fetchInitialData, fetchNotifications, fetchCandidateDetail, fetchJobApplication]);
 
   const handleRealtimeApplicationRow = useCallback(
     (row: Record<string, unknown>) => {
@@ -938,7 +932,7 @@ export const App: React.FC = () => {
             setSelectedCandidateId((prev) => (isMobile ? id : prev === id ? null : id));
             if (isMobile) setMobileScreen('jobs');
           }}
-          isLoading={isLoadingCandidates || isAuthHydrating}
+          isLoading={isLoadingCandidates}
           emptyMessage={noCandidatesMessage}
           selectedDate={selectedDate}
         />

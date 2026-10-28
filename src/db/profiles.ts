@@ -247,32 +247,82 @@ export async function upsertProfile(
   profile: Partial<ProfileRow> & { applywizz_id: string; client_name: string }
 ): Promise<ProfileRow> {
   const isYaswanth = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-YASWANTH';
-  const isAkshitha = (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-31428' || (profile.client_name || '').toLowerCase().includes('akshitha');
-  const companyEmail =
-    profile.company_email ||
-    extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
-  const sandboxCaEmail = getSandboxCaEmail();
-  const payload: ProfileRow = {
-    ...profile,
-    ...(profile.ca_email !== undefined || sandboxCaEmail
-      ? {
-          ca_email:
-            sandboxCaEmail ||
-            (profile.ca_email ? profile.ca_email.trim().toLowerCase() : null),
-        }
-      : {}),
-    country: profile.country ?? null,
-    country_code: profile.country_code ?? null,
-    location: isYaswanth ? (profile.location || 'Hyderabad, Telangana, India') : (isAkshitha ? (profile.location || 'Dallas, Texas, United States') : (profile.location ?? null)),
-    phone: profile.phone ?? null,
-    company_email: companyEmail,
-    email: companyEmail || profile.email || null,
+  const isAkshitha =
+    (profile.applywizz_id || '').trim().toUpperCase() === 'AWL-31428' ||
+    (profile.client_name || '').toLowerCase().includes('akshitha');
+
+  const payload: Partial<ProfileRow> & {
+    applywizz_id: string;
+    client_name: string;
+    updated_at: string;
+  } = {
+    applywizz_id: profile.applywizz_id,
+    client_name: profile.client_name,
     updated_at: new Date().toISOString(),
   };
 
-  // Preserve scanner-managed flag when not explicitly provided on upsert
-  if (profile.zoho_connected === undefined) {
-    delete payload.zoho_connected;
+  const mergeKeys = [
+    'first_name',
+    'last_name',
+    'email',
+    'company_email',
+    'ca_email',
+    'phone',
+    'country',
+    'country_code',
+    'location',
+    'linkedin_url',
+    'website_url',
+    'github_url',
+    'work_authorization',
+    'requires_sponsorship',
+    'education',
+    'work_experience',
+    'resume_url',
+    'resume_storage_path',
+    'raw_api_payload',
+    'zoho_connected',
+  ] as const;
+
+  for (const key of mergeKeys) {
+    if (profile[key] !== undefined && profile[key] !== null) {
+      (payload as any)[key] = profile[key];
+    }
+  }
+
+  if (profile.resume_facts !== undefined && profile.resume_facts !== null) {
+    payload.resume_facts = profile.resume_facts;
+  }
+  if (profile.resume_text !== undefined && profile.resume_text !== null) {
+    payload.resume_text = profile.resume_text;
+  }
+  if (profile.last_api_fetch_at !== undefined && profile.last_api_fetch_at !== null) {
+    payload.last_api_fetch_at = profile.last_api_fetch_at;
+  }
+
+  const companyEmail =
+    profile.company_email ||
+    extractCompanyEmailFromPayload(profile.raw_api_payload, profile.email);
+  if (companyEmail) {
+    payload.company_email = companyEmail;
+    if (!payload.email) {
+      payload.email = companyEmail;
+    }
+  }
+
+  const sandboxCaEmail = getSandboxCaEmail();
+  if (sandboxCaEmail) {
+    payload.ca_email = sandboxCaEmail;
+  } else if (payload.ca_email) {
+    payload.ca_email = String(payload.ca_email).trim().toLowerCase() || null;
+  }
+
+  if (!payload.location) {
+    if (isYaswanth) {
+      payload.location = 'Hyderabad, Telangana, India';
+    } else if (isAkshitha) {
+      payload.location = 'Dallas, Texas, United States';
+    }
   }
 
   if (isSupabaseConfigured()) {
@@ -296,38 +346,47 @@ export async function upsertProfile(
       fs.mkdirSync(profilesDir, { recursive: true });
     }
     const filePath = path.join(profilesDir, `${profile.applywizz_id}.json`);
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify(
-        {
-          applywizzId: profile.applywizz_id,
-          clientName: profile.client_name,
-          firstName: profile.first_name,
-          lastName: profile.last_name,
-          email: profile.email,
-          companyEmail: profile.company_email,
-          phone: profile.phone,
-          country: payload.country,
-          countryCode: payload.country_code,
-          location: payload.location,
-          linkedinUrl: profile.linkedin_url,
-          websiteUrl: profile.website_url,
-          githubUrl: profile.github_url,
-          workAuthorization: profile.work_authorization,
-          requiresSponsorship: profile.requires_sponsorship,
-          education: profile.education,
-          workExperience: profile.work_experience,
-          resumeUrl: profile.resume_url,
-          localResumePath: profile.resume_storage_path,
-          demographics: profile.raw_api_payload?.demographics,
-        },
-        null,
-        2
-      )
-    );
+
+    let existingData: Record<string, any> = {};
+    if (fs.existsSync(filePath)) {
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        existingData = parsed.profile || parsed || {};
+      } catch {}
+    }
+
+    const mergedCache = {
+      applywizzId: payload.applywizz_id ?? existingData.applywizzId ?? profile.applywizz_id,
+      clientName: payload.client_name ?? existingData.clientName ?? profile.client_name,
+      firstName: payload.first_name ?? existingData.firstName ?? null,
+      lastName: payload.last_name ?? existingData.lastName ?? null,
+      email: payload.email ?? existingData.email ?? null,
+      companyEmail: payload.company_email ?? existingData.companyEmail ?? null,
+      phone: payload.phone ?? existingData.phone ?? null,
+      country: payload.country ?? existingData.country ?? null,
+      countryCode: payload.country_code ?? existingData.countryCode ?? existingData.country_code ?? null,
+      location: payload.location ?? existingData.location ?? null,
+      linkedinUrl: payload.linkedin_url ?? existingData.linkedinUrl ?? null,
+      websiteUrl: payload.website_url ?? existingData.websiteUrl ?? null,
+      githubUrl: payload.github_url ?? existingData.githubUrl ?? null,
+      workAuthorization: payload.work_authorization ?? existingData.workAuthorization ?? null,
+      requiresSponsorship: payload.requires_sponsorship ?? existingData.requiresSponsorship ?? false,
+      education: payload.education ?? existingData.education ?? [],
+      workExperience: payload.work_experience ?? existingData.workExperience ?? [],
+      resumeUrl: payload.resume_url ?? existingData.resumeUrl ?? null,
+      localResumePath: payload.resume_storage_path ?? existingData.localResumePath ?? null,
+      demographics: payload.raw_api_payload?.demographics ?? existingData.demographics ?? null,
+      zohoConnected: payload.zoho_connected ?? existingData.zohoConnected ?? existingData.zoho_connected ?? false,
+      ...(payload.ca_email !== undefined || existingData.caEmail || existingData.ca_email
+        ? { caEmail: payload.ca_email ?? existingData.caEmail ?? existingData.ca_email }
+        : {}),
+    };
+
+    fs.writeFileSync(filePath, JSON.stringify(mergedCache, null, 2));
   } catch {}
 
-  return payload as ProfileRow;
+  return (await getProfile(profile.applywizz_id)) || ({ ...payload } as ProfileRow);
 }
 
 /**
@@ -545,6 +604,8 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
 
   return null;
 }
+
+export const getProfileByApplywizzId = getProfile;
 
 /**
  * Fetches a candidate profile by resume URL or other remote URL reference.
