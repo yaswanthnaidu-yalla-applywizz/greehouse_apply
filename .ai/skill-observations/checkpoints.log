@@ -889,3 +889,4 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-10-29 deliverable flush: DB2 migration 040 applied after UUID fix; isolated stats release verified; Railway deployment paused; no new skill observations
 2026-10-29 deliverable flush: no observations; Ashby DOM, required-only resolution, ATS cards, queue RPC repair prepared; live DB2 and Railway verification pending
 2026-10-29 session-start scan: files=3 parsed=3
+2026-10-29 deliverable flush: pushed committed dev changes, raised PR #64 into main, confirmed clean mergeability with zero conflicts; no new skill observations
