@@ -54,6 +54,7 @@ export function useApplicationStatsInvalidation({
   onInvalidate,
 }: UseApplicationStatsInvalidationOptions): UseApplicationStatsInvalidationReturn {
   const [connected, setConnected] = useState(false);
+  const connectedRef = useRef(false);
   const onInvalidateRef = useRef(onInvalidate);
   onInvalidateRef.current = onInvalidate;
   const getAuthHeadersRef = useRef(getAuthHeaders);
@@ -62,6 +63,7 @@ export function useApplicationStatsInvalidation({
   useEffect(() => {
     if (!enabled) {
       setConnected(false);
+      connectedRef.current = false;
       return;
     }
 
@@ -96,6 +98,7 @@ export function useApplicationStatsInvalidation({
         const cfg = await fetchRealtimeConfig(apiBaseUrl, headers);
         if (cancelled || !cfg.enabled || !cfg.url || !cfg.anonKey) {
           setConnected(false);
+          connectedRef.current = false;
           return;
         }
 
@@ -138,25 +141,38 @@ export function useApplicationStatsInvalidation({
           if (cancelled) return;
           if (status === 'SUBSCRIBED') {
             setConnected(true);
+            connectedRef.current = true;
             if (!wasConnected) {
               wasConnected = true;
               triggerInvalidation();
             }
           } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
             setConnected(false);
+            connectedRef.current = false;
+            wasConnected = false;
           }
         });
       } catch {
-        if (!cancelled) setConnected(false);
+        if (!cancelled) {
+          setConnected(false);
+          connectedRef.current = false;
+        }
       }
     })();
 
     // 5-minute reconciliation while connected; 60s fallback while disconnected
+    let tickCount = 0;
     const reconciliationInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return; // Visible-only
       }
-      triggerInvalidation();
+      tickCount++;
+      const isConnected = connectedRef.current;
+      if (!isConnected) {
+        triggerInvalidation();
+      } else if (tickCount % 5 === 0) {
+        triggerInvalidation();
+      }
     }, 60 * 1000);
 
     return () => {
