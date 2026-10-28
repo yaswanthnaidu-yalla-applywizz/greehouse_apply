@@ -1,3 +1,10 @@
+2026-10-29 session-start scan: files=3 parsed=3 (fetching yesterday's application stats grouped by status, reason, and ats)
+2026-10-28 session-checkpoint: executed REST API requests across Supabase PostgREST and OpenRouter to verify today's spending; OpenRouter daily usage is $0.00; Claude Haiku usage across 1,485 calls is exactly 4,516,498 prompt + 513,445 completion tokens totaling $0.605683 at corrected rate ($5.666984 raw DB uncorrected); no new observations
+2026-10-28 session-checkpoint: queried application resolution metrics for today's Claude Haiku run; 1,485 applications touched across 118 candidates and 217 jobs; 3,074 / 4,244 custom questions resolved (72.4%); 1,159 applications had >= 1 field resolved; 1,268 in READY_FOR_REVIEW and 13 APPLIED; average AI cost is $0.00052/app; no new observations
+2026-10-28 session-checkpoint: fixed Claude Haiku 5.5 cost multiplier in src/resolver/llmSynthesizer.ts to $0.10/M input and $0.30/M output; verified today's exact cost is $0.6057 across 1,485 calls (4,516,498 prompt + 513,445 completion tokens); 5/5 Claude tests pass & typecheck clean; no new observations
+2026-10-28 session-checkpoint: analyzed discrepancy between expected ($0.10/$0.30) vs recorded Claude Haiku cost ($5.85); root causes: 1) src/resolver/llmSynthesizer.ts:604 hardcodes Claude 3.5 Haiku list rates ($0.80 input / $4.00 output per 1M tokens), an 8x/13.3x difference; 2) Claude completion volume is 10.3x higher (350 vs 34 tokens/call); no new observations
+2026-10-28 session-checkpoint: checked LLM token cost in DB 2 for today (2026-10-28); total cost is $5.6670 across 1,485 LLM calls with claude-haiku-5-5 (5,029,943 tokens); no new observations
+2026-10-28 session-checkpoint: checked LLM token cost in DB 2 for prior dates (excluding 2026-10-28); total cost prior to today is $3.7475 across 4,479 LLM calls (10,922,570 tokens); no new observations
 2026-10-28 session-checkpoint: completed all 7 tasks and fix pass for dashboard stats, Dev trend chart, and realtime refresh plan (commits 3edc32a..7e831ab); canonicalized IST date range engine, migrated first_attempted_at (040) and stats_changed broadcast trigger (041), unified role-scoped endpoints on created-cohort current-status contract with empty team zeroing, replaced blanket 30s polling loops with event-driven authorized broadcast invalidation (SUBSCRIBED refetch, 60s disconnected fallback, 5m connected reconciliation), built zero-dependency SVG trend chart with day/week/month bucket generation and lifetime anchoring without 366-day cap, standardized [Today|This Week|This Month|Lifetime|Custom] controls across Dev/Admin/Manager; 100% tests pass (37/37 node:test across 6 suites), typecheck clean (src + dashboard), Vite build clean (2.59s); no new observations
 2026-10-28 session-start scan: files=3 parsed=3 (checking railway ingest service logs for scanned ashby jobs)
 2026-10-28 session-start scan: files=3 parsed=3 (executing dashboard stats and refresh inline via superpowers:executing-plans)
@@ -874,3 +881,10 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-10-28 session-start scan: files=3 (railway ingest error logs check)
 2026-10-28 DB 2 MCP and Railway CLI audit extension: no new skill observations
 2026-10-28 deliverable flush: checked Railway injest logs with ERROR filter; diagnosed T5 batch parse and scanner failures; no new skill observations
+2026-10-28 deliverable flush: traced deployed route, sampled Railway HTTP p95, ran DB 2 plans, updated audit; no new skill observations
+2026-10-28 deliverable flush: created docs/batch_scan_issues.md detailing Ashby 401s and browser disconnects; no new skill observations
+2026-10-28 deliverable flush: Terra timing instrumentation measured stats branch in production; original commit restored; no new skill observations
+2026-10-29 session-start scan: files=3 parsed=3
+2026-10-29 deliverable flush: DB2 migration 040 applied after UUID fix; isolated stats release verified; Railway deployment paused; no new skill observations
+2026-10-29 deliverable flush: no observations; Ashby DOM, required-only resolution, ATS cards, queue RPC repair prepared; live DB2 and Railway verification pending
+2026-10-29 session-start scan: files=3 parsed=3
