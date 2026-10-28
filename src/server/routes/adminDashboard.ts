@@ -202,7 +202,7 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
 
     const [stats, queued, applying, audit] = await Promise.all([
       getApplicationStats({
-        range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+        range: parsedRange,
       }),
       countApplicationsByStatus('QUEUED', createdAtRange),
       countApplicationsByStatus('APPLYING', createdAtRange),
