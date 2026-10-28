@@ -142,6 +142,7 @@ describe('application statistics contract', () => {
       },
       {
         id: 'app-proof-pending',
+        ats: 'ashby',
         applywizz_id: 'AWL-2',
         status: 'EMAIL_PROOF_PENDING',
         assigned_ca_email: 'ca2@example.com',
@@ -170,6 +171,10 @@ describe('application statistics contract', () => {
       submitted: 3,
       applied: 2,
       failed: 1,
+    });
+    assert.deepEqual(summary.byAts, {
+      greenhouse: { total: 3, submitted: 2, applied: 1, failed: 1 },
+      ashby: { total: 1, submitted: 1, applied: 1, failed: 0 },
     });
   });
 

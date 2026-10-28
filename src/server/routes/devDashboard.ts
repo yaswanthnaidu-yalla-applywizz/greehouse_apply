@@ -75,22 +75,24 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
       return;
     }
     const { startIso, endIso } = parsedRange;
-    const submitClicks = await countAuditEventsByActionInRange({
-      action: SUBMIT_CLICK_AUDIT_ACTION,
-      startIso,
-      endIso,
-    });
-    const [stats, queued] = await Promise.all([
+    const [submitClicks, stats, queued, snapshot] = await Promise.all([
+      countAuditEventsByActionInRange({
+        action: SUBMIT_CLICK_AUDIT_ACTION,
+        startIso,
+        endIso,
+      }),
       getApplicationStats({
         range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
       }),
       countApplicationsByStatus('QUEUED', { startIso, endIso }),
+      collectHealthSnapshot(),
     ]);
     res.json({
-      ...(await collectHealthSnapshot()),
+      ...snapshot,
       submitClicks,
       submitClicksDate: parsedRange.toDate,
       totalApplications: stats.counts.total,
+      byAts: stats.byAts,
       submitted: stats.counts.submitted,
       submittedCount: stats.counts.submitted,
       applied: stats.counts.applied,

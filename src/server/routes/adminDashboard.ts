@@ -214,6 +214,7 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       activeOperators: activeOperators.length,
       inactiveOperators: Math.max(0, operators.length - activeOperators.length),
       totalApplications: stats.counts.total,
+      byAts: stats.byAts,
       submitted: stats.counts.submitted,
       applied: stats.counts.applied,
       running: applying,

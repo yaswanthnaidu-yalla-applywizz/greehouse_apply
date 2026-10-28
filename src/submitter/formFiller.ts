@@ -991,9 +991,10 @@ export async function fillSingleField(
       label
     );
   const referralOptionValues = ['LinkedIn', 'Social Media', 'Online'];
+  const skipOptional = !field.isRequired && !val;
 
   // Only apply default heuristics as fallbacks when no resolved value is present
-  if (!val) {
+  if (!val && !skipOptional) {
     if (isWorkAuthRelocation) {
       val = 'Yes';
       log.info(`Work auth/relocation field empty — fallback setting Yes for label=${label}`);
@@ -1040,6 +1041,10 @@ export async function fillSingleField(
     source: field.source,
     success: false,
   };
+  if (skipOptional) {
+    fillResult.success = true;
+    return fillResult;
+  }
 
   // 0. Cover Letter Prohibition - NEVER fill or upload cover letters per policy
   if (/cover\s*letter|cover_letter/i.test(`${name} ${fieldId} ${label}`)) {

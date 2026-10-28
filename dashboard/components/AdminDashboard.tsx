@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, apiFetch, apiUploadWithProgress } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
+import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
 import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 
@@ -55,6 +56,7 @@ interface ManagerClientRow {
 }
 
 interface AdminOverview {
+  byAts?: import('./AtsBreakdown.js').AtsBreakdownCounts;
   operators: number;
   activeOperators: number;
   inactiveOperators: number;
@@ -840,6 +842,9 @@ export const AdminDashboard: React.FC = () => {
                 <div key={label} className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">{label}</p>
                   <p className="text-2xl font-black tracking-tight text-white mt-1">{val ?? 0}</p>
+                  {label === 'Total Applications' || label === 'Submitted' || label === 'Applied' || label === 'Failed' ? (
+                    <AtsBreakdown counts={overview.byAts} metric={label === 'Total Applications' ? 'total' : label === 'Submitted' ? 'submitted' : label === 'Applied' ? 'applied' : 'failed'} available={overview.statsAvailable !== false} />
+                  ) : null}
                 </div>
               ))}
             </div>

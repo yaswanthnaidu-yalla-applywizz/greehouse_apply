@@ -10,11 +10,11 @@
  * - V2-implementation.md (Phase V2-5, V2-UI)
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { CandidateSidebar } from './components/Queue/CandidateSidebar.js';
 import { DashboardHeader } from './components/Header/DashboardHeader.js';
+import { AtsBreakdown } from './components/AtsBreakdown.js';
 import { JobQueueView } from './JobQueueView.js';
-import { FormRenderer } from './FormRenderer.js';
 import { AuthView, type AuthUser } from './components/AuthView.js';
 import type {
   CandidateDetail,
@@ -49,6 +49,7 @@ import {
 } from './utils/notificationDismissals.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
+const FormRenderer = React.lazy(() => import('./FormRenderer.js').then(({ FormRenderer }) => ({ default: FormRenderer })));
 
 export const App: React.FC = () => {
   const [opsMode, setOpsMode] = useState<boolean>(() => {
@@ -470,6 +471,7 @@ export const App: React.FC = () => {
     if (!currentUser || typeof window === 'undefined') return;
     let ws: WebSocket | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let upsertRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
     let isDisposed = false;
 
     const connectWs = () => {
@@ -487,6 +489,14 @@ export const App: React.FC = () => {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+            if (data.type === 'APPLICATION_UPSERTED') {
+              if (upsertRefreshTimeout) clearTimeout(upsertRefreshTimeout);
+              upsertRefreshTimeout = setTimeout(() => {
+                fetchInitialData(true, selectedDate);
+                const activeCandidateId = selectedCandidateRef.current;
+                if (activeCandidateId) fetchCandidateDetail(activeCandidateId);
+              }, 300);
+            }
             if (data.type === 'APPLICATION_FAILED') {
               console.log('[Dashboard WS] ⚠️ Received APPLICATION_FAILED:', data);
               setFailureAlert({
@@ -543,6 +553,7 @@ export const App: React.FC = () => {
 
     return () => {
       isDisposed = true;
+      if (upsertRefreshTimeout) clearTimeout(upsertRefreshTimeout);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (ws) {
         ws.onopen = null;
@@ -879,6 +890,7 @@ export const App: React.FC = () => {
               <div className="text-3xl font-bold text-[#ffffff] mt-2">
                 {stats.statsAvailable === false ? '—' : stats.totalApplications}
               </div>
+              <AtsBreakdown counts={stats.byAts} metric="total" available={stats.statsAvailable !== false} />
               <div className="text-[11px] font-mono text-[#8e8e93] mt-1">
                 Active job assignments
               </div>
@@ -891,6 +903,7 @@ export const App: React.FC = () => {
               <div className="text-3xl font-bold text-[#ffffff] mt-2">
                 {stats.statsAvailable === false ? '—' : stats.successfulApplications ?? 0}
               </div>
+              <AtsBreakdown counts={stats.byAts} metric="applied" available={stats.statsAvailable !== false} />
               <div className="text-[11px] font-mono text-[#30d158] mt-1">
                 APPLIED or EMAIL_PROOF_PENDING
               </div>
@@ -903,6 +916,7 @@ export const App: React.FC = () => {
               <div className="text-3xl font-bold text-[#ffffff] mt-2">
                 {stats.statsAvailable === false ? '—' : stats.failedApplications ?? 0}
               </div>
+              <AtsBreakdown counts={stats.byAts} metric="failed" available={stats.statsAvailable !== false} />
               <div className="text-[11px] font-mono text-[#ff453a] mt-1">
                 Terminal FAILED submissions
               </div>
@@ -962,16 +976,18 @@ export const App: React.FC = () => {
 
               {/* Right Main: Form Renderer */}
               <div className="mobile-stage mobile-stage-application">
-                <FormRenderer
-                  key={selectedJobUrl || 'no-job'}
-                  application={application}
-                  isLoading={isLoadingApplication}
-                  candidateName={candidateDetail.clientName}
-                  apiBaseUrl={API_BASE_URL}
-                  onBack={() => setMobileScreen('jobs')}
-                  onFieldUpdate={handleFieldUpdate}
-                  onStatusChange={handleStatusChange}
-                />
+                <Suspense fallback={<div className="flex h-full items-center justify-center" role="status">Loading application form…</div>}>
+                  <FormRenderer
+                    key={selectedJobUrl || 'no-job'}
+                    application={application}
+                    isLoading={isLoadingApplication}
+                    candidateName={candidateDetail.clientName}
+                    apiBaseUrl={API_BASE_URL}
+                    onBack={() => setMobileScreen('jobs')}
+                    onFieldUpdate={handleFieldUpdate}
+                    onStatusChange={handleStatusChange}
+                  />
+                </Suspense>
               </div>
 
               {/* Candidate Client Info Slide-Over Drawer */}

@@ -658,6 +658,7 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
       candidates: candidateIds.size,
       applications: stats.counts.total,
       totalApplications: stats.counts.total,
+      byAts: stats.byAts,
       submitted: stats.counts.submitted,
       applied: stats.counts.applied,
       failed: stats.counts.failed,

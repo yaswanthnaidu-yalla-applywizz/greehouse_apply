@@ -36,6 +36,11 @@ project docs/
 greenhouse_only_applywizz_prod(in).csv
 # Raw debug captures: real candidate inboxes, live OTP codes, application history
 .ai/skill-observations/evidence/
+.audit/
+.release-stats/
+PERFORMANCE_AUDIT.md
+injest_logs.json
+injest_all_logs.json
 
 # Local Supabase CLI linkage (project refs)
 supabase/.temp/

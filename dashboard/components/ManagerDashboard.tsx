@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, sessionRole, sessionUserEmail, apiFetch } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
+import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
 import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 
@@ -107,6 +108,7 @@ interface ReportsPayload {
 }
 
 interface ManagerDashboardApiResponse {
+  byAts?: import('./AtsBreakdown.js').AtsBreakdownCounts;
   rows?: ManagerClientRow[];
   totals?: Record<string, number | null>;
   submitted?: number | null;
@@ -382,6 +384,7 @@ export const ManagerDashboard: React.FC = () => {
   const [ca, setCa] = useState<string>('all');
   const [rows, setRows] = useState<ManagerClientRow[]>([]);
   const [totals, setTotals] = useState<Record<string, number | null>>({});
+  const [byAts, setByAts] = useState<import('./AtsBreakdown.js').AtsBreakdownCounts>();
   const [submitted, setSubmitted] = useState<number | null>(0);
   const [applied, setApplied] = useState<number | null>(0);
   const [statsAvailable, setStatsAvailable] = useState<boolean | null>(null);
@@ -427,6 +430,7 @@ export const ManagerDashboard: React.FC = () => {
       const data = payload as ManagerDashboardApiResponse;
       setRows(data.rows || []);
       setTotals(data.totals || {});
+      setByAts(data.byAts);
       setSubmitted(data.submitted ?? (data.statsAvailable === false ? null : 0));
       setApplied(data.applied ?? (data.statsAvailable === false ? null : 0));
       setStatsAvailable(data.statsAvailable !== false);
@@ -745,6 +749,7 @@ export const ManagerDashboard: React.FC = () => {
                 <div key={label} className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">{label}</p>
                   <p className="text-2xl font-black text-white mt-1">{statsAvailable === false ? '—' : val ?? 0}</p>
+                  <AtsBreakdown counts={byAts} metric={label === 'Total Applications' ? 'total' : label === 'Submitted (team)' ? 'submitted' : label === 'Applied (team)' ? 'applied' : 'failed'} available={statsAvailable !== false} />
                 </div>
               ))}
             </div>

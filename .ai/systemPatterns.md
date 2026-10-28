@@ -10,7 +10,7 @@ Input CSV (greenhouse_only_applywizz_prod(in).csv)
          ├─ BRANCH 1: Job Scanning (unique URLs only)
          │     csvDeduplicator → normalize URLs, resolve grnh.se shortlinks, deduplicate
          │     Greenhouse: PlaywrightScanner (headless, 3–5 parallel workers, 3–6s jitter)
-         │     Ashby: ashbyScanner (Ashby JSON API schema + Playwright DOM fallback [data-field-path])
+         │     Ashby: ashbyScanner (Playwright DOM only, [data-field-path])
          │       → extracts: text, textarea, select, radio, checkbox, file, location_autocomplete
          │       → captures: label, required flag (including hidden markers), dropdown options
          │       → detects: expired/404 jobs
@@ -19,7 +19,7 @@ Input CSV (greenhouse_only_applywizz_prod(in).csv)
          └─ BRANCH 2: Candidate Sync & Resolution
                segregateCandidatesByApplyWizzId → group CSV by AWL ID
                → ApplyWizz API sync (CSV IDs are the approval) → profile JSON + resume PDF → `profiles`
-               → AnswerResolver:
+               → AnswerResolver (required questions only; optional questions remain blank):
                      - Ashby system field short-circuit (_systemfield_*) mapped directly from profile before Tier 1
                      - 5-Tier Waterfall for custom & ATS fields
                → Needs Review & Filtered-Out Routing:
@@ -87,6 +87,8 @@ Resolver observability: `[Resolver Choice]` logs include the Tier 1 source, raw 
 **Availability date:** “Date available to start” is the UTC application date plus seven calendar days. Native/text answers use captured input/placeholder format metadata; dropdowns use a unique one-week option or the first listed option after “Immediately”, otherwise remain unresolved. Availability rules do not repurpose `desired_start_date` as a full value for month/year component fields. Education month/year fields use education-specific facts; missing component facts remain unresolved.
 
 ## Filtered-Out Application Routing (`src/resolver/needsReview.ts`)
+Optional questions stay visible and blank in the operator form. They do not enter the resolver or the filtered-out counts.
+
 An application is routed to `FILTERED_OUT` when:
 1. **Required AI field count > 3** (`countRequiredAiFields(fields) > 3`), OR
 2. **Unresolved required field count > 3** (`countUnresolvedRequiredFields(fields) > 3`).
@@ -129,6 +131,8 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
 | `unresolved` | 🔴 Red | No answer found across all 5 tiers |
 
 ## Submission Flow Rules
+
+The dequeue RPC allows another Ashby application for a candidate only after one hour from a successful submission (`submitted_at`). An Ashby success also blocks that candidate from the same company for 48 hours, using normalized company identity and the Ashby organization slug when available. Greenhouse jobs do not use these timed gaps. Failed attempts start neither timer. Migration 042 must be applied to DB 2 before these guards are active.
 
 ### Unified Stealth Browser (`src/submitter/browserManager.ts`)
 Both Greenhouse and Ashby submissions use `BrowserManager` wrapped with `playwright-extra` and `puppeteer-extra-plugin-stealth`. Stealth evasion runs in both headless (Railway prod) and headful (local dry-run) environments.
