@@ -1,6 +1,8 @@
 import { getISTDateRangeUtc } from '../db/applications.js';
 import { getISTDateString } from '../services/workHistoryClient.js';
 
+export { getISTDateRangeUtc };
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
