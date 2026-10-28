@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, apiFetch } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
+import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 
 interface DevHealthProbe {
   name: string;
@@ -256,12 +257,13 @@ export const DevDashboard: React.FC = () => {
     void refresh();
   }, [refresh]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
+  useApplicationStatsInvalidation({
+    enabled: isAuthorized,
+    onInvalidate: () => {
       void refresh();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    },
+    getAuthHeaders: () => ({ Authorization: `Bearer ${token}` }),
+  });
 
   const openDebugger = async (id?: string) => {
     const target = (id || debugId).trim();

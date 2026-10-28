@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, sessionRole, sessionUserEmail, apiFetch } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
+import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 
 interface EmailProofData {
   subject?: string;
@@ -520,14 +521,15 @@ export const ManagerDashboard: React.FC = () => {
   useEffect(() => { if (tab === 'activity') void loadActivity(); }, [tab, loadActivity]);
   useEffect(() => { if (tab === 'reports') void loadReports(); }, [tab, loadReports]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
+  useApplicationStatsInvalidation({
+    enabled: isAuthorized,
+    onInvalidate: () => {
       void load();
       if (tab === 'operators') void loadOperators();
       if (tab === 'activity') void loadActivity();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [load, loadOperators, loadActivity, tab]);
+    },
+    getAuthHeaders: () => ({ Authorization: `Bearer ${token}` }),
+  });
 
   useEffect(() => {
     if (!opsPickerOpen || currentRole !== 'dev') return;
