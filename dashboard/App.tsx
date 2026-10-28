@@ -42,6 +42,11 @@ import {
   isOpsMode,
 } from './hooks/useSession.js';
 import { ClientInfoDrawer } from './components/ClientInfoDrawer.js';
+import {
+  filterActiveNotifications,
+  dismissNotificationId,
+  dismissAllNotificationIds,
+} from './utils/notificationDismissals.js';
 
 const API_BASE_URL = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -169,6 +174,7 @@ export const App: React.FC = () => {
   };
 
   const clearNotification = async (id: string) => {
+    dismissNotificationId(id);
     setNotifications((prev) => prev.filter((n) => n.id !== id));
     try {
       await apiFetch(`${API_BASE_URL}/api/notifications/${encodeURIComponent(id)}`, {
@@ -180,6 +186,7 @@ export const App: React.FC = () => {
   };
 
   const clearAllNotifs = async () => {
+    dismissAllNotificationIds(notifications.map((n) => n.id));
     setNotifications([]);
     try {
       await apiFetch(`${API_BASE_URL}/api/notifications/all`, {
@@ -271,7 +278,7 @@ export const App: React.FC = () => {
       if (res.ok) {
         const serverNotifs = await res.json();
         if (Array.isArray(serverNotifs)) {
-          setNotifications(serverNotifs);
+          setNotifications(filterActiveNotifications(serverNotifs));
         }
       }
     } catch (err) {
