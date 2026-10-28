@@ -83,7 +83,7 @@ export function useCandidateApplicationsRealtime(
       const row = payload.new;
       if (!row || typeof row !== 'object') return;
       console.log(
-        `[Realtime] candidate_applications ${payload.eventType} ${
+        `[Realtime] gh_candidate_applications ${payload.eventType} ${
           isGlobal ? '(global)' : `applywizz=${applywizzId}`
         } status=${String(row.status)} id=${String(row.id || '')}`
       );
@@ -121,12 +121,12 @@ export function useCandidateApplicationsRealtime(
             .channel(channelName)
             .on(
               'postgres_changes',
-              { event: 'UPDATE', schema: 'public', table: 'candidate_applications', filter },
+              { event: 'UPDATE', schema: 'public', table: 'gh_candidate_applications', filter },
               (payload: any) => handlePayload({ eventType: 'UPDATE', new: payload.new as RealtimeApplicationRow })
             )
             .on(
               'postgres_changes',
-              { event: 'INSERT', schema: 'public', table: 'candidate_applications', filter },
+              { event: 'INSERT', schema: 'public', table: 'gh_candidate_applications', filter },
               (payload: any) => handlePayload({ eventType: 'INSERT', new: payload.new as RealtimeApplicationRow })
             );
         } else {
@@ -134,12 +134,12 @@ export function useCandidateApplicationsRealtime(
             .channel(channelName)
             .on(
               'postgres_changes',
-              { event: 'UPDATE', schema: 'public', table: 'candidate_applications' },
+              { event: 'UPDATE', schema: 'public', table: 'gh_candidate_applications' },
               (payload: any) => handlePayload({ eventType: 'UPDATE', new: payload.new as RealtimeApplicationRow })
             )
             .on(
               'postgres_changes',
-              { event: 'INSERT', schema: 'public', table: 'candidate_applications' },
+              { event: 'INSERT', schema: 'public', table: 'gh_candidate_applications' },
               (payload: any) => handlePayload({ eventType: 'INSERT', new: payload.new as RealtimeApplicationRow })
             );
         }

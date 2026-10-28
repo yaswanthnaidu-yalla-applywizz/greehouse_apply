@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, apiFetch, apiUploadWithProgress } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
+import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 
 interface EmailProofData {
   subject?: string;
@@ -530,12 +531,13 @@ export const AdminDashboard: React.FC = () => {
     void refresh();
   }, [refresh]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
+  useApplicationStatsInvalidation({
+    enabled: isAuthorized,
+    onInvalidate: () => {
       void refresh();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    },
+    getAuthHeaders: () => ({ Authorization: `Bearer ${token}` }),
+  });
 
   const openManager = async (managerEmail: string) => {
     setSelectedManager(managerEmail);
