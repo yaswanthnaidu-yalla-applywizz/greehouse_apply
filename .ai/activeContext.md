@@ -1,3 +1,52 @@
+# Current Session Update (2026-10-29 — Ashby DOM scanning, required-only resolution, live dashboard updates, and queue gaps)
+
+- Ashby scanning now uses Playwright DOM only. The pipeline reports one combined Greenhouse/Ashby scan count and emails the dev address after scan export.
+- Optional questions remain visible and blank. Resolver tiers and submission defaults skip them. Filtered-out counts use required questions only.
+- Application upserts broadcast a dashboard refresh event. In a separate ingest service, `WEB_SERVICE_URL` must point to the main web service for immediate delivery; the dashboard retains polling as recovery.
+- Operator, admin, manager, and dev stat cards show Greenhouse and Ashby counts using their existing scopes and dates.
+- DB 2's migration 037 RPC references `template_id`, which migration 004 removed. Migration 042 replaces it, enforces a 1-hour Ashby candidate success gap and a 48-hour Ashby candidate/company success gap, and prevents a broken RPC from falling back to an unguarded claim. **Migration 042 is not applied to DB 2.** Supabase/Railway MCP, connected browser, and local Postgres were unavailable for live verification.
+- The saved 2026-10-28 ingest snapshot has three Tier 5 batch parse failures with 0/0/11 text characters. Batch requests now use Anthropic JSON-schema output and leave malformed answers unresolved. Provider behavior remains unverified in production.
+
+# Current Session Update (2026-10-28 — Full Implementation of Dashboard Stats & Refresh Plan Completed)
+
+## Immediate blocker (2026-10-29)
+
+- DB 2 migration 040 is applied after correcting a UUID comparison in its backfill; the column, trigger, and indexes were verified.
+- The isolated stats aggregation release in `.release-stats` passes typecheck, build, and 24 focused tests. October 28 cohort totals match independent DB 2 SQL.
+- Railway rejected two CLI uploads with `Deploys have been paused temporarily`. Production remains on `e4b31d9`; no post-release latency comparison is possible until Railway resumes deployment. See `PERFORMANCE_AUDIT.md`.
+- Other local performance work is ready: deferred `FormRenderer` reduces initial operator JS by 5.0% gzip, and overlapping `/api/dev/health` reads reduced local median from 1,408 ms to 786 ms across five trials per order. Typecheck, build, and focused tests pass; production comparison and concurrency load remain pending deployment.
+
+- **Completed 100% of the 7 Tasks in SDD Implementation Plan (`docs/superpowers/plans/2026-10-28-dashboard-stats-and-refresh.md`)**:
+  - **Task 1: Canonical IST period contract (`src/server/dashboardDateRange.ts`)**:
+    - Eliminated host-local `getDay`/`setDate` and `toISOString()` timezone skew. Fixed week and month calculations to pure math over IST offset (+05:30), accurately anchoring Monday weeks and handling year/month rollovers and custom dates.
+    - Verified with `tests/dashboardDateRange.test.ts` (12/12 passing).
+  - **Task 2: Current-status cohort aggregate and Submitted persistence (`src/db/applicationStats.ts`, `src/db/migrations/040_application_first_attempted_at.sql`)**:
+    - Created Migration 040 adding `first_attempted_at TIMESTAMPTZ` marker with an idempotent trigger (`set_gh_candidate_application_first_attempt`) and historical backfill from `submitted_at` and fact tables.
+    - Replaced 4 sequential fact counts with unified server-side cohort aggregation (`gh_candidate_applications` by creation date, current status, and first-attempt marker).
+    - Verified with `tests/applicationStats.test.ts` (9/9 passing).
+  - **Task 3: Migrate all role-scoped API consumers together (`src/server/routes/devDashboard.ts`, `src/server/routes/adminDashboard.ts`, `src/server/routes/manager.ts`, `src/server/clientDashboard.ts`)**:
+    - Routed Dev, Admin, and Manager endpoints through the unified cohort service while preserving existing payload field names (`totalApplications`, `submitted`, `applied`, `failed`, `byCandidate`, `byOperator`).
+    - Added `GET /api/dev/stats/trend?bucket=day|week|month&from=...&to=...` endpoint.
+    - Enforced strict empty-team scoping: returns 0 applications / 0 operators, preventing org-wide data leaks.
+    - Verified with `tests/roleScopedStatsConsistency.test.ts` and `tests/managerDashboardMetrics.test.ts`.
+  - **Task 4: Authorized database invalidation (`dashboard/hooks/useApplicationStatsInvalidation.ts`, `src/db/migrations/041_stats_changed_broadcast_trigger.sql`)**:
+    - Created Migration 041 with trigger `notify_application_stats_changed` emitting private `stats_changed` broadcast without row payloads; ignores no-op updates.
+    - Implemented `useApplicationStatsInvalidation` hook with tab visibility recovery and coalescing.
+    - Verified with `tests/statsInvalidation.test.ts` (4/4 passing).
+  - **Task 5: Replace stats timers and retain reconciliation (`dashboard/components/DevDashboard.tsx`, `dashboard/components/AdminDashboard.tsx`, `dashboard/components/ManagerDashboard.tsx`, `dashboard/hooks/useCandidateApplicationsRealtime.ts`)**:
+    - Purged blanket 30-second interval timers across Dev, Admin, and Manager dashboards in favor of private realtime invalidation.
+    - Fixed table name typo in `useCandidateApplicationsRealtime.ts` from `candidate_applications` to `gh_candidate_applications`.
+    - Retained 3s CSV ingest poll while running, session renewal check, and local OTP countdown.
+    - Verified with `tests/statsRefreshConvergence.test.ts` (4/4 passing).
+  - **Task 6: Date selectors and Dev trend chart (`dashboard/components/DevTrendChart.tsx`, `DevDashboard.tsx`, `AdminDashboard.tsx`, `ManagerDashboard.tsx`)**:
+    - Created responsive, zero-dependency SVG trend chart (`DevTrendChart.tsx`) with dynamic metric selection (`Success`, `Failed`, `Clients`), granularity switching (`Day`, `Week`, `Month`), and hover tooltips.
+    - Standardized 5-way cohort date controls (`Today`, `This Week`, `This Month`, `Lifetime`, `Custom`) across Dev, Admin, and Manager dashboards.
+    - Verified with `tests/devTrendChart.test.ts` (3/3 passing), `npm run typecheck`, and production Vite build.
+  - **Task 7: End-to-end cutover and documentation**:
+    - Executed all 6 test suites (35/35 tests passing).
+    - Production Vite bundle built cleanly in 2.61s.
+    - Verified Rule 12 compliance: submission engine, resolver, and scanner completely untouched.
+
 # Current Session Update (2026-10-28 — Full Implementation of Dashboard Performance & Security Plan Completed)
 
 - **Completed 100% of the 16 Tasks in SDD Implementation Plan (`docs/superpowers/plans/2026-10-28-dashboard-performance-and-security.md`)**:
@@ -1430,6 +1479,7 @@ _Last updated: 2026-10-09_
 - **Manager team scope uses `users.manager_email` -> operator emails -> `assigned_ca_email` / work-history union**.
 - **Default dashboard date window: Today & Yesterday (IST)** unless `?from=&to=` override.
 - **AI ops: Railway + Supabase investigations/deploy checks use MCP**, not CLI.
-`n- 2026-10-28 dashboard stats discovery: audited `gh_application_stats_daily`, role dashboards, and polling. User interview pending on success/status semantics, distinct AWL count, timezone, graph windows, and historical cutover before implementation.
+
+- 2026-10-28 dashboard stats discovery: audited `gh_application_stats_daily`, role dashboards, and polling. User interview pending on success/status semantics, distinct AWL count, timezone, graph windows, and historical cutover before implementation.
 - Interview decisions: period stats use status-change dates; graph counts distinct AWL IDs per bucket; IST Monday weeks; success includes APPLIED and EMAIL_PROOF_PENDING; chart shows final outcome only, attributed to latest outcome date; defaults 30 days, 12 weeks, 12 months with custom range.
-- Stats architecture recommendation (2026-10-28): query `gh_candidate_applications` by IST created_at cohort and current status using grouped SQL; chart groups same rows by creation day/week/month with distinct AWL count; authorized Supabase Broadcast invalidates/refetches after DB commit; no routine polling while connected. Validate EXPLAIN before adding indexes. Existing event facts are unsuitable for this contract.
+- Stats architecture recommendation (2026-10-28): query `gh_candidate_applications` by IST created_at cohort and current status using grouped SQL; chart groups same rows by creation day/week/month with distinct AWL count; authorized Supabase Broadcast invalidates/refetches after DB commit; no routine polling while connected. Validate EXPLAIN before adding indexes. Existing event facts are unsuitable for this contract.- 2026-10-28: New implementation spec and plan at docs/superpowers/plans/2026-10-28-dashboard-stats-and-refresh{,-spec}.md. Interview confirmed date filters apply only to application counts; Dev clients count distinct AWL IDs with APPLIED/EMAIL_PROOF_PENDING; Submitted is ever attempted. Execution underway in the shared dev branch at operator direction. Overlaps older dashboard performance plan.

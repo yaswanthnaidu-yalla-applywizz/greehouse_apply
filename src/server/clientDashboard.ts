@@ -97,6 +97,7 @@ export interface ManagerClientRow {
 
 export interface ClientDashboardResult {
   date: string;
+  byAts: ApplicationStatsResult['byAts'];
   dateRange: { preset: string; from: string | null; to: string | null; label: string };
   ca: string;
   managerEmail: string;
@@ -200,6 +201,7 @@ export function emptyClientDashboard(
   return {
     date,
     dateRange,
+    byAts: stats?.byAts ?? { greenhouse: { total: 0, submitted: 0, applied: 0, failed: 0 }, ashby: { total: 0, submitted: 0, applied: 0, failed: 0 } },
     ca,
     managerEmail,
     rows: [],
@@ -494,6 +496,7 @@ export async function loadClientDashboard(options: {
   return {
     date,
     dateRange,
+    byAts: stats.byAts,
     ca: requestedCa.toLowerCase() === 'all' ? 'all' : requestedCa,
     managerEmail,
     rows,

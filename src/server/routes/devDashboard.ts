@@ -11,7 +11,7 @@ import {
   listApplications,
   countApplicationsByStatus,
 } from '../../db/applications.js';
-import { getApplicationStats } from '../../db/applicationStats.js';
+import { getApplicationStats, getApplicationTrend } from '../../db/applicationStats.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { listApplicationEvents } from '../../db/events.js';
 import { getISTDateString } from '../../services/workHistoryClient.js';
@@ -75,22 +75,24 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
       return;
     }
     const { startIso, endIso } = parsedRange;
-    const submitClicks = await countAuditEventsByActionInRange({
-      action: SUBMIT_CLICK_AUDIT_ACTION,
-      startIso,
-      endIso,
-    });
-    const [stats, queued] = await Promise.all([
+    const [submitClicks, stats, queued, snapshot] = await Promise.all([
+      countAuditEventsByActionInRange({
+        action: SUBMIT_CLICK_AUDIT_ACTION,
+        startIso,
+        endIso,
+      }),
       getApplicationStats({
         range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
       }),
       countApplicationsByStatus('QUEUED', { startIso, endIso }),
+      collectHealthSnapshot(),
     ]);
     res.json({
-      ...(await collectHealthSnapshot()),
+      ...snapshot,
       submitClicks,
       submitClicksDate: parsedRange.toDate,
       totalApplications: stats.counts.total,
+      byAts: stats.byAts,
       submitted: stats.counts.submitted,
       submittedCount: stats.counts.submitted,
       applied: stats.counts.applied,
@@ -104,6 +106,34 @@ devDashboardRouter.get('/health', async (req: Request, res: Response): Promise<v
   } catch (error) {
     log.error('[Dev] health failed:', error);
     res.status(500).json({ error: 'Unable to load health snapshot.' });
+  }
+});
+
+devDashboardRouter.get('/stats/trend', async (req: Request, res: Response): Promise<void> => {
+  const bucketParam = typeof req.query.bucket === 'string' ? req.query.bucket.trim().toLowerCase() : 'day';
+  if (bucketParam !== 'day' && bucketParam !== 'week' && bucketParam !== 'month') {
+    res.status(400).json({ error: 'bucket must be day, week, or month.' });
+    return;
+  }
+  const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
+  if ('error' in parsedRange) {
+    res.status(400).json({ error: parsedRange.error });
+    return;
+  }
+
+  try {
+    const trend = await getApplicationTrend({
+      range: parsedRange,
+      bucket: bucketParam,
+    });
+    res.json({
+      trend,
+      bucket: bucketParam,
+      dateRange: serializeDateRange(parsedRange),
+    });
+  } catch (error) {
+    log.error('[Dev] trend failed:', error);
+    res.status(500).json({ error: 'Unable to load application trend.' });
   }
 });
 

@@ -177,6 +177,7 @@ AWS_SECRET_ACCESS_KEY=
 RAILWAY_ENV=true                   # Disables headful mode, caps memory
 ENABLE_PIPELINE_STOP=false         # Allow admin ⏹ Stop + CLI SIGINT
 INGEST_ONLY=false                  # Start server in ingest-only mode
+WEB_SERVICE_URL=                   # Main web service URL for ingest/worker WebSocket event forwarding
 DASHBOARD_MODE=tsx                 # 'tsx' (Vite build dist/client) or 'html' (Babel in-browser legacy)
 PIPELINE_VERBOSE=false             # Compact pipeline summaries vs verbose logs
 

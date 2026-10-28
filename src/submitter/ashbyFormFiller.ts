@@ -147,6 +147,7 @@ export async function fillAshbyForm(
     const questionText = field.label || fieldPath;
     const rawAnswer = field.value;
     const controlType = (field.type || 'text').toLowerCase();
+    if (!field.isRequired && !String(rawAnswer ?? '').trim()) continue;
 
     // Check for resume upload
     if (fieldPath === '_systemfield_resume' || controlType === 'file') {

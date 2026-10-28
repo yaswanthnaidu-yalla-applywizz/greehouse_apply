@@ -535,7 +535,7 @@ managerRouter.get('/reports', async (req: Request, res: Response): Promise<void>
     const role = resolveRequestAppRole(req as AuthenticatedRequest, managerEmail);
     const unrestricted = hasUnrestrictedDashboardAccess(role);
     const stats = await getApplicationStats({
-      range: { fromDate: start, toDate: end },
+      range: reportRange,
       scope: unrestricted ? {} : { managerEmail },
       includeBreakdown: true,
     });
@@ -622,7 +622,7 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
     const scoped = await scopedApplywizzIds(req);
     const role = resolveRequestAppRole(req as AuthenticatedRequest, scoped.managerEmail);
     const stats = await getApplicationStats({
-      range: { fromDate: parsedRange.fromDate!, toDate: parsedRange.toDate! },
+      range: parsedRange,
       scope: hasUnrestrictedDashboardAccess(role) ? {} : { managerEmail: scoped.managerEmail },
     });
     let applications: Array<Pick<ApplicationRow, 'id' | 'applywizz_id' | 'status' | 'created_at'>> = [];
@@ -658,6 +658,7 @@ managerRouter.get(['/overview', '/stats'], async (req: Request, res: Response): 
       candidates: candidateIds.size,
       applications: stats.counts.total,
       totalApplications: stats.counts.total,
+      byAts: stats.byAts,
       submitted: stats.counts.submitted,
       applied: stats.counts.applied,
       failed: stats.counts.failed,

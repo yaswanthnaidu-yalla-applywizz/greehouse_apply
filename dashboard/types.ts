@@ -76,6 +76,7 @@ export interface DashboardDateRangeMeta {
 
 export interface DashboardStats {
   totalCandidates: number;
+  byAts?: import('./components/AtsBreakdown.js').AtsBreakdownCounts;
   totalApplications: number | null;
   successfulApplications: number | null;
   failedApplications: number | null;
