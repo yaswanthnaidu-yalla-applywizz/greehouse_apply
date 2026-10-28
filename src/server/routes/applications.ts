@@ -42,6 +42,7 @@ import {
   applicationRowHasPersistedResolution,
   filterOperatorApplicationJobs,
 } from '../../dashboard/candidateQueueFilter.js';
+import { APPLICATION_SUMMARY_COLUMNS } from '../types/applicationDtos.js';
 import { requireAuth } from '../middleware/auth.js';
 import axios from 'axios';
 
@@ -684,7 +685,13 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let applications: any[] = [];
     if (isSupabaseConfigured()) {
       const supabase = getDbClient();
-      let query = supabase.from('gh_candidate_applications').select('*').neq('status', 'FILTERED_OUT');
+      // Project scalar columns for summary list (excluding heavy JSONB payloads resolved_fields, user_inputs)
+      // Filters APPLICATION_SUMMARY_COLUMNS to physical DB columns to prevent PostgREST column missing error
+      const summaryColumns = APPLICATION_SUMMARY_COLUMNS.filter(
+        (col) => !['location', 'match_score', 'failure_reason', 'last_error', 'proof_url'].includes(col)
+      );
+      const selectProjection = summaryColumns.join(',') || APPLICATION_SUMMARY_COLUMNS.join(',');
+      let query = supabase.from('gh_candidate_applications').select(selectProjection).neq('status', 'FILTERED_OUT');
 
       if (applywizzId) {
         query = query.eq('applywizz_id', applywizzId);
@@ -705,8 +712,8 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         return;
       }
       applications = filterOperatorApplicationJobs(
-        (data || []).filter((app: any) => {
-          if (!applicationRowHasPersistedResolution(app)) return false;
+        ((data as any[]) || []).filter((app: any) => {
+          if (app.resolved_fields !== undefined && !applicationRowHasPersistedResolution(app)) return false;
           if (!adminBypass && userEmail) {
             if (viewAsManagerEmail && teamOperatorEmails) {
               return applicationAssignedCaAllowed(
