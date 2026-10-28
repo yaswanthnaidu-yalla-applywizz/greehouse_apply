@@ -103,7 +103,6 @@ export const App: React.FC = () => {
   );
 
   const [isLoadingCandidates, setIsLoadingCandidates] = useState<boolean>(true);
-  const [isAuthHydrating, setIsAuthHydrating] = useState<boolean>(false);
   const [isLoadingApplication, setIsLoadingApplication] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
@@ -212,26 +211,6 @@ export const App: React.FC = () => {
     return role === 'dev' || role === 'admin';
   };
 
-  const ensureAdminHydrated = useCallback(async (dateStr: string): Promise<void> => {
-    if (!isAdminSession()) return;
-    const token = localStorage.getItem('applywizz_auth_token');
-    if (!token) return;
-    setIsAuthHydrating(true);
-    try {
-      await apiFetch(`${API_BASE_URL}/api/auth/hydrate-admin`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ date: dateStr }),
-      });
-    } catch (err) {
-      console.warn('Admin hydration request failed:', err);
-    } finally {
-      setIsAuthHydrating(false);
-    }
-  }, [currentUser]);
-
   const handleSignOut = async () => {
     setWorkHistoryUnreachable(false);
     setWorkHistoryBannerDismissed(false);
@@ -326,10 +305,9 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    ensureAdminHydrated(selectedDate);
     fetchInitialData(false, selectedDate);
     fetchNotifications(selectedDate);
-  }, [currentUser, selectedDate, ensureAdminHydrated, fetchInitialData, fetchNotifications]);
+  }, [currentUser, selectedDate, fetchInitialData, fetchNotifications]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -939,7 +917,7 @@ export const App: React.FC = () => {
             setSelectedCandidateId((prev) => (isMobile ? id : prev === id ? null : id));
             if (isMobile) setMobileScreen('jobs');
           }}
-          isLoading={isLoadingCandidates || isAuthHydrating}
+          isLoading={isLoadingCandidates}
           emptyMessage={noCandidatesMessage}
           selectedDate={selectedDate}
         />
