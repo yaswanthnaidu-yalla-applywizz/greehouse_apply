@@ -110,4 +110,31 @@ describe('Dev trend chart and date selector contract', () => {
     assert.equal(trendAfter[0].successApplications, 1);
     assert.equal(trendAfter[0].clients, 1);
   });
+
+  it('includes records from current year 2026 when range is lifetime without 366-day cap truncation', () => {
+    const lifetimeRange = parseDashboardStatsRange({ range: 'lifetime' });
+    assert.ok(!('error' in lifetimeRange));
+    if ('error' in lifetimeRange) return;
+
+    const rows: ApplicationCohortRow[] = [
+      {
+        id: 'app-2026',
+        applywizz_id: 'AWL-2026',
+        status: 'APPLIED',
+        assigned_ca_email: 'ca@example.com',
+        created_at: '2026-10-28T04:00:00.000Z',
+        first_attempted_at: '2026-10-28T04:10:00.000Z',
+      },
+    ];
+
+    const trend = summarizeApplicationTrend(rows, {
+      range: lifetimeRange,
+      bucket: 'month',
+    });
+
+    const point2026 = trend.find((p) => p.bucketStart.startsWith('2026-10'));
+    assert.ok(point2026, 'Trend must contain 2026 bucket under lifetime range');
+    assert.equal(point2026.successApplications, 1);
+    assert.equal(point2026.clients, 1);
+  });
 });

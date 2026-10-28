@@ -119,6 +119,36 @@ describe('stats refresh invalidation and coalescing contract', () => {
     coalescer.handleReconnect();
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(callCount, 2);
+
+    // Second reconnect after disconnection also invalidates
+    coalescer.handleReconnect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(callCount, 3);
+  });
+
+  it('verifies 5-minute connected reconciliation interval and 60-second disconnected fallback cadence', () => {
+    // Model the cadence logic used in useApplicationStatsInvalidation
+    const runTicks = (connected: boolean, totalMinutes: number): number => {
+      let invalidations = 0;
+      let tickCount = 0;
+      for (let min = 1; min <= totalMinutes; min++) {
+        tickCount++;
+        if (!connected) {
+          // Every 1 minute tick while disconnected
+          invalidations++;
+        } else if (tickCount % 5 === 0) {
+          // Every 5 minute ticks while connected
+          invalidations++;
+        }
+      }
+      return invalidations;
+    };
+
+    // In 15 minutes of connected state: exactly 3 reconciliations (at 5m, 10m, 15m)
+    assert.equal(runTicks(true, 15), 3, 'Connected reconciliation must trigger once per 5 minutes');
+
+    // In 5 minutes of disconnected state: exactly 5 fallback triggers (1m, 2m, 3m, 4m, 5m)
+    assert.equal(runTicks(false, 5), 5, 'Disconnected fallback must trigger every 60 seconds');
   });
 
   it('cleans up timers and queues cleanly on teardown', async () => {

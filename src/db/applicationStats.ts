@@ -1,7 +1,6 @@
 import { getDbClient, isSupabaseConfigured } from './client.js';
 import {
   getISTDateRangeUtc,
-  listIstDatesInclusive,
   getIstCalendarDate,
   DashboardCreatedAtRange,
 } from '../server/dashboardDateRange.js';
@@ -230,12 +229,51 @@ export function generateTrendBucketKeys(
   toDate: string,
   bucket: 'day' | 'week' | 'month'
 ): string[] {
-  const dates = listIstDatesInclusive(fromDate, toDate);
-  const keys = new Set<string>();
-  for (const d of dates) {
-    keys.add(getBucketKeyForIstDate(d, bucket));
+  if (fromDate > toDate) return [];
+
+  if (bucket === 'month') {
+    const [startYear, startMonth] = fromDate.split('-').map(Number);
+    const [endYear, endMonth] = toDate.split('-').map(Number);
+    let y = startYear;
+    let m = startMonth;
+    const keys: string[] = [];
+    while (y < endYear || (y === endYear && m <= endMonth)) {
+      keys.push(`${y}-${String(m).padStart(2, '0')}-01`);
+      m++;
+      if (m > 12) {
+        m = 1;
+        y++;
+      }
+      if (keys.length > 600) break;
+    }
+    return keys;
   }
-  return Array.from(keys).sort();
+
+  if (bucket === 'week') {
+    let currentMonday = getBucketKeyForIstDate(fromDate, 'week');
+    const endMonday = getBucketKeyForIstDate(toDate, 'week');
+    const keys: string[] = [];
+    while (currentMonday <= endMonday) {
+      keys.push(currentMonday);
+      const [yyyy, mm, dd] = currentMonday.split('-').map(Number);
+      const nextMonMs = Date.UTC(yyyy, mm - 1, dd + 7, 12, 0, 0);
+      currentMonday = getIstCalendarDate(nextMonMs).isoDate;
+      if (keys.length > 2600) break;
+    }
+    return keys;
+  }
+
+  // bucket === 'day'
+  let current = fromDate;
+  const keys: string[] = [];
+  while (current <= toDate) {
+    keys.push(current);
+    const [yyyy, mm, dd] = current.split('-').map(Number);
+    const nextDayMs = Date.UTC(yyyy, mm - 1, dd + 1, 12, 0, 0);
+    current = getIstCalendarDate(nextDayMs).isoDate;
+    if (keys.length > 1000) break;
+  }
+  return keys;
 }
 
 export function summarizeApplicationTrend(
@@ -246,8 +284,48 @@ export function summarizeApplicationTrend(
   }
 ): ApplicationTrendPoint[] {
   const bucketType = options.bucket || 'day';
-  const fromDate = 'fromDate' in options.range && options.range.fromDate ? options.range.fromDate : '2026-01-01';
+  let fromDate = 'fromDate' in options.range && options.range.fromDate ? options.range.fromDate : '2026-01-01';
   const toDate = 'toDate' in options.range && options.range.toDate ? options.range.toDate : fromDate;
+
+  // When range is lifetime (or legacy default 2000-01-01), anchor to relevant data window
+  const isLifetime = ('preset' in options.range && options.range.preset === 'lifetime') || fromDate <= '2000-01-01';
+  if (isLifetime) {
+    const [toY, toM, toD] = toDate.split('-').map(Number);
+    let defaultWindowStart = fromDate;
+    if (bucketType === 'month') {
+      let startY = toY - 1;
+      let startM = toM + 1;
+      if (startM > 12) {
+        startM = 1;
+        startY = toY;
+      }
+      defaultWindowStart = `${startY}-${String(startM).padStart(2, '0')}-01`;
+    } else if (bucketType === 'week') {
+      const toMs = Date.UTC(toY, toM - 1, toD, 12, 0, 0);
+      const startMs = toMs - 11 * 7 * 86400000;
+      defaultWindowStart = getBucketKeyForIstDate(getIstCalendarDate(startMs).isoDate, 'week');
+    } else {
+      const toMs = Date.UTC(toY, toM - 1, toD, 12, 0, 0);
+      const startMs = toMs - 29 * 86400000;
+      defaultWindowStart = getIstCalendarDate(startMs).isoDate;
+    }
+
+    if (rows.length > 0) {
+      let earliestRowMs = Infinity;
+      for (const row of rows) {
+        const t = new Date(row.created_at).getTime();
+        if (!isNaN(t) && t < earliestRowMs) earliestRowMs = t;
+      }
+      if (earliestRowMs !== Infinity) {
+        const earliestDate = getIstCalendarDate(earliestRowMs).isoDate;
+        fromDate = earliestDate < defaultWindowStart ? earliestDate : defaultWindowStart;
+      } else {
+        fromDate = defaultWindowStart;
+      }
+    } else {
+      fromDate = defaultWindowStart;
+    }
+  }
 
   const bucketKeys = generateTrendBucketKeys(fromDate, toDate, bucketType);
   const pointsMap = new Map<string, { success: number; failed: number; clientSet: Set<string> }>();

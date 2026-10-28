@@ -17,6 +17,7 @@ export interface DevTrendChartProps {
   bucket: TrendBucket;
   onBucketChange: (bucket: TrendBucket) => void;
   loading?: boolean;
+  totalDistinctClients?: number;
 }
 
 export function DevTrendChart({
@@ -26,6 +27,7 @@ export function DevTrendChart({
   bucket,
   onBucketChange,
   loading = false,
+  totalDistinctClients,
 }: DevTrendChartProps): React.JSX.Element {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
@@ -38,7 +40,7 @@ export function DevTrendChart({
       ? 'Successful Applications'
       : metric === 'failedApplications'
       ? 'Failed Applications'
-      : 'Unique Clients (Successful)';
+      : 'Active Clients (Bucket)';
 
   const metricColor =
     metric === 'successApplications'
@@ -92,7 +94,21 @@ export function DevTrendChart({
             {loading && <span className="text-[10px] font-mono text-[#8e8e93] animate-pulse">updating…</span>}
           </div>
           <p className="text-xs text-[#8e8e93] mt-0.5">
-            Total for period: <span className="font-bold text-white font-mono">{totalValue}</span> {metricLabel.toLowerCase()}
+            {metric === 'clients' ? (
+              totalDistinctClients !== undefined ? (
+                <>
+                  Distinct clients for period: <span className="font-bold text-white font-mono">{totalDistinctClients}</span>
+                </>
+              ) : (
+                <>
+                  Sum of bucket active clients: <span className="font-bold text-white font-mono">{totalValue}</span> (bucket distinct)
+                </>
+              )
+            ) : (
+              <>
+                Total for period: <span className="font-bold text-white font-mono">{totalValue}</span> {metricLabel.toLowerCase()}
+              </>
+            )}
           </p>
         </div>
 
