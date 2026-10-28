@@ -48,7 +48,6 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
   proofWebUrl,
   proofEmailUrl,
   proofEmailJson,
-  emailProofStatus,
   dryRunScreenshotUrl,
   proofFailedUrl,
   retryCount = 0,
@@ -136,20 +135,6 @@ export const SubmissionControls: React.FC<SubmissionControlsProps> = ({
       console.warn(`[SubmissionControls] Status poll error for ${applicationId}:`, err);
     }
   };
-
-  useEffect(() => {
-    if (
-      (applicationStatus !== 'APPLIED' && applicationStatus !== 'EMAIL_PROOF_PENDING') ||
-      emailProofStatus !== 'pending' ||
-      !applicationId
-    ) {
-      return;
-    }
-    const pollInterval = setInterval(() => {
-      pollStatusUpdate();
-    }, 3000);
-    return () => clearInterval(pollInterval);
-  }, [applicationStatus, emailProofStatus, applicationId, jobUrl, apiBaseUrl]);
 
   const captureEmailProof = async () => {
     setIsCapturingEmailProof(true);
