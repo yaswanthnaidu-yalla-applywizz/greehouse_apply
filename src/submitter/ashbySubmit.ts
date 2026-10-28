@@ -9,7 +9,7 @@ import { getProfile } from '../db/profiles.js';
 import { buildAshbyProxyConfig } from './ashbyProxy.js';
 import { fillAshbyForm, sleep } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
-import { downloadResumeTempFile, uploadProof } from '../db/storage.js';
+import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { setAshbyScheduledNotBefore } from '../db/applications/queue.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
@@ -67,6 +67,7 @@ export async function submitAshbyApplication(
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
+        ...(isHeadless ? [] : ['--start-maximized', '--window-position=50,50']),
       ],
     });
 
@@ -80,8 +81,13 @@ export async function submitAshbyApplication(
 
     page = await context.newPage();
 
-    log.info(`[AshbySubmit] Navigating to ${application.job_url}...`);
-    await page.goto(application.job_url, { waitUntil: 'networkidle', timeout: 60000 });
+    const targetUrl = application.job_url.includes('/application')
+      ? application.job_url
+      : `${application.job_url.replace(/\/+$/, '')}/application`;
+
+    log.info(`[AshbySubmit] Navigating to ${targetUrl}...`);
+    await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.waitForSelector('[data-field-path]', { timeout: 15000 }).catch(() => {});
     await sleep(1500, 2500);
 
     // 3. Fill form fields
@@ -94,7 +100,7 @@ export async function submitAshbyApplication(
 
     // 5. Submit application
     const submitBtn = page
-      .locator('button[type="submit"], button:has-text("Submit Application"), button:has-text("Apply")')
+      .locator('.ashby-application-form-submit-button, button:has-text("Submit Application"), button[type="submit"]')
       .first();
 
     if ((await submitBtn.count()) === 0) {
@@ -161,9 +167,22 @@ export async function submitAshbyApplication(
     const errorMsg = err.message || String(err);
     log.error(`[AshbySubmit] ❌ Submission failed for ${applicationId}: ${errorMsg}`);
 
+    let failedProofUrl: string | null = null;
+    if (page && !page.isClosed()) {
+      try {
+        const screenshotBuffer = await page.screenshot({ fullPage: true });
+        failedProofUrl = await uploadFailedScreenshot(applicationId, screenshotBuffer);
+        log.info(`[AshbySubmit] 📸 Failure screenshot captured and uploaded: ${failedProofUrl}`);
+      } catch (screenshotErr: any) {
+        log.warn(`[AshbySubmit] Failed to capture failure screenshot: ${screenshotErr.message}`);
+      }
+    }
+
     if (application.id) {
       await updateStatus(application.id, 'FAILED', {
         error_message: errorMsg,
+        proof_failed_url: failedProofUrl,
+        proof_failed_captured_at: failedProofUrl ? new Date().toISOString() : undefined,
       }).catch(() => {});
     }
 
@@ -174,6 +193,7 @@ export async function submitAshbyApplication(
       status: 'FAILED',
       applicationId,
       errorMessage: errorMsg,
+      proofFailedUrl: failedProofUrl || undefined,
     };
   } finally {
     if (page && !page.isClosed()) {

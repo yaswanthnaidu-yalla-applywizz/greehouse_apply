@@ -48,6 +48,9 @@ resumes/
 output/
 cache/
 *.pdf
+yaswanthnaidu/
+zipped/
+.ai/arena-war/
 
 # Media & Temporary Artifacts
 reports/

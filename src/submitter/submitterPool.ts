@@ -375,6 +375,7 @@ export class SubmitterPool {
             await this.updateStatusFn(applicationId, 'FAILED', {
               error_message: failureMessage,
               job_url: application.job_url,
+              proof_failed_url: result.proofFailedUrl,
             });
           }
           await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
