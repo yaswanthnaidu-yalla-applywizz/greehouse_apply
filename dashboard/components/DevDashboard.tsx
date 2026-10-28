@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, apiFetch } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
+import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
+import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
+import { DevTrendChart, type TrendPoint, type TrendMetric, type TrendBucket } from './DevTrendChart.js';
 
 interface DevHealthProbe {
   name: string;
@@ -11,6 +14,7 @@ interface DevHealthProbe {
 }
 
 interface DevHealthSnapshot {
+  byAts?: import('./AtsBreakdown.js').AtsBreakdownCounts;
   totalApplications?: number | null;
   submitted?: number | null;
   submittedCount?: number | null;
@@ -166,7 +170,12 @@ export const DevDashboard: React.FC = () => {
 
   const [tab, setTab] = useState<'system' | 'runs' | 'errors' | 'queue' | 'integrations' | 'debugger' | 'diagnostics' | 'guide'>('system');
   const [date, setDate] = useState<string>(getTodayIST);
-  const [statsRange, setStatsRange] = useState<'day' | 'lifetime'>('day');
+  const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month' | 'lifetime' | 'custom'>('day');
+  const [customFrom, setCustomFrom] = useState<string>(getTodayIST);
+  const [customTo, setCustomTo] = useState<string>(getTodayIST);
+  const [trend, setTrend] = useState<TrendPoint[]>([]);
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>('successApplications');
+  const [trendBucket, setTrendBucket] = useState<TrendBucket>('day');
   const [health, setHealth] = useState<DevHealthSnapshot | null>(null);
   const [runs, setRuns] = useState<DevRunItem[]>([]);
   const [runStatus, setRunStatus] = useState<string>('');
@@ -207,8 +216,15 @@ export const DevDashboard: React.FC = () => {
     setError('');
     try {
       if (tab === 'system') {
-        const healthPayload = await loadJson<DevHealthSnapshot>(`/api/dev/health?range=${statsRange}`);
+        const rangeQuery = statsRange === 'custom'
+          ? `range=custom&from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`
+          : `range=${statsRange}`;
+        const [healthPayload, trendPayload] = await Promise.all([
+          loadJson<DevHealthSnapshot>(`/api/dev/health?${rangeQuery}`),
+          loadJson<{ trend?: TrendPoint[] }>(`/api/dev/stats/trend?${rangeQuery}&bucket=${trendBucket}`).catch(() => ({ trend: [] })),
+        ]);
         setHealth(healthPayload);
+        setTrend(trendPayload.trend || []);
       }
       if (tab === 'runs') {
         const params = new URLSearchParams({ date, limit: '100' });
@@ -250,18 +266,19 @@ export const DevDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [tab, date, statsRange, token, isAuthorized, runStatus, diagnosticPhase, diagnosticCategory, diagnosticCandidate, diagnosticApplication, diagnosticRun, diagnosticOffset, loadJson]);
+  }, [tab, date, statsRange, customFrom, customTo, trendBucket, token, isAuthorized, runStatus, diagnosticPhase, diagnosticCategory, diagnosticCandidate, diagnosticApplication, diagnosticRun, diagnosticOffset, loadJson]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
+  useApplicationStatsInvalidation({
+    enabled: isAuthorized,
+    onInvalidate: () => {
       void refresh();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [refresh]);
+    },
+    getAuthHeaders: () => ({ Authorization: `Bearer ${token}` }),
+  });
 
   const openDebugger = async (id?: string) => {
     const target = (id || debugId).trim();
@@ -363,13 +380,50 @@ export const DevDashboard: React.FC = () => {
             <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Date
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="block mt-1 border border-[#3a3a3c] rounded-lg px-2.5 py-1.5 text-sm font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]" />
             </label>
-            <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Stats
-              <div className="mt-1 flex gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
-                {(['day', 'lifetime'] as const).map((range) => (
-                  <button key={range} type="button" onClick={() => setStatsRange(range)} className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${statsRange === range ? 'bg-[#2c2c2e] text-white font-bold' : 'text-[#8e8e93] hover:text-white'}`}>{range === 'day' ? 'Today' : 'Lifetime'}</button>
+            <div className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Cohort Range
+              <div className="mt-1 flex flex-wrap gap-1 bg-[#1c1c1e] p-0.5 rounded-lg border border-[#2c2c2e]">
+                {([
+                  { id: 'day', label: 'Today' },
+                  { id: 'week', label: 'This Week' },
+                  { id: 'month', label: 'This Month' },
+                  { id: 'lifetime', label: 'Lifetime' },
+                  { id: 'custom', label: 'Custom' },
+                ] as const).map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setStatsRange(r.id)}
+                    className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                      statsRange === r.id
+                        ? 'bg-[#2c2c2e] text-white font-bold'
+                        : 'text-[#8e8e93] hover:text-white'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
                 ))}
               </div>
             </div>
+            {statsRange === 'custom' && (
+              <div className="flex items-end gap-1">
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">From
+                  <input
+                    type="date"
+                    value={customFrom}
+                    onChange={(e) => setCustomFrom(e.target.value)}
+                    className="block mt-1 border border-[#3a3a3c] rounded-lg px-2 py-1 text-xs font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]"
+                  />
+                </label>
+                <label className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">To
+                  <input
+                    type="date"
+                    value={customTo}
+                    onChange={(e) => setCustomTo(e.target.value)}
+                    className="block mt-1 border border-[#3a3a3c] rounded-lg px-2 py-1 text-xs font-mono bg-[#2c2c2e] text-white focus:outline-none focus:border-[#0a84ff]"
+                  />
+                </label>
+              </div>
+            )}
             <button type="button" onClick={() => void refresh()} className="bg-[#2c2c2e] border border-[#3a3a3c] px-3 py-1.5 text-xs font-semibold rounded-lg text-white hover:bg-[#3a3a3c] transition-colors">Refresh</button>
             <HeaderSignOut onSignOut={signOut} />
           </div>
@@ -417,10 +471,12 @@ export const DevDashboard: React.FC = () => {
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Total Applications</p>
                 <p className="text-2xl font-black text-white mt-1">{health.statsAvailable === false ? '—' : health.totalApplications ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="total" available={health.statsAvailable !== false} />
               </div>
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 col-span-2 md:col-span-1">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Submitted</p>
                 <p className="text-2xl font-black text-white mt-1">{health.statsAvailable === false ? '—' : health.submitted ?? health.submittedCount ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="submitted" available={health.statsAvailable !== false} />
                 <p className="text-[10px] font-mono text-[#8e8e93] mt-1">{date}</p>
               </div>
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 col-span-2 md:col-span-1">
@@ -431,16 +487,26 @@ export const DevDashboard: React.FC = () => {
               <div className="bg-[#1c1c1e] border border-[#30d158]/30 rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#30d158]">Applied</p>
                 <p className="text-2xl font-black text-[#30d158] mt-1">{health.statsAvailable === false ? '—' : health.applied ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="applied" available={health.statsAvailable !== false} />
               </div>
               <div className="bg-[#1c1c1e] border border-[#ff453a]/30 rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#ff453a]">Failed</p>
                 <p className="text-2xl font-black text-[#ff453a] mt-1">{health.statsAvailable === false ? '—' : health.failed ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="failed" available={health.statsAvailable !== false} />
               </div>
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Queued</p>
                 <p className="text-2xl font-black text-white mt-1">{health.queued ?? 0}</p>
               </div>
             </div>
+            <DevTrendChart
+              trend={trend}
+              metric={trendMetric}
+              onMetricChange={setTrendMetric}
+              bucket={trendBucket}
+              onBucketChange={setTrendBucket}
+              loading={loading}
+            />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {(health.probes || []).map((probe) => (
                 <div key={probe.name} className={`border rounded-xl p-4 ${lightClass(probe.status)}`}>

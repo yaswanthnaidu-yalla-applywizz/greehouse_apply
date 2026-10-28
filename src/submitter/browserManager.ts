@@ -79,6 +79,7 @@ export class BrowserManager {
 
       if (typeof browser.on === 'function') {
         browser.on('disconnected', () => {
+          if (!this.activeBrowsers.has(browserId)) return;
           log.warn(`[BrowserManager] ⚠️ Browser ${browserId} disconnected unexpectedly.`);
           this.releaseBrowser(browserId).catch(() => {});
         });

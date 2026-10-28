@@ -386,7 +386,7 @@ export function selectNextRoundRobinAppInMemory(
 
 /**
  * Retrieves the next application in the global submission queue for round-robin processing (Phase V2-4c).
- * Uses atomic PostgreSQL FOR UPDATE SKIP LOCKED via RPC with fallback to query.
+ * Uses the atomic PostgreSQL RPC. A failed RPC must not bypass its timing guards.
  * Transitions status to 'APPLYING'.
  */
 export async function getNextQueuedApplicationForRoundRobin(): Promise<ApplicationRow | null> {
@@ -396,8 +396,24 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
     // 1. Try atomic PostgreSQL RPC function first
     try {
       const { data, error } = await supabase.rpc('get_next_queued_application');
-      if (!error && data && Array.isArray(data) && data.length > 0) {
+      if (error) throw error;
+      if (data && Array.isArray(data) && data.length > 0) {
         const selected = data[0] as ApplicationRow;
+        const gate = await assertApplywizzZohoConnected(selected.applywizz_id, { allowAdminDemo: true });
+        if (!gate.allowed) {
+          const { error: releaseError } = await supabase
+            .from('gh_candidate_applications')
+            .update({
+              status: 'READY_FOR_REVIEW',
+              error_message: gate.error || OperatorErrors.ZOHO_NOT_CONNECTED,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', selected.id)
+            .eq('status', 'APPLYING');
+          if (releaseError) throw releaseError;
+          log.warn(`[Queue] Candidate ${selected.applywizz_id} is not Zoho connected; application ${selected.id} returned to review.`);
+          return null;
+        }
         cacheApplicationLocally(selected);
         void insertApplicationEvent({
           applicationId: selected.id || '',
@@ -411,103 +427,14 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
         log.info(`[API] Status → APPLYING (application ${appRef}, dequeued via RPC from QUEUED)`);
         return selected;
       }
+      return null;
     } catch (rpcErr: any) {
-      // If RPC doesn't exist or errors, fall through to fallback query
-    }
-
-    // 2. Fallback query if RPC is not yet created in Supabase SQL editor
-    try {
-      const { data, error } = await supabase
-        .from('gh_candidate_applications')
-        .select('*')
-        .eq('status', 'QUEUED')
-        .order('submission_order', { ascending: true })
-        .limit(50);
-
-      if (!error && data && data.length > 0) {
-        // Query candidate counts for candidates present in the queued set to compute accurate candidate round ranks
-        const queuedCandidateIds = Array.from(new Set(data.map((d: any) => d.applywizz_id).filter(Boolean)));
-        let activeHistory: ApplicationRow[] = [];
-        if (queuedCandidateIds.length > 0) {
-          const { data: histData } = await supabase
-            .from('gh_candidate_applications')
-            .select('applywizz_id, status')
-            .in('applywizz_id', queuedCandidateIds)
-            .in('status', ['APPLYING', 'APPLIED', 'FAILED', 'RETRY', 'EMAIL_PROOF_PENDING']);
-          if (histData) activeHistory = histData as ApplicationRow[];
-        }
-
-        let remainingCandidates = [...(data as ApplicationRow[])];
-
-        while (remainingCandidates.length > 0) {
-          const candidateApp = selectNextRoundRobinAppInMemory(remainingCandidates, {
-            allCandidateApps: [...activeHistory, ...remainingCandidates],
-          });
-          if (!candidateApp) break;
-
-          const applywizzId = candidateApp.applywizz_id;
-          const gate = await assertApplywizzZohoConnected(applywizzId, { allowAdminDemo: true });
-          if (!gate.allowed) {
-            log.warn(
-              `[Queue] ⛔ Candidate ${applywizzId} is not Zoho connected. Setting application ${candidateApp.id} to READY_FOR_REVIEW.`
-            );
-            await supabase
-              .from('gh_candidate_applications')
-              .update({
-                status: 'READY_FOR_REVIEW',
-                error_message: gate.error || OperatorErrors.ZOHO_NOT_CONNECTED,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', candidateApp.id)
-              .eq('status', 'QUEUED');
-
-            remainingCandidates = remainingCandidates.filter((c) => c.id !== candidateApp.id);
-            continue;
-          }
-
-          const updateRes = await supabase
-            .from('gh_candidate_applications')
-            .update({
-              status: 'APPLYING',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', candidateApp.id)
-            .eq('status', 'QUEUED')
-            .select('id');
-
-          if (!updateRes.data || updateRes.data.length === 0) {
-            // another worker claimed it — continue to next candidate
-            remainingCandidates = remainingCandidates.filter((c) => c.id !== candidateApp.id);
-            continue;
-          }
-
-          if (!updateRes.error) {
-            const applyingApp: ApplicationRow = {
-              ...candidateApp,
-              status: 'APPLYING',
-              updated_at: new Date().toISOString(),
-            };
-            cacheApplicationLocally(applyingApp);
-            void insertApplicationEvent({
-              applicationId: applyingApp.id || '',
-              applywizzId: applyingApp.applywizz_id,
-              jobUrl: applyingApp.job_url,
-              fromStatus: 'QUEUED',
-              toStatus: 'APPLYING',
-              actorEmail: applyingApp.assigned_ca_email ?? null,
-            });
-            const appRef = applyingApp.id || applyingApp.applywizz_id;
-            log.info(`[API] Status → APPLYING (application ${appRef}, dequeued from QUEUED via round-robin query fallback)`);
-            return applyingApp;
-          }
-        }
-      }
-    } catch (queryErr: any) {
-      log.warn(`[DB] Fallback queue selection error: ${queryErr.message}`);
+      log.error(`[Queue] Atomic dequeue RPC failed: ${rpcErr.message}`);
+      throw rpcErr;
     }
   }
 
-  // 3. In-memory queue selection fallback
+  // Sandbox in-memory queue selection.
   const allMem = Array.from(memoryApplications.values());
   const next = selectNextRoundRobinAppInMemory(allMem);
 
@@ -522,37 +449,6 @@ export async function getNextQueuedApplicationForRoundRobin(): Promise<Applicati
   return null;
 }
 
-
-/**
- * Updates scheduled_not_before on all remaining QUEUED Ashby applications for a candidate,
- * enforcing a random 40 to 60 minute delay between applications.
- */
-export async function setAshbyScheduledNotBefore(applywizzId: string): Promise<void> {
-  const delayMinutes = 40 + Math.floor(Math.random() * 21); // 40-60 min
-  const notBefore = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
-
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = getDbClient();
-      await supabase
-        .from('gh_candidate_applications')
-        .update({ scheduled_not_before: notBefore, updated_at: new Date().toISOString() })
-        .eq('applywizz_id', applywizzId)
-        .eq('ats', 'ashby')
-        .eq('status', 'QUEUED');
-
-      log.info(`[Queue] Set Ashby scheduled_not_before to ${notBefore} (+${delayMinutes}m) for ${applywizzId}`);
-    } catch (err: any) {
-      log.warn(`[Queue] Failed to set Ashby scheduled_not_before for ${applywizzId}: ${err.message}`);
-    }
-  }
-
-  for (const app of memoryApplications.values()) {
-    if (app.applywizz_id === applywizzId && app.ats === 'ashby' && app.status === 'QUEUED') {
-      app.scheduled_not_before = notBefore;
-    }
-  }
-}
 
 /**
  * Claims the next EMAIL_PROOF_PENDING application across multi-replica workers.

@@ -50,11 +50,12 @@ import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnecti
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
+import { wsManager } from '../server/ws.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import {
   applicationNeedsOperatorReview,
   applicationShouldBeFilteredOut,
-  countAiFields,
+  countRequiredAiFields,
   countUnresolvedRequiredFields,
 } from './needsReview.js';
 
@@ -512,9 +513,27 @@ export class AnswerResolver {
       jobContext?: { companyName: string; jobTitle: string };
     }
   ): Promise<ResolvedField> {
+    if (!field.isRequired) return this.blankOptionalField(field);
     const resolved = await this.resolveFieldRaw(applywizzId, field, context);
     const aligned = alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field));
     return enforceCorporatePolicy(field, aligned);
+  }
+
+  private blankOptionalField(field: ScannedField): ResolvedField {
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      type: field.type,
+      label: field.label,
+      value: '',
+      source: 'unresolved',
+      resolvedByTier: null,
+      confidence: 0,
+      isRequired: false,
+      ...(field.options ? { options: field.options } : {}),
+      ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+      ...(field.metadata ? { metadata: field.metadata } : {}),
+    };
   }
 
   private async resolveFieldRaw(
@@ -808,8 +827,9 @@ export class AnswerResolver {
     template: ScannedJobTemplate
   ): Promise<CandidateJobApplication> {
     const profile = await getProfile(applywizzId);
-    const parsedResume = await getOrParseResume(applywizzId);
-    const qaEntries = await findAnswersByCandidate(applywizzId);
+    const hasRequiredFields = template.fields?.some((field) => field.isRequired) ?? false;
+    const parsedResume = hasRequiredFields ? await getOrParseResume(applywizzId) : null;
+    const qaEntries = hasRequiredFields ? await findAnswersByCandidate(applywizzId) : [];
 
     const candidateName = profile?.client_name || applywizzId;
     const jobContext = {
@@ -845,6 +865,10 @@ export class AnswerResolver {
     const tier5Slots: number[] = [];
 
     for (const field of template.fields) {
+      if (!field.isRequired) {
+        resolvedFields.push(this.blankOptionalField(field));
+        continue;
+      }
       const resolved = await this.resolveFieldThroughTier2(applywizzId, field, {
         profile,
         parsedResume,
@@ -1145,6 +1169,13 @@ export class AnswerResolver {
               status: initialStatus,
               ats: app.ats ?? atsFromUrl(persistJobUrl),
             });
+            if (persistedApplication.id && persistedApplication.status !== 'FILTERED_OUT') {
+              wsManager.broadcast({
+                type: 'APPLICATION_UPSERTED',
+                appId: persistedApplication.id,
+                timestamp: new Date().toISOString(),
+              });
+            }
 
             if (shouldFilterOut) {
               filteredOutApplications++;
@@ -1152,7 +1183,7 @@ export class AnswerResolver {
                 { applywizzId: app.applywizzId, jobUrl: persistJobUrl },
                 'filtered_out'
               );
-              const aiCount = countAiFields(app.resolvedFields);
+              const aiCount = countRequiredAiFields(app.resolvedFields);
               const unresCount = countUnresolvedRequiredFields(app.resolvedFields);
               log.debug(
                 `[Answer Resolver] 🚫 Filtered out ${app.applywizzId} ${persistJobUrl} (ai_count=${aiCount} unresolved_required=${unresCount} > 3)`
@@ -1300,8 +1331,9 @@ export async function resolveFields(
 ): Promise<{ resolvedFields: ResolvedField[]; telemetry: ResolutionTelemetry }> {
   const resolver = new AnswerResolver();
   const profile = await getProfile(applywizzId);
-  const parsedResume = await getOrParseResume(applywizzId);
-  const qaEntries = await findAnswersByCandidate(applywizzId);
+  const hasRequiredFields = fields.some((field) => field.isRequired);
+  const parsedResume = hasRequiredFields ? await getOrParseResume(applywizzId) : null;
+  const qaEntries = hasRequiredFields ? await findAnswersByCandidate(applywizzId) : [];
 
   const resolvedFields: ResolvedField[] = [];
   const telemetry: ResolutionTelemetry = {

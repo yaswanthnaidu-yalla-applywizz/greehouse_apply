@@ -10,7 +10,6 @@ import { buildAshbyProxyConfig } from './ashbyProxy.js';
 import { fillAshbyForm, sleep } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
-import { setAshbyScheduledNotBefore } from '../db/applications/queue.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 
@@ -146,15 +145,13 @@ export async function submitAshbyApplication(
     const screenshotBuffer = await page.screenshot({ fullPage: true });
     const proofUrl = await uploadProof(applicationId, screenshotBuffer);
 
-    // 8. Update status to APPLIED and enforce 40-60m candidate interval
+    // 8. Update status to APPLIED; updateStatus records submitted_at.
     if (application.id) {
       await updateStatus(application.id, 'APPLIED', {
         proof_web_url: proofUrl,
         proof_captured_at: new Date().toISOString(),
       });
     }
-
-    await setAshbyScheduledNotBefore(application.applywizz_id);
 
     return {
       success: true,
@@ -185,8 +182,6 @@ export async function submitAshbyApplication(
         proof_failed_captured_at: failedProofUrl ? new Date().toISOString() : undefined,
       }).catch(() => {});
     }
-
-    await setAshbyScheduledNotBefore(application.applywizz_id).catch(() => {});
 
     return {
       success: false,

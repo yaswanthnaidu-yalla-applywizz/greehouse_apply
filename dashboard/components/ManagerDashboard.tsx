@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, sessionRole, sessionUserEmail, apiFetch } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
+import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
+import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 
 interface EmailProofData {
   subject?: string;
@@ -106,6 +108,7 @@ interface ReportsPayload {
 }
 
 interface ManagerDashboardApiResponse {
+  byAts?: import('./AtsBreakdown.js').AtsBreakdownCounts;
   rows?: ManagerClientRow[];
   totals?: Record<string, number | null>;
   submitted?: number | null;
@@ -354,7 +357,7 @@ export const ManagerDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['manager']);
 
   const [tab, setTab] = useState<'home' | 'operators' | 'activity' | 'reports' | 'guide'>('home');
-  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'lifetime' | 'custom'>('day');
+  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'week' | 'month' | 'lifetime' | 'custom'>('day');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const today = getTodayIST();
     const d = new Date(`${today}T00:00:00+05:30`);
@@ -366,7 +369,13 @@ export const ManagerDashboard: React.FC = () => {
   const dateRangeLabel =
     dateFilterMode === 'custom' && customFrom && customTo
       ? (customFrom === customTo ? customFrom : `${customFrom} – ${customTo}`)
-      : dateFilterMode === 'lifetime' ? 'Lifetime' : 'Today';
+      : dateFilterMode === 'lifetime'
+      ? 'Lifetime'
+      : dateFilterMode === 'week'
+      ? 'This Week'
+      : dateFilterMode === 'month'
+      ? 'This Month'
+      : 'Today';
   const dateQuery =
     dateFilterMode === 'custom' && customFrom && customTo
       ? `from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`
@@ -375,6 +384,7 @@ export const ManagerDashboard: React.FC = () => {
   const [ca, setCa] = useState<string>('all');
   const [rows, setRows] = useState<ManagerClientRow[]>([]);
   const [totals, setTotals] = useState<Record<string, number | null>>({});
+  const [byAts, setByAts] = useState<import('./AtsBreakdown.js').AtsBreakdownCounts>();
   const [submitted, setSubmitted] = useState<number | null>(0);
   const [applied, setApplied] = useState<number | null>(0);
   const [statsAvailable, setStatsAvailable] = useState<boolean | null>(null);
@@ -420,6 +430,7 @@ export const ManagerDashboard: React.FC = () => {
       const data = payload as ManagerDashboardApiResponse;
       setRows(data.rows || []);
       setTotals(data.totals || {});
+      setByAts(data.byAts);
       setSubmitted(data.submitted ?? (data.statsAvailable === false ? null : 0));
       setApplied(data.applied ?? (data.statsAvailable === false ? null : 0));
       setStatsAvailable(data.statsAvailable !== false);
@@ -520,14 +531,15 @@ export const ManagerDashboard: React.FC = () => {
   useEffect(() => { if (tab === 'activity') void loadActivity(); }, [tab, loadActivity]);
   useEffect(() => { if (tab === 'reports') void loadReports(); }, [tab, loadReports]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
+  useApplicationStatsInvalidation({
+    enabled: isAuthorized,
+    onInvalidate: () => {
       void load();
       if (tab === 'operators') void loadOperators();
       if (tab === 'activity') void loadActivity();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [load, loadOperators, loadActivity, tab]);
+    },
+    getAuthHeaders: () => ({ Authorization: `Bearer ${token}` }),
+  });
 
   useEffect(() => {
     if (!opsPickerOpen || currentRole !== 'dev') return;
@@ -678,8 +690,15 @@ export const ManagerDashboard: React.FC = () => {
                 <span className="text-sm font-bold text-white">{dateRangeLabel}</span>
                 {dateFilterMode !== 'custom' ? (
                   <>
-                    {(['day', 'lifetime'] as const).map((range) => (
-                      <button key={range} type="button" className={`uppercase text-xs font-semibold ${dateFilterMode === range ? 'text-white underline font-bold' : 'text-[#8e8e93] hover:text-white'}`} onClick={() => setDateFilterMode(range)}>{range === 'day' ? 'Today' : 'Lifetime'}</button>
+                    {(['day', 'week', 'month', 'lifetime'] as const).map((range) => (
+                      <button
+                        key={range}
+                        type="button"
+                        className={`text-xs font-semibold ${dateFilterMode === range ? 'text-white underline font-bold' : 'text-[#8e8e93] hover:text-white'}`}
+                        onClick={() => setDateFilterMode(range)}
+                      >
+                        {range === 'day' ? 'Today' : range === 'week' ? 'This Week' : range === 'month' ? 'This Month' : 'Lifetime'}
+                      </button>
                     ))}
                     <button type="button" className="text-xs text-[#8e8e93] hover:text-white underline" onClick={() => setDateFilterMode('custom')}>Custom</button>
                   </>
@@ -730,6 +749,7 @@ export const ManagerDashboard: React.FC = () => {
                 <div key={label} className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">{label}</p>
                   <p className="text-2xl font-black text-white mt-1">{statsAvailable === false ? '—' : val ?? 0}</p>
+                  <AtsBreakdown counts={byAts} metric={label === 'Total Applications' ? 'total' : label === 'Submitted (team)' ? 'submitted' : label === 'Applied (team)' ? 'applied' : 'failed'} available={statsAvailable !== false} />
                 </div>
               ))}
             </div>
