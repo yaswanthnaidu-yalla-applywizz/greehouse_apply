@@ -7,9 +7,6 @@ import {
   countApplicationsByStatus,
   countOperatorWorkloadByProfileCaEmail,
   getRequiredFieldFailuresByCA,
-  
-  
-
   getISTDateRangeUtc,
   type ApplicationStatus,
 } from '../../db/applications.js';
@@ -195,7 +192,6 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       return;
     }
     const createdAtRange = { startIso: parsedRange.startIso, endIso: parsedRange.endIso };
-    
 
     const directory = await listAuthDirectory();
     const operators = directory.filter((user) => user.role === 'operator');
@@ -207,11 +203,8 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       }),
       countApplicationsByStatus('QUEUED', createdAtRange),
       countApplicationsByStatus('APPLYING', createdAtRange),
-
       listAuditEvents({ limit: 15 }),
     ]);
-
-
 
     res.json({
       operators: operators.length,
@@ -226,15 +219,6 @@ adminDashboardRouter.get('/overview', async (_req: Request, res: Response): Prom
       statsAvailable: stats.available,
       statsPartial: stats.partial,
       statsAvailableFrom: stats.availableFrom,
-
-
-
-
-
-
-
-
-
       recentActivity: audit.events,
       warning: audit.warning,
       dateRange: serializeDateRange(parsedRange),
@@ -399,11 +383,12 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
       return;
     }
 
+    const searchStr = typeof search === 'string' ? search.trim().replace(/[%_,()]/g, '') : '';
+
     let query = getDbClient()
       .from('gh_candidate_applications')
-      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, proof_web_url, proof_email_url, proof_email_json, proof_captured_at, profiles(client_name, ca_email)', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .select('id, applywizz_id, job_url, company_name, job_title, status, assigned_ca_email, created_at, updated_at, submitted_at, error_message, proof_web_url, proof_email_url, proof_email_json, proof_captured_at, profiles(client_name, ca_email)', { count: 'exact' });
+
     if (status) {
       query = query.eq('status', status);
     } else {
@@ -414,10 +399,19 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
       const { startIso, endIso } = getISTDateRangeUtc(date);
       query = query.gte('created_at', startIso).lt('created_at', endIso);
     }
+
+    if (searchStr) {
+      query = query.or(`company_name.ilike.%${searchStr}%,job_title.ilike.%${searchStr}%,applywizz_id.ilike.%${searchStr}%,assigned_ca_email.ilike.%${searchStr}%`);
+    }
+
+    query = query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
     const { data, error, count } = await query;
     if (error) throw error;
 
-    let rows = (data || []).map((row: any) => {
+    const rows = (data || []).map((row: any) => {
       const candidateName = row.profiles?.client_name || row.applywizz_id || '';
       const caEmail = row.assigned_ca_email || row.profiles?.ca_email || '';
       return {
@@ -445,13 +439,6 @@ adminDashboardRouter.get('/applications', async (req: Request, res: Response): P
         proof_captured_at: row.proof_captured_at || null,
       };
     });
-    if (search) {
-      rows = rows.filter((row) =>
-        [row.client, row.applywizzId, row.companyName, row.jobTitle, row.operator, row.jobUrl]
-          .filter(Boolean)
-          .some((value) => String(value).toLowerCase().includes(search))
-      );
-    }
 
     res.json({ applications: rows, total: count ?? rows.length, limit, offset });
   } catch (error) {
