@@ -113,6 +113,7 @@ const log = createLogger('Server');
  */
 export interface DashboardStats {
   totalCandidates: number;
+  byAts: Awaited<ReturnType<typeof getApplicationStats>>['byAts'];
   totalApplications: number | null;
   submitted: number | null;
   submittedCount: number | null;
@@ -718,6 +719,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
     const stats: DashboardStats = {
       totalCandidates: metrics.totalCandidates,
       totalApplications: applicationStats.counts.total,
+      byAts: applicationStats.byAts,
       submitted: applicationStats.counts.submitted,
       submittedCount: applicationStats.counts.submitted,
       applied: applicationStats.counts.applied,

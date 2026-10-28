@@ -49,6 +49,7 @@ export interface ApplicationStatsResult {
   partial: boolean;
   availableFrom: string;
   counts: ApplicationStatsCounts;
+  byAts: Record<'greenhouse' | 'ashby', ApplicationStatsCounts>;
   byCandidate: ApplicationStatsBreakdown[];
   byOperator: OperatorStatsBreakdown[];
   byDate: DateStatsBreakdown[];
@@ -77,6 +78,7 @@ export interface ApplicationCohortRow {
   assigned_ca_email: string | null;
   created_at: string;
   first_attempted_at?: string | null;
+  ats?: string | null;
 }
 
 const EMPTY_COUNTS: ApplicationStatsCounts = {
@@ -139,17 +141,21 @@ export function statusMetricsForTransition(status: string): ApplicationStatsMetr
 
 export function summarizeApplicationCohortRows(rows: ApplicationCohortRow[]): {
   counts: ApplicationStatsCounts;
+  byAts: Record<'greenhouse' | 'ashby', ApplicationStatsCounts>;
   byCandidate: ApplicationStatsBreakdown[];
   byOperator: OperatorStatsBreakdown[];
   byDate: DateStatsBreakdown[];
 } {
   const counts = emptyCounts();
+  const byAts = { greenhouse: emptyCounts(), ashby: emptyCounts() };
   const candidates = new Map<string, ApplicationStatsBreakdown>();
   const operators = new Map<string, OperatorStatsBreakdown>();
   const dates = new Map<string, ApplicationStatsCounts>();
 
   for (const row of rows) {
     counts.total = (counts.total ?? 0) + 1;
+    const atsCounts = row.ats === 'ashby' ? byAts.ashby : byAts.greenhouse;
+    atsCounts.total = (atsCounts.total ?? 0) + 1;
     const attempted = isAttemptedRow(row);
     const success = isSuccessStatus(row.status);
     const failed = isFailedStatus(row.status);
@@ -157,6 +163,9 @@ export function summarizeApplicationCohortRows(rows: ApplicationCohortRow[]): {
     if (attempted) counts.submitted = (counts.submitted ?? 0) + 1;
     if (success) counts.applied = (counts.applied ?? 0) + 1;
     if (failed) counts.failed = (counts.failed ?? 0) + 1;
+    if (attempted) atsCounts.submitted = (atsCounts.submitted ?? 0) + 1;
+    if (success) atsCounts.applied = (atsCounts.applied ?? 0) + 1;
+    if (failed) atsCounts.failed = (atsCounts.failed ?? 0) + 1;
 
     // Date bucket in IST
     const istCreated = getIstCalendarDate(new Date(row.created_at)).isoDate;
@@ -206,6 +215,7 @@ export function summarizeApplicationCohortRows(rows: ApplicationCohortRow[]): {
 
   return {
     counts,
+    byAts,
     byCandidate: Array.from(candidates.values()).sort((a, b) => a.applywizzId.localeCompare(b.applywizzId)),
     byOperator: Array.from(operators.values()).sort((a, b) => a.email.localeCompare(b.email)),
     byDate: Array.from(dates, ([date, dateCounts]) => ({ date, counts: dateCounts })).sort((a, b) => a.date.localeCompare(b.date)),
@@ -493,7 +503,7 @@ export async function fetchApplicationCohortRows(options: {
     for (let from = 0; ; from += pageSize) {
       let query = getDbClient()
         .from('gh_candidate_applications')
-        .select('id, applywizz_id, status, assigned_ca_email, created_at, first_attempted_at')
+        .select('id, applywizz_id, status, assigned_ca_email, created_at, first_attempted_at, ats')
         .gte('created_at', startIso);
 
       if (endIso) {
@@ -538,6 +548,7 @@ export async function getApplicationStats(options: {
       partial: false,
       availableFrom: '2000-01-01',
       counts: emptyCounts(),
+      byAts: { greenhouse: emptyCounts(), ashby: emptyCounts() },
       byCandidate: [],
       byOperator: [],
       byDate: [],
@@ -556,6 +567,7 @@ export async function getApplicationStats(options: {
     partial: false,
     availableFrom: '2000-01-01',
     counts: summary.counts,
+    byAts: summary.byAts,
     byCandidate: options.includeBreakdown ? summary.byCandidate : [],
     byOperator: options.includeBreakdown ? summary.byOperator : [],
     byDate: options.includeBreakdown ? summary.byDate : [],

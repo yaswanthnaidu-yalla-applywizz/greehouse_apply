@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRequireRole, getTodayIST, apiFetch } from '../hooks/useSession.js';
 import { DevSwitcher } from './DevSwitcher.js';
+import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
 import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 import { DevTrendChart, type TrendPoint, type TrendMetric, type TrendBucket } from './DevTrendChart.js';
@@ -13,6 +14,7 @@ interface DevHealthProbe {
 }
 
 interface DevHealthSnapshot {
+  byAts?: import('./AtsBreakdown.js').AtsBreakdownCounts;
   totalApplications?: number | null;
   submitted?: number | null;
   submittedCount?: number | null;
@@ -469,10 +471,12 @@ export const DevDashboard: React.FC = () => {
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Total Applications</p>
                 <p className="text-2xl font-black text-white mt-1">{health.statsAvailable === false ? '—' : health.totalApplications ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="total" available={health.statsAvailable !== false} />
               </div>
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 col-span-2 md:col-span-1">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Submitted</p>
                 <p className="text-2xl font-black text-white mt-1">{health.statsAvailable === false ? '—' : health.submitted ?? health.submittedCount ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="submitted" available={health.statsAvailable !== false} />
                 <p className="text-[10px] font-mono text-[#8e8e93] mt-1">{date}</p>
               </div>
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 col-span-2 md:col-span-1">
@@ -483,10 +487,12 @@ export const DevDashboard: React.FC = () => {
               <div className="bg-[#1c1c1e] border border-[#30d158]/30 rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#30d158]">Applied</p>
                 <p className="text-2xl font-black text-[#30d158] mt-1">{health.statsAvailable === false ? '—' : health.applied ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="applied" available={health.statsAvailable !== false} />
               </div>
               <div className="bg-[#1c1c1e] border border-[#ff453a]/30 rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#ff453a]">Failed</p>
                 <p className="text-2xl font-black text-[#ff453a] mt-1">{health.statsAvailable === false ? '—' : health.failed ?? 0}</p>
+                <AtsBreakdown counts={health.byAts} metric="failed" available={health.statsAvailable !== false} />
               </div>
               <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#8e8e93]">Queued</p>

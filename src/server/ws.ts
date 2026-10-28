@@ -31,6 +31,7 @@ export interface ApplicationFailedEvent {
 
 export type WebSocketMessage =
   | ApplicationFailedEvent
+  | { type: 'APPLICATION_UPSERTED'; appId: string; timestamp: string }
   | {
       type: 'APPLICATION_STATUS_CHANGED';
       appId: string;
@@ -280,7 +281,7 @@ class WebSocketManager {
         ? process.env.WORKER_SERVICE_URL.replace('worker', 'main').replace('worker', 'greehouse_apply')
         : undefined);
 
-    if (process.env.ENABLE_QUEUE_WORKER === 'true' && webServiceUrl) {
+    if ((process.env.ENABLE_QUEUE_WORKER === 'true' || process.env.INGEST_ONLY === 'true') && webServiceUrl) {
       const headers: Record<string, string> = {};
       if (process.env.INTERNAL_API_SECRET) {
         headers['x-internal-secret'] = process.env.INTERNAL_API_SECRET;

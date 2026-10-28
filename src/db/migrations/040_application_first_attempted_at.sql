@@ -42,7 +42,7 @@ BEGIN
         WHERE ca.first_attempted_at IS NULL
           AND EXISTS (
               SELECT 1 FROM gh_application_stats_daily s
-              WHERE s.application_id = ca.id::text
+              WHERE s.application_id = ca.id
                 AND s.metric IN ('submitted', 'applied', 'failed')
           );
     END IF;

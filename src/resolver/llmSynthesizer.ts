@@ -392,6 +392,9 @@ function extractJsonValue(text: string): unknown | null {
 
 export function parseBatchAnswerResponse(raw: string, expectedCount: number): string[] | null {
   let parsed = extractJsonValue(cleanLLMOutput(raw));
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'answers' in parsed) {
+    parsed = (parsed as { answers: unknown }).answers;
+  }
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const entries = Object.entries(parsed as Record<string, unknown>);
     if (entries.every(([key]) => /^\d+$/.test(key))) {
@@ -529,9 +532,11 @@ export class LLMSynthesizer {
   private async callAnthropic(
     prompt: string,
     systemMessage: string,
-    maxTokens: number
+    maxTokens: number,
+    structuredBatch = false
   ): Promise<{
     text: string;
+    stopReason?: string;
     usage?: {
       promptTokens: number;
       completionTokens: number;
@@ -557,6 +562,19 @@ export class LLMSynthesizer {
       system: systemMessage,
       messages: [{ role: 'user', content: prompt }],
     };
+    if (structuredBatch) {
+      requestBody.output_config = {
+        format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            properties: { answers: { type: 'array', items: { type: 'string' } } },
+            required: ['answers'],
+            additionalProperties: false,
+          },
+        },
+      };
+    }
     if (!this.modelName.includes('5-5') && !this.modelName.includes('5.5')) {
       requestBody.temperature = 0.2;
     }
@@ -587,7 +605,9 @@ export class LLMSynthesizer {
     }
 
     const data = (await res.json()) as any;
-    const rawText = data?.content?.find((c: any) => c.type === 'text')?.text || '';
+    const rawText = Array.isArray(data?.content)
+      ? data.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('')
+      : '';
     const usageData = data?.usage;
     let usage;
     if (usageData) {
@@ -601,12 +621,12 @@ export class LLMSynthesizer {
         cacheReadTokens,
         cacheWriteTokens,
         totalTokens: inputTokens + outputTokens,
-        cost: (inputTokens * 0.0000008) + (outputTokens * 0.000004),
+        cost: (inputTokens * 0.00000010) + (outputTokens * 0.00000030),
         model: this.modelName,
       };
     }
 
-    return { text: rawText, usage };
+    return { text: rawText, stopReason: typeof data?.stop_reason === 'string' ? data.stop_reason : undefined, usage };
   }
 
 
@@ -805,7 +825,7 @@ export class LLMSynthesizer {
     if (questions.length === 0) return { answers: [] };
 
     const prompt = buildBatchPrompt(questions, jobDescription, _profile);
-    const systemMessage = `You answer job application questions. Return only a valid JSON array of direct answer strings, one answer per question, in order. Example: ["answer 1", "answer 2"]. NEVER return markdown or explanatory text.
+    const systemMessage = `You answer job application questions. Return a JSON object with an answers array of direct answer strings, one answer per question, in order. Example: {"answers":["answer 1","answer 2"]}. NEVER return markdown or explanatory text.
 
 PROFILE DATA RULE: The Candidate Profile section below contains factual data about the candidate. For any question whose answer exists in the profile (gender, race, ethnicity, veteran status, disability status, salary, education, experience, location, authorization), use the EXACT value from the profile. Never answer "No" or "N/A" for demographic fields — the candidate has already provided these values.
 
@@ -824,16 +844,19 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
     }
 
     let raw = '';
+    let stopReason = '';
     let batchUsage: BatchSynthesizeResult['usage'] = undefined;
     const requestStartedAt = Date.now();
     try {
       const result = await this.callAnthropic(
         prompt,
         systemMessage,
-        Math.max(500, questions.length * 150)
+        Math.max(1024, questions.length * 250),
+        true
       );
       haltIfFirstProviderCallFailed(true);
       raw = result.text;
+      stopReason = result.stopReason || '';
       batchUsage = result.usage;
       log.debug(
         `[LLM Provider] event=request_completed operation=batch provider=anthropic ` +
@@ -872,7 +895,7 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
       });
       log.error(
         `[Resolver] event=t5_batch_parse_failure provider=${this.provider} model=${this.modelName} ` +
-          `batch_size=${questions.length} response_chars=${raw.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+          `batch_size=${questions.length} response_chars=${raw.length} stop_reason=${stopReason || 'unknown'} elapsed_ms=${Date.now() - requestStartedAt} ` +
           'expected_shape=json_array answers=0'
       );
       return { answers: questions.map(() => ''), usage: batchUsage };
@@ -1033,7 +1056,7 @@ has no matching option (return null instead).
   }
 
   const prompt = `${candidateHeaderBlock}Resolve every numbered job application question using only the candidate evidence and job description.
-Return ONLY a JSON array of strings in the same order as the questions. Do not include markdown or explanations.
+Return ONLY a JSON object with an "answers" array of strings in the same order as the questions. Do not include markdown or explanations.
 
 For any question with a complete Options list provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate. If a choice list is marked incomplete, do not treat the captured options as exhaustive; return a concise exact choice supported by candidate data or NONE.
 ${corporateDefaultsBlock}

@@ -27,6 +27,7 @@ import { syncCaCandidateAssignments } from '../services/caAssignmentSync.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
 import { AnswerResolver, exportResolvedApplications } from '../resolver/answerResolver.js';
 import { sendCaNotificationEmails, sendLeadershipIngestionSummary } from '../services/caNotificationEmail.js';
+import { sendEmail } from '../services/azureEmail.js';
 import type {
   CandidateJobApplication,
   CandidateSegment,
@@ -207,12 +208,23 @@ export class V1Pipeline {
         log.info(`[Pipeline Phase B] 🌐 Scanning ${uniqueUrls.length} unique URLs with Playwright pool...`);
       }
       let scanCompleted = false;
+      let scannedCount = 0;
+      let scanFailures = 0;
+      const reportScanProgress = (): void => {
+        if (scannedCount === uniqueUrls.length || scannedCount % 50 === 0) {
+          log.info(`[Pipeline Phase B] Scanned ${scannedCount}/${uniqueUrls.length} job URLs (Greenhouse + Ashby, failed: ${scanFailures}).`);
+        }
+      };
       try {
         const scanner = new PlaywrightScanner({
           workerPoolSize: scanWorkers,
           timeoutMs: config.PLAYWRIGHT_TIMEOUT,
           minJitterMs: config.SCANNER_JITTER_MIN_MS,
           maxJitterMs: config.SCANNER_JITTER_MAX_MS,
+          onJobScanned: () => {
+            scannedCount++;
+            reportScanProgress();
+          },
         });
 
         const ashbyUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'ashby');
@@ -221,10 +233,14 @@ export class V1Pipeline {
         const ashbyTemplates: ScannedJobTemplate[] = [];
         for (const aUrl of ashbyUrls) {
           try {
-            const tmpl = await scanAshbyJob(aUrl, scanner);
+            const tmpl = await scanAshbyJob(aUrl);
             ashbyTemplates.push(tmpl);
           } catch (e: any) {
+            scanFailures++;
             log.warn(`[Pipeline] Ashby scan failed for ${aUrl}: ${e.message}`);
+          } finally {
+            scannedCount++;
+            reportScanProgress();
           }
         }
         scannedTemplates = [...ghTemplates, ...ashbyTemplates];
@@ -238,6 +254,17 @@ export class V1Pipeline {
 
       if (scanCompleted) {
         await exportScannedJobs(scannedTemplates, resolvedOutputDir);
+        const greenhouseCount = scannedTemplates.filter((template) => atsFromUrl(template.jobUrl) === 'greenhouse').length;
+        const ashbyCount = scannedTemplates.length - greenhouseCount;
+        try {
+          await sendEmail({
+            to: 'yaswanthnaiduyalla@applywizz.ai',
+            subject: 'ApplyWizz job scanning complete',
+            text: `Scanned ${scannedCount}/${uniqueUrls.length} job URLs. Greenhouse: ${greenhouseCount}. Ashby: ${ashbyCount}. Failed: ${scanFailures}.`,
+          });
+        } catch (emailErr: any) {
+          log.warn(`[Pipeline Phase B] Scan-complete email failed: ${emailErr?.message || emailErr}`);
+        }
         if (compact) {
           log.info(`[Pipeline] phase B done templates=${scannedTemplates.length}`);
         } else {

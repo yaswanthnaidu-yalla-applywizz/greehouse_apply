@@ -293,7 +293,7 @@ export class PlaywrightScanner {
     }
 
     const total = urls.length;
-    log.info(
+    if (!this.onJobScanned) log.info(
       `[Playwright Scanner] 🚀 Starting scan for ${total.toLocaleString()} unique URLs (workers: ${this.workerPoolSize}, timeout: ${this.timeoutMs}ms)`
     );
 
@@ -371,7 +371,7 @@ export class PlaywrightScanner {
                 }
 
                 const isMilestone = completedCount === total || completedCount % 50 === 0;
-                if (isMilestone) {
+                if (isMilestone && !this.onJobScanned) {
                   const elapsedSec = ((Date.now() - scanStartedAt) / 1000).toFixed(0);
                   log.info(
                     `[Playwright Scanner] Progress: ${completedCount}/${total} scanned (active: ${activeJobs}, expired: ${expiredJobs}, elapsed: ${elapsedSec}s)`
@@ -415,7 +415,7 @@ export class PlaywrightScanner {
     }
 
     const elapsedSec = ((Date.now() - scanStartedAt) / 1000).toFixed(1);
-    log.info(
+    if (!this.onJobScanned) log.info(
       `[Playwright Scanner] ✅ Scan complete: ${completedCount}/${total} URLs processed (active: ${activeJobs}, expired: ${expiredJobs}, total_fields: ${totalFields}, workers: ${Math.min(this.workerPoolSize, total)}, elapsed: ${elapsedSec}s)`
     );
     return results.filter(Boolean);

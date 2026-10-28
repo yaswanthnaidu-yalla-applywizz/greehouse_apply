@@ -1,4 +1,20 @@
+# Current Session Update (2026-10-29 — Ashby DOM scanning, required-only resolution, live dashboard updates, and queue gaps)
+
+- Ashby scanning now uses Playwright DOM only. The pipeline reports one combined Greenhouse/Ashby scan count and emails the dev address after scan export.
+- Optional questions remain visible and blank. Resolver tiers and submission defaults skip them. Filtered-out counts use required questions only.
+- Application upserts broadcast a dashboard refresh event. In a separate ingest service, `WEB_SERVICE_URL` must point to the main web service for immediate delivery; the dashboard retains polling as recovery.
+- Operator, admin, manager, and dev stat cards show Greenhouse and Ashby counts using their existing scopes and dates.
+- DB 2's migration 037 RPC references `template_id`, which migration 004 removed. Migration 042 replaces it, enforces a 1-hour Ashby candidate success gap and a 48-hour Ashby candidate/company success gap, and prevents a broken RPC from falling back to an unguarded claim. **Migration 042 is not applied to DB 2.** Supabase/Railway MCP, connected browser, and local Postgres were unavailable for live verification.
+- The saved 2026-10-28 ingest snapshot has three Tier 5 batch parse failures with 0/0/11 text characters. Batch requests now use Anthropic JSON-schema output and leave malformed answers unresolved. Provider behavior remains unverified in production.
+
 # Current Session Update (2026-10-28 — Full Implementation of Dashboard Stats & Refresh Plan Completed)
+
+## Immediate blocker (2026-10-29)
+
+- DB 2 migration 040 is applied after correcting a UUID comparison in its backfill; the column, trigger, and indexes were verified.
+- The isolated stats aggregation release in `.release-stats` passes typecheck, build, and 24 focused tests. October 28 cohort totals match independent DB 2 SQL.
+- Railway rejected two CLI uploads with `Deploys have been paused temporarily`. Production remains on `e4b31d9`; no post-release latency comparison is possible until Railway resumes deployment. See `PERFORMANCE_AUDIT.md`.
+- Other local performance work is ready: deferred `FormRenderer` reduces initial operator JS by 5.0% gzip, and overlapping `/api/dev/health` reads reduced local median from 1,408 ms to 786 ms across five trials per order. Typecheck, build, and focused tests pass; production comparison and concurrency load remain pending deployment.
 
 - **Completed 100% of the 7 Tasks in SDD Implementation Plan (`docs/superpowers/plans/2026-10-28-dashboard-stats-and-refresh.md`)**:
   - **Task 1: Canonical IST period contract (`src/server/dashboardDateRange.ts`)**:
