@@ -32,11 +32,10 @@ import {
   applicationAssignedCaAllowed,
   resolveViewAsOperatorManagerEmail,
   resolveManagerViewAsOperatorScope,
+  resolveRequestAppRole,
 } from '../managerTeamScope.js';
 import { isUserAdmin } from './auth.js';
-import { fetchAllowedCandidates } from '../../services/workHistoryClient.js';
-import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
-import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
+import { parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
 import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
 import {
@@ -636,6 +635,7 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
     let teamOperatorEmails: string[] | null = null;
     const authReq = req as AuthenticatedRequest;
     const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(authReq);
+    const role = resolveRequestAppRole(authReq, userEmail);
     const adminBypass = isAdmin && !viewAsManagerEmail;
 
     if (!adminBypass) {
@@ -652,32 +652,32 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         });
         allowedIds = scope.allowedIds;
         teamOperatorEmails = scope.teamOperatorEmails;
-      } else {
-        const caEmail = userEmail!;
-        const merged = await mergeWorkHistoryForIstDates({
-          mode: 'ca',
-          caEmail,
-          dates: istDatesForWorkHistory(parsedRange),
-        });
-        let candidateIds = merged.candidateIds;
-        if (candidateIds.length === 0 && parsedRange.preset === 'default') {
-          const allowedResult = await fetchAllowedCandidates(caEmail);
-          if (allowedResult.candidateIds.length > 0) {
-            candidateIds = allowedResult.candidateIds;
-          }
+        if (applywizzId && allowedIds && !allowedIds.has(applywizzId.toUpperCase())) {
+          log.warn(
+            `[API] GET /api/applications (manager=${viewAsManagerEmail}) → 403 (candidate ${applywizzId} not in manager team)`
+          );
+          res.status(403).json({
+            error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
+            applications: [],
+          });
+          return;
         }
-        allowedIds = new Set(candidateIds.map((id) => id.toUpperCase()));
-      }
-
-      if (applywizzId && allowedIds && !allowedIds.has(applywizzId.toUpperCase())) {
-        log.warn(
-          `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA in work-history span)`
-        );
-        res.status(403).json({
-          error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
-          applications: [],
-        });
-        return;
+      } else if (applywizzId && isSupabaseConfigured() && userEmail) {
+        const supabase = getDbClient();
+        const [{ data: prof }, { data: appRow }] = await Promise.all([
+          supabase.from('profiles').select('applywizz_id').eq('ca_email', userEmail).ilike('applywizz_id', applywizzId).limit(1),
+          supabase.from('gh_candidate_applications').select('id').eq('assigned_ca_email', userEmail).ilike('applywizz_id', applywizzId).limit(1)
+        ]);
+        if ((!prof || prof.length === 0) && (!appRow || appRow.length === 0)) {
+          log.warn(
+            `[API] GET /api/applications (ca_email=${userEmail}) → 403 (candidate ${applywizzId} not assigned to CA in DB)`
+          );
+          res.status(403).json({
+            error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.`,
+            applications: [],
+          });
+          return;
+        }
       }
     }
 
@@ -690,6 +690,9 @@ applicationsRouter.get('/', async (req: Request, res: Response): Promise<void> =
         query = query.eq('applywizz_id', applywizzId);
       } else if (allowedIds) {
         query = query.in('applywizz_id', Array.from(allowedIds));
+      }
+      if (role === 'operator' && userEmail) {
+        query = query.eq('assigned_ca_email', userEmail);
       }
       query = applyCreatedAtRangeFilter(query, {
         startIso: parsedRange.startIso,
