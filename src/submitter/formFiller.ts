@@ -639,6 +639,12 @@ async function fillInteractiveSelectDropdown(
   }
 
   if (clicked) {
+    if (searchInput) {
+      await searchInput.evaluate((input: HTMLInputElement) => {
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }).catch(() => {});
+    }
     await searchInput?.blur().catch(() => {});
     await page.waitForTimeout(250);
     const committedMatch = choiceOptionTextMatches;
