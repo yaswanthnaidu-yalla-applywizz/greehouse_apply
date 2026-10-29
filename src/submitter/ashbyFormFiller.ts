@@ -166,7 +166,17 @@ export async function fillAshbyForm(
         const fileInput = container.locator('input[type="file"]').first();
         if ((await fileInput.count()) > 0) {
           await fileInput.setInputFiles(resumeLocalPath);
-          await sleep(1000, 1800);
+          await sleep(500, 800);
+
+          // Dispatch synthetic change and input events to trigger React controlled state
+          await fileInput.evaluate((input: HTMLInputElement) => {
+            const changeEvent = new Event('change', { bubbles: true });
+            Object.defineProperty(changeEvent, 'target', { value: input });
+            input.dispatchEvent(changeEvent);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          }).catch(() => {});
+
+          await sleep(800, 1500);
 
           // Live DOM verification for file upload
           const isUploaded = await container.evaluate((el) => {
