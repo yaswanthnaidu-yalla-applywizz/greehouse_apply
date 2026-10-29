@@ -1,3 +1,6 @@
+2026-10-29 session-checkpoint: completed Tasks 1-11 of Ashby master execution plan; implemented sessid stickiness (7067c12), multi-tier country resolution (9c7cecc), proxy preflight (742147f), live DOM fill verification (10b0556), stage telemetry (3580fc1), instant challenge quarantine (a9af67c), post-submit retry lockout (80beb70), corpus rejection matcher (8f77402), inbox proof strategies (7d24e3a), lifecycle wiring (9e9c474), and verification (1f1e3d7); 83/83 Ashby tests, 32/32 master E2E checkpoints, and 110/110 unit tests pass, typecheck clean; no new observations
+2026-10-29 session-checkpoint: added Ramakrishna@Applywizz.ai ingestion email and 1-hour follow-up with per-manager task breakdowns (Balaji and Ramakrishna Tejavath) CCing yaswanthnaiduyalla and vivek; diagnosed congratulatory email misfire (PostgREST URL overflow and error fallback treating failed queries as 0 remaining tasks), chunked query by 50, added fail-safe error handling and verified completion against active queue; 15/15 tests pass and typecheck clean; no new observations
+2026-10-29 session-start scan: files=5 parsed=5 (adding Ramakrishna ingestion notifications and followups, investigating congratulatory mail misfire)
 2026-10-29 session-start scan: files=5 parsed=5 (checking answer resolution policies: work auth, previous employment, etc.)
 2026-10-29 session-start scan: files=5 parsed=5 (checking applications in ready for review after 5 PM IST for unresolved and AI-resolved questions)
 2026-10-29 session-checkpoint: diagnosed shortlink mismatch bug in pipeline.ts; 67 candidates had 926 rows (dropped by REQUIRE_ZOHO_CONNECTED); 120 eligible candidates had 1,693 rows, but 1,149 were silently dropped by allowedJobUrls.has(j.canonicalUrl) because segregator stores unexpanded grnh.se shortlinks while Phase A stores resolved canonical URLs; 544 were raw full URLs; no new observations
@@ -920,3 +923,8 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-10-29 deliverable flush: diagnosed Ashby failure cohort, proxy session and geo-boundary bugs; updated activeContext and progress; no new skill observations
 2026-10-29 deliverable flush: grounded Ashby confirmation-email proof design against current inbox pipeline and official sender/template behavior; no new skill observations
 2026-10-29 deliverable flush: created Ashby confirmation email proof design and five-task TDD implementation plan from the supplied corpus; no new skill observations
+2026-10-29 session-start scan: files=5 parsed=5 (investigating DB RPCs, concurrency, race condition prevention, and queue worker application pickup)
+
+2026-10-29 session-start scan: files=5 parsed=5 (checking railway logs on injest service for webservice errors)
+
+2026-10-29 session-checkpoint: diagnosed Railway injest WebSocket forwarding ECONNREFUSED error to web service (http://greehouseapply.railway.internal:3001); web service listens on port 8080 and INTERNAL_API_SECRET is unset; analysis-only session, no code changes; no new observations

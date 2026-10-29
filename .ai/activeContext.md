@@ -1,3 +1,30 @@
+# Current Session Update (2026-10-29 - Ashby Master Execution Plan Shipped: Tasks 1-11 Complete)
+
+- **Master Plan Execution Shipped**: Successfully executed and verified Tasks 1-11 of `docs/superpowers/plans/2026-10-29-ashby-master-execution-plan.md` in subagent-driven mode.
+- **Key Deliverables Shipped**:
+  - **Task 1 (`7067c12`)**: DataImpulse `sessid.<cleanId>_<attemptToken>` session parameter for ~30m sticky exit IP continuity on port 823.
+  - **Task 2 (`9c7cecc`)**: Multi-tier ISO-2 resolution with fail-closed `InvalidCountryError` (no silent `'us'` fallback).
+  - **Task 3 (`742147f`)**: Same-browser proxy preflight (`verifyProxyPreflight`) with 3s hard timeout and hashed exit audit (`sha256(ip).slice(0, 12)`).
+  - **Task 4 (`10b0556`)**: Live DOM state inspection (`aria-pressed`, `:checked`, file preview chips) and pre-submit validation gate throwing `DATA_FAULT:MISSING_REQUIRED_FIELD`.
+  - **Task 5 (`3580fc1`)**: Structured attempt telemetry (`AshbySubmissionTelemetry`) and 8 progressive stage milestones tracking in `error_details` and `gh_failure_diagnostics`.
+  - **Task 6 (`a9af67c`)**: Instant interactive challenge quarantine (`detectInteractiveChallenge`) with 3s grace window for invisible Turnstile; aborts hCaptcha/Turnstile modals in ~3s.
+  - **Task 7 (`80beb70`)**: Recorded `submitClickedAt` before button click; strictly locks out automatic post-submit retries in `submissionRetry.ts`.
+  - **Task 8 (`8f77402`)**: Corpus-backed confirmation email matcher (`ashbyConfirmationMatcher.ts`) with adverse rejection gate (Plenful, LiveRamp, Juicebox, Plaid, Fluidstack) and conditional guardrail (Replit).
+  - **Task 9 (`7d24e3a`)**: Connected inbox proof matching with 5s clock skew, full message body retrieval, and adverse rejection skipping in Zoho and Gmail strategies.
+  - **Task 10 (`9e9c474`)**: Ashby lifecycle wired to `EMAIL_PROOF_PENDING` with web proof, immediate lookup, background poller fallback, and promotion to `APPLIED`.
+  - **Task 11 (`1f1e3d7`)**: Verification of all 18 Ashby test suites (83/83 pass), Master Phase V2-6 E2E Integration Suite (32/32 checkpoints pass), rate-limiting RPC (Migration 042 verified in `tests/ashbyRateLimiting.test.ts`), and clean TypeScript typecheck across root and dashboard.
+  - **Task 12**: Phase 7 (P2 browser persona alignment) formally deferred until production telemetry indicates browser persona divergence.
+
+# Current Session Update (2026-10-29 - Ingestion Emails to Ramakrishna & Fixed Congratulatory Misfire)
+
+- **Executive Notification Shipped**: Added `Ramakrishna@Applywizz.ai` ingestion notification (`PROD_EXECUTIVE_TO = ['ramakrishna@applywizz.ai']`) with CC to `yaswanthnaiduyalla@applywizz.ai` and `vivek@applywizz.ai`.
+- **Manager Breakdown Included**: Built `groupReadyForReviewByManager` and `buildExecutiveInitialEmailHtml` listing assigned tasks for both managers (`balaji@applywizz.ai` and `ramakrishnaa.tejavath@applywizz.ai`), including `"x manager has y number of tasks to be done"` text and table breakdown. Both managers are guaranteed to be present even if an assigned count is 0.
+- **1-Hour Follow-Up Poller**: Updated default follow-up delay from 90m to 60m (1 hour) across all initial notices and poller timeouts. In 1 hour, `startLeadershipFollowupPoller` dispatches follow-up reminders to Leadership (per-CA) and Executive (per-Manager remaining counts for Balaji and Ramakrishna Tejavath).
+- **Congratulatory Email Misfire Diagnosed & Fixed**:
+  - *Root Cause*: `defaultQueryFn` in `startLeadershipFollowupPoller` queried `.in('id', ids)` without chunking. With 100+ applications, PostgREST/Kong rejected requests (HTTP 414 URI Too Large / 400). The error handler returned `[]`, which caused `runCheck` to see `remainingCount === 0` and erroneously dispatch `"🎉 ALL TASKS COMPLETED"` when tasks were still pending.
+  - *Fix Shipped*: Chunked PostgREST queries into batches of 50. Handled errors fail-safely: query errors throw rather than returning `[]`, and `runCheck` logs the failure and continues to retry next cycle without sending false completion emails. When genuine 0 tasks remain, congratulatory notifications are dispatched to both Leadership and Executive.
+- **Verification**: 15/15 unit tests pass in `tests/leadershipNotificationEmail.test.ts`, 16/16 in `tests/autoQueueAndCaNotification.test.ts`, 32/32 in `tests/e2eIntegration.test.ts`, and full typecheck clean.
+
 # Current Session Update (2026-10-29 - Fixed Ingest Shortlink Drop Bug in pipeline.ts via TDD)
 
 - **Bug Diagnosed**: In `src/orchestrator/pipeline.ts:301`, candidate segment jobs were filtered with `allowedJobUrls.has(j.canonicalUrl)`. Phase A resolves all `grnh.se` shortlinks to canonical Greenhouse URLs, but `segregator.ts` left `j.canonicalUrl` as raw `grnh.se` shortlinks. The comparison failed for all shortlink rows, causing 1,149 eligible jobs (and 1,773 total jobs) from `gh_jobs_202610291702.csv` to be silently dropped.
