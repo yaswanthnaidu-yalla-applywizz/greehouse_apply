@@ -18,6 +18,7 @@ import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
+import { isAshbySubmissionRetryAllowed } from './submissionRetry.js';
 
 const log = createLogger('AshbySubmit');
 
@@ -46,12 +47,19 @@ export function capTelemetryMetadata(
     challengeType: telemetry.challengeType,
     submitResponseStatus: telemetry.submitResponseStatus,
     capturedAt: telemetry.capturedAt,
+    submitClickedAt: telemetry.submitClickedAt,
+    submitClicked: telemetry.submitClicked,
   };
   metaStr = JSON.stringify(metadata);
   if (Buffer.byteLength(metaStr, 'utf8') <= maxBytes) {
     return metadata;
   }
-  return { stage: telemetry.stage, capturedAt: telemetry.capturedAt };
+  return {
+    stage: telemetry.stage,
+    capturedAt: telemetry.capturedAt,
+    submitClickedAt: telemetry.submitClickedAt,
+    submitClicked: telemetry.submitClicked,
+  };
 }
 
 export interface ChallengeDetectionResult {
@@ -198,6 +206,8 @@ export async function submitAshbyApplication(
   let committedFieldCount: number | undefined;
   let challengeType: 'none' | 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown' = 'none';
   let submitResponseStatus: number | undefined;
+  let submitClickedAt: string | null = null;
+  let submitClicked = false;
 
   let managedBrowser: any = null;
   let page: any = null;
@@ -339,6 +349,9 @@ export async function submitAshbyApplication(
     }
 
     log.info('[AshbySubmit] Clicking submit button...');
+    submitClickedAt = new Date().toISOString();
+    submitClicked = true;
+    stage = 'SUBMIT_CLICK';
     await submitBtn.click();
 
     // 6. Wait for success signal with instant interactive challenge quarantine (3s grace window)
@@ -371,7 +384,13 @@ export async function submitAshbyApplication(
       await statusUpdater(application.id, 'APPLIED', {
         proof_web_url: proofUrl,
         proof_captured_at: new Date().toISOString(),
-        error_details: exitIpHash ? { exitIpHash, countryCode, stage: 'COMPLETED' } : undefined,
+        error_details: {
+          exitIpHash,
+          countryCode,
+          stage: 'COMPLETED',
+          submitClickedAt,
+          submitClicked: true,
+        },
       });
     }
 
@@ -381,6 +400,8 @@ export async function submitAshbyApplication(
       applicationId,
       proofWebUrl: proofUrl,
       proofCapturedAt: new Date().toISOString(),
+      submitClickedAt,
+      submitClicked: true,
       telemetry: {
         deployedCommit,
         stage: 'COMPLETED',
@@ -390,6 +411,8 @@ export async function submitAshbyApplication(
         challengeType,
         submitResponseStatus,
         capturedAt: new Date().toISOString(),
+        submitClickedAt,
+        submitClicked: true,
       },
     };
   } catch (err: any) {
@@ -424,16 +447,37 @@ export async function submitAshbyApplication(
       submitResponseStatus,
       errorMessage: errorMsg,
       capturedAt: new Date().toISOString(),
+      submitClickedAt,
+      submitClicked,
     };
 
     if (application.id) {
       await statusUpdater(application.id, 'FAILED', {
         error_message: errorMsg,
-        error_details: telemetry,
+        error_details: {
+          ...telemetry,
+          submitClickedAt,
+          submitClicked,
+        },
         proof_failed_url: failedProofUrl,
         proof_failed_captured_at: failedProofUrl ? new Date().toISOString() : undefined,
       }).catch(() => {});
     }
+
+    const retryAllowed = !submitClicked && isAshbySubmissionRetryAllowed({
+      success: false,
+      status: 'FAILED',
+      applicationId,
+      errorMessage: errorMsg,
+      submitClicked,
+      submitClickedAt,
+      telemetry,
+    });
+
+    const isRetryable = retryAllowed;
+    const retryReason = submitClicked
+      ? null
+      : (retryAllowed && /browser.*launch|launch.*browser/i.test(errorMsg) ? 'BROWSER_LAUNCH_FAILED' : null);
 
     if (isSupabaseConfigured()) {
       try {
@@ -449,10 +493,7 @@ export async function submitAshbyApplication(
           error_name: err?.name ? String(err.name).slice(0, 80) : null,
           error_code: submitResponseStatus ? String(submitResponseStatus) : null,
           is_terminal: false,
-          is_retryable:
-            classification === 'EXTERNAL_POLICY:INTERACTIVE_CHALLENGE'
-              ? false
-              : stage !== 'SUBMIT_CLICK' && stage !== 'WAIT_CONFIRMATION',
+          is_retryable: isRetryable,
           applywizz_id: application.applywizz_id || null,
           application_id: validAppId,
           job_url_ref: application.job_url ? application.job_url.slice(0, 300) : null,
@@ -469,6 +510,9 @@ export async function submitAshbyApplication(
       applicationId,
       errorMessage: errorMsg,
       proofFailedUrl: failedProofUrl || undefined,
+      submitClickedAt,
+      submitClicked,
+      retryReason,
       telemetry,
     };
   } finally {
