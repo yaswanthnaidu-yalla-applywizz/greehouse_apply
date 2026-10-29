@@ -3,6 +3,7 @@
  */
 
 import fs from 'fs';
+import type { Page } from 'playwright';
 import type {
   ApplicationRow,
   AshbySubmissionStage,
@@ -51,6 +52,130 @@ export function capTelemetryMetadata(
     return metadata;
   }
   return { stage: telemetry.stage, capturedAt: telemetry.capturedAt };
+}
+
+export interface ChallengeDetectionResult {
+  detected: boolean;
+  challengeType?: 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown';
+  details?: string;
+}
+
+interface ChallengeSelectorGroup {
+  type: 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown';
+  selectors: string[];
+}
+
+const CHALLENGE_SELECTOR_GROUPS: ChallengeSelectorGroup[] = [
+  {
+    type: 'hcaptcha',
+    selectors: [
+      'iframe[src*="hcaptcha.com"][style*="visible"]',
+      '.hcaptcha-box',
+      'div:has-text("Select all images")',
+      'div[class*="h-captcha"] iframe',
+    ],
+  },
+  {
+    type: 'turnstile',
+    selectors: [
+      'iframe[title*="Cloudflare"]:has-text("Verify you are human")',
+      'div[class*="challenge-popup"]',
+      'div#challenge-stage',
+      'iframe[title*="Cloudflare"][title*="Verify you are human"]',
+      'iframe[src*="challenges.cloudflare.com"]:has-text("Verify you are human")',
+    ],
+  },
+  {
+    type: 'recaptcha',
+    selectors: [
+      'iframe[src*="recaptcha"][title*="recaptcha challenge"]',
+      'iframe[src*="recaptcha"][src*="bframe"]',
+    ],
+  },
+];
+
+export async function detectInteractiveChallenge(page: Page): Promise<ChallengeDetectionResult> {
+  if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
+    return { detected: false };
+  }
+
+  for (const group of CHALLENGE_SELECTOR_GROUPS) {
+    for (const selector of group.selectors) {
+      try {
+        const locator = page.locator(selector).first();
+        const count = await locator.count();
+        if (count > 0) {
+          const visible = await locator.isVisible().catch(() => false);
+          if (visible) {
+            return {
+              detected: true,
+              challengeType: group.type,
+              details: `Detected visible ${group.type} interactive challenge matching "${selector}"`,
+            };
+          }
+        }
+      } catch {
+        // ignore selector syntax or navigation race
+      }
+    }
+  }
+
+  return { detected: false };
+}
+
+export interface ConfirmationWaitOptions {
+  timeoutMs?: number;
+  graceWindowMs?: number;
+  pollIntervalMs?: number;
+  onChallengeDetected?: (challenge: ChallengeDetectionResult) => void;
+}
+
+export async function waitForSubmitConfirmation(
+  page: Page,
+  options: ConfirmationWaitOptions = {}
+): Promise<boolean> {
+  const timeoutMs = options.timeoutMs ?? 45000;
+  const graceWindowMs = options.graceWindowMs ?? 3000;
+  const pollIntervalMs = options.pollIntervalMs ?? 1500;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < timeoutMs) {
+    const pageText = (await page.textContent('body').catch(() => '')) || '';
+    const url = page.url();
+    const title = (await page.title().catch(() => '')) || '';
+
+    if (
+      pageText.includes('Your application was successfully submitted') ||
+      pageText.includes('application was successfully submitted') ||
+      /thank you for applying|application received/i.test(pageText) ||
+      url.includes('/confirmation') ||
+      /success|thank/i.test(title)
+    ) {
+      return true;
+    }
+
+    // Check for interactive challenge after mandatory grace window
+    if (Date.now() - startTime >= graceWindowMs) {
+      const challenge = await detectInteractiveChallenge(page);
+      if (challenge.detected) {
+        if (options.onChallengeDetected) {
+          options.onChallengeDetected(challenge);
+        }
+        const challengeType = challenge.challengeType || 'unknown';
+        const challengeErr: any = new Error(
+          `External policy block: Interactive ${challengeType} CAPTCHA intercepted submit`
+        );
+        challengeErr.stage = 'WAIT_CONFIRMATION';
+        challengeErr.classification = 'EXTERNAL_POLICY:INTERACTIVE_CHALLENGE';
+        challengeErr.challengeType = challengeType;
+        throw challengeErr;
+      }
+    }
+
+    await page.waitForTimeout(pollIntervalMs);
+  }
+
+  throw new Error('Ashby application submit confirmation signal timed out after 45s');
 }
 
 export async function submitAshbyApplication(
@@ -216,31 +341,18 @@ export async function submitAshbyApplication(
     log.info('[AshbySubmit] Clicking submit button...');
     await submitBtn.click();
 
-    // 6. Wait for success signal
+    // 6. Wait for success signal with instant interactive challenge quarantine (3s grace window)
     // Reference: ashby_application_success.png
     // "Success: Your application was successfully submitted. We'll contact you if there are next steps."
     stage = 'WAIT_CONFIRMATION';
-    let confirmed = false;
-    const startTime = Date.now();
-    const timeoutMs = 45000;
-
-    while (Date.now() - startTime < timeoutMs) {
-      const pageText = (await page.textContent('body')) || '';
-      const url = page.url();
-      const title = await page.title();
-
-      if (
-        pageText.includes('Your application was successfully submitted') ||
-        pageText.includes('application was successfully submitted') ||
-        /thank you for applying|application received/i.test(pageText) ||
-        url.includes('/confirmation') ||
-        /success|thank/i.test(title)
-      ) {
-        confirmed = true;
-        break;
-      }
-      await page.waitForTimeout(1500);
-    }
+    const confirmed = await waitForSubmitConfirmation(page, {
+      timeoutMs: 45000,
+      graceWindowMs: 3000,
+      pollIntervalMs: 1500,
+      onChallengeDetected: (c) => {
+        challengeType = (c.challengeType as any) || 'unknown';
+      },
+    });
 
     if (!confirmed) {
       throw new Error('Ashby application submit confirmation signal timed out after 45s');
@@ -286,6 +398,9 @@ export async function submitAshbyApplication(
       stage = err.stage;
     }
     const classification = err.classification;
+    if (err.challengeType) {
+      challengeType = err.challengeType;
+    }
     log.error(`[AshbySubmit] ❌ Submission failed for ${applicationId} at stage ${stage}: ${errorMsg}`);
 
     let failedProofUrl: string | null = null;
@@ -334,7 +449,10 @@ export async function submitAshbyApplication(
           error_name: err?.name ? String(err.name).slice(0, 80) : null,
           error_code: submitResponseStatus ? String(submitResponseStatus) : null,
           is_terminal: false,
-          is_retryable: stage !== 'SUBMIT_CLICK' && stage !== 'WAIT_CONFIRMATION',
+          is_retryable:
+            classification === 'EXTERNAL_POLICY:INTERACTIVE_CHALLENGE'
+              ? false
+              : stage !== 'SUBMIT_CLICK' && stage !== 'WAIT_CONFIRMATION',
           applywizz_id: application.applywizz_id || null,
           application_id: validAppId,
           job_url_ref: application.job_url ? application.job_url.slice(0, 300) : null,
