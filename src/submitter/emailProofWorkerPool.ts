@@ -160,6 +160,8 @@ export class EmailProofWorkerPool {
       submissionTime: appliedIso,
       allowHistorical: true,
       timeoutMs: 30000,
+      ats: (app as any).ats || 'greenhouse',
+      jobTitle: (app as any).job_title || (app as any).title,
     });
 
     if (result.matched && result.email) {

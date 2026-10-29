@@ -31,6 +31,15 @@ export {
   type RawGmailMessageResponse,
 } from './inbox/gmailStrategy.js';
 
+export {
+  ASHBY_CONFIRMATION_CLOCK_SKEW_MS,
+  isAshbySenderCandidate,
+  matchAshbyConfirmationEmail,
+  type AshbyConfirmationMessage,
+  type AshbyConfirmationContext,
+  type AshbyConfirmationMatchResult,
+} from './inbox/ashbyConfirmationMatcher.js';
+
 import { queryZohoConfirmationEmail, type ZohoEmailQueryOptions, type ZohoEmailQueryResult } from './inbox/zohoStrategy.js';
 import { queryGmailConfirmationEmail } from './inbox/gmailStrategy.js';
 

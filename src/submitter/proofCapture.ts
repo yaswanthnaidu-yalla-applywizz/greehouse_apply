@@ -489,6 +489,8 @@ export async function captureAndSaveEmailProof(
       companyEmail: (appRow as any).company_email || undefined,
       submissionTime: appliedIso,
       timeoutMs: options.timeoutMs ?? (options.isManual ? 45000 : 180000),
+      ats: (appRow as any).ats || 'greenhouse',
+      jobTitle: (appRow as any).job_title || (appRow as any).title,
     });
 
     if (result.matched && result.email) {
