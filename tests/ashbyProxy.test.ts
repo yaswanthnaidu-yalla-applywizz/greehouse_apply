@@ -56,5 +56,23 @@ test('builds valid geo-targeted proxy config', () => {
   assert.equal(cfg.password, 'mypassword');
   assert.ok(cfg.username.startsWith('myuser__cr.us'));
   assert.ok(cfg.username.includes('city.NewYork'));
-  assert.ok(cfg.username.includes('sid.AWL32959_'));
+  assert.ok(cfg.username.includes('sessid.AWL32959_'));
+  assert.ok(!cfg.username.includes(';sid.'));
+});
+
+test('uses sessid instead of sid for sticky proxy sessions', () => {
+  const cfg = buildAshbyProxyConfig(
+    { applywizz_id: 'AWL-32959', country: 'United States', location: 'New York, NY' } as any,
+    { login: 'myuser', password: 'mypassword', attemptToken: 'test1234' }
+  );
+  assert.ok(cfg.username.includes('sessid.AWL32959_test1234'));
+  assert.ok(!cfg.username.includes(';sid.'));
+
+  // Without explicit attemptToken, generates 8-char hex token
+  const cfgAuto = buildAshbyProxyConfig(
+    { applywizz_id: 'AWL-32959', country: 'United States', location: 'New York, NY' } as any,
+    { login: 'myuser', password: 'mypassword' }
+  );
+  assert.match(cfgAuto.username, /sessid\.AWL32959_[a-f0-9]{8}/);
+  assert.ok(!cfgAuto.username.includes(';sid.'));
 });

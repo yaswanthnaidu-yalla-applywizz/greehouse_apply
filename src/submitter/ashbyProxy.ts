@@ -2,6 +2,7 @@
  * @fileoverview DataImpulse Geo-Targeted Residential Proxy Configuration for Ashby Submissions.
  */
 
+import { randomBytes } from 'node:crypto';
 import type { ProfileRow } from '../db/profiles.js';
 
 export interface ProxyConfig {
@@ -15,6 +16,7 @@ export interface ProxyOptions {
   password?: string;
   host?: string;
   port?: number | string;
+  attemptToken?: string;
 }
 
 const COUNTRY_CODE_MAP: Record<string, string> = {
@@ -78,13 +80,13 @@ export function buildAshbyProxyConfig(
   const city = parseCityFromLocation(profile.location);
 
   const cleanId = String(profile.applywizz_id || 'candidate').replace(/[^a-zA-Z0-9]/g, '');
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const attemptToken = options.attemptToken || randomBytes(4).toString('hex');
 
   let username = `${login}__cr.${countryCode}`;
   if (city) {
     username += `;city.${city}`;
   }
-  username += `;sid.${cleanId}_${today}`;
+  username += `;sessid.${cleanId}_${attemptToken}`;
 
   return {
     server: `http://${host}:${port}`,
