@@ -123,6 +123,8 @@ export interface AshbySubmissionTelemetry {
   submitResponseStatus?: number;
   errorMessage?: string;
   capturedAt: string;
+  submitClickedAt?: string | null;
+  submitClicked?: boolean;
 }
 
 export interface ApplicationRow {
