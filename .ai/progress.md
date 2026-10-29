@@ -1,9 +1,15 @@
+### Ingestion & Shortlink Safeguards (2026-10-29 Complete)
+- [x] **Pipeline Ingestion Shortlink Preservation (`src/orchestrator/pipeline.ts`):** Exported and implemented `alignAndFilterCandidateSegmentJobs` in `src/orchestrator/pipeline.ts`. Resolves candidate segment jobs with `grnh.se` shortlinks against Phase A's pre-warmed in-memory `shortlinkCache` (resolving in 4ms with zero network calls) before filtering against `allowedJobUrls`. Resolves the bug where 1,149 eligible tasks were dropped because raw shortlinks were compared against expanded canonical URLs. Verified 100.0% retention on 2,619-row CSV. 3/3 unit tests pass in `tests/pipelineShortlinkFilter.test.ts`.
+
 ### Ashby and Resolution Safeguards (2026-10-29 Local Implementation)
 - [x] Ashby form scans use Playwright DOM only; combined scan progress and dev scan-complete email are wired.
 - [x] Optional questions stay blank through resolution and form filling; required-only filtering is preserved.
 - [x] Operator, admin, manager, and dev stat cards show Greenhouse/Ashby counts; application upserts request immediate operator refresh.
 - [ ] Apply migration 042 to DB 2 and verify queue timing against live rows. Configure `WEB_SERVICE_URL` on the ingest service and verify cross-service refresh and scan email after deployment.
 - [ ] Verify Anthropic structured batch output and Tier 5 parse-failure rate in the next production ingest.
+- [ ] **Known Ashby proxy session bug:** `ashbyProxy.ts` emits `sid.<value>` on DataImpulse's rotating port, while the provider documents `sessid.<value>` for a consistent roughly 30-minute exit IP. Correct and canary this before broad Ashby queueing.
+- [ ] **Known Ashby geo-boundary bug:** unsupported or missing candidate countries silently fall back to `us`; current Irish candidates can therefore receive a US proxy. Validate ISO-2 countries and fail closed instead of inventing US.
+- [ ] Rebuild the Ashby failure cohort by deployed commit and verified proxy state. `docs/fkedup.md` is a failure-only, unversioned aggregate and cannot establish the current success rate.
 
 ### Dashboard Cohort Stats, Dev Trend Chart & Realtime Refresh (2026-10-28 Complete)
 - [x] **Canonical IST Date Range Engine (`src/server/dashboardDateRange.ts`):** Removed host-local timezone skew and UTC formatting drift in week calculation. Anchored Monday weeks, month start, and year rollovers with exact half-open UTC bounds derived from IST calendar dates (+05:30). Verified with `tests/dashboardDateRange.test.ts`.

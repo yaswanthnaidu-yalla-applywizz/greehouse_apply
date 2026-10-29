@@ -1,3 +1,69 @@
+# Current Session Update (2026-10-29 - Fixed Ingest Shortlink Drop Bug in pipeline.ts via TDD)
+
+- **Bug Diagnosed**: In `src/orchestrator/pipeline.ts:301`, candidate segment jobs were filtered with `allowedJobUrls.has(j.canonicalUrl)`. Phase A resolves all `grnh.se` shortlinks to canonical Greenhouse URLs, but `segregator.ts` left `j.canonicalUrl` as raw `grnh.se` shortlinks. The comparison failed for all shortlink rows, causing 1,149 eligible jobs (and 1,773 total jobs) from `gh_jobs_202610291702.csv` to be silently dropped.
+- **TDD Fix Shipped**: Exported and implemented `alignAndFilterCandidateSegmentJobs` in `src/orchestrator/pipeline.ts`. Candidate jobs with `grnh.se` shortlinks are resolved against Phase A's pre-warmed in-memory `shortlinkCache` (resolving 1,777 instances in 4ms with 0 network calls). Added defense-in-depth checking both canonical and raw URLs.
+- **Tests**: Created `tests/pipelineShortlinkFilter.test.ts` (3/3 passing), added to `test:unit` in `package.json`. 100% test suite passing (110 vitest + 15 node test suites), typecheck clean. 100.0% retention verified on real 2,619-row CSV (1,693/1,693 eligible jobs kept).
+
+# Current Session Update (2026-10-29 - Ashby Master Plan Execution: Tasks 1 & 2 Complete, Paused)
+
+- **Master Plan Subagent Execution**: Started implementation of `docs/superpowers/plans/2026-10-29-ashby-master-execution-plan.md` in subagent-driven mode.
+- **Task 1 Shipped (`7067c12`)**: Replaced non-standard `sid` with DataImpulse documented `sessid.<candidate>_<token>` with per-attempt 8-character hex stickiness. Added regression tests asserting `sessid.` and rejecting `sid.`.
+- **Task 2 Shipped (`9c7cecc`)**: Created and exported `InvalidCountryError`. Removed silent `'us'` fallback from `parseCountryCode`. Expanded `COUNTRY_CODE_MAP` (Ireland, Netherlands, UK variations, tech hiring hubs) and implemented multi-tier country resolution in `resolveCountryCode` (profile.country -> location 3rd segment -> phone calling code prefix e.g. `+353` -> fail-closed). 14/14 proxy tests pass.
+- **Execution Status**: Paused at Task 2 done per user request. Ledger updated at `.superpowers/sdd/2026-10-29-ashby-master-execution-plan/progress.md`. Next task when resumed: Task 3 (Lightweight Proxy Preflight with Exit Hash Logging).
+
+# Current Session Update (2026-10-29 - Ashby Strategy Blast-Radius Analysis & Master Execution Plan)
+
+- **Master Execution Plan Created**: Merged proxy session fixes, candidate geography resolution, DOM fill accounting, stage telemetry, fast challenge quarantine, confirmation email matching, rejection gates, and inbox strategies into a unified roadmap at `docs/superpowers/plans/2026-10-29-ashby-master-execution-plan.md`.
+- **pstack:blast-radius Audit Conducted**: Evaluated the proposed P0/P1/P2 Ashby hardening plan across all impacted components (`src/submitter/ashbyProxy.ts`, `src/submitter/ashbySubmit.ts`, `src/submitter/ashbyFormFiller.ts`, `src/submitter/submissionRetry.ts`, and test suites).
+- **Core Breakages & Engineered Remedies**:
+  1. `sid` -> `sessid`: Breaks `tests/ashbyProxy.test.ts:59`. Same-day static session tag reuses tainted IPs. *Remedy*: Update test to assert `sessid.` and reject `sid.`; format tag with unique per-attempt 8-char hex token.
+  2. Country fallback removal: Breaks on unmapped candidates (e.g. Ireland `AWL-1369`). *Remedy*: Expand ISO-2 dictionary with Ireland (`IE`), Netherlands (`NL`), etc., parse country from `profile.location` and phone prefix (`+353`), fail closed before browser launch with `DATA_FAULT:MISSING_GEOGRAPHY`.
+  3. Proxy preflight: External IP lookups from 15 workers risk 429 blocks and bandwidth costs. *Remedy*: Lightweight probe with 3s hard timeout, retry once on failure, log only `sha256(ip).slice(0, 12)` in `submission_metadata`.
+  4. Challenge detection vs 45s wait: Aborting on initial Turnstile iframe kills auto-passing tokens. *Remedy*: Enforce mandatory 3s grace window before testing for visible interactive modal puzzle selectors.
+  5. Fill accounting: Checking raw input values on Ashby custom React components (Yes/No toggle buttons) gives false negatives. *Remedy*: Inspect element-specific state (`aria-pressed`, `.selected`, container text, file preview chips).
+  6. Retry safety: Indeterminate post-click timeouts must never automatically re-click submit. *Remedy*: Track `submitClickedAt`; pre-submit errors allow 1 retry, post-submit errors lock out retry.
+- **Dedicated Implementation Plan Created**: `docs/superpowers/plans/2026-10-29-ashby-proxy-diagnostics-and-hardening.md` (9 tasks organized in P0, P1, P2 phases).
+
+# Current Session Update (2026-10-29 - Ashby Rejection vs Confirmation Differentiation & Plan Refinement)
+
+- **Corpus Linguistic & Decision-Boundary Analysis**: Identified that 5 of the 35 samples in `ashby_confirmation_emails_corpus.md` (Plenful, LiveRamp, Juicebox, Plaid, Fluidstack) are rapid adverse outcomes / knockout rejections (14.3%) rather than positive confirmation receipts (85.7%).
+- **Distinguishing Signals Identified**:
+  - **Shared Trap**: Both categories open with courteous salutations (*"Thank you for your interest"*, *"Thank you for taking the time to apply"*), proving naive salutation matching is fatal.
+  - **Subject Formulas**: `Update on Your Application...`, `Application Update`, and `Followup to your Application...` correlate 100% with rejections in this dataset. Confirmations favor exclamation marks (`!`) and `Thanks for applying...`.
+  - **Rejection Heuristics (Declarative Adverse Verdicts)**: Moving forward with other candidates, explicit discontinuation of candidacy, knockout/ineligibility on in-office expectations, and parting job search condolences (*"in your job search"*).
+  - **Conditional False-Positive Guardrail**: Sample 8 (Replit) contains *"If you are not selected for this position..."*. Guarded against false rejection by enforcing declarative past/present tense decisions and excluding hypothetical `"if"` conditionals.
+- **Artifacts & Plans Updated**:
+  - Updated corpus artifact `ashby_confirmation_emails_corpus.md` with executive summary statistics, differentiation framework, sample annotations, and production Regex constants (`ASHBY_REJECTION_PATTERNS`, `ASHBY_CONFIRMATION_PATTERNS`).
+  - Refined implementation plan `docs/superpowers/plans/2026-10-29-ashby-confirmation-email-proof.md` and design spec `docs/superpowers/specs/2026-10-29-ashby-confirmation-email-proof-design.md` with explicit rejection patterns, test assertions, and fail-closed decision tree.
+
+# Current Session Update (2026-10-29 - Ashby Applied Mailbox Analysis & Confirmation Email Corpus)
+
+- **DB 2 Ashby Analysis**: Queried 151 applied Ashby applications (`ats = 'ashby' AND status = 'APPLIED'`) across 38 companies and 72 candidates. None had email proofs recorded in `proof_email_json`.
+- **Mailbox Sampling via Zoho Connector**: Crawled candidate mailboxes via `/api/zoho/ui/inbox` and `/api/zoho/ui/message` across candidates with applied Ashby jobs.
+- **Corpus Generated**: Captured 35 real confirmation emails across 29 distinct tech employers (Orchard Robotics, Mercor, Kled AI, Nexxen, Phantom, Ellipsis Health, Plenful, Replit, NewtonX, LG Ad Solutions, HappyRobot, FutureFit AI, Ashby, Collective, Thinking Machines Lab, LiveRamp, ClickHouse, Vynca, Marvin Behavioral Health, Keycard, Juicebox, OpenLoop Health, The Zebra, 42dot, Plaid, Inworld, Niantic Spatial, Fluidstack, Confido).
+- **Core Signals & Findings**:
+  - **Sender**: 94.3% `no-reply@ashbyhq.com`, 2.9% `hiring@ashbyhq.com`, 2.9% custom vanity subdomains (`no-reply@keycard.ai`).
+  - **Latency / Time Frame**: Confirmation emails arrive between **2 and 8 seconds** (average **4.1s**) after form submission.
+  - **Subject Formulas**: Heavily standardized: `Thanks for applying to <Company>!` (43%), `Thank you for applying to <Company>!` (20%), `Update on Your Application...` (9%), `Thank you for your interest in <Company>` (9%).
+  - **Body Keywords**: Consistently includes `"Thank you for applying for the <Role> role at <Company>"`, `"We received your application..."`, `"We will review your application and get back to you if there are next steps"`.
+- Detailed report and 35-sample corpus saved to artifact `ashby_confirmation_emails_corpus.md`.
+
+# Current Session Update (2026-10-29 - Ashby Confirmation Email Proof Plan)
+
+- Created `docs/superpowers/specs/2026-10-29-ashby-confirmation-email-proof-design.md` and `docs/superpowers/plans/2026-10-29-ashby-confirmation-email-proof.md`.
+- The design reuses the Greenhouse proof JSON, mailbox routing, immediate lookup, 30-second poller, 10-minute timeout, batch recovery, and renderer. Ashby stays `EMAIL_PROOF_PENDING` until a confirmation email attaches.
+- The supplied 35-message corpus includes at least five rejection messages from Ashby senders. The plan therefore requires rejection-first body classification before positive application-receipt matching.
+- The submitter must record the submit-click timestamp before waiting for web confirmation. Ashby email delivery occurs 2 to 8 seconds after the click, so a later status timestamp can otherwise exclude the correct email.
+- This session produced the design and implementation plan only. No product code changed.
+
+# Current Session Update (2026-10-29 - Ashby Failure Diagnosis)
+
+- Reviewed `docs/fkedup.md` against the current Ashby submitter and project chronology. Its 289/290 challenge figure is a failure-only historical aggregate without cohort dates, row IDs, deployed commit, proxy state, or a reproducible query. Do not use it as the current Ashby success rate.
+- Identified a concrete proxy session bug in `src/submitter/ashbyProxy.ts`: the username uses undocumented `sid` on rotating port 823, while DataImpulse documents `sessid` for a consistent roughly 30-minute IP. This can break same-session IP continuity.
+- Identified a concrete geo-boundary bug: unknown countries silently map to `us`; Ireland is present in current profiles but absent from the map.
+- Decision: first fix proxy construction and add stage-specific Ashby telemetry. Retry only failures proven to occur before submit. Quarantine interactive challenges and reconcile indeterminate post-click results before any retry. Do not add CAPTCHA solving or broad stealth changes.
+- Production gates remain migration 042 verification, same-browser proxy egress validation, one authorized headless canary with web proof, and small-batch stop conditions.
+
 # Current Session Update (2026-10-29 — Profile Authority Guard, E2E Test Isolation, and Master DB1/DB2 Backfill)
 
 - **Root Causes Identified and Fixed**:
