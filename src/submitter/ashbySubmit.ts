@@ -291,10 +291,15 @@ export async function submitAshbyApplication(
       }
     });
 
-    // 2.5 Verify proxy preflight probe
+    // 2.5 Verify proxy preflight probe (with 1 automatic retry on network/503 glitch)
     stage = 'PREFLIGHT';
     log.info(`[AshbySubmit] Probing proxy preflight for ${applicationId} (${countryCode})...`);
-    const preflight = await verifyProxyPreflight(page, countryCode);
+    let preflight = await verifyProxyPreflight(page, countryCode);
+    if (!preflight.success) {
+      log.warn(`[AshbySubmit] ⚠️ Proxy preflight initial attempt failed for ${applicationId}: ${preflight.error}. Retrying once...`);
+      await sleep(1000, 2000);
+      preflight = await verifyProxyPreflight(page, countryCode);
+    }
     if (!preflight.success) {
       log.warn(`[AshbySubmit] ⚠️ Proxy preflight failed for ${applicationId}: ${preflight.error}`);
       throw new Error(`Ashby proxy preflight failed: ${preflight.error}`);
