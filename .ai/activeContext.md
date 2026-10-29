@@ -1,3 +1,13 @@
+# Current Session Update (2026-10-29 - Configurable Stats Rollup & Pruning via ENABLE_STATS_ROLLUP)
+
+- **Requirement**: Make stats rollup and working table pruning configurable via ENABLE_STATS_ROLLUP with NO default value (strictly required in environment), while keeping the Migration 027 guard intact.
+- **Implementation**:
+  - src/config/env.ts: Added required ENABLE_STATS_ROLLUP: z.preprocess(...) without default, strictly requiring a boolean or boolean-like string in environment.
+  - src/db/statsRollup.ts: Migration 027 verification check preserved as the safety guard. If ENABLE_STATS_ROLLUP is false, it logs and skips deleting records from gh_candidate_applications and gh_scanned_job_templates.
+  - .env, .env.example, .env.sandbox: Added ENABLE_STATS_ROLLUP=false.
+  - 	ests/statsRollupPruning.test.ts: Added tests verifying that Migration 027 guard runs and that deletions are executed when true and bypassed when false.
+- **Verification**: Node unit tests (3/3 passed) and TypeScript typecheck (passed).
+
 # Current Session Update (2026-10-29 - Ashby Master Execution Plan Shipped: Tasks 1-11 Complete)
 
 - **Master Plan Execution Shipped**: Successfully executed and verified Tasks 1-11 of `docs/superpowers/plans/2026-10-29-ashby-master-execution-plan.md` in subagent-driven mode.
