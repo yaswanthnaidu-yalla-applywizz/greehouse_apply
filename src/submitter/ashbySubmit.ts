@@ -365,7 +365,7 @@ export async function submitAshbyApplication(
     // "Success: Your application was successfully submitted. We'll contact you if there are next steps."
     stage = 'WAIT_CONFIRMATION';
     const confirmed = await waitForSubmitConfirmation(page, {
-      timeoutMs: 45000,
+      timeoutMs: 60000,
       graceWindowMs: 3000,
       pollIntervalMs: 1500,
       onChallengeDetected: (c) => {
