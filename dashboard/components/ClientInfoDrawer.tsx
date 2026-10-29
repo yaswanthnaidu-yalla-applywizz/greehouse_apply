@@ -2,8 +2,9 @@
  * @fileoverview Slide-Over Drawer component for displaying formatted candidate information.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import type { CandidateDetail } from '../types.js';
+import { apiFetch } from '../hooks/useSession.js';
 
 export interface FormattedEducation {
   degreeAndField: string;
@@ -98,27 +99,27 @@ export function formatExperienceList(rawExperience: any): FormattedExperience[] 
   return results;
 }
 
-export function extractClientDetails(candidate: CandidateDetail): ClientDetails {
-  const profile: any = candidate.profile || {};
-  const awlId = candidate.applywizzId || profile.applywizzId || '—';
-  const name = candidate.clientName || profile.clientName || 'Candidate';
-  const companyEmail = profile.companyEmail || profile.company_email || profile.email || null;
-  const phone = profile.phone || null;
-  const country = profile.country || null;
-  const location = profile.location || null;
-  const linkedinUrl = profile.linkedinUrl || profile.linkedin_url || null;
-  const websiteUrl = profile.websiteUrl || profile.website_url || null;
-  const githubUrl = profile.githubUrl || profile.github_url || null;
-  const workAuth = profile.workAuthorization || profile.work_authorization || null;
+export function extractClientDetails(candidate: CandidateDetail | any): ClientDetails {
+  const profile: any = candidate?.profile || candidate || {};
+  const awlId = candidate?.applywizzId || profile?.applywizzId || '—';
+  const name = candidate?.clientName || profile?.clientName || 'Candidate';
+  const companyEmail = profile?.companyEmail || profile?.company_email || profile?.email || null;
+  const phone = profile?.phone || null;
+  const country = profile?.country || null;
+  const location = profile?.location || null;
+  const linkedinUrl = profile?.linkedinUrl || profile?.linkedin_url || null;
+  const websiteUrl = profile?.websiteUrl || profile?.website_url || null;
+  const githubUrl = profile?.githubUrl || profile?.github_url || null;
+  const workAuth = profile?.workAuthorization || profile?.work_authorization || null;
 
   let sponsorship: string | null = null;
-  if (profile.requiresSponsorship !== undefined || profile.requires_sponsorship !== undefined) {
-    const req = profile.requiresSponsorship === true || profile.requires_sponsorship === true;
+  if (profile?.requiresSponsorship !== undefined || profile?.requires_sponsorship !== undefined) {
+    const req = profile?.requiresSponsorship === true || profile?.requires_sponsorship === true;
     sponsorship = req ? 'Yes (Requires Sponsorship)' : 'No (Does not require sponsorship)';
   }
 
-  const education = formatEducationList(profile.education);
-  const experience = formatExperienceList(profile.workExperience || profile.work_experience);
+  const education = formatEducationList(profile?.education);
+  const experience = formatExperienceList(profile?.workExperience || profile?.work_experience);
 
   return {
     awlId,
@@ -140,14 +141,41 @@ export function extractClientDetails(candidate: CandidateDetail): ClientDetails 
 export interface ClientInfoDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  candidate: CandidateDetail | null;
+  candidate?: CandidateDetail | null;
+  applywizzId?: string | null;
+  candidateName?: string | null;
 }
 
 export const ClientInfoDrawer: React.FC<ClientInfoDrawerProps> = ({
   isOpen,
   onClose,
   candidate,
+  applywizzId: explicitId,
+  candidateName,
 }) => {
+  const activeId = explicitId || candidate?.applywizzId || candidate?.profile?.applywizzId || null;
+  const [profileData, setProfileData] = useState<any | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadProfile = useCallback(async (id: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/candidates/${encodeURIComponent(id)}/profile`);
+      if (!res.ok) {
+        throw new Error(`Failed to load profile (status ${res.status})`);
+      }
+      const data = await res.json();
+      setProfileData(data);
+    } catch (err: any) {
+      console.error('[ClientInfoDrawer] Error fetching candidate profile:', err);
+      setError(err?.message || 'Failed to load candidate information');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
@@ -160,8 +188,39 @@ export const ClientInfoDrawer: React.FC<ClientInfoDrawerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!candidate || !isOpen) return null;
-  const details = extractClientDetails(candidate);
+  useEffect(() => {
+    if (!isOpen || !activeId) {
+      setProfileData(null);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+
+    const rawProfile: any = candidate?.profile;
+    const hasExistingRichData = Boolean(
+      rawProfile &&
+      (rawProfile.phone ||
+        rawProfile.workAuthorization ||
+        (Array.isArray(rawProfile.education) && rawProfile.education.length > 0) ||
+        (Array.isArray(rawProfile.workExperience) && rawProfile.workExperience.length > 0))
+    );
+
+    if (hasExistingRichData) {
+      setProfileData(candidate);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+
+    loadProfile(activeId);
+  }, [isOpen, activeId, candidate, loadProfile]);
+
+  if (!isOpen) return null;
+
+  const rawCandidate = profileData || candidate || { applywizzId: activeId, clientName: candidateName };
+  const details = extractClientDetails(rawCandidate);
+  const displayName = details.name && details.name !== 'Candidate' ? details.name : candidateName || details.name || 'Candidate';
+  const displayId = details.awlId && details.awlId !== '—' ? details.awlId : activeId || '—';
 
   return (
     <>
@@ -185,10 +244,10 @@ export const ClientInfoDrawer: React.FC<ClientInfoDrawerProps> = ({
             <span className="text-xl">👤</span>
             <div>
               <h2 className="text-sm font-bold text-[#ffffff] uppercase tracking-wide">
-                {details.name}
+                {displayName}
               </h2>
               <span className="text-[11px] font-mono text-[#0a84ff] font-semibold">
-                {details.awlId}
+                {displayId}
               </span>
             </div>
           </div>
@@ -204,161 +263,204 @@ export const ClientInfoDrawer: React.FC<ClientInfoDrawerProps> = ({
 
         {/* Scrollable Content */}
         <div className="flex-1 min-h-0 overflow-y-auto p-6 pb-16 space-y-6 custom-scrollbar text-xs">
-          {/* Primary Contact & Location */}
-          <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
-            <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
-              Contact & Location
-            </h3>
-            <div className="space-y-2">
-              {details.companyEmail && (
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-[#8e8e93]">Email:</span>
-                  <a
-                    href={`mailto:${details.companyEmail}`}
-                    className="font-mono text-[#0a84ff] hover:underline break-all"
-                  >
-                    {details.companyEmail}
-                  </a>
+          {isLoading ? (
+            <div className="space-y-4 animate-pulse">
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                <div className="h-3 w-28 bg-[#2c2c2e] rounded" />
+                <div className="space-y-2 pt-1">
+                  <div className="h-4 bg-[#2c2c2e] rounded w-full" />
+                  <div className="h-4 bg-[#2c2c2e] rounded w-3/4" />
+                  <div className="h-4 bg-[#2c2c2e] rounded w-1/2" />
                 </div>
-              )}
-              {details.phone && (
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-[#8e8e93]">Phone:</span>
-                  <span className="font-mono text-[#ffffff]">{details.phone}</span>
+              </div>
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                <div className="h-3 w-36 bg-[#2c2c2e] rounded" />
+                <div className="space-y-2 pt-1">
+                  <div className="h-4 bg-[#2c2c2e] rounded w-2/3" />
                 </div>
-              )}
-              {details.location && (
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-[#8e8e93]">Location:</span>
-                  <span className="text-[#ffffff] text-right">{details.location}</span>
+              </div>
+              <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                <div className="h-3 w-24 bg-[#2c2c2e] rounded" />
+                <div className="space-y-3 pt-1">
+                  <div className="h-10 bg-[#2c2c2e] rounded w-full" />
+                  <div className="h-10 bg-[#2c2c2e] rounded w-full" />
                 </div>
-              )}
-              {details.country && (
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-[#8e8e93]">Country:</span>
-                  <span className="text-[#ffffff] text-right">{details.country}</span>
-                </div>
-              )}
+              </div>
+              <div className="text-center py-2 text-[#8e8e93] text-xs font-mono">
+                Loading candidate profile details...
+              </div>
             </div>
-          </section>
+          ) : error ? (
+            <div className="bg-[#1c1c1e] border border-[#ff453a]/30 rounded-xl p-6 text-center space-y-3">
+              <span className="text-2xl">⚠️</span>
+              <p className="text-sm font-semibold text-[#ff453a]">{error}</p>
+              <button
+                type="button"
+                onClick={() => activeId && loadProfile(activeId)}
+                className="px-3 py-1.5 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-xs text-[#ffffff] font-medium rounded-lg border border-[#3a3a3c] transition-colors"
+              >
+                Retry Loading
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Primary Contact & Location */}
+              <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
+                  Contact & Location
+                </h3>
+                <div className="space-y-2">
+                  {details.companyEmail && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[#8e8e93]">Email:</span>
+                      <a
+                        href={`mailto:${details.companyEmail}`}
+                        className="font-mono text-[#0a84ff] hover:underline break-all"
+                      >
+                        {details.companyEmail}
+                      </a>
+                    </div>
+                  )}
+                  {details.phone && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[#8e8e93]">Phone:</span>
+                      <span className="font-mono text-[#ffffff]">{details.phone}</span>
+                    </div>
+                  )}
+                  {details.location && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[#8e8e93]">Location:</span>
+                      <span className="text-[#ffffff] text-right">{details.location}</span>
+                    </div>
+                  )}
+                  {details.country && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[#8e8e93]">Country:</span>
+                      <span className="text-[#ffffff] text-right">{details.country}</span>
+                    </div>
+                  )}
+                </div>
+              </section>
 
-          {/* Work Authorization & Sponsorship */}
-          {(details.workAuth || details.sponsorship) && (
-            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
-              <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
-                Eligibility & Work Authorization
-              </h3>
-              <div className="space-y-2">
-                {details.workAuth && (
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#8e8e93]">Work Auth:</span>
-                    <span className="font-mono font-semibold text-[#30d158] bg-[#30d158]/10 border border-[#30d158]/20 px-2 py-0.5 rounded">
-                      {details.workAuth}
-                    </span>
-                  </div>
-                )}
-                {details.sponsorship && (
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-[#8e8e93]">Sponsorship:</span>
-                    <span className="text-[#ffffff] text-right font-medium">
-                      {details.sponsorship}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Online Profiles */}
-          {(details.linkedinUrl || details.githubUrl || details.websiteUrl) && (
-            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
-              <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
-                Profiles & Links
-              </h3>
-              <div className="space-y-2">
-                {details.linkedinUrl && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[#8e8e93]">LinkedIn:</span>
-                    <a
-                      href={details.linkedinUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#0a84ff] hover:underline font-mono truncate max-w-[240px]"
-                    >
-                      {details.linkedinUrl} ↗
-                    </a>
-                  </div>
-                )}
-                {details.githubUrl && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[#8e8e93]">GitHub:</span>
-                    <a
-                      href={details.githubUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#0a84ff] hover:underline font-mono truncate max-w-[240px]"
-                    >
-                      {details.githubUrl} ↗
-                    </a>
-                  </div>
-                )}
-                {details.websiteUrl && (
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[#8e8e93]">Website:</span>
-                    <a
-                      href={details.websiteUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#0a84ff] hover:underline font-mono truncate max-w-[240px]"
-                    >
-                      {details.websiteUrl} ↗
-                    </a>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* Education */}
-          {details.education.length > 0 && (
-            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
-              <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
-                Education
-              </h3>
-              <div className="space-y-3">
-                {details.education.map((edu, idx) => (
-                  <div key={idx} className="border-l-2 border-[#0a84ff] pl-3 py-0.5 space-y-0.5">
-                    <p className="font-semibold text-[#ffffff]">{edu.degreeAndField}</p>
-                    <p className="text-[#8e8e93]">{edu.institution}</p>
-                    {edu.year && (
-                      <p className="font-mono text-[10px] text-[#8e8e93]">{edu.year}</p>
+              {/* Work Authorization & Sponsorship */}
+              {(details.workAuth || details.sponsorship) && (
+                <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                  <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
+                    Eligibility & Work Authorization
+                  </h3>
+                  <div className="space-y-2">
+                    {details.workAuth && (
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[#8e8e93]">Work Auth:</span>
+                        <span className="font-mono font-semibold text-[#30d158] bg-[#30d158]/10 border border-[#30d158]/20 px-2 py-0.5 rounded">
+                          {details.workAuth}
+                        </span>
+                      </div>
+                    )}
+                    {details.sponsorship && (
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[#8e8e93]">Sponsorship:</span>
+                        <span className="text-[#ffffff] text-right font-medium">
+                          {details.sponsorship}
+                        </span>
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-            </section>
-          )}
+                </section>
+              )}
 
-          {/* Work Experience */}
-          {details.experience.length > 0 && (
-            <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
-              <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
-                Work Experience
-              </h3>
-              <div className="space-y-3.5">
-                {details.experience.map((exp, idx) => (
-                  <div key={idx} className="border-l-2 border-[#30d158] pl-3 py-0.5 space-y-1">
-                    <p className="font-semibold text-[#ffffff]">{exp.titleAndCompany}</p>
-                    <p className="font-mono text-[10px] text-[#8e8e93]">{exp.dateRange}</p>
-                    {exp.description && (
-                      <p className="text-[#8e8e93] leading-relaxed text-[11px] mt-1 whitespace-pre-line">
-                        {exp.description}
-                      </p>
+              {/* Online Profiles */}
+              {(details.linkedinUrl || details.githubUrl || details.websiteUrl) && (
+                <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                  <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
+                    Profiles & Links
+                  </h3>
+                  <div className="space-y-2">
+                    {details.linkedinUrl && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#8e8e93]">LinkedIn:</span>
+                        <a
+                          href={details.linkedinUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#0a84ff] hover:underline font-mono truncate max-w-[240px]"
+                        >
+                          {details.linkedinUrl} ↗
+                        </a>
+                      </div>
+                    )}
+                    {details.githubUrl && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#8e8e93]">GitHub:</span>
+                        <a
+                          href={details.githubUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#0a84ff] hover:underline font-mono truncate max-w-[240px]"
+                        >
+                          {details.githubUrl} ↗
+                        </a>
+                      </div>
+                    )}
+                    {details.websiteUrl && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#8e8e93]">Website:</span>
+                        <a
+                          href={details.websiteUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#0a84ff] hover:underline font-mono truncate max-w-[240px]"
+                        >
+                          {details.websiteUrl} ↗
+                        </a>
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-            </section>
+                </section>
+              )}
+
+              {/* Education */}
+              {details.education.length > 0 && (
+                <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                  <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
+                    Education
+                  </h3>
+                  <div className="space-y-3">
+                    {details.education.map((edu, idx) => (
+                      <div key={idx} className="border-l-2 border-[#0a84ff] pl-3 py-0.5 space-y-0.5">
+                        <p className="font-semibold text-[#ffffff]">{edu.degreeAndField}</p>
+                        <p className="text-[#8e8e93]">{edu.institution}</p>
+                        {edu.year && (
+                          <p className="font-mono text-[10px] text-[#8e8e93]">{edu.year}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Work Experience */}
+              {details.experience.length > 0 && (
+                <section className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 space-y-3">
+                  <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#8e8e93]">
+                    Work Experience
+                  </h3>
+                  <div className="space-y-3.5">
+                    {details.experience.map((exp, idx) => (
+                      <div key={idx} className="border-l-2 border-[#30d158] pl-3 py-0.5 space-y-1">
+                        <p className="font-semibold text-[#ffffff]">{exp.titleAndCompany}</p>
+                        <p className="font-mono text-[10px] text-[#8e8e93]">{exp.dateRange}</p>
+                        {exp.description && (
+                          <p className="text-[#8e8e93] leading-relaxed text-[11px] mt-1 whitespace-pre-line">
+                            {exp.description}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
           )}
         </div>
       </div>

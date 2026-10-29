@@ -106,14 +106,10 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     setIsEditing(false);
   };
 
-  const isSchoolQuestion = /\b(school|university|college)\b/i.test(
-    `${field.label} ${field.name} ${field.fieldId}`,
-  );
-
   const getHintText = (): string => {
     const type = (field.type || '').toLowerCase();
-    if (type === 'select' && field.isRequired && field.optionsComplete === false && isSchoolQuestion) {
-      return 'This is a dropdown question with more options than shown. Enter the exact choice as it appears in the job application.';
+    if ((type === 'select' || type === 'radio') && field.optionsComplete === false) {
+      return 'This question has more options than shown in the application. Please provide as detailed and accurate an answer as possible.';
     }
     if (type === 'select' || type === 'radio' || isChoiceField) {
       return 'This is a dropdown question, please choose from the given options.';
@@ -157,8 +153,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       (field.type === 'date' || field.metadata?.inputType === 'date' ? 'YYYY-MM-DD' : 'MM/DD/YYYY')
     : null;
   const fieldOptions = Array.isArray(field.options) && field.options.length > 0 ? field.options : null;
-  const isIncompleteChoice = fieldType === 'select' && field.isRequired &&
-    field.optionsComplete === false && isSchoolQuestion;
+  const isIncompleteChoice = (fieldType === 'select' || fieldType === 'radio') && field.optionsComplete === false;
   const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions && !isIncompleteChoice;
   const isCheckbox = fieldType === 'checkbox';
   const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];

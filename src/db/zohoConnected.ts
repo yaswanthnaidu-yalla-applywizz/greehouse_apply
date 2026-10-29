@@ -112,3 +112,32 @@ export async function resolveApplywizzIdFromApplicationRef(
 
   return null;
 }
+
+/**
+ * Checks whether an email address is an unmonitored consumer Gmail domain.
+ */
+export function isCandidateGmailEmail(email?: string | null): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const clean = email.trim().toLowerCase();
+  return clean.endsWith('@gmail.com') || clean.endsWith('@googlemail.com');
+}
+
+/**
+ * Ingestion gate check:
+ * When REQUIRE_ZOHO_CONNECTED is true, candidate must have zoho_connected === true
+ * and candidate cannot have a consumer Gmail address.
+ */
+export function isCandidateEligibleForZohoGate(
+  profile: ProfileRow | null | undefined
+): { eligible: boolean; reason?: string } {
+  if (!profile) {
+    return { eligible: false, reason: 'missing_profile' };
+  }
+  if (profile.zoho_connected !== true) {
+    return { eligible: false, reason: 'zoho_not_connected' };
+  }
+  if (isCandidateGmailEmail(profile.email) || isCandidateGmailEmail(profile.company_email)) {
+    return { eligible: false, reason: 'gmail_email_not_served' };
+  }
+  return { eligible: true };
+}
