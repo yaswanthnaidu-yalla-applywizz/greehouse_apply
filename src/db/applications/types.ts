@@ -194,6 +194,8 @@ export type UpdateStatusExtra =
       proof_email_json?: EmailProofJson | null;
       email_proof_status?: EmailProofStatus | null;
       email_proof_attempted_at?: string | null;
+      manual_review_needed?: boolean | null;
+      submitted_at?: string | null;
       dry_run_screenshot_url?: string | null;
       error_message?: string | null;
       job_url?: string | null;
