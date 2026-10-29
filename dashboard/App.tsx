@@ -127,6 +127,11 @@ export const App: React.FC = () => {
   const notifRef = useRef<HTMLDivElement>(null);
   const selectedCandidateRef = useRef<string | null>(selectedCandidateId);
   const selectedJobRef = useRef<string | null>(selectedJobUrl);
+  const candidatesRef = useRef<CandidateSummary[]>(candidates);
+
+  useEffect(() => {
+    candidatesRef.current = candidates;
+  }, [candidates]);
 
   useEffect(() => {
     selectedCandidateRef.current = selectedCandidateId;
@@ -338,16 +343,13 @@ export const App: React.FC = () => {
     const requestedId = normalizeApplywizzId(applywizzId);
     console.log(`[Dashboard] Selected ${requestedId} → fetching jobs assigned to this candidate only`);
     try {
-      const [res, jobsRes] = await Promise.all([
-        apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}`),
-        apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`),
-      ]);
+      const jobsRes = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`);
 
       if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
         return;
       }
 
-      if (res.status === 403) {
+      if (jobsRes.status === 403) {
         console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} not accessible`);
         setCandidateDetail(null);
         setSelectedJobUrl(null);
@@ -355,20 +357,13 @@ export const App: React.FC = () => {
         return;
       }
 
-      if (!res.ok) {
-        return;
-      }
+      const matchingSummary = candidatesRef.current.find((c) => isSameApplywizzId(c.applywizzId, requestedId));
+      const clientName = matchingSummary?.clientName || requestedId;
 
-      const detail: CandidateDetail = await res.json();
-      if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
-        return;
-      }
-
-      if (jobsRes.status === 403) {
-        console.warn(`[Dashboard] 403 Access Denied: candidate ${applywizzId} is not assigned to current CA`);
+      if (!jobsRes.ok) {
         setCandidateDetail({
-          ...detail,
           applywizzId: requestedId,
+          clientName,
           jobs: [],
         });
         setSelectedJobUrl(null);
@@ -376,7 +371,7 @@ export const App: React.FC = () => {
         return;
       }
 
-      const jobsPayload = jobsRes.ok ? await jobsRes.json() : null;
+      const jobsPayload = await jobsRes.json();
       const returnedApplywizzId = jobsPayload?.applywizzId || jobsPayload?.applywizz_id;
       console.log(
         `[API] GET /api/candidates/${applywizzId}/jobs → filtering by applywizz_id=${applywizzId}`
@@ -394,8 +389,8 @@ export const App: React.FC = () => {
         filterJobsForCandidate(rawJobs, requestedId)
       );
       setCandidateDetail({
-        ...detail,
         applywizzId: requestedId,
+        clientName,
         jobs: candidateJobs,
       });
 
@@ -994,6 +989,8 @@ export const App: React.FC = () => {
               <ClientInfoDrawer
                 isOpen={isClientInfoOpen}
                 onClose={() => setIsClientInfoOpen(false)}
+                applywizzId={selectedCandidateId}
+                candidateName={candidateDetail?.clientName}
                 candidate={candidateDetail}
               />
             </>
