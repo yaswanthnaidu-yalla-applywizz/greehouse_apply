@@ -1,5 +1,6 @@
 import { getDbClient } from './client.js';
 import { createLogger } from '../utils/logger.js';
+import config from '../config/env.js';
 
 const log = createLogger('Stats Rollup');
 
@@ -35,6 +36,11 @@ export async function runStatsRollup(): Promise<void> {
     .maybeSingle();
   if (error) throw new Error(`Application stats are not initialized; apply migration 027: ${error.message}`);
   if (!data?.value) throw new Error('Application stats are not initialized; apply migration 027 before pruning applications.');
+
+  if (!config.ENABLE_STATS_ROLLUP) {
+    log.info('ENABLE_STATS_ROLLUP is false; skipping application and template pruning.');
+    return;
+  }
 
   const statusFilter = buildRetainedStatusFilter();
   const { data: deletedApplications, error: applicationsError } = await getDbClient()
