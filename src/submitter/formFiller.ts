@@ -707,6 +707,69 @@ export function isCountryCodeField(fieldId: string, name: string, label: string)
   );
 }
 
+/**
+ * Returns true if this optional select is the Greenhouse phone-section country dropdown
+ * (name='country', type='select') that must NOT be skipped even when optional and
+ * unresolved — it needs to be force-filled with 'United States' to satisfy
+ * Greenhouse's client-side "if phone filled → country required" validation.
+ *
+ * Distinct from regular phone dialing-code fields (name='country_code') which
+ * correctly remain skipped when optional and unresolved.
+ */
+export function isPhoneCountrySectionSelect(
+  val: string,
+  fieldId: string,
+  name: string,
+  rawType: string
+): boolean {
+  return !val && /^country$/i.test(name) && /^country$/i.test(fieldId) && rawType === 'select';
+}
+
+/**
+ * Computes whether an optional field with no resolved value should be skipped entirely.
+ * Returns false for the Greenhouse phone-section country dropdown so that
+ * isForcedCountryField can supply 'United States' as the fallback value.
+ */
+export function computeSkipOptional(params: {
+  isRequired: boolean;
+  val: string;
+  fieldId: string;
+  name: string;
+  rawType: string;
+}): boolean {
+  const { isRequired, val, fieldId, name, rawType } = params;
+  if (isRequired || val) return false;
+  // Phone-section country select must not be skipped — let isForcedCountryField run
+  if (isPhoneCountrySectionSelect(val, fieldId, name, rawType)) return false;
+  return true;
+}
+
+/**
+ * Returns the forced country value for a country select field that is empty,
+ * or null if the field should not be force-filled.
+ * Handles both the legacy !isCountryCode path (text/other country fields) and
+ * the new phone-section country select (name='country', type='select').
+ */
+export function computeForcedCountryValue(params: {
+  val: string;
+  fieldId: string;
+  name: string;
+  label: string;
+  rawType: string;
+}): string | null {
+  const { val, fieldId, name, label, rawType } = params;
+  if (val) return null;
+  if (!/country/i.test(label)) return null;
+  if (!['text', 'select', 'radio', 'location_autocomplete'].includes(rawType)) return null;
+  const isCountryCodeFieldLocal = isCountryCodeField(fieldId, name, label);
+  const isPhoneSection = isPhoneCountrySectionSelect(val, fieldId, name, rawType);
+  // Force-fill when: not a country-code field, OR it's the specific phone-section country select
+  if (!isCountryCodeFieldLocal || isPhoneSection) {
+    return 'United States';
+  }
+  return null;
+}
+
 export function isDemographicOrEeoField(fieldId: string, name: string, label: string): boolean {
   const combined = `${fieldId} ${name} ${label}`.toLowerCase();
   return /race|ethnicity|gender|sex|veteran|disability|demographic|voluntary self-identification|equal employment/i.test(combined);
@@ -991,7 +1054,7 @@ export async function fillSingleField(
       label
     );
   const referralOptionValues = ['LinkedIn', 'Social Media', 'Online'];
-  const skipOptional = !field.isRequired && !val;
+  const skipOptional = computeSkipOptional({ isRequired: field.isRequired, val, fieldId, name, rawType });
 
   // Only apply default heuristics as fallbacks when no resolved value is present
   if (!val && !skipOptional) {
@@ -1020,13 +1083,9 @@ export async function fillSingleField(
     }
   }
 
-  const isForcedCountryField =
-    !val &&
-    !isCountryCode &&
-    /country/i.test(label) &&
-    ['text', 'select', 'radio', 'location_autocomplete'].includes(rawType);
-  if (isForcedCountryField) {
-    val = 'United States';
+  const forcedCountry = computeForcedCountryValue({ val, fieldId, name, label, rawType });
+  if (forcedCountry) {
+    val = forcedCountry;
     log.info(`Country field empty — fallback setting United States for field=${label}`);
   }
   const optionValues = isReferralSource && !val ? referralOptionValues : [val];
