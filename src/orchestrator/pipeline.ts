@@ -17,11 +17,10 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config/env.js';
-import { readAndDeduplicateUrls } from '../scanner/csvDeduplicator.js';
+import { readAndDeduplicateUrls, resolveShortlink, atsFromUrl } from '../scanner/csvDeduplicator.js';
 import { PlaywrightScanner } from '../scanner/playwrightScanner.js';
 import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
 import { scanAshbyJob } from '../scanner/ashbyScanner.js';
-import { atsFromUrl } from '../scanner/csvDeduplicator.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
 import { syncCaCandidateAssignments } from '../services/caAssignmentSync.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
@@ -51,6 +50,29 @@ function addUniqueIngestFilterApplication(
     item.jobUrl === application.jobUrl
   )) {
     applications.push(application);
+  }
+}
+
+/**
+ * Aligns candidate segment jobs with scanned unique URLs.
+ * Resolves any grnh.se shortlinks (using Phase A's pre-warmed cache) so
+ * candidate jobs match canonical URLs, then filters to scanned URLs.
+ */
+export async function alignAndFilterCandidateSegmentJobs(
+  candidateSegments: Iterable<CandidateSegment>,
+  allowedJobUrls: Set<string>,
+  resolveShortlinkFn: (url: string) => Promise<string> = resolveShortlink
+): Promise<void> {
+  for (const segment of candidateSegments) {
+    for (const job of segment.jobs) {
+      if (job.canonicalUrl && job.canonicalUrl.includes('grnh.se')) {
+        job.canonicalUrl = await resolveShortlinkFn(job.canonicalUrl);
+      }
+    }
+    segment.jobs = segment.jobs.filter(
+      (j) => allowedJobUrls.has(j.canonicalUrl) || (j.rawUrl && allowedJobUrls.has(j.rawUrl))
+    );
+    segment.totalJobs = segment.jobs.length;
   }
 }
 
@@ -297,10 +319,7 @@ export class V1Pipeline {
       });
 
       // Filter candidate segment jobs to only those present in scanned uniqueUrls
-      for (const segment of candidateMap.values()) {
-        segment.jobs = segment.jobs.filter((j) => allowedJobUrls.has(j.canonicalUrl));
-        segment.totalJobs = segment.jobs.length;
-      }
+      await alignAndFilterCandidateSegmentJobs(candidateMap.values(), allowedJobUrls);
 
       await exportCandidateSegments(candidateMap, resolvedOutputDir);
       candidateSegments = Array.from(candidateMap.values());
