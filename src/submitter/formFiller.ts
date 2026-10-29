@@ -1060,7 +1060,7 @@ export async function fillSingleField(
       label
     );
   const referralOptionValues = ['LinkedIn', 'Social Media', 'Online'];
-  const skipOptional = computeSkipOptional({ isRequired: field.isRequired, val, fieldId, name, rawType });
+  const skipOptional = computeSkipOptional({ isRequired: Boolean(field.isRequired), val, fieldId, name, rawType });
 
   // Only apply default heuristics as fallbacks when no resolved value is present
   if (!val && !skipOptional) {
