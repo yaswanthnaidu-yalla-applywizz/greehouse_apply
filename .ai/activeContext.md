@@ -1,4 +1,30 @@
+# Current Session Update (2026-10-29 — Profile Authority Guard, E2E Test Isolation, and Master DB1/DB2 Backfill)
+
+- **Root Causes Identified and Fixed**:
+  1. `tests/e2eIntegration.test.ts` previously hardcoded `candidateId = 'AWL-11'` at line 151 and wrote dummy data (`John Doe`, `555-0199`) into `profiles` at line 200. Updated test fixture to use dedicated synthetic mock ID `AWL-E2E-TEST`. Real candidate Rajkumar Bharath is now safe from test runs.
+  2. Broad generic upsert payloads with null demographic fields were previously wiping resume-extracted contact details.
+  3. A morning bulk copy synced corrupted DB1 state into DB2.
+- **Migration 043 Applied to DB1 & DB2 (`src/db/migrations/043_protect_profile_facts.sql`)**:
+  - Implemented `protect_profile_facts()` function and `BEFORE UPDATE ON profiles` trigger.
+  - Enforces field immutability on identity (`first_name`, `last_name`), contact (`phone`, `country`, `country_code`, `location`, `linkedin_url`, `website_url`, `github_url`), and professional facts (`work_authorization`, `requires_sponsorship`, `education`, `work_experience`).
+  - Populated protected fields cannot be overwritten or wiped by generic writes. Generic writes can still populate blank/null fields.
+  - Trusted overrides require session variable `SET app.profile_authoritative_override = 'on'`.
+  - Blocked overwrites and overrides are audited into `gh_audit_events`. Live trigger rejection was verified by attempting a fake overwrite on `AWL-11` and confirming its rejection and audit logging.
+- **Master Profile Backfill and Synchronization (`scripts/backfillAndSyncProfilesMaster.ts`)**:
+  - Restored `AWL-11` to authentic details: `Rajkumar Bharath`, `rajkumarbharath7@gmail.com`, `(312) 868-2355`, `+1`, `Chicago, Illinois, United States`, `https://www.linkedin.com/in/rajkumarbharath`.
+  - Set `AWL-32573`: `phone = '9620404636'`, `country_code = '+1'`, `Milpitas, California, United States`.
+  - Preserved `AWL-29518`: `phone = '(555) 123-4567'`, `location = 'New York, New York, United States'`.
+  - Resolved `AWL-41701` (`Middlesbrough, England, United Kingdom`, `+44`, `7405805275`), `AWL-4220` (`Fort Wayne, Indiana, United States`), `AWL-43537` (`Edison, New Jersey, United States`), `AWL-1369` (`Dublin, Leinster, Ireland`, `+353`), `AWL-150` (`Tampa, Florida, United States`).
+  - Standardized all candidate locations to 3-part `City, State, Country` format across both DB1 and DB2 (0 non-standard candidate locations).
+  - Normalized all mobile numbers: 0 phone numbers containing `+` sign.
+  - 100% parity verified between DB1 and DB2. Actioned observation 0037.
+
 # Current Session Update (2026-10-29 — Ashby DOM scanning, required-only resolution, live dashboard updates, and queue gaps)
+
+- Backfilled DB2 `profiles.zoho_connected` from live Zoho Mail Reader REST API (247 connected true, 150 false).
+- Implemented `REQUIRE_ZOHO_CONNECTED` env switch: when true, drops non-Zoho connected candidates and all consumer Gmail (@gmail.com, @googlemail.com) users at ingestion (`src/candidate/segregator.ts`) and resolution (`src/resolver/answerResolver.ts`). Verified with `tests/zohoGateIngestion.test.ts`.
+- Reverted backend school keyword logic; updated EditableFormField.tsx so any choice field with optionsComplete === false (required or optional) strips dropdown options and renders as a text input with updated operator guidance.
+- Decoupled candidate selection in the dashboard sidebar from heavy profile fetching; candidate client info is now lazy-loaded on-demand only when clicking `[👤 Client Info]` via `GET /api/candidates/:applywizzId/profile` with an animated skeleton loader and full demographics, work authorization, education, and experience cards.
 
 - Ashby scanning now uses Playwright DOM only. The pipeline reports one combined Greenhouse/Ashby scan count and emails the dev address after scan export.
 - Optional questions remain visible and blank. Resolver tiers and submission defaults skip them. Filtered-out counts use required questions only.

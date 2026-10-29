@@ -139,6 +139,7 @@ INPUT_CSV_PATH=./greenhouse_only_applywizz_prod(in).csv
 OUTPUT_DIR=./output
 RESUMES_DIR=./resumes
 MAX_JOB_QUESTIONS=35               # Jobs with 35+ scanned questions are skipped
+REQUIRE_ZOHO_CONNECTED=false       # Ingest gate: when true, drop candidates with zoho_connected!=true or @gmail at ingestion
 SUPABASE_STORAGE_BUCKET_RESUMES=resumes
 SUPABASE_STORAGE_BUCKET_PROOFS=proofs_web
 
