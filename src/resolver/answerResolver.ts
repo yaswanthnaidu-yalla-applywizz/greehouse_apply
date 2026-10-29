@@ -513,7 +513,7 @@ export class AnswerResolver {
       jobContext?: { companyName: string; jobTitle: string };
     }
   ): Promise<ResolvedField> {
-    if (!field.isRequired) return this.blankOptionalField(field);
+    if (!Boolean(field.isRequired || (field as any).required || (field as any).is_required)) return this.blankOptionalField(field);
     const resolved = await this.resolveFieldRaw(applywizzId, field, context);
     const aligned = alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field));
     return enforceCorporatePolicy(field, aligned);
@@ -827,7 +827,8 @@ export class AnswerResolver {
     template: ScannedJobTemplate
   ): Promise<CandidateJobApplication> {
     const profile = await getProfile(applywizzId);
-    const hasRequiredFields = template.fields?.some((field) => field.isRequired) ?? false;
+    const hasRequiredFields =
+      template.fields?.some((field) => Boolean(field.isRequired || (field as any).required || (field as any).is_required)) ?? false;
     const parsedResume = hasRequiredFields ? await getOrParseResume(applywizzId) : null;
     const qaEntries = hasRequiredFields ? await findAnswersByCandidate(applywizzId) : [];
 
@@ -865,7 +866,7 @@ export class AnswerResolver {
     const tier5Slots: number[] = [];
 
     for (const field of template.fields) {
-      if (!field.isRequired) {
+      if (!Boolean(field.isRequired || (field as any).required || (field as any).is_required)) {
         resolvedFields.push(this.blankOptionalField(field));
         continue;
       }
@@ -1331,7 +1332,7 @@ export async function resolveFields(
 ): Promise<{ resolvedFields: ResolvedField[]; telemetry: ResolutionTelemetry }> {
   const resolver = new AnswerResolver();
   const profile = await getProfile(applywizzId);
-  const hasRequiredFields = fields.some((field) => field.isRequired);
+  const hasRequiredFields = fields.some((field) => Boolean(field.isRequired || (field as any).required || (field as any).is_required));
   const parsedResume = hasRequiredFields ? await getOrParseResume(applywizzId) : null;
   const qaEntries = hasRequiredFields ? await findAnswersByCandidate(applywizzId) : [];
 
