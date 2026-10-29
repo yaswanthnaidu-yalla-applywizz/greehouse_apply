@@ -199,6 +199,7 @@ export async function submitAshbyApplication(
   } = {}
 ): Promise<LiveSubmitResult & { telemetry?: AshbySubmissionTelemetry }> {
   const applicationId = application.id || application.applywizz_id;
+  const targetAppId = application.id || applicationId;
   const isHeadless = options.headless ?? (process.env.RAILWAY_ENV === 'true' || process.env.HEADLESS !== 'false');
   const deployedCommit = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local';
   const statusUpdater = options.updateStatusFn || updateStatus;
@@ -243,8 +244,8 @@ export async function submitAshbyApplication(
       log.warn(`[AshbySubmit] Failed to download resume temp file: ${resumeErr.message}`);
     }
 
-    if (application.id) {
-      await statusUpdater(application.id, 'APPLYING');
+    if (targetAppId) {
+      await statusUpdater(targetAppId, 'APPLYING');
     }
 
     managedBrowser = await browserManager.acquireBrowser({
@@ -386,8 +387,8 @@ export async function submitAshbyApplication(
     const proofCapturedAt = new Date().toISOString();
 
     // 8. First write status 'EMAIL_PROOF_PENDING' to DB with web proof details
-    if (application.id) {
-      await statusUpdater(application.id, 'EMAIL_PROOF_PENDING', {
+    if (targetAppId) {
+      await statusUpdater(targetAppId, 'EMAIL_PROOF_PENDING', {
         proof_web_url: proofUrl,
         proof_captured_at: proofCapturedAt,
         submitted_at: submitClickedAt || new Date().toISOString(),
@@ -499,8 +500,8 @@ export async function submitAshbyApplication(
       submitClicked,
     };
 
-    if (application.id) {
-      await statusUpdater(application.id, 'FAILED', {
+    if (targetAppId) {
+      await statusUpdater(targetAppId, 'FAILED', {
         error_message: errorMsg,
         error_details: {
           ...telemetry,

@@ -2,7 +2,8 @@
  * @fileoverview Queue Worker lifecycle handler for submission results (Phase 5 Task 10).
  */
 
-import type { ApplicationRow, ApplicationStatus, LiveSubmitResult } from '../db/applications/types.js';
+import type { ApplicationRow, ApplicationStatus } from '../db/applications/types.js';
+import type { LiveSubmitResult } from '../submitter/liveSubmit.js';
 import { logQueueStatusChange } from '../db/applications/queue.js';
 import { createLogger } from '../utils/logger.js';
 

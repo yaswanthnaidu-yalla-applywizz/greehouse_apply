@@ -41,6 +41,7 @@ export interface ZohoEmailQueryResult {
   matched: boolean;
   email: EmailProofJson | null;
   errorMessage?: string;
+  reason?: string;
   scannedCount?: number;
   window?: {
     minTimeIso: string;

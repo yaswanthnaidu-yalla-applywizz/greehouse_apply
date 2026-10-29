@@ -266,6 +266,10 @@ export interface ProxyPreflightResult {
  * Lightweight same-browser proxy preflight verification.
  * Probes the proxy exit IP using Playwright page.request with a hard timeout.
  * Never throws — always returns a ProxyPreflightResult.
+ *
+ * Note: DataImpulse enforces target country routing at the proxy gateway username level (__cr.<iso>).
+ * If endpointUrl returns country information, expectedCountryCode is validated; otherwise, IP continuity
+ * and successful egress are verified, and an exit IP hash is computed.
  */
 export async function verifyProxyPreflight(
   page: Page,

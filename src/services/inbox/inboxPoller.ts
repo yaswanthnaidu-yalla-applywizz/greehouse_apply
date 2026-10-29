@@ -368,13 +368,13 @@ export function startEmailProofPolling(
     if (!running) return;
 
     try {
-      let currentApp: ApplicationRow | null = null;
+      let currentApp: ApplicationRow = application;
       try {
-        currentApp = await getApp(appId, application.job_url);
+        const fetched = await getApp(appId, application.job_url);
+        if (fetched) {
+          currentApp = fetched;
+        }
       } catch {
-        currentApp = application;
-      }
-      if (!currentApp) {
         currentApp = application;
       }
 
