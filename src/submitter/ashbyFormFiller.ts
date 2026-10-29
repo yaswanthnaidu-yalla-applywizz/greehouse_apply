@@ -132,6 +132,31 @@ export async function humanType(page: Page, element: Locator, text: string): Pro
   await sleep(350, 750);
 }
 
+/**
+ * Dispatches synthetic change and input events on a DOM element (or its first input/select/textarea)
+ * to ensure React controlled component state updates when Playwright fills or selects values.
+ */
+export async function dispatchReactChangeEvent(locator: Locator): Promise<void> {
+  try {
+    if ((await locator.count()) === 0) return;
+    await locator.first().evaluate((el: HTMLElement) => {
+      const targetEl = (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)
+        ? el
+        : el.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select') || el;
+
+      const changeEvent = new Event('change', { bubbles: true });
+      Object.defineProperty(changeEvent, 'target', { value: targetEl });
+      targetEl.dispatchEvent(changeEvent);
+
+      const inputEvent = new Event('input', { bubbles: true });
+      Object.defineProperty(inputEvent, 'target', { value: targetEl });
+      targetEl.dispatchEvent(inputEvent);
+    });
+  } catch {
+    // Non-fatal if element was detached or evaluation failed
+  }
+}
+
 export interface FilledAshbyField {
   fieldId: string;
   label: string;
@@ -326,6 +351,7 @@ export async function fillAshbyForm(
         await selectEl.selectOption({ label: answer }, { timeout: 2000 }).catch(async () => {
           await selectEl.selectOption({ value: answer }, { timeout: 2000 });
         }).catch(() => {});
+        await dispatchReactChangeEvent(selectEl);
       } else {
         const inputEl = container.locator(
           'input.ashby-application-form-input-autocomplete, input[role="combobox"], [role="combobox"] input, input'
@@ -338,6 +364,7 @@ export async function fillAshbyForm(
           await glideCursor(page, inputEl, { click: true });
           await inputEl.fill('');
           await humanType(page, inputEl, answer);
+          await dispatchReactChangeEvent(inputEl);
           await sleep(350, 650);
 
           const optionLoc = page.locator(
@@ -345,10 +372,12 @@ export async function fillAshbyForm(
           ).first();
           if ((await optionLoc.count()) > 0 && (await optionLoc.isVisible())) {
             await glideCursor(page, optionLoc, { click: true });
+            await dispatchReactChangeEvent(container);
           } else {
             await page.keyboard.press('ArrowDown');
             await sleep(150, 300);
             await page.keyboard.press('Enter');
+            await dispatchReactChangeEvent(inputEl);
           }
         } else if ((await comboboxTrigger.count()) > 0) {
           await glideCursor(page, comboboxTrigger, { click: true });
@@ -356,9 +385,11 @@ export async function fillAshbyForm(
           const optionLoc = page.locator(`[role="option"]:has-text("${answer}"), div:has-text("${answer}")`).first();
           if ((await optionLoc.count()) > 0 && (await optionLoc.isVisible())) {
             await glideCursor(page, optionLoc, { click: true });
+            await dispatchReactChangeEvent(container);
           } else {
             await page.keyboard.type(answer);
             await page.keyboard.press('Enter');
+            await dispatchReactChangeEvent(comboboxTrigger);
           }
         }
       }
@@ -399,6 +430,7 @@ export async function fillAshbyForm(
     const input = container.locator('input, textarea').first();
     if ((await input.count()) > 0 && (await input.isVisible())) {
       await humanType(page, input, answer);
+      await dispatchReactChangeEvent(input);
       await sleep(350, 650);
 
       // Live DOM verification: verify input.inputValue() equals or matches answer
