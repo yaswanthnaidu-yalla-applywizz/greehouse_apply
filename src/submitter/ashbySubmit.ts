@@ -3,9 +3,14 @@
  */
 
 import fs from 'fs';
-import type { ApplicationRow } from '../db/applications/types.js';
+import type {
+  ApplicationRow,
+  AshbySubmissionStage,
+  AshbySubmissionTelemetry,
+} from '../db/applications/types.js';
 import { updateStatus } from '../db/applications/crud.js';
 import { getProfile } from '../db/profiles.js';
+import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { buildAshbyProxyConfig, resolveCountryCode, verifyProxyPreflight } from './ashbyProxy.js';
 import { fillAshbyForm, sleep, verifyRequiredFieldsCommitted } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
@@ -15,48 +20,93 @@ import type { LiveSubmitResult } from './liveSubmit.js';
 
 const log = createLogger('AshbySubmit');
 
+export function capTelemetryMetadata(
+  telemetry: AshbySubmissionTelemetry,
+  maxBytes = 1024
+): Record<string, unknown> {
+  let metadata: Record<string, unknown> = { ...telemetry };
+  let metaStr = JSON.stringify(metadata);
+  if (Buffer.byteLength(metaStr, 'utf8') <= maxBytes) {
+    return metadata;
+  }
+  if (metadata.errorMessage && typeof metadata.errorMessage === 'string') {
+    metadata.errorMessage = (metadata.errorMessage as string).slice(0, 200);
+    metaStr = JSON.stringify(metadata);
+    if (Buffer.byteLength(metaStr, 'utf8') <= maxBytes) {
+      return metadata;
+    }
+  }
+  metadata = {
+    stage: telemetry.stage,
+    deployedCommit: telemetry.deployedCommit,
+    exitIpHash: telemetry.exitIpHash,
+    proxyRegion: telemetry.proxyRegion,
+    committedFieldCount: telemetry.committedFieldCount,
+    challengeType: telemetry.challengeType,
+    submitResponseStatus: telemetry.submitResponseStatus,
+    capturedAt: telemetry.capturedAt,
+  };
+  metaStr = JSON.stringify(metadata);
+  if (Buffer.byteLength(metaStr, 'utf8') <= maxBytes) {
+    return metadata;
+  }
+  return { stage: telemetry.stage, capturedAt: telemetry.capturedAt };
+}
+
 export async function submitAshbyApplication(
   application: ApplicationRow,
-  options: { headless?: boolean } = {}
-): Promise<LiveSubmitResult> {
+  options: {
+    headless?: boolean;
+    updateStatusFn?: (id: string, status: any, extra?: any) => Promise<any>;
+  } = {}
+): Promise<LiveSubmitResult & { telemetry?: AshbySubmissionTelemetry }> {
   const applicationId = application.id || application.applywizz_id;
   const isHeadless = options.headless ?? (process.env.RAILWAY_ENV === 'true' || process.env.HEADLESS !== 'false');
+  const deployedCommit = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local';
+  const statusUpdater = options.updateStatusFn || updateStatus;
 
   log.info(`[AshbySubmit] 🚀 Starting Ashby submission for ${application.applywizz_id} [${application.job_url}]`);
 
-  // 1. Check & Build mandatory DataImpulse proxy
-  const profile = await getProfile(application.applywizz_id);
-  if (!profile) {
-    throw new Error(`Profile not found for candidate ${application.applywizz_id}`);
-  }
-
-  let proxyConfig;
-  let countryCode: string | undefined;
-  try {
-    countryCode = resolveCountryCode(profile);
-    proxyConfig = buildAshbyProxyConfig(profile);
-  } catch (proxyErr: any) {
-    haltWithDevAlert('AshbySubmit', `Cannot submit Ashby without proxy: ${proxyErr.message}`);
-    throw proxyErr;
-  }
-
-  // 2. Prepare resume temp file
-  let resumeLocalPath = '';
-  try {
-    resumeLocalPath = await downloadResumeTempFile(application.applywizz_id);
-  } catch (resumeErr: any) {
-    log.warn(`[AshbySubmit] Failed to download resume temp file: ${resumeErr.message}`);
-  }
-
-  if (application.id) {
-    await updateStatus(application.id, 'APPLYING');
-  }
-
-  let managedBrowser = null;
-  let page = null;
+  let stage: AshbySubmissionStage = 'PREFLIGHT';
   let exitIpHash: string | undefined;
+  let proxyRegion: string | undefined;
+  let committedFieldCount: number | undefined;
+  let challengeType: 'none' | 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown' = 'none';
+  let submitResponseStatus: number | undefined;
+
+  let managedBrowser: any = null;
+  let page: any = null;
+  let resumeLocalPath = '';
 
   try {
+    // 1. Check & Build mandatory DataImpulse proxy
+    const profile = await getProfile(application.applywizz_id);
+    if (!profile) {
+      throw new Error(`Profile not found for candidate ${application.applywizz_id}`);
+    }
+
+    let proxyConfig;
+    let countryCode: string | undefined;
+    try {
+      countryCode = resolveCountryCode(profile);
+      proxyRegion = countryCode;
+      proxyConfig = buildAshbyProxyConfig(profile);
+    } catch (proxyErr: any) {
+      haltWithDevAlert('AshbySubmit', `Cannot submit Ashby without proxy: ${proxyErr.message}`);
+      throw proxyErr;
+    }
+
+    // 2. Prepare resume temp file
+    try {
+      resumeLocalPath = await downloadResumeTempFile(application.applywizz_id);
+    } catch (resumeErr: any) {
+      log.warn(`[AshbySubmit] Failed to download resume temp file: ${resumeErr.message}`);
+    }
+
+    if (application.id) {
+      await statusUpdater(application.id, 'APPLYING');
+    }
+
     managedBrowser = await browserManager.acquireBrowser({
       headless: isHeadless,
       proxy: {
@@ -83,7 +133,25 @@ export async function submitAshbyApplication(
 
     page = await context.newPage();
 
+    // Listen for GraphQL submitApplication responses to capture status code
+    page.on('response', (response: any) => {
+      try {
+        const url = response.url().toLowerCase();
+        if (url.includes('submitapplication') || url.includes('submit-application')) {
+          submitResponseStatus = response.status();
+        } else if (url.includes('graphql')) {
+          const postData = response.request().postData() || '';
+          if (postData.includes('SubmitApplication') || postData.includes('submitApplication')) {
+            submitResponseStatus = response.status();
+          }
+        }
+      } catch {
+        // ignore
+      }
+    });
+
     // 2.5 Verify proxy preflight probe
+    stage = 'PREFLIGHT';
     log.info(`[AshbySubmit] Probing proxy preflight for ${applicationId} (${countryCode})...`);
     const preflight = await verifyProxyPreflight(page, countryCode);
     if (!preflight.success) {
@@ -97,13 +165,18 @@ export async function submitAshbyApplication(
       ? application.job_url
       : `${application.job_url.replace(/\/+$/, '')}/application`;
 
+    stage = 'NAVIGATION';
     log.info(`[AshbySubmit] Navigating to ${targetUrl}...`);
     await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 });
+
+    stage = 'DOM_SCAN';
     await page.waitForSelector('[data-field-path]', { timeout: 15000 }).catch(() => {});
     await sleep(1500, 2500);
 
     // 3. Fill form fields
+    stage = 'FORM_FILL';
     const fillResult = await fillAshbyForm(page, application.resolved_fields || [], resumeLocalPath);
+    committedFieldCount = fillResult.filledCount;
     log.info(`[AshbySubmit] Form populated: ${fillResult.filledCount} fields filled.`);
 
     // 4. Scroll smoothly to bottom to allow Turnstile / Cloudflare challenges to settle
@@ -111,6 +184,7 @@ export async function submitAshbyApplication(
     await sleep(2000, 3000);
 
     // 4.5 Pre-submit validation gate: verify all required fields are committed on the live DOM
+    stage = 'PRE_SUBMIT';
     const requiredFieldPaths = (application.resolved_fields || [])
       .filter((f) => f.isRequired)
       .map((f) => f.fieldId || f.name)
@@ -130,6 +204,7 @@ export async function submitAshbyApplication(
     }
 
     // 5. Submit application
+    stage = 'SUBMIT_CLICK';
     const submitBtn = page
       .locator('.ashby-application-form-submit-button, button:has-text("Submit Application"), button[type="submit"]')
       .first();
@@ -144,6 +219,7 @@ export async function submitAshbyApplication(
     // 6. Wait for success signal
     // Reference: ashby_application_success.png
     // "Success: Your application was successfully submitted. We'll contact you if there are next steps."
+    stage = 'WAIT_CONFIRMATION';
     let confirmed = false;
     const startTime = Date.now();
     const timeoutMs = 45000;
@@ -170,6 +246,7 @@ export async function submitAshbyApplication(
       throw new Error('Ashby application submit confirmation signal timed out after 45s');
     }
 
+    stage = 'COMPLETED';
     log.info('[AshbySubmit] 🎉 Success signal confirmed!');
     await sleep(1000, 2000);
 
@@ -179,10 +256,10 @@ export async function submitAshbyApplication(
 
     // 8. Update status to APPLIED; updateStatus records submitted_at.
     if (application.id) {
-      await updateStatus(application.id, 'APPLIED', {
+      await statusUpdater(application.id, 'APPLIED', {
         proof_web_url: proofUrl,
         proof_captured_at: new Date().toISOString(),
-        error_details: exitIpHash ? { exitIpHash, countryCode } : undefined,
+        error_details: exitIpHash ? { exitIpHash, countryCode, stage: 'COMPLETED' } : undefined,
       });
     }
 
@@ -192,12 +269,24 @@ export async function submitAshbyApplication(
       applicationId,
       proofWebUrl: proofUrl,
       proofCapturedAt: new Date().toISOString(),
+      telemetry: {
+        deployedCommit,
+        stage: 'COMPLETED',
+        exitIpHash,
+        proxyRegion,
+        committedFieldCount,
+        challengeType,
+        submitResponseStatus,
+        capturedAt: new Date().toISOString(),
+      },
     };
   } catch (err: any) {
     const errorMsg = err.message || String(err);
-    const stage = err.stage;
+    if (err.stage) {
+      stage = err.stage;
+    }
     const classification = err.classification;
-    log.error(`[AshbySubmit] ❌ Submission failed for ${applicationId}: ${errorMsg}`);
+    log.error(`[AshbySubmit] ❌ Submission failed for ${applicationId} at stage ${stage}: ${errorMsg}`);
 
     let failedProofUrl: string | null = null;
     if (page && !page.isClosed()) {
@@ -210,19 +299,50 @@ export async function submitAshbyApplication(
       }
     }
 
+    const telemetry: AshbySubmissionTelemetry = {
+      deployedCommit,
+      stage,
+      exitIpHash,
+      proxyRegion,
+      committedFieldCount,
+      challengeType,
+      submitResponseStatus,
+      errorMessage: errorMsg,
+      capturedAt: new Date().toISOString(),
+    };
+
     if (application.id) {
-      await updateStatus(application.id, 'FAILED', {
+      await statusUpdater(application.id, 'FAILED', {
         error_message: errorMsg,
-        error_details: {
-          exitIpHash,
-          countryCode,
-          failureReason: errorMsg,
-          ...(stage ? { stage } : {}),
-          ...(classification ? { classification } : {}),
-        },
+        error_details: telemetry,
         proof_failed_url: failedProofUrl,
         proof_failed_captured_at: failedProofUrl ? new Date().toISOString() : undefined,
       }).catch(() => {});
+    }
+
+    if (isSupabaseConfigured()) {
+      try {
+        const metadata = capTelemetryMetadata(telemetry, 1024);
+        const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const validAppId = application.id && idPattern.test(application.id) ? application.id : null;
+
+        await getDbClient().from('gh_failure_diagnostics').insert({
+          phase: 'SUBMIT',
+          stage,
+          category: classification || (stage === 'FORM_FILL' ? 'SUBMIT_FORM_FILL_ERROR' : stage === 'WAIT_CONFIRMATION' ? 'SUBMIT_CONFIRMATION_TIMEOUT' : 'SUBMIT_PLAYWRIGHT_NAVIGATE'),
+          reason: errorMsg.slice(0, 500),
+          error_name: err?.name ? String(err.name).slice(0, 80) : null,
+          error_code: submitResponseStatus ? String(submitResponseStatus) : null,
+          is_terminal: false,
+          is_retryable: stage !== 'SUBMIT_CLICK' && stage !== 'WAIT_CONFIRMATION',
+          applywizz_id: application.applywizz_id || null,
+          application_id: validAppId,
+          job_url_ref: application.job_url ? application.job_url.slice(0, 300) : null,
+          metadata,
+        });
+      } catch (diagErr: any) {
+        log.warn(`[AshbySubmit] Failed to record failure diagnostics: ${diagErr.message}`);
+      }
     }
 
     return {
@@ -231,6 +351,7 @@ export async function submitAshbyApplication(
       applicationId,
       errorMessage: errorMsg,
       proofFailedUrl: failedProofUrl || undefined,
+      telemetry,
     };
   } finally {
     if (page && !page.isClosed()) {
