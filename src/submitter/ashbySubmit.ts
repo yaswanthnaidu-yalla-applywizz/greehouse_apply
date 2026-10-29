@@ -6,6 +6,7 @@ import fs from 'fs';
 import type { Page } from 'playwright';
 import type {
   ApplicationRow,
+  ApplicationStatus,
   AshbySubmissionStage,
   AshbySubmissionTelemetry,
 } from '../db/applications/types.js';
@@ -19,6 +20,10 @@ import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 import { isAshbySubmissionRetryAllowed } from './submissionRetry.js';
+import {
+  captureAndSaveEmailProof,
+  startEmailProofPolling,
+} from '../services/inbox/inboxPoller.js';
 
 const log = createLogger('AshbySubmit');
 
@@ -378,12 +383,14 @@ export async function submitAshbyApplication(
     // 7. Capture web proof screenshot
     const screenshotBuffer = await page.screenshot({ fullPage: true });
     const proofUrl = await uploadProof(applicationId, screenshotBuffer);
+    const proofCapturedAt = new Date().toISOString();
 
-    // 8. Update status to APPLIED; updateStatus records submitted_at.
+    // 8. First write status 'EMAIL_PROOF_PENDING' to DB with web proof details
     if (application.id) {
-      await statusUpdater(application.id, 'APPLIED', {
+      await statusUpdater(application.id, 'EMAIL_PROOF_PENDING', {
         proof_web_url: proofUrl,
-        proof_captured_at: new Date().toISOString(),
+        proof_captured_at: proofCapturedAt,
+        submitted_at: submitClickedAt || new Date().toISOString(),
         error_details: {
           exitIpHash,
           countryCode,
@@ -394,14 +401,55 @@ export async function submitAshbyApplication(
       });
     }
 
+    // 9. Immediate email proof capture
+    let finalStatus: ApplicationStatus = 'EMAIL_PROOF_PENDING';
+    let proofEmailJson = null;
+    try {
+      const emailProofResult = await captureAndSaveEmailProof(
+        {
+          ...application,
+          id: applicationId,
+          ats: 'ashby',
+          submitted_at: submitClickedAt || new Date().toISOString(),
+        } as any,
+        {
+          updateStatusFn: statusUpdater,
+        }
+      );
+      if (emailProofResult.matched && emailProofResult.proof) {
+        finalStatus = 'APPLIED';
+        proofEmailJson = emailProofResult.proof;
+      }
+    } catch (proofErr: any) {
+      log.warn(`[AshbySubmit] Immediate email proof capture error: ${proofErr.message}`);
+    }
+
+    // 10. If unmatched, launch background poller
+    if (finalStatus === 'EMAIL_PROOF_PENDING') {
+      try {
+        startEmailProofPolling({
+          ...application,
+          id: applicationId,
+          ats: 'ashby',
+          submitted_at: submitClickedAt || new Date().toISOString(),
+          proof_web_url: proofUrl,
+          company_name: application.company_name,
+        } as any);
+      } catch (pollErr: any) {
+        log.warn(`[AshbySubmit] Failed to launch background email proof poller: ${pollErr.message}`);
+      }
+    }
+
     return {
       success: true,
-      status: 'APPLIED',
+      status: finalStatus,
       applicationId,
       proofWebUrl: proofUrl,
-      proofCapturedAt: new Date().toISOString(),
+      proofEmailJson,
+      proofCapturedAt,
       submitClickedAt,
       submitClicked: true,
+      hasEmailProof: Boolean(proofEmailJson),
       telemetry: {
         deployedCommit,
         stage: 'COMPLETED',
