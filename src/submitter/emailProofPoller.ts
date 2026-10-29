@@ -67,6 +67,7 @@ export class EmailProofPoller {
           const targetId = currentApp.id || appId;
           await updateStatus(targetId, 'EMAIL_PROOF_PENDING', {
             email_proof_status: 'manual_review_needed',
+            manual_review_needed: true,
             error_message: 'Confirmation email not found after 10m automatic polling. Web submission succeeded with proof screenshot.',
             job_url: currentApp.job_url,
           }).catch(() => {});
@@ -106,6 +107,8 @@ export class EmailProofPoller {
           companyEmail: (currentApp as any).company_email || undefined,
           submissionTime: appliedIso,
           timeoutMs: 15000,
+          ats: (currentApp as any).ats || 'greenhouse',
+          jobTitle: (currentApp as any).job_title || (currentApp as any).title,
         });
 
         if (result.matched && result.email) {
@@ -124,6 +127,7 @@ export class EmailProofPoller {
             proof_email_json: result.email,
             proof_email_captured_at: result.email.received_at,
             email_proof_status: 'captured',
+            manual_review_needed: false,
             job_url: currentApp.job_url,
           });
 

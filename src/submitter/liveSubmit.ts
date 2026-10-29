@@ -65,6 +65,8 @@ import {
   upsertApplication,
   type ApplicationRow,
   type ApplicationStatus,
+  type AshbySubmissionTelemetry,
+  type EmailProofJson,
 } from '../db/applications.js';
 import { getProfile, updateResumeStoragePath } from '../db/profiles.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
@@ -178,10 +180,14 @@ export interface LiveSubmitResult {
   proofFailedUrl?: string;
   proofFailedCapturedAt?: string;
   hasEmailProof?: boolean;
+  proofEmailJson?: EmailProofJson | null;
   requiresOtp?: boolean;
   errorMessage?: string;
-  retryReason?: SubmissionRetryReason;
+  retryReason?: SubmissionRetryReason | null;
   summary?: FormFillSummary;
+  submitClickedAt?: string | null;
+  submitClicked?: boolean;
+  telemetry?: AshbySubmissionTelemetry;
 }
 
 

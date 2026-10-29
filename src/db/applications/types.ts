@@ -87,6 +87,10 @@ export interface EmailProofJson {
   body_html?: string;
   messageId?: string;
   message_id?: string;
+  bodyText?: string;
+  receivedTime?: string | number;
+  snippet?: string;
+  matchedAt?: string;
 }
 
 import type { ResolvedField } from '../../types/index.js';
@@ -101,6 +105,30 @@ export interface SubmissionErrorDetails {
   pageTitle?: string;
   domErrors?: string[];
   [key: string]: unknown;
+}
+
+export type AshbySubmissionStage =
+  | 'PREFLIGHT'
+  | 'NAVIGATION'
+  | 'DOM_SCAN'
+  | 'FORM_FILL'
+  | 'PRE_SUBMIT'
+  | 'SUBMIT_CLICK'
+  | 'WAIT_CONFIRMATION'
+  | 'COMPLETED';
+
+export interface AshbySubmissionTelemetry {
+  deployedCommit?: string;
+  stage: AshbySubmissionStage;
+  exitIpHash?: string;
+  proxyRegion?: string;
+  committedFieldCount?: number;
+  challengeType?: 'none' | 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown';
+  submitResponseStatus?: number;
+  errorMessage?: string;
+  capturedAt: string;
+  submitClickedAt?: string | null;
+  submitClicked?: boolean;
 }
 
 export interface ApplicationRow {
@@ -166,6 +194,8 @@ export type UpdateStatusExtra =
       proof_email_json?: EmailProofJson | null;
       email_proof_status?: EmailProofStatus | null;
       email_proof_attempted_at?: string | null;
+      manual_review_needed?: boolean | null;
+      submitted_at?: string | null;
       dry_run_screenshot_url?: string | null;
       error_message?: string | null;
       job_url?: string | null;

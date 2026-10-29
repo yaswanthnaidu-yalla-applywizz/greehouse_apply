@@ -121,6 +121,230 @@ export function resolveLeadershipRecipients(): { to: string[]; cc: string[] } {
   };
 }
 
+const PROD_EXECUTIVE_TO = ['ramakrishna@applywizz.ai'];
+const PROD_EXECUTIVE_CC = [
+  'yaswanthnaiduyalla@applywizz.ai',
+  'vivek@applywizz.ai',
+];
+
+export function resolveExecutiveRecipients(): { to: string[]; cc: string[] } {
+  const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
+  const override = String(process.env.CA_NOTIFICATION_EMAIL_OVERRIDE || config.CA_NOTIFICATION_EMAIL_OVERRIDE || '')
+    .trim()
+    .toLowerCase();
+
+  if (override) {
+    return { to: [override], cc: [] };
+  }
+  if (isSandbox) {
+    return { to: [DEV_EMAIL], cc: [] };
+  }
+  return {
+    to: [...PROD_EXECUTIVE_TO],
+    cc: [...PROD_EXECUTIVE_CC],
+  };
+}
+
+export interface ManagerTaskSummary {
+  managerEmail: string;
+  managerName: string;
+  appCount: number;
+  clientCount: number;
+}
+
+export const KNOWN_MANAGERS: Array<{ email: string; name: string }> = [
+  { email: 'balaji@applywizz.ai', name: 'Balaji' },
+  { email: 'ramakrishnaa.tejavath@applywizz.ai', name: 'Ramakrishna Tejavath' },
+];
+
+let cachedCaToManagerMap: Map<string, string> | null = null;
+let cachedCaToManagerMapExpiresAt = 0;
+
+export async function getCaToManagerMap(): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (cachedCaToManagerMap && now < cachedCaToManagerMapExpiresAt) {
+    return cachedCaToManagerMap;
+  }
+  const map = new Map<string, string>();
+  if (!isSupabaseConfigured()) return map;
+  try {
+    const supabase = getDbClient();
+    const { data, error } = await supabase
+      .from('gh_users')
+      .select('email, manager_email')
+      .not('manager_email', 'is', null);
+    if (!error && data) {
+      for (const row of data as Array<{ email: string; manager_email: string | null }>) {
+        if (row.email && row.manager_email) {
+          map.set(row.email.trim().toLowerCase(), row.manager_email.trim().toLowerCase());
+        }
+      }
+      cachedCaToManagerMap = map;
+      cachedCaToManagerMapExpiresAt = now + 5 * 60 * 1000;
+    }
+  } catch (err: any) {
+    log.warn(`[CA Notification] Could not fetch operator manager mapping: ${err?.message || err}`);
+  }
+  return map;
+}
+
+export function groupReadyForReviewByManager(
+  rows: ReviewAppRow[],
+  caToManagerMap: Map<string, string>,
+  options?: { excludeKeys?: Set<string> }
+): ManagerTaskSummary[] {
+  const byManager = new Map<string, { name: string; clients: Set<string>; appCount: number }>();
+  for (const m of KNOWN_MANAGERS) {
+    byManager.set(m.email.toLowerCase(), { name: m.name, clients: new Set(), appCount: 0 });
+  }
+
+  for (const row of rows) {
+    if (options?.excludeKeys && options.excludeKeys.size > 0 && row.applywizz_id && row.job_url) {
+      const normalizedKey = `${String(row.applywizz_id).trim().toUpperCase()}::${row.job_url}`;
+      if (options.excludeKeys.has(normalizedKey)) {
+        continue;
+      }
+    }
+
+    const caEmail = String(row.assigned_ca_email || '').trim().toLowerCase();
+    if (!caEmail) continue;
+
+    let managerEmail = caToManagerMap.get(caEmail);
+    if (!managerEmail && byManager.has(caEmail)) {
+      managerEmail = caEmail;
+    }
+    if (!managerEmail) continue;
+
+    const bucket = byManager.get(managerEmail);
+    if (bucket) {
+      bucket.appCount += 1;
+      const applywizzId = String(row.applywizz_id || '').trim().toUpperCase();
+      if (applywizzId) bucket.clients.add(applywizzId);
+    }
+  }
+
+  return Array.from(byManager.entries()).map(([managerEmail, bucket]) => ({
+    managerEmail,
+    managerName: bucket.name,
+    appCount: bucket.appCount,
+    clientCount: bucket.clients.size,
+  }));
+}
+
+export function buildExecutiveInitialEmailHtml(summary: {
+  totalTasks: number;
+  clientCount: number;
+  managers: ManagerTaskSummary[];
+}): string {
+  const { totalTasks, clientCount, managers } = summary;
+  const rowsHtml = managers
+    .map(
+      (m) => `
+    <tr>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #eee;">
+        <strong>${m.managerName}</strong><br/>
+        <span style="font-size: 12px; color: #666;">${m.managerEmail}</span>
+      </td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #eee; text-align: right; font-size: 15px;">
+        <strong>${m.appCount}</strong>
+      </td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #eee; text-align: right;">${m.clientCount}</td>
+    </tr>`
+    )
+    .join('');
+
+  const bulletsText = managers
+    .map(
+      (m) =>
+        `<li><strong>${m.managerName}</strong> has <strong>${m.appCount}</strong> number of tasks to be done (${m.clientCount} clients)</li>`
+    )
+    .join('');
+
+  return `
+<h2>Ingestion Review Summary — Manager Breakdown</h2>
+<p style="font-size: 16px;">
+  <strong>${totalTasks} tasks for ${clientCount} clients are ready for review across managers.</strong>
+</p>
+<ul style="font-size: 14px; line-height: 1.6; margin: 12px 0;">
+  ${bulletsText}
+</ul>
+<table style="width: 100%; max-width: 600px; border-collapse: collapse; margin: 16px 0; font-family: sans-serif; font-size: 14px;">
+  <thead>
+    <tr style="background: #f7f7f7; text-align: left;">
+      <th style="padding: 8px 12px; border-bottom: 2px solid #ddd;">Manager</th>
+      <th style="padding: 8px 12px; border-bottom: 2px solid #ddd; text-align: right;">Tasks to be Done</th>
+      <th style="padding: 8px 12px; border-bottom: 2px solid #ddd; text-align: right;">Clients</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rowsHtml}
+  </tbody>
+</table>
+<p>
+  <a href="${DASHBOARD_URL}" style="display: inline-block; padding: 10px 18px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">Open ApplyWizz Dashboard →</a>
+</p>
+<p style="color:#888;font-size:12px; margin-top: 24px;">
+  This is an automated notification from ApplyWizz. Follow-up status check scheduled in 1 hour.
+</p>
+`.trim();
+}
+
+export function buildExecutiveReminderEmailHtml(remainingPerManager: Array<{
+  managerEmail: string;
+  managerName: string;
+  remainingCount: number;
+}>): string {
+  const totalRemaining = remainingPerManager.reduce((sum, item) => sum + item.remainingCount, 0);
+  const rowsHtml = remainingPerManager
+    .map(
+      (m) => `
+    <tr>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #eee;">
+        <strong>${m.managerName}</strong><br/>
+        <span style="font-size: 12px; color: #666;">${m.managerEmail}</span>
+      </td>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #eee; text-align: right; color: ${m.remainingCount > 0 ? '#b91c1c' : '#15803d'}; font-size: 15px;">
+        <strong>${m.remainingCount}</strong>
+      </td>
+    </tr>`
+    )
+    .join('');
+
+  const bulletsText = remainingPerManager
+    .map(
+      (m) =>
+        `<li><strong>${m.managerName}</strong> has <strong>${m.remainingCount}</strong> remaining tasks to be done</li>`
+    )
+    .join('');
+
+  return `
+<h2>Review SLA Reminder — Manager Pending Tasks</h2>
+<p style="font-size: 16px;">
+  1 hour has elapsed since ingestion. There are <strong>${totalRemaining} tasks remaining for review</strong> across managers.
+</p>
+<ul style="font-size: 14px; line-height: 1.6; margin: 12px 0;">
+  ${bulletsText}
+</ul>
+<table style="width: 100%; max-width: 500px; border-collapse: collapse; margin: 16px 0; font-family: sans-serif; font-size: 14px;">
+  <thead>
+    <tr style="background: #f7f7f7; text-align: left;">
+      <th style="padding: 8px 12px; border-bottom: 2px solid #ddd;">Manager</th>
+      <th style="padding: 8px 12px; border-bottom: 2px solid #ddd; text-align: right;">Remaining Tasks</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rowsHtml}
+  </tbody>
+</table>
+<p>
+  <a href="${DASHBOARD_URL}" style="display: inline-block; padding: 10px 18px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">Review Pending Applications →</a>
+</p>
+<p style="color:#888;font-size:12px; margin-top: 24px;">
+  Automated reminder from ApplyWizz.
+</p>
+`.trim();
+}
+
 export interface LeadershipInitialSummary {
   totalTasks: number;
   clientCount: number;
@@ -162,7 +386,7 @@ export function buildLeadershipInitialEmailHtml(summary: LeadershipInitialSummar
   <a href="${DASHBOARD_URL}" style="display: inline-block; padding: 10px 18px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 4px; font-weight: bold;">Open ApplyWizz Dashboard →</a>
 </p>
 <p style="color:#888;font-size:12px; margin-top: 24px;">
-  This is an automated notification from ApplyWizz. Follow-up status check scheduled in 1.5 hours.
+  This is an automated notification from ApplyWizz. Follow-up status check scheduled in 1 hour.
 </p>
 `.trim();
 }
@@ -187,7 +411,7 @@ export function buildLeadershipReminderEmailHtml(remainingPerCa: CaRemainingTask
   return `
 <h2>Review SLA Reminder — Pending Tasks</h2>
 <p style="font-size: 16px;">
-  1.5 hours have elapsed since ingestion. There are <strong>${totalRemaining} tasks remaining for review</strong> across <strong>${remainingPerCa.length} CA(s)</strong>.
+  1 hour has elapsed since ingestion. There are <strong>${totalRemaining} tasks remaining for review</strong> across <strong>${remainingPerCa.length} CA(s)</strong>.
 </p>
 <table style="width: 100%; max-width: 500px; border-collapse: collapse; margin: 16px 0; font-family: sans-serif; font-size: 14px;">
   <thead>
@@ -232,11 +456,13 @@ export interface FollowupPollOptions {
   pollIntervalMs?: number;
   dbQueryFn?: (appIds: string[]) => Promise<Array<{ id?: string; assigned_ca_email?: string | null }>>;
   sendEmailFn?: (options: any) => Promise<any>;
+  caToManagerMap?: Map<string, string>;
+  caToManagerMapFn?: () => Promise<Map<string, string>>;
 }
 
 /**
  * Starts SLA follow-up polling on a specific set of application IDs.
- * First check runs at initialDelayMs (default 90m). Subsequent checks run every pollIntervalMs (default 60m).
+ * First check runs at initialDelayMs (default 60m). Subsequent checks run every pollIntervalMs (default 60m).
  * Stops if:
  * 1. Remaining tasks reach 0 (sends completion email).
  * 2. Two consecutive checks show the same remaining count (stall detected).
@@ -249,9 +475,11 @@ export function startLeadershipFollowupPoller(
     return { stop: () => {} };
   }
 
-  const initialDelay = options?.initialDelayMs ?? 90 * 60 * 1000;
+  const initialDelay = options?.initialDelayMs ?? 60 * 60 * 1000;
   const pollInterval = options?.pollIntervalMs ?? 60 * 60 * 1000;
   const sendEmailImpl = options?.sendEmailFn ?? sendEmail;
+  const getCaToManagerMapImpl = options?.caToManagerMapFn
+    ?? (options?.caToManagerMap ? async () => options.caToManagerMap! : getCaToManagerMap);
 
   let activeTimer: NodeJS.Timeout | null = null;
   let isStopped = false;
@@ -259,17 +487,27 @@ export function startLeadershipFollowupPoller(
 
   const defaultQueryFn = async (ids: string[]) => {
     if (!isSupabaseConfigured()) return [];
+    if (ids.length === 0) return [];
     const supabase = getDbClient();
-    const { data, error } = await supabase
-      .from('gh_candidate_applications')
-      .select('id, assigned_ca_email')
-      .in('id', ids)
-      .eq('status', 'READY_FOR_REVIEW');
-    if (error) {
-      log.warn(`[Leadership Followup] Query failed: ${error.message}`);
-      return [];
+    const CHUNK_SIZE = 50;
+    const allRows: Array<{ id?: string; assigned_ca_email?: string | null }> = [];
+
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await supabase
+        .from('gh_candidate_applications')
+        .select('id, assigned_ca_email')
+        .in('id', chunk)
+        .eq('status', 'READY_FOR_REVIEW');
+      if (error) {
+        log.warn(`[Leadership Followup] Query failed on chunk: ${error.message}`);
+        throw new Error(`Database query failed: ${error.message}`);
+      }
+      if (data) {
+        allRows.push(...(data as Array<{ id?: string; assigned_ca_email?: string | null }>));
+      }
     }
-    return (data || []) as Array<{ id?: string; assigned_ca_email?: string | null }>;
+    return allRows;
   };
 
   const queryFn = options?.dbQueryFn ?? defaultQueryFn;
@@ -282,15 +520,31 @@ export function startLeadershipFollowupPoller(
       log.info(`[Leadership Followup] Check (first=${isFirstCheck}): ${remainingCount} tasks remain of ${appIds.length}`);
 
       if (remainingCount === 0) {
-        log.info('[Leadership Followup] All tasks completed! Dispatching congratulatory email.');
-        const recipients = resolveLeadershipRecipients();
-        await sendEmailImpl({
-          to: recipients.to,
-          cc: recipients.cc,
-          subject: '🎉 ALL TASKS COMPLETED — ApplyWizz Review SLA',
-          html: buildLeadershipCompletionEmailHtml(),
-          text: 'All tasks from today have been reviewed and completed across all Career Associates!',
-        });
+        if (appIds.length > 0) {
+          log.info('[Leadership Followup] All tasks completed! Dispatching congratulatory email.');
+          const recipients = resolveLeadershipRecipients();
+          const execRecipients = resolveExecutiveRecipients();
+          const completionHtml = buildLeadershipCompletionEmailHtml();
+          const completionText = 'All tasks from today have been reviewed and completed across all Career Associates!';
+
+          // Leadership congratulatory email
+          await sendEmailImpl({
+            to: recipients.to,
+            cc: recipients.cc,
+            subject: '🎉 ALL TASKS COMPLETED — ApplyWizz Review SLA',
+            html: completionHtml,
+            text: completionText,
+          });
+
+          // Executive (Ramakrishna) congratulatory email
+          await sendEmailImpl({
+            to: execRecipients.to,
+            cc: execRecipients.cc,
+            subject: '🎉 ALL TASKS COMPLETED — ApplyWizz Review SLA',
+            html: completionHtml,
+            text: completionText,
+          });
+        }
         isStopped = true;
         return;
       }
@@ -305,6 +559,7 @@ export function startLeadershipFollowupPoller(
       lastRemainingCount = remainingCount;
 
       if (isFirstCheck) {
+        // 1. Dispatch reminder to Leadership (per-CA breakdown)
         const countsByCa = new Map<string, number>();
         for (const r of remainingRows) {
           const ca = String(r.assigned_ca_email || 'Unassigned').trim().toLowerCase();
@@ -320,8 +575,30 @@ export function startLeadershipFollowupPoller(
           cc: recipients.cc,
           subject: `Review SLA: ${remainingCount} tasks remaining for review — ApplyWizz`,
           html: buildLeadershipReminderEmailHtml(remainingPerCa),
-          text: `1.5 hours have elapsed. ${remainingCount} tasks remain for review across ${remainingPerCa.length} CA(s).`,
+          text: `1 hour has elapsed. ${remainingCount} tasks remain for review across ${remainingPerCa.length} CA(s).`,
         });
+
+        // 2. Dispatch reminder to Executive (Ramakrishna, per-Manager breakdown)
+        try {
+          const caManagerMap = await getCaToManagerMapImpl();
+          const managerSummaries = groupReadyForReviewByManager(remainingRows, caManagerMap);
+          const remainingPerManager = managerSummaries.map((m) => ({
+            managerEmail: m.managerEmail,
+            managerName: m.managerName,
+            remainingCount: m.appCount,
+          }));
+
+          const execRecipients = resolveExecutiveRecipients();
+          await sendEmailImpl({
+            to: execRecipients.to,
+            cc: execRecipients.cc,
+            subject: `Review SLA: ${remainingCount} tasks remaining across managers — ApplyWizz`,
+            html: buildExecutiveReminderEmailHtml(remainingPerManager),
+            text: `1 hour has elapsed. ${remainingCount} tasks remain for review across managers.`,
+          });
+        } catch (execErr: any) {
+          log.warn(`[Executive Followup] Reminder email error: ${execErr?.message || execErr}`);
+        }
       }
 
       if (!isStopped) {
@@ -331,7 +608,13 @@ export function startLeadershipFollowupPoller(
         activeTimer.unref();
       }
     } catch (err: any) {
-      log.warn(`[Leadership Followup] Check error: ${err?.message || err}`);
+      log.warn(`[Leadership Followup] Check error (will retry next interval): ${err?.message || err}`);
+      if (!isStopped) {
+        activeTimer = setTimeout(() => {
+          void runCheck(false);
+        }, pollInterval);
+        activeTimer.unref();
+      }
     }
   };
 
@@ -434,16 +717,21 @@ export async function sendCaNotificationEmails(
   return { summaries, sent, skipped: 0, failed };
 }
 
+export interface LeadershipIngestionSummaryOptions {
+  excludeKeys?: Set<string>;
+  followupOptions?: FollowupPollOptions;
+  sendEmailFn?: (options: any) => Promise<any>;
+  caToManagerMap?: Map<string, string>;
+}
+
 /**
  * Dispatches an initial leadership email summarizing tasks ready for review across all CAs,
+ * an executive email to Ramakrishna summarizing tasks to be done across both managers,
  * and launches the SLA follow-up poller for this run.
  */
 export async function sendLeadershipIngestionSummary(
   runStartedAt: string | Date,
-  options?: {
-    excludeKeys?: Set<string>;
-    followupOptions?: FollowupPollOptions;
-  }
+  options?: LeadershipIngestionSummaryOptions
 ): Promise<void> {
   const runStartedAtIso = runStartedAt instanceof Date ? runStartedAt.toISOString() : String(runStartedAt);
 
@@ -456,6 +744,8 @@ export async function sendLeadershipIngestionSummary(
     log.warn('[Leadership Summary] Azure email not configured — skipping summary');
     return;
   }
+
+  const sendEmailImpl = options?.sendEmailFn ?? sendEmail;
 
   try {
     const supabase = getDbClient();
@@ -501,18 +791,41 @@ export async function sendLeadershipIngestionSummary(
       perCa: summaries,
     };
 
+    // 1. Dispatch Leadership initial email (per-CA breakdown)
     const recipients = resolveLeadershipRecipients();
     const subject = `Review Queue: ${totalTasks} tasks for ${clientSet.size} clients across ${summaries.length} CAs ready for review`;
 
-    await sendEmail({
+    await sendEmailImpl({
       to: recipients.to,
       cc: recipients.cc,
       subject,
       html: buildLeadershipInitialEmailHtml(summaryData),
       text: `${totalTasks} tasks for ${clientSet.size} clients across ${summaries.length} CAs are ready for review.`,
     });
-
     log.info(`[Leadership Summary] Dispatched initial email to ${recipients.to.join(', ')} (tasks=${totalTasks})`);
+
+    // 2. Dispatch Executive initial email to Ramakrishna (per-Manager breakdown)
+    try {
+      const caManagerMap = options?.caToManagerMap ?? (await getCaToManagerMap());
+      const managerSummaries = groupReadyForReviewByManager(filteredRows, caManagerMap, options);
+      const execRecipients = resolveExecutiveRecipients();
+      const execSubject = `Review Queue: ${totalTasks} tasks ready for review across managers`;
+
+      await sendEmailImpl({
+        to: execRecipients.to,
+        cc: execRecipients.cc,
+        subject: execSubject,
+        html: buildExecutiveInitialEmailHtml({
+          totalTasks,
+          clientCount: clientSet.size,
+          managers: managerSummaries,
+        }),
+        text: `${totalTasks} tasks for ${clientSet.size} clients ready for review across managers.`,
+      });
+      log.info(`[Executive Summary] Dispatched initial email to ${execRecipients.to.join(', ')} (tasks=${totalTasks})`);
+    } catch (execErr: any) {
+      log.warn(`[Executive Summary] Failed to process executive summary: ${execErr?.message || execErr}`);
+    }
 
     if (appIds.length > 0) {
       startLeadershipFollowupPoller(appIds, options?.followupOptions);
