@@ -19,32 +19,192 @@ export interface ProxyOptions {
   attemptToken?: string;
 }
 
+export class InvalidCountryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidCountryError';
+  }
+}
+
 const COUNTRY_CODE_MAP: Record<string, string> = {
+  // United States
   'united states': 'us',
+  'united states of america': 'us',
   usa: 'us',
   us: 'us',
+  // Canada
   canada: 'ca',
   ca: 'ca',
+  // United Kingdom
   'united kingdom': 'gb',
   uk: 'gb',
   gb: 'gb',
-  australia: 'au',
-  au: 'au',
+  'great britain': 'gb',
+  england: 'gb',
+  scotland: 'gb',
+  wales: 'gb',
+  // Ireland
+  ireland: 'ie',
+  'republic of ireland': 'ie',
+  ie: 'ie',
+  // Netherlands
+  netherlands: 'nl',
+  holland: 'nl',
+  nl: 'nl',
+  // Germany
   germany: 'de',
+  deutschland: 'de',
   de: 'de',
+  // France
   france: 'fr',
   fr: 'fr',
+  // India
   india: 'in',
   in: 'in',
+  // Australia
+  australia: 'au',
+  au: 'au',
+  // Singapore
+  singapore: 'sg',
+  sg: 'sg',
+  // Switzerland
+  switzerland: 'ch',
+  ch: 'ch',
+  // Sweden
+  sweden: 'se',
+  se: 'se',
+  // Spain
+  spain: 'es',
+  es: 'es',
+  // Poland
+  poland: 'pl',
+  pl: 'pl',
+};
+
+const PHONE_PREFIX_TO_ISO: Record<string, string> = {
+  '1': 'us',
+  '44': 'gb',
+  '353': 'ie',
+  '31': 'nl',
+  '49': 'de',
+  '33': 'fr',
+  '91': 'in',
+  '61': 'au',
+  '65': 'sg',
+  '41': 'ch',
+  '46': 'se',
+  '34': 'es',
+  '48': 'pl',
 };
 
 /**
  * Normalizes country strings to ISO 2-letter country codes for DataImpulse.
+ * Rejects invalid or unresolvable values by throwing InvalidCountryError (fail-closed).
  */
 export function parseCountryCode(country?: string | null): string {
-  if (!country || typeof country !== 'string') return 'us';
+  if (!country || typeof country !== 'string') {
+    throw new InvalidCountryError('Country is required and must be a non-empty string');
+  }
   const clean = country.trim().toLowerCase();
-  return COUNTRY_CODE_MAP[clean] || 'us';
+  if (!clean) {
+    throw new InvalidCountryError('Country cannot be empty');
+  }
+  if (COUNTRY_CODE_MAP[clean]) {
+    return COUNTRY_CODE_MAP[clean];
+  }
+  if (/^[a-z]{2}$/.test(clean)) {
+    return clean;
+  }
+  throw new InvalidCountryError(`Unable to resolve ISO-2 country code from: "${country}"`);
+}
+
+/**
+ * Extracts country code from a location string (e.g. 'Dublin, Leinster, Ireland' -> 'ie').
+ */
+export function extractCountryFromLocation(location?: string | null): string | null {
+  if (!location || typeof location !== 'string') return null;
+  const parts = location.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+
+  // Check the last segment first
+  const lastPart = parts[parts.length - 1];
+  try {
+    return parseCountryCode(lastPart);
+  } catch {
+    // If last part is not a country, try other parts in reverse order
+    for (let i = parts.length - 2; i >= 0; i--) {
+      try {
+        return parseCountryCode(parts[i]);
+      } catch {
+        // continue
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Parses phone calling code or country code prefix to ISO 2-letter country code.
+ */
+export function parsePhoneCountryCode(code?: string | null): string | null {
+  if (!code || typeof code !== 'string') return null;
+
+  // If it's already an ISO code or country name directly
+  try {
+    return parseCountryCode(code);
+  } catch {
+    // continue
+  }
+
+  const clean = code.trim();
+  const digits = clean.replace(/^\+|^00/, '').replace(/\D/g, '');
+  if (!digits) return null;
+
+  if (PHONE_PREFIX_TO_ISO[digits]) {
+    return PHONE_PREFIX_TO_ISO[digits];
+  }
+
+  for (const [prefix, iso] of Object.entries(PHONE_PREFIX_TO_ISO)) {
+    if (digits.startsWith(prefix) && digits.length > prefix.length) {
+      return iso;
+    }
+  }
+  return null;
+}
+
+/**
+ * Multi-tier country resolution:
+ * 1. profile.country
+ * 2. profile.location (last segment)
+ * 3. profile.country_code (phone prefix or ISO)
+ * Halts loudly with InvalidCountryError if all tiers fail.
+ */
+export function resolveCountryCode(profile: Partial<ProfileRow> | Record<string, any>): string {
+  // Tier 1: profile.country
+  if (profile.country && typeof profile.country === 'string') {
+    try {
+      return parseCountryCode(profile.country);
+    } catch {
+      // Fall through to next tier
+    }
+  }
+
+  // Tier 2: profile.location
+  if (profile.location && typeof profile.location === 'string') {
+    const fromLoc = extractCountryFromLocation(profile.location);
+    if (fromLoc) return fromLoc;
+  }
+
+  // Tier 3: profile.country_code (phone prefix or ISO code)
+  if (profile.country_code && typeof profile.country_code === 'string') {
+    const fromCode = parsePhoneCountryCode(profile.country_code);
+    if (fromCode) return fromCode;
+  }
+
+  throw new InvalidCountryError(
+    `Unable to resolve valid ISO-2 country code for candidate profile "${profile.applywizz_id || 'unknown'}". ` +
+      `country="${profile.country}", location="${profile.location}", country_code="${profile.country_code}".`
+  );
 }
 
 /**
@@ -76,7 +236,7 @@ export function buildAshbyProxyConfig(
     );
   }
 
-  const countryCode = parseCountryCode(profile.country || (profile as any).country_code);
+  const countryCode = resolveCountryCode(profile);
   const city = parseCityFromLocation(profile.location);
 
   const cleanId = String(profile.applywizz_id || 'candidate').replace(/[^a-zA-Z0-9]/g, '');
