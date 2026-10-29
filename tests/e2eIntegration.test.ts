@@ -148,7 +148,7 @@ async function runE2EIntegrationTestSuite() {
       }
     }
 
-    const candidateId = 'AWL-11';
+    const candidateId = 'AWL-E2E-TEST';
     const testJobUrl = `https://job-boards.greenhouse.io/acme-e2e/jobs/${Date.now()}`;
 
     // =========================================================================

@@ -621,7 +621,7 @@ export class LLMSynthesizer {
         cacheReadTokens,
         cacheWriteTokens,
         totalTokens: inputTokens + outputTokens,
-        cost: (inputTokens * 0.00000010) + (outputTokens * 0.00000030),
+        cost: (inputTokens * 0.10 + outputTokens * 0.30) / 1_000_000,
         model: this.modelName,
       };
     }
