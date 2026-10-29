@@ -165,6 +165,8 @@ describe('Claude Haiku 5.5 LLM Synthesis', () => {
     assert.strictEqual(result.usage.promptTokens, 150);
     assert.strictEqual(result.usage.completionTokens, 25);
     assert.strictEqual(result.usage.model, 'claude-haiku-5-5');
+    // Pricing: $0.10/M input + $0.30/M output = (150 * 0.00000010) + (25 * 0.00000030) = 0.0000225
+    assert.strictEqual(result.usage.cost, 0.0000225);
   });
 
   it('fails fast on 429 rate limit leaving question unresolved without falling back', async () => {
