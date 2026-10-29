@@ -2,7 +2,8 @@
  * @fileoverview DataImpulse Geo-Targeted Residential Proxy Configuration for Ashby Submissions.
  */
 
-import { randomBytes } from 'node:crypto';
+import crypto, { randomBytes } from 'node:crypto';
+import type { Page } from 'playwright';
 import type { ProfileRow } from '../db/profiles.js';
 
 export interface ProxyConfig {
@@ -253,4 +254,79 @@ export function buildAshbyProxyConfig(
     username,
     password,
   };
+}
+
+export interface ProxyPreflightResult {
+  success: boolean;
+  exitIpHash?: string;
+  error?: string;
+}
+
+/**
+ * Lightweight same-browser proxy preflight verification.
+ * Probes the proxy exit IP using Playwright page.request with a hard timeout.
+ * Never throws — always returns a ProxyPreflightResult.
+ */
+export async function verifyProxyPreflight(
+  page: Page,
+  expectedCountryCode?: string,
+  options: { timeoutMs?: number; endpointUrl?: string } = {}
+): Promise<ProxyPreflightResult> {
+  const timeoutMs = options.timeoutMs ?? 3000;
+  const endpointUrl = options.endpointUrl || 'https://api.ipify.org?format=json';
+
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`Preflight probe timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    const probePromise = (async (): Promise<ProxyPreflightResult> => {
+      const response = await page.request.get(endpointUrl, { timeout: timeoutMs });
+      if (!response.ok() || response.status() !== 200) {
+        throw new Error(`Preflight probe failed with HTTP status ${response.status()}`);
+      }
+      const data = await response.json();
+      const ip = data?.ip || data?.query;
+      if (!ip || typeof ip !== 'string') {
+        throw new Error('Preflight probe did not return a valid IP');
+      }
+
+      if (expectedCountryCode) {
+        const respCountry = (data?.country || data?.country_code || data?.countryCode || '')
+          ?.toString()
+          .trim()
+          .toLowerCase();
+        if (respCountry && respCountry !== expectedCountryCode.trim().toLowerCase()) {
+          throw new Error(
+            `Proxy exit country mismatch: expected ${expectedCountryCode}, got ${respCountry}`
+          );
+        }
+      }
+
+      const exitIpHash = crypto
+        .createHash('sha256')
+        .update(ip.trim())
+        .digest('hex')
+        .slice(0, 12);
+
+      return {
+        success: true,
+        exitIpHash,
+      };
+    })();
+
+    return await Promise.race([probePromise, timeoutPromise]);
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Preflight probe failed',
+    };
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }

@@ -6,7 +6,7 @@ import fs from 'fs';
 import type { ApplicationRow } from '../db/applications/types.js';
 import { updateStatus } from '../db/applications/crud.js';
 import { getProfile } from '../db/profiles.js';
-import { buildAshbyProxyConfig } from './ashbyProxy.js';
+import { buildAshbyProxyConfig, resolveCountryCode, verifyProxyPreflight } from './ashbyProxy.js';
 import { fillAshbyForm, sleep } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
@@ -31,7 +31,9 @@ export async function submitAshbyApplication(
   }
 
   let proxyConfig;
+  let countryCode: string | undefined;
   try {
+    countryCode = resolveCountryCode(profile);
     proxyConfig = buildAshbyProxyConfig(profile);
   } catch (proxyErr: any) {
     haltWithDevAlert('AshbySubmit', `Cannot submit Ashby without proxy: ${proxyErr.message}`);
@@ -52,6 +54,7 @@ export async function submitAshbyApplication(
 
   let managedBrowser = null;
   let page = null;
+  let exitIpHash: string | undefined;
 
   try {
     managedBrowser = await browserManager.acquireBrowser({
@@ -79,6 +82,16 @@ export async function submitAshbyApplication(
     });
 
     page = await context.newPage();
+
+    // 2.5 Verify proxy preflight probe
+    log.info(`[AshbySubmit] Probing proxy preflight for ${applicationId} (${countryCode})...`);
+    const preflight = await verifyProxyPreflight(page, countryCode);
+    if (!preflight.success) {
+      log.warn(`[AshbySubmit] ⚠️ Proxy preflight failed for ${applicationId}: ${preflight.error}`);
+      throw new Error(`Ashby proxy preflight failed: ${preflight.error}`);
+    }
+    exitIpHash = preflight.exitIpHash;
+    log.info(`[AshbySubmit] 🔒 Proxy preflight verified (exitIpHash: ${exitIpHash}, country: ${countryCode})`);
 
     const targetUrl = application.job_url.includes('/application')
       ? application.job_url
@@ -150,6 +163,7 @@ export async function submitAshbyApplication(
       await updateStatus(application.id, 'APPLIED', {
         proof_web_url: proofUrl,
         proof_captured_at: new Date().toISOString(),
+        error_details: exitIpHash ? { exitIpHash, countryCode } : undefined,
       });
     }
 
@@ -178,6 +192,11 @@ export async function submitAshbyApplication(
     if (application.id) {
       await updateStatus(application.id, 'FAILED', {
         error_message: errorMsg,
+        error_details: {
+          exitIpHash,
+          countryCode,
+          failureReason: errorMsg,
+        },
         proof_failed_url: failedProofUrl,
         proof_failed_captured_at: failedProofUrl ? new Date().toISOString() : undefined,
       }).catch(() => {});
