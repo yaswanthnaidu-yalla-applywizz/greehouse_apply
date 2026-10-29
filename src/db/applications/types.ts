@@ -103,6 +103,28 @@ export interface SubmissionErrorDetails {
   [key: string]: unknown;
 }
 
+export type AshbySubmissionStage =
+  | 'PREFLIGHT'
+  | 'NAVIGATION'
+  | 'DOM_SCAN'
+  | 'FORM_FILL'
+  | 'PRE_SUBMIT'
+  | 'SUBMIT_CLICK'
+  | 'WAIT_CONFIRMATION'
+  | 'COMPLETED';
+
+export interface AshbySubmissionTelemetry {
+  deployedCommit?: string;
+  stage: AshbySubmissionStage;
+  exitIpHash?: string;
+  proxyRegion?: string;
+  committedFieldCount?: number;
+  challengeType?: 'none' | 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown';
+  submitResponseStatus?: number;
+  errorMessage?: string;
+  capturedAt: string;
+}
+
 export interface ApplicationRow {
   id?: string;
   applywizz_id: string;
