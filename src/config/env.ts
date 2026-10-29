@@ -125,6 +125,9 @@ const envSchema = z.object({
   /** Submitter worker pool concurrency / lane count (default '3') */
   SUBMISSION_POOL_SIZE: z.string().optional().default('3'),
 
+  /** Ingest gate: when true, drop candidates with zoho_connected!=true or @gmail emails at ingestion */
+  REQUIRE_ZOHO_CONNECTED: z.coerce.boolean().default(false),
+
   /** Maximum concurrent live Chromium browser instances across all workers/dry-runs (default: 5) */
   MAX_CONCURRENT_BROWSERS: z.coerce.number().int().min(1).max(15).default(5),
 

@@ -24,7 +24,7 @@ import {
   applicationRowHasPersistedResolution,
   filterOperatorApplicationJobs,
 } from '../../dashboard/candidateQueueFilter.js';
-import { fetchProfileListingFieldsByApplywizzIds } from '../../db/profiles.js';
+import { fetchProfileListingFieldsByApplywizzIds, getProfile } from '../../db/profiles.js';
 import { fetchResumePdfBuffer, getProfileResumeHttpUrl, isDemoResumeApplywizzId } from '../../db/storage.js';
 import { isSupabaseConfigured, getDbClient } from '../../db/client.js';
 import {
@@ -515,6 +515,75 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
 });
 
 /**
+ * GET /api/candidates/:applywizzId/profile
+ * Returns rich profile details (demographics, contact, links, work auth, education, work experience).
+ */
+candidatesRouter.get('/:applywizzId/profile', async (req: AuthenticatedRequest, res: Response) => {
+  const applywizzId = Array.isArray(req.params.applywizzId)
+    ? req.params.applywizzId[0]
+    : String(req.params.applywizzId || '');
+  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  if ('error' in parsedRange) {
+    res.status(400).json({ error: parsedRange.error });
+    return;
+  }
+  const access = await resolveDashboardCandidateAccess(req, parsedRange, res);
+  if (access.authError) {
+    res.status(401).json({ error: access.authError });
+    return;
+  }
+  if (!isApplywizzIdInDashboardAccess(applywizzId, access)) {
+    res.status(403).json({ error: `Access denied: Candidate '${applywizzId}' is not assigned to your account.` });
+    return;
+  }
+
+  const zohoGate = await assertCandidateZohoConnectedForViewing(applywizzId, {
+    isAdmin: access.unrestricted,
+    allowAdminDemo: true,
+  });
+  if (!zohoGate.allowed) {
+    res.status(403).json({ error: zohoGate.error });
+    return;
+  }
+
+  const dbProfile = await getProfile(applywizzId);
+  const seg = candidatesMap.get(applywizzId);
+  const segProfile: any = seg?.profile;
+  const whRecord = access.workHistoryRecords.find(
+    (r) => r.applywizzId.toUpperCase() === applywizzId.toUpperCase()
+  );
+
+  const clientName = dbProfile?.client_name || whRecord?.clientName || seg?.clientName || applywizzId;
+  const companyEmail = dbProfile?.company_email || dbProfile?.email || whRecord?.clientEmail || segProfile?.companyEmail || segProfile?.email || null;
+  const phone = dbProfile?.phone || segProfile?.phone || null;
+  const country = dbProfile?.country || segProfile?.country || null;
+  const location = dbProfile?.location || segProfile?.location || '';
+  const linkedinUrl = dbProfile?.linkedin_url || segProfile?.linkedinUrl || null;
+  const websiteUrl = dbProfile?.website_url || segProfile?.websiteUrl || null;
+  const githubUrl = dbProfile?.github_url || segProfile?.githubUrl || null;
+  const workAuth = dbProfile?.work_authorization || segProfile?.workAuthorization || null;
+  const requiresSponsorship = dbProfile?.requires_sponsorship ?? segProfile?.requiresSponsorship ?? null;
+  const education = dbProfile?.education || segProfile?.education || [];
+  const workExperience = dbProfile?.work_experience || segProfile?.workExperience || [];
+
+  res.json({
+    applywizzId,
+    clientName,
+    companyEmail,
+    phone,
+    country,
+    location,
+    linkedinUrl,
+    websiteUrl,
+    githubUrl,
+    workAuthorization: workAuth,
+    requiresSponsorship,
+    education,
+    workExperience,
+  });
+});
+
+/**
  * GET /api/candidates/:applywizzId
  * Returns candidate full profile, resume details, and assigned job queue (< MAX_JOB_QUESTIONS).
  */
@@ -566,13 +635,14 @@ candidatesRouter.get('/:applywizzId', async (req: AuthenticatedRequest, res: Res
     const whRecord = workHistoryRecords.find(
       (r) => r.applywizzId.toUpperCase() === applywizzId.toUpperCase()
     );
+    const dbProfile = await getProfile(applywizzId);
     const profileFields = await fetchProfileListingFieldsByApplywizzIds([applywizzId]);
     const profileRow = profileFields.get(applywizzId.toUpperCase());
 
-    const clientName = whRecord?.clientName || profileRow?.clientName || applywizzId;
-    const clientEmail = whRecord?.clientEmail || profileRow?.email || '';
+    const clientName = dbProfile?.client_name || whRecord?.clientName || profileRow?.clientName || applywizzId;
+    const clientEmail = dbProfile?.company_email || dbProfile?.email || whRecord?.clientEmail || profileRow?.email || '';
 
-    if (whRecord || profileRow) {
+    if (dbProfile || whRecord || profileRow) {
       const resumeFilenameLocal = `${applywizzId}_resume.pdf`;
       const resumeExistsLocal = fs.existsSync(path.join(config.RESUMES_DIR, resumeFilenameLocal));
       let resumeUrl: string | null = await getProfileResumeHttpUrl(applywizzId);
@@ -584,9 +654,22 @@ candidatesRouter.get('/:applywizzId', async (req: AuthenticatedRequest, res: Res
       }
 
       res.json({
-        applywizzId: whRecord?.applywizzId || profileRow?.applywizzId || applywizzId,
+        applywizzId: dbProfile?.applywizz_id || whRecord?.applywizzId || profileRow?.applywizzId || applywizzId,
         clientName,
-        profile: { email: clientEmail, location: profileRow?.location || '' },
+        profile: {
+          email: clientEmail,
+          companyEmail: dbProfile?.company_email || clientEmail,
+          phone: dbProfile?.phone || null,
+          country: dbProfile?.country || null,
+          location: dbProfile?.location || profileRow?.location || '',
+          linkedinUrl: dbProfile?.linkedin_url || null,
+          websiteUrl: dbProfile?.website_url || null,
+          githubUrl: dbProfile?.github_url || null,
+          workAuthorization: dbProfile?.work_authorization || null,
+          requiresSponsorship: dbProfile?.requires_sponsorship ?? null,
+          education: dbProfile?.education || [],
+          workExperience: dbProfile?.work_experience || [],
+        },
         resumeUrl,
         resumeFilename,
         jobs: [],

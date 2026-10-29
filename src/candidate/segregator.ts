@@ -19,6 +19,7 @@ import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
 import { profileRowToCandidateProfile, type ProfileRow } from '../db/profiles.js';
 import { ensureSupabaseProfile } from './ensureSupabaseProfile.js';
+import { isCandidateEligibleForZohoGate } from '../db/zohoConnected.js';
 import { checkZohoConnectionForProfiles } from '../services/zohoConnectionCheck.js';
 import type { CandidateSegment } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
@@ -451,6 +452,20 @@ export async function segregateCandidatesByApplyWizzId(
 
           if (ensured.status === 'created') fromApi++;
           else fromSupabase++;
+
+          if (config.REQUIRE_ZOHO_CONNECTED) {
+            const gate = isCandidateEligibleForZohoGate(ensured.profile);
+            if (!gate.eligible) {
+              segmentsMap.delete(id);
+              skippedEnsured++;
+              if (!compact) {
+                log.info(
+                  `[Segregator] ⛔ Ingestion Gate: skipping candidate ${id} (REQUIRE_ZOHO_CONNECTED=true, reason=${gate.reason})`
+                );
+              }
+              continue;
+            }
+          }
 
           syncedProfiles.set(id.toUpperCase(), ensured.profile);
           segment.profile = profileRowToCandidateProfile(ensured.profile);

@@ -48,6 +48,22 @@ export function calculateNovaLiteCost(usage: {
 }
 
 /**
+ * Calculates dollar cost for Claude Haiku 5.5.
+ * Pricing (per 1,000,000 tokens):
+ * - Input: $0.10 ($0.00000010 per token)
+ * - Output: $0.30 ($0.00000030 per token)
+ */
+export function calculateClaudeHaikuCost(usage: {
+  promptTokens: number;
+  completionTokens: number;
+}): number {
+  const cost =
+    (usage.promptTokens * 0.10) / 1_000_000 +
+    (usage.completionTokens * 0.30) / 1_000_000;
+  return Math.round(cost * 1_000_000) / 1_000_000;
+}
+
+/**
  * Records or updates token usage for an application in `gh_application_token_usage`.
  * Uses idempotent upsert on `(applywizz_id, job_url, date)`.
  */
@@ -59,6 +75,11 @@ export async function recordApplicationTokenUsage(
   const cost =
     input.cost !== undefined
       ? input.cost
+      : input.model?.includes('claude') || input.model?.includes('haiku')
+      ? calculateClaudeHaikuCost({
+          promptTokens: input.promptTokens,
+          completionTokens: input.completionTokens,
+        })
       : calculateNovaLiteCost({
           promptTokens: input.promptTokens,
           completionTokens: input.completionTokens,
