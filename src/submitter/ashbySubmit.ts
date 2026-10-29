@@ -7,7 +7,7 @@ import type { ApplicationRow } from '../db/applications/types.js';
 import { updateStatus } from '../db/applications/crud.js';
 import { getProfile } from '../db/profiles.js';
 import { buildAshbyProxyConfig, resolveCountryCode, verifyProxyPreflight } from './ashbyProxy.js';
-import { fillAshbyForm, sleep } from './ashbyFormFiller.js';
+import { fillAshbyForm, sleep, verifyRequiredFieldsCommitted } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
@@ -110,6 +110,25 @@ export async function submitAshbyApplication(
     await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
     await sleep(2000, 3000);
 
+    // 4.5 Pre-submit validation gate: verify all required fields are committed on the live DOM
+    const requiredFieldPaths = (application.resolved_fields || [])
+      .filter((f) => f.isRequired)
+      .map((f) => f.fieldId || f.name)
+      .filter((p): p is string => Boolean(p));
+
+    const domVerification = await verifyRequiredFieldsCommitted(page, requiredFieldPaths);
+    if (!domVerification.allCommitted) {
+      log.warn(
+        `[AshbySubmit] ⛔ Pre-submit validation failed for ${applicationId}. Missing required DOM fields: ${domVerification.missingFields.join(', ')}`
+      );
+      const preSubmitErr: any = new Error(
+        `Pre-submit validation failed: Required field(s) uncommitted on DOM: ${domVerification.missingFields.join(', ')}`
+      );
+      preSubmitErr.stage = 'PRE_SUBMIT';
+      preSubmitErr.classification = 'DATA_FAULT:MISSING_REQUIRED_FIELD';
+      throw preSubmitErr;
+    }
+
     // 5. Submit application
     const submitBtn = page
       .locator('.ashby-application-form-submit-button, button:has-text("Submit Application"), button[type="submit"]')
@@ -176,6 +195,8 @@ export async function submitAshbyApplication(
     };
   } catch (err: any) {
     const errorMsg = err.message || String(err);
+    const stage = err.stage;
+    const classification = err.classification;
     log.error(`[AshbySubmit] ❌ Submission failed for ${applicationId}: ${errorMsg}`);
 
     let failedProofUrl: string | null = null;
@@ -196,6 +217,8 @@ export async function submitAshbyApplication(
           exitIpHash,
           countryCode,
           failureReason: errorMsg,
+          ...(stage ? { stage } : {}),
+          ...(classification ? { classification } : {}),
         },
         proof_failed_url: failedProofUrl,
         proof_failed_captured_at: failedProofUrl ? new Date().toISOString() : undefined,
