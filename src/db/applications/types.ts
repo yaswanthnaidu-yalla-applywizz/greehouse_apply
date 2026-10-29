@@ -87,6 +87,10 @@ export interface EmailProofJson {
   body_html?: string;
   messageId?: string;
   message_id?: string;
+  bodyText?: string;
+  receivedTime?: string | number;
+  snippet?: string;
+  matchedAt?: string;
 }
 
 import type { ResolvedField } from '../../types/index.js';

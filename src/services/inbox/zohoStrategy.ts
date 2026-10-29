@@ -15,14 +15,23 @@ import {
   normalizeCompanyName,
   getErrorCategory,
 } from './inboxPoller.js';
+import {
+  ASHBY_CONFIRMATION_CLOCK_SKEW_MS,
+  isAshbySenderCandidate,
+  matchAshbyConfirmationEmail,
+} from './ashbyConfirmationMatcher.js';
 
 const log = createLogger('Zoho Connector');
 
 export interface ZohoEmailQueryOptions {
   candidateEmail: string;
   companyName: string;
-  companyEmail?: string | null;
   submissionTime: string | number | Date;
+  maxWaitMinutes?: number;
+  mailboxEmail?: string;
+  ats?: 'greenhouse' | 'ashby';
+  jobTitle?: string | null;
+  companyEmail?: string | null;
   timeoutMs?: number;
   allowHistorical?: boolean;
 }
@@ -108,6 +117,7 @@ export async function queryZohoConfirmationEmail(
   const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
   const companyName = (options.companyName || '').trim();
   const companyEmail = (options.companyEmail || '').trim().toLowerCase();
+  const isAshby = options.ats === 'ashby';
 
   if (!candidateEmail) {
     return {
@@ -130,7 +140,11 @@ export async function queryZohoConfirmationEmail(
   const subDate = new Date(options.submissionTime);
   const submissionMs = !Number.isNaN(subDate.getTime()) ? subDate.getTime() : Date.now();
   const WINDOW_MS = 10 * 60 * 1000;
-  const minTimeMs = options.allowHistorical ? submissionMs - 2 * 60 * 1000 : submissionMs;
+  const minTimeMs = options.allowHistorical
+    ? submissionMs - 2 * 60 * 1000
+    : isAshby
+    ? submissionMs - ASHBY_CONFIRMATION_CLOCK_SKEW_MS
+    : submissionMs;
   const maxTimeMs = options.allowHistorical ? Date.now() : submissionMs + WINDOW_MS;
 
   const minTimeIso = new Date(minTimeMs).toISOString();
@@ -142,7 +156,7 @@ export async function queryZohoConfirmationEmail(
   const companyLower = companyName.toLowerCase();
 
   log.info(
-    `[Zoho Connector] 🔍 Querying inbox for ${candidateEmail} | Window: [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] | Company: "${companyName}" (Email: "${companyEmail || 'none'}")`
+    `[Zoho Connector] 🔍 Querying inbox for ${candidateEmail} | ATS: ${options.ats || 'greenhouse'} | Window: [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] | Company: "${companyName}" (Email: "${companyEmail || 'none'}")`
   );
 
   let matchingMsg: RawZohoInboxMessage | null = null;
@@ -221,15 +235,116 @@ export async function queryZohoConfirmationEmail(
           continue;
         }
 
-        if (!fromAddress.includes(GREENHOUSE_PROOF_SENDER)) {
-          continue;
-        }
-        const matchesConfirmationPattern = CONFIRMATION_SUBJECT_PATTERN.test(subject);
-
         const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
         if (!isTimeMatch) {
           continue;
         }
+
+        if (isAshby) {
+          if (!isAshbySenderCandidate(msg.from || '', companyName)) {
+            continue;
+          }
+
+          const folderId = msg.folderId || data.folder?.folderId;
+          const accountId = data.accountId;
+          let fullSubject = msg.subject || 'Application Confirmation';
+          let fullFrom = msg.from || 'Unknown';
+          let fullTo = msg.to || candidateEmail;
+          let textContent = '';
+          let htmlContent = '';
+
+          if (accountId && folderId && msg.messageId) {
+            try {
+              const msgQs = new URLSearchParams({
+                email: candidateEmail,
+                accountId,
+                folderId,
+                messageId: msg.messageId,
+              });
+              const msgRes = await fetch(`${baseUrl}/api/zoho/ui/message?${msgQs}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+              });
+
+              if (msgRes.ok) {
+                const msgData = (await msgRes.json()) as RawZohoMessageResponse;
+                if (msgData.message) {
+                  fullSubject = msgData.message.subject || fullSubject;
+                  fullFrom = msgData.message.from || fullFrom;
+                  fullTo = msgData.message.to || fullTo;
+                  htmlContent = msgData.message.htmlContent || '';
+                  textContent = msgData.message.textContent || stripHtml(htmlContent);
+                }
+              }
+            } catch (err: any) {
+              log.warn(`[Zoho Connector] ⚠️ Failed to fetch full message body: ${err.message}`);
+            }
+          }
+
+          if (!textContent && htmlContent) {
+            textContent = stripHtml(htmlContent);
+          }
+
+          const matchResult = matchAshbyConfirmationEmail(
+            {
+              from: fullFrom,
+              to: fullTo,
+              subject: fullSubject,
+              bodyText: textContent || fullSubject,
+            },
+            {
+              candidateEmail,
+              companyName,
+              jobTitle: options.jobTitle ?? null,
+            }
+          );
+
+          if (matchResult.matched === true) {
+            const receivedAtIso = new Date(receivedMs).toISOString();
+            log.info(
+              `[Zoho Connector] 🎉 Ashby proof email captured: ${fullSubject} from ${fullFrom} at ${receivedAtIso}`
+            );
+
+            const emailResult: EmailProofJson = {
+              from: fullFrom,
+              to: fullTo,
+              subject: fullSubject,
+              received_at: receivedAtIso,
+              receivedTime: receivedAtIso,
+              body_text: textContent || fullSubject,
+              bodyText: textContent || fullSubject,
+              body_html: htmlContent || undefined,
+              messageId: msg.messageId,
+              message_id: msg.messageId,
+              snippet: textContent ? textContent.slice(0, 200) : undefined,
+              matchedAt: new Date().toISOString(),
+            };
+
+            return {
+              success: true,
+              matched: true,
+              email: emailResult,
+              scannedCount: totalScanned,
+              window: { minTimeIso, maxTimeIso, submissionTimeIso },
+            };
+          } else {
+            if (matchResult.reason === 'rejection') {
+              log.debug(
+                `[Zoho Connector] Skipping Ashby rejection message ${msg.messageId} for company "${companyName}".`
+              );
+            } else {
+              log.debug(
+                `[Zoho Connector] Ashby matcher rejected candidate message ${msg.messageId}: ${matchResult.reason}`
+              );
+            }
+            continue;
+          }
+        }
+
+        if (!fromAddress.includes(GREENHOUSE_PROOF_SENDER)) {
+          continue;
+        }
+        const matchesConfirmationPattern = CONFIRMATION_SUBJECT_PATTERN.test(subject);
 
         const fromContainsCompanyEmail = Boolean(
           companyEmail && companyEmail.length > 3 && fromAddress.includes(companyEmail)
@@ -276,12 +391,13 @@ export async function queryZohoConfirmationEmail(
       log.info(
         `[Zoho Connector] ⚠️ Zero confirmation matches for ${candidateEmail} among ${totalScanned} scanned messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
       );
+      const atsLabel = isAshby ? 'Ashby' : 'Greenhouse';
       return {
         success: false,
         matched: false,
         email: null,
         scannedCount: totalScanned,
-        errorMessage: `Greenhouse confirmation email not found after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
+        errorMessage: `${atsLabel} confirmation email not found after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
         window: { minTimeIso, maxTimeIso, submissionTimeIso },
       };
     }
@@ -337,10 +453,14 @@ export async function queryZohoConfirmationEmail(
       to: fullTo,
       subject: fullSubject,
       received_at: receivedAtIso,
+      receivedTime: receivedAtIso,
       body_text: textContent || fullSubject,
+      bodyText: textContent || fullSubject,
       body_html: htmlContent || undefined,
       messageId: matchingMsg.messageId,
       message_id: matchingMsg.messageId,
+      snippet: textContent ? textContent.slice(0, 200) : undefined,
+      matchedAt: new Date().toISOString(),
     };
 
     return {

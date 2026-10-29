@@ -11,6 +11,11 @@ import {
   stripHtml,
   normalizeCompanyName,
 } from './inboxPoller.js';
+import {
+  ASHBY_CONFIRMATION_CLOCK_SKEW_MS,
+  isAshbySenderCandidate,
+  matchAshbyConfirmationEmail,
+} from './ashbyConfirmationMatcher.js';
 import type {
   ZohoOtpApiQueryOptions,
   ZohoOtpApiResult,
@@ -364,6 +369,7 @@ export async function queryGmailConfirmationEmail(
   const candidateEmail = (options.candidateEmail || '').trim().toLowerCase();
   const companyName = (options.companyName || '').trim();
   const companyEmail = (options.companyEmail || '').trim().toLowerCase();
+  const isAshby = options.ats === 'ashby';
 
   if (!candidateEmail) {
     return {
@@ -386,7 +392,11 @@ export async function queryGmailConfirmationEmail(
   const subDate = new Date(options.submissionTime);
   const submissionMs = !Number.isNaN(subDate.getTime()) ? subDate.getTime() : Date.now();
   const WINDOW_MS = 10 * 60 * 1000;
-  const minTimeMs = options.allowHistorical ? submissionMs - 2 * 60 * 1000 : submissionMs;
+  const minTimeMs = options.allowHistorical
+    ? submissionMs - 2 * 60 * 1000
+    : isAshby
+    ? submissionMs - ASHBY_CONFIRMATION_CLOCK_SKEW_MS
+    : submissionMs;
   const maxTimeMs = options.allowHistorical ? Date.now() : submissionMs + WINDOW_MS;
 
   const minTimeIso = new Date(minTimeMs).toISOString();
@@ -398,7 +408,7 @@ export async function queryGmailConfirmationEmail(
   const companyLower = companyName.toLowerCase();
 
   log.info(
-    `[Gmail Connector] 🔍 Querying inbox for ${candidateEmail} | Window: [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] | Company: "${companyName}" (Email: "${companyEmail || 'none'}")`
+    `[Gmail Connector] 🔍 Querying inbox for ${candidateEmail} | ATS: ${options.ats || 'greenhouse'} | Window: [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] | Company: "${companyName}" (Email: "${companyEmail || 'none'}")`
   );
 
   let matchingMsg: RawGmailInboxMessage | null = null;
@@ -505,6 +515,100 @@ export async function queryGmailConfirmationEmail(
           continue;
         }
 
+        const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
+        if (!isTimeMatch) {
+          continue;
+        }
+
+        if (isAshby) {
+          if (!isAshbySenderCandidate(msg.from || '', companyName)) {
+            continue;
+          }
+
+          let msgData: RawGmailMessageResponse | null = null;
+          if (msg.messageId) {
+            try {
+              const msgQs = new URLSearchParams({
+                email: candidateEmail,
+                messageId: msg.messageId,
+              });
+              await mailboxRateLimiter.acquire();
+              const msgRes = await fetch(`${baseUrl}/api/gmail/ui/message?${msgQs}`, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' },
+              });
+              if (msgRes.ok) {
+                msgData = (await msgRes.json()) as RawGmailMessageResponse;
+              }
+            } catch (err: any) {
+              log.warn(`[Gmail Connector] ⚠️ Failed to fetch full message body for ${msg.messageId}: ${err.message}`);
+            }
+          }
+
+          const fullSubject = msgData?.message?.subject || msg.subject || 'Application Confirmation';
+          const fullFrom = msgData?.message?.from || msg.from || 'Unknown';
+          const fullTo = msgData?.message?.to || msg.to || candidateEmail;
+          const htmlContent = msgData?.message?.htmlContent || '';
+          const textContent = msgData?.message?.textContent || stripHtml(htmlContent);
+          const snippet = msgData?.message?.snippet || msg.snippet || '';
+          const bodyText = textContent || stripHtml(htmlContent) || snippet || fullSubject;
+
+          const matchResult = matchAshbyConfirmationEmail(
+            {
+              from: fullFrom,
+              to: fullTo,
+              subject: fullSubject,
+              bodyText,
+            },
+            {
+              candidateEmail,
+              companyName,
+              jobTitle: options.jobTitle ?? null,
+            }
+          );
+
+          if (matchResult.matched === true) {
+            const receivedAtIso = new Date(receivedMs).toISOString();
+            log.info(
+              `[Gmail Connector] 🎉 Ashby proof email captured: ${fullSubject} from ${fullFrom} at ${receivedAtIso}`
+            );
+
+            const emailResult: EmailProofJson = {
+              from: fullFrom,
+              to: fullTo,
+              subject: fullSubject,
+              received_at: receivedAtIso,
+              receivedTime: receivedAtIso,
+              body_text: bodyText,
+              bodyText: bodyText,
+              body_html: htmlContent || undefined,
+              messageId: msg.messageId,
+              message_id: msg.messageId,
+              snippet: snippet || (bodyText ? bodyText.slice(0, 200) : undefined),
+              matchedAt: new Date().toISOString(),
+            };
+
+            return {
+              success: true,
+              matched: true,
+              email: emailResult,
+              scannedCount: totalScanned,
+              window: { minTimeIso, maxTimeIso, submissionTimeIso },
+            };
+          } else {
+            if (matchResult.reason === 'rejection') {
+              log.debug(
+                `[Gmail Connector] Skipping Ashby rejection message ${msg.messageId} for company "${companyName}".`
+              );
+            } else {
+              log.debug(
+                `[Gmail Connector] Ashby matcher rejected candidate message ${msg.messageId}: ${matchResult.reason}`
+              );
+            }
+            continue;
+          }
+        }
+
         const isGreenhouseSender =
           fromAddress.includes('greenhouse-mail.io') ||
           fromAddress.includes('greenhouse');
@@ -516,11 +620,6 @@ export async function queryGmailConfirmationEmail(
           /thank you|application received|application confirmed|journey.*started|application.*submitted|received.*application/i.test(
             subject
           );
-
-        const isTimeMatch = receivedMs >= minTimeMs && receivedMs <= maxTimeMs;
-        if (!isTimeMatch) {
-          continue;
-        }
 
         const fromContainsCompanyEmail = Boolean(
           companyEmail && companyEmail.length > 3 && fromAddress.includes(companyEmail)
@@ -567,12 +666,13 @@ export async function queryGmailConfirmationEmail(
       log.info(
         `[Gmail Connector] ⚠️ Zero confirmation matches for ${candidateEmail} among ${totalScanned} scanned messages in window [${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}] for company "${companyName}".`
       );
+      const atsLabel = isAshby ? 'Ashby' : 'Greenhouse';
       return {
         success: false,
         matched: false,
         email: null,
         scannedCount: totalScanned,
-        errorMessage: `Greenhouse confirmation email not found in Gmail after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
+        errorMessage: `${atsLabel} confirmation email not found in Gmail after submission (${new Date(minTimeMs).toLocaleTimeString()} - ${new Date(maxTimeMs).toLocaleTimeString()}) for company "${companyName}".`,
         window: { minTimeIso, maxTimeIso, submissionTimeIso },
       };
     }
@@ -625,10 +725,14 @@ export async function queryGmailConfirmationEmail(
       to: fullTo,
       subject: fullSubject,
       received_at: receivedAtIso,
+      receivedTime: receivedAtIso,
       body_text: textContent || fullSubject,
+      bodyText: textContent || fullSubject,
       body_html: htmlContent || undefined,
       messageId: matchingMsg.messageId,
       message_id: matchingMsg.messageId,
+      snippet: textContent ? textContent.slice(0, 200) : undefined,
+      matchedAt: new Date().toISOString(),
     };
 
     return {
