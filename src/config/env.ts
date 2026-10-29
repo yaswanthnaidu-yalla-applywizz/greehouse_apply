@@ -250,6 +250,16 @@ const envSchema = z.object({
   /** ApplyWizz S3 Bucket Base URL for master resumes */
   APPLYWIZZ_S3_BASE_URL: z.string().default('https://applywizz-prod.s3.us-east-2.amazonaws.com'),
 
+  /** Enable stats rollup and working table pruning during ingestion (strictly configurable via env) */
+  ENABLE_STATS_ROLLUP: z.preprocess((val) => {
+    if (typeof val === 'string') {
+      const normalized = val.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1') return true;
+      if (normalized === 'false' || normalized === '0') return false;
+    }
+    return val;
+  }, z.boolean()),
+
   /** OpenRouter API Base URL */
   OPENROUTER_BASE_URL: z.string().default('https://openrouter.ai/api/v1'),
 
