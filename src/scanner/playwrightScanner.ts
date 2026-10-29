@@ -104,6 +104,23 @@ export function isZeroJobsExpiredPage(pageText: string, hasForm: boolean): boole
 }
 
 /**
+ * Checks if a Greenhouse job page represents an external-redirect or informational-only posting
+ * with no embedded application form or submit button (e.g., Merchants Fleet posting).
+ */
+export function isClosedJobNoEmbeddedForm(params: {
+  hasEmbeddedForm: boolean;
+  hasSubmitButton: boolean;
+  pageText?: string;
+}): boolean {
+  const { hasEmbeddedForm, hasSubmitButton, pageText = '' } = params;
+  if (hasEmbeddedForm || hasSubmitButton) return false;
+  if (/apply on (?:our )?(?:external )?(?:portal|website|careers site)|redirect(?:ed)? to apply/i.test(pageText)) {
+    return true;
+  }
+  return !hasEmbeddedForm && !hasSubmitButton;
+}
+
+/**
  * Utility to generate a randomized delay within [min, max] range.
  *
  * @param minMs - Minimum delay in milliseconds.
@@ -483,6 +500,15 @@ export class PlaywrightScanner {
       // Check for listing-page redirect with 0 jobs and no application form
       const formPresent = await page.$('form#application_form, form#app_form, form[action*="applications"]').catch(() => null);
       if (isZeroJobsExpiredPage(pageText, !!formPresent)) {
+        template.isExpired = true;
+        return template;
+      }
+
+      // Check for closed job / external link without embedded form or submit button
+      const submitBtnPresent = await page.$(
+        'button[type="submit"], input[type="submit"], #submit_app, button:has-text("Submit Application")'
+      ).catch(() => null);
+      if (isClosedJobNoEmbeddedForm({ hasEmbeddedForm: !!formPresent, hasSubmitButton: !!submitBtnPresent, pageText })) {
         template.isExpired = true;
         return template;
       }
