@@ -413,7 +413,13 @@ export async function getApplicationByCandidateAndJob(
 export async function updateResolvedFields(
   id: string,
   resolvedFields: any[],
-  extra?: { has_manual_edits?: boolean; reviewed_at?: string | null; job_url?: string; applywizz_id?: string }
+  extra?: {
+    has_manual_edits?: boolean;
+    reviewed_at?: string | null;
+    operator_approved_at?: string | null;
+    job_url?: string;
+    applywizz_id?: string;
+  }
 ): Promise<void> {
   const updatePayload: Record<string, any> = {
     resolved_fields: resolvedFields,
@@ -425,6 +431,9 @@ export async function updateResolvedFields(
   }
   if (extra?.reviewed_at !== undefined) {
     updatePayload.reviewed_at = extra.reviewed_at;
+  }
+  if (extra?.operator_approved_at !== undefined) {
+    updatePayload.operator_approved_at = extra.operator_approved_at;
   }
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);

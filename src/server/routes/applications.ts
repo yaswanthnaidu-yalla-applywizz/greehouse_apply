@@ -539,6 +539,7 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
       return;
     }
 
+    const operatorApprovedAt = new Date().toISOString();
     const saved = await upsertApplication({
       id: application?.id,
       applywizz_id: finalApplywizz,
@@ -549,12 +550,14 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
       resolved_fields: fieldsToSave,
       has_manual_edits: true,
       reviewed_at: new Date().toISOString(),
+      operator_approved_at: operatorApprovedAt,
     });
 
     if (saved?.id) {
       await updateResolvedFields(saved.id, fieldsToSave, {
         has_manual_edits: true,
         reviewed_at: new Date().toISOString(),
+        operator_approved_at: operatorApprovedAt,
         job_url: finalJobUrl,
         applywizz_id: finalApplywizz,
       });

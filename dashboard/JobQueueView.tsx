@@ -9,16 +9,14 @@
  * - V2-implementation.md (Phase V2-UI)
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { DifficultyBadge } from './components/DifficultyBadge.js';
-import { ProofViewer } from './components/ProofViewer.js';
 import type { CandidateDetail } from './types.js';
 import {
   candidateDetailMatchesSelection,
   filterOperatorApplicationJobs,
   filterJobsForCandidate,
-  isSkippedApplicationJob,
-  isUnresolvedApplicationJob,
+  isOperatorApprovedApplicationJob,
   jobCardCompanyLabel,
   jobCardTitleLabel,
 } from '../src/dashboard/candidateQueueFilter.js';
@@ -48,52 +46,6 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   onSelectJob,
   onOpenClientInfo,
 }) => {
-  const [proofViewerState, setProofViewerState] = useState<{
-    isOpen: boolean;
-    applicationId: string | null;
-    kind: 'web' | 'failed' | 'email';
-    metadata: {
-      candidateName?: string;
-      applywizzId?: string;
-      companyName?: string;
-      jobTitle?: string;
-      jobUrl?: string;
-      status?: string;
-    };
-  }>({
-    isOpen: false,
-    applicationId: null,
-    kind: 'web',
-    metadata: {},
-  });
-
-  const handleProofBadgeClick = (job: CandidateJob, kind: 'web' | 'failed') => {
-    const appId =
-      (job as any).id ||
-      (job as any).applicationId ||
-      (job as any).application_id ||
-      job.applywizzId ||
-      job.applywizz_id ||
-      selectedApplywizzId ||
-      candidate.applywizzId;
-
-    const jobUrl = job.canonicalUrl || job.rawUrl;
-
-    setProofViewerState({
-      isOpen: true,
-      applicationId: appId,
-      kind,
-      metadata: {
-        candidateName: candidate.clientName,
-        applywizzId: job.applywizzId || job.applywizz_id || selectedApplywizzId || candidate.applywizzId,
-        companyName: jobCardCompanyLabel(job),
-        jobTitle: jobCardTitleLabel(job),
-        jobUrl,
-        status: job.status,
-      },
-    });
-  };
-
   const queueJobs = useMemo(() => {
     if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
       return [];
@@ -258,90 +210,11 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                 </span>
 
                 <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                  {isSkippedApplicationJob(job) && (
-                    <span
-                      className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full"
-                      title="This job was intentionally skipped — open the card for the reason"
-                    >
-                      ⏭ Skipped
+                  {isOperatorApprovedApplicationJob(job) ? (
+                    <span className="text-[10px] font-mono text-[#30d158] font-semibold bg-[#30d158]/15 border border-[#30d158]/30 px-1.5 py-0.5 rounded-full">
+                      Submitted
                     </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && isUnresolvedApplicationJob(job) && (
-                    <span
-                      className="text-[10px] font-mono text-[#ff453a] font-semibold bg-[#ff453a]/15 border border-[#ff453a]/30 px-1.5 py-0.5 rounded-full"
-                      title="Resolver has not finished or required fields are still unresolved"
-                    >
-                      ⚠️ Unresolved
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'APPLIED' && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProofBadgeClick(job, 'web');
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleProofBadgeClick(job, 'web');
-                        }
-                      }}
-                      title="Click to view confirmation proof directly"
-                      className="text-[10px] font-mono text-[#30d158] font-semibold bg-[#30d158]/15 hover:bg-[#30d158]/25 border border-[#30d158]/30 px-1.5 py-0.5 rounded-full cursor-pointer transition-all"
-                    >
-                      ✅ Applied
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'APPLYING' && (
-                    <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full animate-pulse">
-                      ⏳ Submitting
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'DRY_RUN_COMPLETE' && (
-                    <span className="text-[10px] font-mono text-[#ffffff] font-semibold bg-[#3a3a3c] border border-[#48484a] px-1.5 py-0.5 rounded-full">
-                      🚀 Dry-Run
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'OTP_REQUIRED' && (
-                    <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full">
-                      🔒 OTP
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'FAILED' && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProofBadgeClick(job, 'failed');
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleProofBadgeClick(job, 'failed');
-                        }
-                      }}
-                      title="Click to view failure screenshot proof directly"
-                      className="text-[10px] font-mono text-[#ff453a] font-semibold bg-[#ff453a]/15 hover:bg-[#ff453a]/25 border border-[#ff453a]/30 px-1.5 py-0.5 rounded-full cursor-pointer transition-all"
-                    >
-                      ❌ Failed
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'READY_FOR_REVIEW' && (
-                    <span className="text-[10px] font-mono text-[#ffffff] font-semibold bg-[#3a3a3c] border border-[#48484a] px-1.5 py-0.5 rounded-full">
-                      Ready
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'EXPIRED' && (
-                    <span className="text-[10px] font-mono text-[#8e8e93] font-semibold bg-[#2c2c2e] border border-[#3a3a3c] px-1.5 py-0.5 rounded-full">
-                      Closed
-                    </span>
-                  )}
-                  {!isSkippedApplicationJob(job) && job.status === 'PENDING' && (
+                  ) : (
                     <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full">
                       Pending
                     </span>
@@ -353,14 +226,6 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
         })}
       </div>
 
-      <ProofViewer
-        isOpen={proofViewerState.isOpen}
-        onClose={() => setProofViewerState((prev) => ({ ...prev, isOpen: false }))}
-        applicationId={proofViewerState.applicationId}
-        kind={proofViewerState.kind}
-        title={proofViewerState.kind === 'failed' ? 'Failure Screenshot' : 'Application Verification Proof'}
-        metadata={proofViewerState.metadata}
-      />
     </div>
   );
 };

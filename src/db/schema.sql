@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS gh_candidate_applications (
     assigned_ca_email TEXT,                              -- Assigned Campus Ambassador email for user isolation
     has_manual_edits BOOLEAN DEFAULT false,              -- True if operator edited any field; prioritized to end of queue
     reviewed_at TIMESTAMPTZ,                             -- Timestamp when operator reviewed/edited
+    operator_approved_at TIMESTAMPTZ,                    -- Timestamp when an operator explicitly approved this application
     resolved_fields JSONB NOT NULL,                     -- Array<ResolvedField> snapshot
     proof_web_url TEXT,                                  -- Supabase Storage signed/public URL of confirmation screenshot
     proof_captured_at TIMESTAMPTZ,

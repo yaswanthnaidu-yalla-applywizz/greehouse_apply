@@ -148,6 +148,7 @@ export function serializeApplicationDto(
       : null;
   const hasManualEdits = Boolean(merged.has_manual_edits ?? merged.hasManualEdits ?? false);
   const reviewedAt = merged.reviewed_at || merged.reviewedAt || null;
+  const operatorApprovedAt = merged.operator_approved_at ?? merged.operatorApprovedAt ?? null;
   const submittedAt = merged.submitted_at || merged.submittedAt || null;
   const submissionOrder = merged.submission_order ?? merged.submissionOrder ?? null;
   const assignedCaEmail = resolveAssignedCaEmail(
@@ -201,6 +202,8 @@ export function serializeApplicationDto(
     hasManualEdits,
     reviewed_at: reviewedAt,
     reviewedAt,
+    operator_approved_at: operatorApprovedAt,
+    operatorApprovedAt,
     submitted_at: submittedAt,
     submittedAt,
     submission_order: submissionOrder,
