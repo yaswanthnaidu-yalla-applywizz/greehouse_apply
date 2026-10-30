@@ -305,9 +305,15 @@ export async function enqueueApplication(
   log.info(`[API] Status → QUEUED (application ${resolvedId}, submission_order=${nextOrder})`);
   await logQueueStatusChange(resolvedId, previousStatus, 'QUEUED');
   if (process.env.ENABLE_QUEUE_WORKER !== 'true') {
-    log.warn(
-      `[Queue] ENABLE_QUEUE_WORKER is not "true" — app ${resolvedId} will remain QUEUED until a submission worker runs`
-    );
+    if (process.env.INGEST_ONLY === 'true') {
+      log.debug(
+        `[Queue] INGEST_ONLY=true — app ${resolvedId} queued for background submission worker`
+      );
+    } else {
+      log.warn(
+        `[Queue] ENABLE_QUEUE_WORKER is not "true" — app ${resolvedId} will remain QUEUED until a submission worker runs`
+      );
+    }
   }
   return { submissionOrder: nextOrder, application: updatedApp };
 }

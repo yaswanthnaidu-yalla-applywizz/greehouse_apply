@@ -1441,6 +1441,28 @@ export async function runLiveSubmit(
       timeout: timeoutMs,
     });
 
+    // Check for blocking Cloudflare Turnstile / anti-bot challenge on page load
+    const turnstileFrame = page.locator(
+      'iframe[title*="Cloudflare"]:has-text("Verify you are human"), iframe[src*="challenges.cloudflare.com"], div#challenge-stage'
+    ).first();
+    if ((await turnstileFrame.count()) > 0 && (await turnstileFrame.isVisible().catch(() => false))) {
+      const skipReason = 'cloudflare_turnstile';
+      log.warn(`[Live Submit] 🛡️ Cloudflare Turnstile anti-bot challenge detected on ${targetUrl}. Marking SKIPPED.`);
+      if (application.id) {
+        await updateStatus(application.id, 'SKIPPED', {
+          error_message: 'Skipped due to Cloudflare Turnstile challenge block on job page',
+          error_details: { skipReason, stage: 'PREFLIGHT_CHALLENGE' },
+          job_url: application.job_url,
+        }).catch(() => {});
+      }
+      return {
+        success: false,
+        status: 'SKIPPED',
+        applicationId,
+        errorMessage: 'Skipped: Cloudflare Turnstile anti-bot challenge detected',
+      };
+    }
+
     try {
       const fillResult = await executeFormFill(page, application, options);
       fillSummary = fillResult.fillSummary;
