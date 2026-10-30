@@ -6,6 +6,22 @@ import { isSameApplywizzId } from './candidateQueueFilter.js';
 
 export type RealtimeApplicationRow = Record<string, unknown>;
 
+function parseTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export function shouldAcceptApplicationRealtimeRow(
+  previous: RealtimeApplicationRow,
+  incoming: RealtimeApplicationRow
+): boolean {
+  const previousTimestamp = parseTimestamp(previous.updated_at);
+  const incomingTimestamp = parseTimestamp(incoming.updated_at);
+  if (previousTimestamp === null || incomingTimestamp === null) return true;
+  return incomingTimestamp > previousTimestamp;
+}
+
 function urlsMatch(a: string, b: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
@@ -56,6 +72,7 @@ export function mergeApplicationFromRealtimeRow<T extends Record<string, unknown
   if (!applicationRowMatchesView(row, prev as { id?: string; jobUrl?: string; job_url?: string })) {
     return prev;
   }
+  if (!shouldAcceptApplicationRealtimeRow(prev, row)) return prev;
 
   const status = row.status as string | undefined;
   const errorMessage = (row.error_message as string | null | undefined) ?? undefined;
@@ -97,6 +114,7 @@ export function patchJobInCandidateDetail<
       canonicalUrl?: string;
       rawUrl?: string;
       status?: string;
+      updated_at?: string | null;
       error_message?: string | null;
     }>;
   }
@@ -117,9 +135,11 @@ export function patchJobInCandidateDetail<
     jobs: detail.jobs.map((job) => {
       const jobUrl = job.canonicalUrl || job.rawUrl || '';
       if (!urlsMatch(jobUrl, rowJob)) return job;
+      if (!shouldAcceptApplicationRealtimeRow(job, row)) return job;
       return {
         ...job,
         status: status ?? job.status,
+        updated_at: (row.updated_at as string | null | undefined) ?? job.updated_at,
         error_message: error_message ?? job.error_message,
       };
     }),

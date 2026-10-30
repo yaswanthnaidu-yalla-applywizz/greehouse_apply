@@ -156,6 +156,7 @@ export interface ApplicationRow {
   dry_run_screenshot_url?: string | null;
   has_manual_edits?: boolean;
   reviewed_at?: string | null;
+  operator_approved_at?: string | null;
   submitted_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -259,6 +260,8 @@ export interface ApplicationDto {
   hasManualEdits: boolean;
   reviewed_at: string | null;
   reviewedAt: string | null;
+  operator_approved_at: string | null;
+  operatorApprovedAt: string | null;
   submitted_at: string | null;
   submittedAt: string | null;
   submission_order?: number | null;

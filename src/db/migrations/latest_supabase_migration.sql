@@ -40,7 +40,8 @@ ALTER TABLE gh_candidate_applications
   ADD COLUMN IF NOT EXISTS proof_email_url TEXT,
   ADD COLUMN IF NOT EXISTS proof_email_captured_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS has_manual_edits BOOLEAN DEFAULT false,
-  ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS operator_approved_at TIMESTAMPTZ;
 
 -- Drop redundant template_id column if present (jobs identified by job_url)
 ALTER TABLE gh_candidate_applications

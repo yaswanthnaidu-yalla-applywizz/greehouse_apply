@@ -27,6 +27,7 @@ import { useCandidateApplicationsRealtime } from './hooks/useCandidateApplicatio
 import {
   mergeApplicationFromRealtimeRow,
   patchJobInCandidateDetail,
+  shouldAcceptApplicationRealtimeRow,
 } from '../src/dashboard/applicationRealtimeMerge.js';
 import {
   filterJobsForCandidate,
@@ -631,58 +632,66 @@ export const App: React.FC = () => {
     // back would requeue a submission a worker is still running.
     const persist = options.persist !== false;
 
-    setApplication((prev: any) => ({
-      ...prev,
-      status: newStatus,
-      error_message:
-        updatedPayload?.error_message ||
-        updatedPayload?.errorMessage ||
-        updatedPayload?.error ||
-        prev.error_message,
-      errorMessage:
-        updatedPayload?.error_message ||
-        updatedPayload?.errorMessage ||
-        updatedPayload?.error ||
-        prev.errorMessage,
-      proof_web_url:
-        updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || prev.proof_web_url,
-      proof_captured_at:
-        updatedPayload?.proofCapturedAt ||
-        updatedPayload?.proof_captured_at ||
-        prev.proof_captured_at,
-      proof_email_url:
-        updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proof_email_url,
-      proofEmailUrl:
-        updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proofEmailUrl,
-      proof_email_captured_at:
-        updatedPayload?.proofEmailCapturedAt ||
-        updatedPayload?.proof_email_captured_at ||
-        prev.proof_email_captured_at,
-      email_proof_status:
-        updatedPayload?.emailProofStatus ||
-        updatedPayload?.email_proof_status ||
-        prev.email_proof_status,
-      emailProofStatus:
-        updatedPayload?.emailProofStatus ||
-        updatedPayload?.email_proof_status ||
-        prev.emailProofStatus,
-      proof_email_json:
-        updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proof_email_json,
-      proofEmailJson:
-        updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proofEmailJson,
-      proof_failed_url:
-        updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proof_failed_url,
-      proofFailedUrl:
-        updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proofFailedUrl,
-      proof_failed_captured_at:
-        updatedPayload?.proofFailedCapturedAt ||
-        updatedPayload?.proof_failed_captured_at ||
-        prev.proof_failed_captured_at,
-      dry_run_screenshot_url:
-        updatedPayload?.screenshotUrl ||
-        updatedPayload?.dry_run_screenshot_url ||
-        prev.dry_run_screenshot_url,
-    }));
+    setApplication((prev: any) => {
+      if (!prev) return prev;
+      const incomingUpdatedAt = updatedPayload?.updated_at || updatedPayload?.updatedAt || null;
+      const incoming = { ...updatedPayload, status: newStatus, updated_at: incomingUpdatedAt };
+      if (!shouldAcceptApplicationRealtimeRow(prev, incoming)) return prev;
+
+      return {
+        ...prev,
+        status: newStatus,
+        ...(incomingUpdatedAt ? { updated_at: incomingUpdatedAt } : {}),
+        error_message:
+          updatedPayload?.error_message ||
+          updatedPayload?.errorMessage ||
+          updatedPayload?.error ||
+          prev.error_message,
+        errorMessage:
+          updatedPayload?.error_message ||
+          updatedPayload?.errorMessage ||
+          updatedPayload?.error ||
+          prev.errorMessage,
+        proof_web_url:
+          updatedPayload?.proofWebUrl || updatedPayload?.proof_web_url || prev.proof_web_url,
+        proof_captured_at:
+          updatedPayload?.proofCapturedAt ||
+          updatedPayload?.proof_captured_at ||
+          prev.proof_captured_at,
+        proof_email_url:
+          updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proof_email_url,
+        proofEmailUrl:
+          updatedPayload?.proofEmailUrl || updatedPayload?.proof_email_url || prev.proofEmailUrl,
+        proof_email_captured_at:
+          updatedPayload?.proofEmailCapturedAt ||
+          updatedPayload?.proof_email_captured_at ||
+          prev.proof_email_captured_at,
+        email_proof_status:
+          updatedPayload?.emailProofStatus ||
+          updatedPayload?.email_proof_status ||
+          prev.email_proof_status,
+        emailProofStatus:
+          updatedPayload?.emailProofStatus ||
+          updatedPayload?.email_proof_status ||
+          prev.emailProofStatus,
+        proof_email_json:
+          updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proof_email_json,
+        proofEmailJson:
+          updatedPayload?.proofEmailJson || updatedPayload?.proof_email_json || prev.proofEmailJson,
+        proof_failed_url:
+          updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proof_failed_url,
+        proofFailedUrl:
+          updatedPayload?.proofFailedUrl || updatedPayload?.proof_failed_url || prev.proofFailedUrl,
+        proof_failed_captured_at:
+          updatedPayload?.proofFailedCapturedAt ||
+          updatedPayload?.proof_failed_captured_at ||
+          prev.proof_failed_captured_at,
+        dry_run_screenshot_url:
+          updatedPayload?.screenshotUrl ||
+          updatedPayload?.dry_run_screenshot_url ||
+          prev.dry_run_screenshot_url,
+      };
+    });
 
     if (candidateDetail && selectedJobUrl) {
       const updatedJobs = candidateDetail.jobs.map((j) => {
@@ -691,7 +700,16 @@ export const App: React.FC = () => {
             updatedPayload?.error_message ||
             updatedPayload?.errorMessage ||
             updatedPayload?.error;
-          return { ...j, status: newStatus, error_message: err ?? j.error_message };
+          const incomingUpdatedAt = updatedPayload?.updated_at || updatedPayload?.updatedAt || null;
+          if (!shouldAcceptApplicationRealtimeRow(j, { ...updatedPayload, updated_at: incomingUpdatedAt })) {
+            return j;
+          }
+          return {
+            ...j,
+            status: newStatus,
+            ...(incomingUpdatedAt ? { updated_at: incomingUpdatedAt } : {}),
+            error_message: err ?? j.error_message,
+          };
         }
         return j;
       });
