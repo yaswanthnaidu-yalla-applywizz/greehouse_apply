@@ -1076,6 +1076,8 @@ _Last updated: 2026-10-07_
 - **Demo job scores:** Akshitha fixture jobs use scores 90–95; dashboard score filter (20–60) is bypassed for pinned demo IDs only
 - **E2E integration** (`npm test`): 28/32 checkpoints pass locally; Tier 1 “Email” resolution assertions fail while dry-run still fills email via `company_email` — investigate resolver profile/email mapping, not a dashboard blocker
 - Local dev defaults LLM to **Ollama** (`llama3.1:latest`) — will fail silently if Ollama isn't running; override with `LLM_PROVIDER=openrouter`
+- **FIXED (2026-10-30):** Operator job cards now render only `Submitted` or `Pending`. The decision uses persisted operator approval (`reviewed_at`) and no longer exposes transient submission labels.
+- **FIXED (2026-10-30):** Choice-field hydration no longer invents `Yes`/`No` when scanned options are absent, preventing city/location questions from receiving boolean dropdown choices.
 - `RAILWAY_ENV=true` must be set on Railway or headful Playwright will try to open a display and fail
 - `candidate_resume_parsed` is parsed once and cached; if resume changes, the old parse is stale — no auto-invalidation
 - The `< 35` field count filter runs at scan/resolve time (`MAX_JOB_QUESTIONS=35`); over-cap jobs persist as `SKIPPED` (migration 014). Changing the cap requires re-resolve for already-SKIPPED rows
@@ -1090,3 +1092,21 @@ _Last updated: 2026-10-07_
 - **Pre-launch audit risk — status persistence errors are swallowed in submission routes:** RETRY/FAILED writes can fail while the route returns a status response, leaving the database row in its earlier state; route-level APPLIED writes are redundant with the submit helpers' persisted APPLIED transition.
 - **Pre-launch audit risk — automatic status pushes are not delivered:** worker status transitions bypass the route-level WebSocket broadcaster, and the legacy Supabase listener targets `candidate_applications` instead of the published `gh_candidate_applications` table; the active badge refreshes by polling.
 - **Pre-launch audit risk — production mode and CORS depend on exact environment values:** `NODE_ENV` defaults to development, allowing the internal-secret middleware's development bypass when unset; `ALLOWED_ORIGINS` is split without trimming, so whitespace after commas prevents matching.
+### Operator Approval Labels & Choice Metadata Integrity (2026-10-30 Implemented)
+- [x] **Operator-only job-card state:** Added `operator_approved_at` through the application schema, DTOs, approve route, candidate queue payload, and card projection. Job cards now render only `Submitted` when explicitly approved and `Pending` otherwise; execution `status` no longer controls those labels.
+- [x] **Stale-status protection:** Added timestamp-ordered application merges for realtime, polling, and local status updates so an older `APPLYING` event cannot overwrite a newer `APPLIED` state.
+- [x] **Choice metadata integrity:** Separated persisted scanned options from resolver-inferred prompt options, removed broad “do you” Yes/No inference, and limited Ashby Yes/No detection to fields containing a complete Yes/No pair.
+- [x] **Read-only audit:** Added `scripts/auditChoiceMetadata.ts` with chunked reads and binary-question classification. Audit found 6 existing non-binary rows with Yes/No metadata; no production data was changed.
+- [x] **Verification:** `npm run typecheck`, `npm run test:unit`, targeted regression tests, and `npm run build` pass.
+- [x] **Operational follow-up:** Applied migration `045_add_operator_approved_at.sql` to the configured production database and verified the application API can read the new column.
+- [x] **Historical cleanup:** Ran the parameterized repair utility against the six audited rows. False Yes/No options are removed; invalid city/location values are blanked and marked unresolved. Post-write audit now reports 0 invalid rows.
+
+
+# Current Session Update (2026-10-30 - Greenhouse Failure Hardening)
+
+- **FIXED:** Optional Greenhouse resume fields are still resolved and uploaded when the form requires either a resume or LinkedIn profile.
+- **FIXED:** Greenhouse phone submission honors candidate country/calling code metadata instead of forcing US formatting and country selection.
+- **FIXED:** Required-field submission now has a Greenhouse DOM commitment/HTML validity gate, preventing confirmation timeouts caused by blocked client validation.
+- **FIXED:** Greenhouse post-submit detection recognizes modern alert/live-region error surfaces; scanner follows embedded Greenhouse application iframes on marketing pages.
+- **FIXED:** Failure diagnostics preserve short numeric choice IDs while redacting phone-shaped values, and missing-resume storage failures map to actionable operator copy.
+- Verification passed: 50 focused Vitest tests, 13 focused Node tests, and root/dashboard typecheck.
