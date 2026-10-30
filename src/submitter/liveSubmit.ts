@@ -78,6 +78,7 @@ import type { SubmissionRetryReason } from './submissionRetry.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { captureFailureDiagnostics } from './domFailureCapture.js';
 import { browserManager, type ManagedBrowser } from './browserManager.js';
+import { validateGreenhouseSubmission } from './greenhouseValidation.js';
 
 const log = createLogger('Live Submit');
 const RESUMES_BUCKET = 'resumes';
@@ -485,6 +486,10 @@ export async function detectFormFillingErrors(
       '.flash-error',
       '.validation-error',
       '[aria-invalid="true"]',
+      '[role="alert"]',
+      '[aria-live="assertive"]',
+      '[data-testid*="error" i]',
+      '[class*="field-error" i]',
       'span.error:not(:empty)',
       'div.error:not(:empty)',
       'p.error:not(:empty)',
@@ -1467,6 +1472,37 @@ export async function runLiveSubmit(
       const fillResult = await executeFormFill(page, application, options);
       fillSummary = fillResult.fillSummary;
       application = fillResult.freshApplication;
+
+      const submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
+      if (!submissionGate.ok) {
+        const requiredFieldsError = `Required fields not committed: ${submissionGate.failure.fields
+          .map((field) => `${field.label} (${field.message})`)
+          .join(', ')}`;
+        log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
+        await emitFailureDiagnostic({
+          category: 'SUBMIT_REQUIRED_FIELD_EMPTY',
+          stage: 'form_validation',
+          reason: requiredFieldsError,
+          isTerminal: false,
+          isRetryable: false,
+          applicationId: application.id || applicationId,
+          jobUrl: targetUrl,
+        });
+        if (application.id) {
+          await updateStatus(application.id, 'FAILED', {
+            error_message: requiredFieldsError,
+            job_url: application.job_url,
+          }).catch(() => {});
+        }
+        return {
+          success: false,
+          status: 'FAILED',
+          applicationId,
+          errorMessage: requiredFieldsError,
+          retryReason: 'UNRESOLVED_REQUIRED_FIELD',
+          summary: fillSummary,
+        };
+      }
 
       if (fillResult.unfilledRequiredLabels.length > 0) {
         const requiredFieldsError = `Required fields not filled: ${fillResult.unfilledRequiredLabels.join(', ')}`;

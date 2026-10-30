@@ -75,7 +75,7 @@ const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const bearerPattern = /\bBearer\s+\S+/gi;
 const secretPattern = /\b(?:sk-[A-Z0-9_-]{8,}|eyJ[A-Z0-9_-]{20,}|sb_(?:secret|publishable)_[A-Z0-9_-]{8,})\b/gi;
 const urlPattern = /\bhttps?:\/\/[^\s"'<>]+/gi;
-const phonePattern = /(?<!\w)\+?\d[\d ().-]{7,}\d(?!\w)/g;
+const phonePattern = /(?<!\w)\+?[\d ().-]{8,}\d(?!\w)/g;
 const otpValuePattern = /\b((?:otp|one[-\s]?time(?: password)?|verification|security)\s*(?:code|token)?\s*(?:is|:|=)\s*)[A-Z0-9]{4,12}\b/gi;
 const quotedValuePattern = /\b(?:answer|value|token|code)\s*[:=]\s*(['"])[\s\S]*?\1/gi;
 
@@ -85,7 +85,10 @@ function sanitizeText(value: string, maxLength: number): string {
     .replace(bearerPattern, 'Bearer [REDACTED]')
     .replace(secretPattern, '[REDACTED_SECRET]')
     .replace(urlPattern, (match) => sanitizeJobUrlRef(match) || '[REDACTED_URL]')
-    .replace(phonePattern, '[REDACTED_PHONE]')
+    .replace(phonePattern, (match) => {
+      const digitCount = (match.match(/\d/g) || []).length;
+      return digitCount >= 10 ? '[REDACTED_PHONE]' : match;
+    })
     .replace(otpValuePattern, '$1[REDACTED]')
     .replace(quotedValuePattern, '[REDACTED_VALUE]')
     .replace(/[\r\n\t]+/g, ' ')
