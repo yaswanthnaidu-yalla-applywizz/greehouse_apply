@@ -7,6 +7,7 @@ import {
   LLMSynthesizer,
   LLM_MIN_CONFIDENCE,
   getEffectiveFieldOptions,
+  getPersistedFieldOptions,
   isRichEeocIdentityQuestion,
   getLlmProviderErrorDiagnostics,
   type BatchQuestion,
@@ -238,7 +239,7 @@ export async function resolveTier5(
         resolvedByTier: 5,
         confidence,
         isRequired: Boolean(field.isRequired),
-        ...(effectiveOptions ? { options: effectiveOptions } : {}),
+        ...(getPersistedFieldOptions(field) ? { options: getPersistedFieldOptions(field) } : {}),
       };
 
       // Write-back to persistent candidate QA bank
@@ -449,7 +450,7 @@ export async function resolveTier5Batch(
         resolvedByTier: 5,
         confidence,
         isRequired: Boolean(field.isRequired),
-        ...(effectiveOptions ? { options: effectiveOptions } : {}),
+        ...(getPersistedFieldOptions(field) ? { options: getPersistedFieldOptions(field) } : {}),
       };
 
       try {

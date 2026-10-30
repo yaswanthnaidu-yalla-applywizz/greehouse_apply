@@ -873,6 +873,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
         companyName: application.company_name || 'Greenhouse Company',
         jobTitle: application.job_title || 'Job Opening',
         status: jobStatus,
+        operator_approved_at: application.operator_approved_at ?? null,
+        updated_at: application.updated_at ?? null,
         error_message: application.error_message ?? null,
         fieldsCount,
         resolved_fields: enrichResolvedFieldsWithTemplateOptions(application.resolved_fields, template),

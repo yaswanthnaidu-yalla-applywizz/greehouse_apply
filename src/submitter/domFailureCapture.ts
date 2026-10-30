@@ -17,7 +17,9 @@ export async function captureFailureDiagnostics(page: Page): Promise<FailureDiag
 
   // Collect inline field errors
   const failingFields = await page
-    .$$eval('.field-error, [class*="error-message"], [aria-invalid="true"]', (els: any[]) =>
+    .$$eval(
+      '.field-error, [class*="error-message"], [class*="field-error" i], [role="alert"], [aria-live="assertive"], [data-testid*="error" i], [aria-invalid="true"]',
+      (els: any[]) =>
       els
         .map((el) => {
           const dataField = el.closest?.('[data-field]')?.getAttribute?.('data-field');

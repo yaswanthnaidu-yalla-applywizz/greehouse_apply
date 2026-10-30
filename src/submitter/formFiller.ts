@@ -38,6 +38,8 @@ export interface FormFillerOptions {
   maxCascadeCycles?: number;
   /** Max time allowed for cascade resolution in ms (default: 2000) */
   maxCascadeTimeoutMs?: number;
+  phoneCountry?: string;
+  phoneCountryCode?: string;
 }
 
 export interface FieldFillResult {
@@ -50,6 +52,7 @@ export interface FieldFillResult {
   source?: ResolvedField['source'];
   skippedRequired?: boolean;
   success: boolean;
+  domCommitted?: boolean;
   error?: string;
 }
 
@@ -680,14 +683,47 @@ async function fillSearchableSelectInput(
   return selected;
 }
 
-export function sanitizePhoneNumberForSubmission(phone: string): string {
+export function sanitizePhoneNumberForSubmission(phone: string, countryCode = '+1'): string {
   if (!phone) return phone;
   const digits = phone.replace(/\D/g, '');
-  // Only strip US prefix (+1 / 1) if there are 11 or more digits, so at least 10 digits remain
-  if (digits.length >= 11 && (phone.trim().startsWith('+1') || phone.trim().startsWith('1'))) {
+  const normalizedCode = countryCode.trim().replace(/\s/g, '');
+  const codeDigits = normalizedCode.replace(/\D/g, '');
+  if (normalizedCode === '+1' && digits.length >= 11 && digits.startsWith('1')) {
     return phone.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
   }
+  if (codeDigits && normalizedCode !== '+1' && digits.startsWith(codeDigits) && digits.length > codeDigits.length + 7) {
+    const withoutCallingCode = digits.slice(codeDigits.length);
+    if (normalizedCode === '+1' && withoutCallingCode.length >= 10) {
+      return withoutCallingCode;
+    }
+    return withoutCallingCode;
+  }
   return phone.replace(/^\+/, '').replace(/\s+/g, ' ').trim();
+}
+
+export function resolvePhoneCountrySelection(
+  country?: string | null,
+  countryCode?: string | null
+): { country: string; dialCode: string; iso2: string } {
+  const normalizedCountry = (country || '').trim().toLowerCase();
+  const normalizedCode = (countryCode || '').trim().replace(/\s/g, '');
+  const known: Record<string, { country: string; dialCode: string; iso2: string }> = {
+    '+1': { country: 'United States', dialCode: '+1', iso2: 'us' },
+    '+44': { country: 'United Kingdom', dialCode: '+44', iso2: 'gb' },
+    '+91': { country: 'India', dialCode: '+91', iso2: 'in' },
+    '+353': { country: 'Ireland', dialCode: '+353', iso2: 'ie' },
+    '+31': { country: 'Netherlands', dialCode: '+31', iso2: 'nl' },
+    '+61': { country: 'Australia', dialCode: '+61', iso2: 'au' },
+    '+1-ca': { country: 'Canada', dialCode: '+1', iso2: 'ca' },
+  };
+  if (normalizedCountry.includes('canada')) return known['+1-ca'];
+  if (known[normalizedCode]) return known[normalizedCode];
+  if (normalizedCountry.includes('united kingdom') || normalizedCountry === 'uk') return known['+44'];
+  if (normalizedCountry.includes('india')) return known['+91'];
+  if (normalizedCountry.includes('ireland')) return known['+353'];
+  if (normalizedCountry.includes('netherlands')) return known['+31'];
+  if (normalizedCountry.includes('australia')) return known['+61'];
+  return known['+1'];
 }
 
 function normalizeBooleanValue(value: string): 'Yes' | 'No' | null {
@@ -762,8 +798,9 @@ export function computeForcedCountryValue(params: {
   name: string;
   label: string;
   rawType: string;
+  targetCountry?: string;
 }): string | null {
-  const { val, fieldId, name, label, rawType } = params;
+  const { val, fieldId, name, label, rawType, targetCountry } = params;
   if (val) return null;
   if (!/country/i.test(label)) return null;
   if (!['text', 'select', 'radio', 'location_autocomplete'].includes(rawType)) return null;
@@ -771,7 +808,7 @@ export function computeForcedCountryValue(params: {
   const isPhoneSection = isPhoneCountrySectionSelect(val, fieldId, name, rawType);
   // Force-fill when: not a country-code field, OR it's the specific phone-section country select
   if (!isCountryCodeFieldLocal || isPhoneSection) {
-    return 'United States';
+    return targetCountry || 'United States';
   }
   return null;
 }
@@ -1089,7 +1126,14 @@ export async function fillSingleField(
     }
   }
 
-  const forcedCountry = computeForcedCountryValue({ val, fieldId, name, label, rawType });
+  const forcedCountry = computeForcedCountryValue({
+    val,
+    fieldId,
+    name,
+    label,
+    rawType,
+    targetCountry: options.phoneCountry,
+  });
   if (forcedCountry) {
     val = forcedCountry;
     log.info(`Country field empty — fallback setting United States for field=${label}`);
@@ -1105,6 +1149,7 @@ export async function fillSingleField(
     isRequired: field.isRequired,
     source: field.source,
     success: false,
+    domCommitted: false,
   };
   if (skipOptional) {
     fillResult.success = true;
@@ -1121,7 +1166,7 @@ export async function fillSingleField(
 
   // Strip +1 country code prefix from US phone numbers when safe
   if (fieldId === 'phone' || name === 'phone' || /phone/i.test(label)) {
-    val = sanitizePhoneNumberForSubmission(val);
+    val = sanitizePhoneNumberForSubmission(val, options.phoneCountryCode || '+1');
     fillResult.valuePopulated = val;
   }
 
@@ -1257,8 +1302,9 @@ export async function fillSingleField(
       let selectValue = booleanValue || val;
 
       // Special resolution for country code dropdown (phone country) - strictly +1 (United States)
-      let targetCountryName = 'United States';
-      let targetDialCode = '+1';
+      const phoneCountry = resolvePhoneCountrySelection(options.phoneCountry, options.phoneCountryCode);
+      let targetCountryName = phoneCountry.country;
+      let targetDialCode = phoneCountry.dialCode;
       if (isCountryCode) {
         selectValue = targetCountryName;
       }
@@ -1856,12 +1902,8 @@ export async function fillSingleField(
           await targetOption.click({ timeout: 2500 }).catch(() => {});
           fillResult.success = true;
         } else {
-          // If no option clicked, trigger ArrowDown and Enter to commit active highlighted option
-          await page.keyboard.press('ArrowDown').catch(() => {});
-          await page.waitForTimeout(100);
-          await page.keyboard.press('Enter').catch(() => {});
-          await page.keyboard.press('Tab').catch(() => {});
-          fillResult.success = true;
+          fillResult.success = false;
+          fillResult.error = `Location option "${val}" was not committed`;
         }
       } else {
         throw new Error(`Location autocomplete input not found for ${name}`);
@@ -2043,9 +2085,13 @@ export async function fillSingleField(
             /phone|mobile/i.test(fieldId);
           if (isPhoneField) {
             try {
-              const targetCountryCode = 'us';
-              const targetCountry = 'United States';
-              const targetDial = '+1';
+              const phoneCountry = resolvePhoneCountrySelection(
+                options.phoneCountry,
+                options.phoneCountryCode
+              );
+              const targetCountryCode = phoneCountry.iso2;
+              const targetCountry = phoneCountry.country;
+              const targetDial = phoneCountry.dialCode;
 
               // 1. Try intl-tel-input JavaScript instance
               await found.locator.evaluate((el: HTMLInputElement, code: string) => {
@@ -2114,7 +2160,8 @@ export async function fillSingleField(
                 const btnText = (await flagBtn.innerText().catch(() => '')) || '';
                 const combinedStatus = `${titleText} ${ariaLabel} ${btnText}`.toLowerCase();
 
-                const alreadyMatches = combinedStatus.includes('united states') || combinedStatus.includes('+1');
+                const alreadyMatches =
+                  combinedStatus.includes(targetCountry.toLowerCase()) || combinedStatus.includes(targetDial);
 
                 if (!alreadyMatches) {
                   log.debug(`[Form Filler] 📞 Setting intl-tel-input country to United States (+1)`);
@@ -2123,8 +2170,8 @@ export async function fillSingleField(
 
                   const countryItem = page.locator(
                     `li.iti__country[data-country-code="${targetCountryCode}"], ` +
-                    `li.iti__country[data-dial-code="1"], ` +
-                    `li.iti__country:has-text("United States")`
+                    `li.iti__country[data-dial-code="${targetDial.replace(/^\+/, '')}"], ` +
+                    `li.iti__country:has-text("${targetCountry}")`
                   ).first();
 
                   if ((await countryItem.count()) > 0) {
@@ -2160,6 +2207,7 @@ export async function fillSingleField(
     }
   }
 
+  fillResult.domCommitted = fillResult.success && !fillResult.skippedRequired;
   return fillResult;
 }
 
@@ -2223,6 +2271,11 @@ export async function fillForm(
     log.warn(`[Form Filler] ⚠️ Could not load profile for resume filename: ${profileErr.message}`);
   }
   const resumeFilename = buildResumeFilename(profile, companyName, jobTitle);
+  const fillerOptions: FormFillerOptions = {
+    ...options,
+    phoneCountry: options.phoneCountry || profile?.country || undefined,
+    phoneCountryCode: options.phoneCountryCode || profile?.country_code || undefined,
+  };
 
   // Normalize resolved fields array
   const rawFields = appObj.resolved_fields || appObj.resolvedFields || [];
@@ -2268,7 +2321,7 @@ export async function fillForm(
         field,
         applywizzId,
         tempFilesToClean,
-        options,
+        fillerOptions,
         resumeFilename
       );
       results.push(fillRes);
@@ -2340,7 +2393,7 @@ export async function fillForm(
           resolved,
           applywizzId,
           tempFilesToClean,
-          options,
+          fillerOptions,
           resumeFilename
         );
         results.push(fillRes);
@@ -2380,7 +2433,7 @@ export async function fillForm(
         retryField,
         applywizzId,
         tempFilesToClean,
-        options,
+        fillerOptions,
         resumeFilename
       );
     }
@@ -2495,7 +2548,10 @@ export async function fillForm(
         if (!currentVal || currentVal.trim() === '') {
           let phoneVal = profile?.phone || '';
           if (phoneVal) {
-            phoneVal = phoneVal.replace(/^\+?1[\s.-]*/, '').replace(/^\+/, '').replace(/\s+/g, ' ').trim();
+            phoneVal = sanitizePhoneNumberForSubmission(
+              phoneVal,
+              options.phoneCountryCode || profile?.country_code || '+1'
+            );
             log.info(`[Form Filler] 🛡️ Safety Sweep: Populating empty Phone with "${phoneVal}"`);
             await phoneLoc.fill(phoneVal);
             await phoneLoc.evaluate((el: HTMLInputElement) => {
