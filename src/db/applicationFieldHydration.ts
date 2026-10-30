@@ -12,10 +12,7 @@ const log = createLogger('Application Field Hydration');
 
 export function scannedFieldsToResolvedShells(fields: ScannedField[]): ResolvedField[] {
   return fields.map((f) => {
-    const isBool = /\b(do you|are you|have you|will you|can you|would you|is your|were you|did you)\b/i.test(f.label || '');
-    const options = (Array.isArray(f.options) && f.options.length > 0)
-      ? f.options
-      : ((f.type === 'select' || f.type === 'radio') && isBool ? ['Yes', 'No'] : undefined);
+    const options = Array.isArray(f.options) && f.options.length > 0 ? f.options : undefined;
     return {
       fieldId: f.fieldId,
       name: f.name,
@@ -78,13 +75,8 @@ export async function hydrateApplicationResolvedFields(
         typeof schemaField?.optionsComplete === 'boolean' &&
         f.optionsComplete !== schemaField.optionsComplete;
       if (needsOptions || completenessChanged || metadataChanged) {
-        const isBool = /\b(do you|are you|have you|will you|can you|would you|is your|were you|did you)\b/i.test(
-          f.label || ''
-        );
         const options = needsOptions && schemaField && Array.isArray(schemaField.options) && schemaField.options.length > 0
             ? schemaField.options
-            : needsOptions && isBool
-            ? ['Yes', 'No']
             : undefined;
         enriched = true;
         return {

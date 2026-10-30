@@ -23,7 +23,7 @@ import { resolveTier2 } from './tier2ResumeParse.js';
 import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getSessionLlmMetrics, resetSessionLlmMetrics } from './tier5LLM.js';
-import { getEffectiveFieldOptions } from './llmSynthesizer.js';
+import { getEffectiveFieldOptions, getPersistedFieldOptions } from './llmSynthesizer.js';
 import { normalizeText } from './fingerprint.js';
 import { isPhoneNumberField, resumeAnswerMatchesPhone } from './candidateEvidence.js';
 import { matchCorporatePolicy, enforceCorporatePolicy } from './corporatePolicies.js';
@@ -107,7 +107,7 @@ function profileIndicatesUsLocation(profile: ProfileRow | null): boolean {
 }
 
 function getFieldOptions(field: ScannedField): string[] | undefined {
-  return getEffectiveFieldOptions(field);
+  return getPersistedFieldOptions(field);
 }
 
 export function isUnsupportedUuidAnswer(field: ScannedField, answer: string): boolean {
@@ -118,6 +118,16 @@ export function isUnsupportedUuidAnswer(field: ScannedField, answer: string): bo
   return !/\b(?:uuid|unique id|unique identifier|candidate id|application id|employee id|reference id|tracking id|id number)\b/i.test(
     `${field.label} ${field.name} ${field.fieldId}`
   );
+}
+
+/**
+ * Attachment fields are submission obligations even when Greenhouse describes
+ * them as optional alternatives, such as "LinkedIn Profile or Resume".
+ * Ordinary optional questions must continue to bypass the resolver waterfall.
+ */
+export function isAttachmentObligation(field: ScannedField): boolean {
+  const combined = `${field.fieldId} ${field.name} ${field.label}`;
+  return field.type === 'file' && /resume|curriculum vitae|\bcv\b/i.test(combined) && !/cover\s*letter|cover_letter/i.test(combined);
 }
 
 export function isSchoolField(field: ScannedField): boolean {
@@ -149,10 +159,12 @@ export function alignResolvedChoice(
   resolved: ResolvedField,
   effectiveOptions?: string[]
 ): ResolvedField {
-  const options = effectiveOptions || getFieldOptions(field) || resolved.options;
+  const options = effectiveOptions || getEffectiveFieldOptions(field) || field.options;
+  const persistedOptions = getPersistedFieldOptions(field);
+  const { options: _inferredOptions, ...resolvedWithoutOptions } = resolved;
   const baseWithOptions = {
-    ...resolved,
-    ...(options ? { options } : {}),
+    ...resolvedWithoutOptions,
+    ...(persistedOptions ? { options: persistedOptions } : {}),
     ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
     ...(field.metadata ? { metadata: field.metadata } : {}),
   };
@@ -513,7 +525,8 @@ export class AnswerResolver {
       jobContext?: { companyName: string; jobTitle: string };
     }
   ): Promise<ResolvedField> {
-    if (!Boolean(field.isRequired || (field as any).required || (field as any).is_required)) return this.blankOptionalField(field);
+    const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+    if (!isRequired && !isAttachmentObligation(field)) return this.blankOptionalField(field);
     const resolved = await this.resolveFieldRaw(applywizzId, field, context);
     const aligned = alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field));
     return enforceCorporatePolicy(field, aligned);
@@ -866,7 +879,7 @@ export class AnswerResolver {
     const tier5Slots: number[] = [];
 
     for (const field of template.fields) {
-      if (!Boolean(field.isRequired || (field as any).required || (field as any).is_required)) {
+      if (!Boolean(field.isRequired || (field as any).required || (field as any).is_required) && !isAttachmentObligation(field)) {
         resolvedFields.push(this.blankOptionalField(field));
         continue;
       }
@@ -910,7 +923,7 @@ export class AnswerResolver {
           const alignedTier5 = alignResolvedChoice(
             chunkFields[i],
             tier5,
-            tier5.options || getEffectiveFieldOptions(chunkFields[i])
+            getEffectiveFieldOptions(chunkFields[i])
           );
           resolvedFields[chunkSlots[i]] = alignedTier5;
         }

@@ -207,6 +207,11 @@ export function getEffectiveFieldOptions(field: ScannedField): string[] | undefi
   return undefined;
 }
 
+/** Options safe to persist into ResolvedField metadata: only options observed by the scanner. */
+export function getPersistedFieldOptions(field: ScannedField): string[] | undefined {
+  return field.options && field.options.length > 0 ? field.options : undefined;
+}
+
 export function isBinaryYesNoQuestion(field: ScannedField): boolean {
   const label = field.label || '';
   const combined = `${label} ${field.name || ''} ${field.fieldId || ''}`;

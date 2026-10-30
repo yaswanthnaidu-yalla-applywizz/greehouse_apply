@@ -25,3 +25,28 @@ test('Ashby scans required and optional questions from the application DOM', asy
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('Ashby does not let a partial Yes marker override a real location select', async () => {
+  const server = http.createServer((_request, response) => {
+    response.setHeader('content-type', 'text/html');
+    response.end(`<html><head><title>Engineer @ Example</title></head><body>
+      <div data-field-path="location_question">
+        <label>What city do you live in?</label>
+        <button data-option="yes" hidden>Yes</button>
+        <select><option>New York</option><option>London</option></select>
+      </div>
+    </body></html>`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const template = await scanAshbyJob(`http://127.0.0.1:${address.port}/example/job`);
+    const field = template.fields.find((candidate) => candidate.fieldId === 'location_question');
+    assert.ok(field);
+    assert.equal(field.type, 'select');
+    assert.deepEqual(field.options, ['New York', 'London']);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
