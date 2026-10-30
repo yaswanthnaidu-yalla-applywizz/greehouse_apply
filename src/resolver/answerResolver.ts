@@ -1207,9 +1207,10 @@ export class AnswerResolver {
               `[Answer Resolver] Application resolved: ${app.applywizzId} [${persistJobUrl}] - ${app.companyName || 'Unknown'} (${questionCount} questions, status: ${persistedApplication.status})`
             );
 
-            if (resolvedCount % 50 === 0 || resolvedCount === tasks.length) {
+            if (resolvedCount % 25 === 0 || resolvedCount === tasks.length) {
+              const unresolvedOrFailed = totalUnsuccessful + stats.failed;
               log.info(
-                `[Answer Resolver] Progress: ${resolvedCount}/${tasks.length} applications resolved (${totalSuccessful} fully resolved)`
+                `[Answer Resolver] Progress: ${resolvedCount}/${tasks.length} resolved | Success: ${totalSuccessful}, Unresolved/Failed: ${unresolvedOrFailed}`
               );
             }
           } catch (dbErr: any) {
