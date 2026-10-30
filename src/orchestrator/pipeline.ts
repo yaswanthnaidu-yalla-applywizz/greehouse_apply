@@ -233,8 +233,10 @@ export class V1Pipeline {
       let scannedCount = 0;
       let scanFailures = 0;
       const reportScanProgress = (): void => {
-        if (scannedCount === uniqueUrls.length || scannedCount % 50 === 0) {
-          log.info(`[Pipeline Phase B] Scanned ${scannedCount}/${uniqueUrls.length} job URLs (Greenhouse + Ashby, failed: ${scanFailures}).`);
+        if (scannedCount === uniqueUrls.length || scannedCount % 25 === 0) {
+          log.info(
+            `[Pipeline Phase B] Progress: ${scannedCount}/${uniqueUrls.length} scanned | Success: ${scannedCount - scanFailures}, Failed: ${scanFailures}`
+          );
         }
       };
       try {

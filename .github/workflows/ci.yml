@@ -85,6 +85,7 @@ jobs:
         env:
           FORCE_MEMORY_DB: 'true'
           NODE_ENV: test
+          ENABLE_STATS_ROLLUP: 'false'
 
   container-build:
     name: Container Build
