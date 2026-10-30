@@ -958,3 +958,4 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-10-30 13:34 [greehouse_apply] checkpoint: appended worktree updates to change report; no new observations
 
 2026-10-30 14:13 [greehouse_apply] session-start scan: files=7 parsed=7 principles=unparsed2026-10-30 session-checkpoint: remediation applied for form-filler checkbox regression, dead dashboard badges, audit-script ignore rule, and targeted EOL cleanup; focused tests and root/dashboard typecheck passed; no files staged or committed
+2026-10-30 14:45 [greehouse_apply] session-start scan: files=7 parsed=7 principles=unparsed
