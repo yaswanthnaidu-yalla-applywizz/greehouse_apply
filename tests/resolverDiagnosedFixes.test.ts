@@ -2,6 +2,7 @@ import type { ProfileRow } from '../src/db/profiles.js';
 import { scannedFieldsToResolvedShells } from '../src/db/applicationFieldHydration.js';
 import {
   isUnsupportedUuidAnswer,
+  isAttachmentObligation,
   resolveAvailabilityField,
   resolvePreTierField,
 } from '../src/resolver/answerResolver.js';
@@ -53,6 +54,22 @@ async function run(): Promise<void> {
     resolvePreTierField(countryField, countryProfile, true)?.value || null,
     null,
     'country fields continue to Tier 1 resolution'
+  );
+
+  assertEqual(
+    isAttachmentObligation(makeField({ fieldId: 'resume', name: 'resume', type: 'file', label: 'LinkedIn Profile or Resume', isRequired: false })),
+    true,
+    'optional resume alternatives remain submission obligations'
+  );
+  assertEqual(
+    isAttachmentObligation(makeField({ fieldId: 'cover_letter', name: 'cover_letter', type: 'file', label: 'Cover Letter', isRequired: false })),
+    false,
+    'cover letters remain excluded from attachment obligations'
+  );
+  assertEqual(
+    isAttachmentObligation(makeField({ fieldId: 'optional_text', name: 'optional_text', type: 'text', label: 'Optional prompt', isRequired: false })),
+    false,
+    'ordinary optional fields remain outside the resolver waterfall'
   );
   const profileWithoutCountry: ProfileRow = {
     applywizz_id: 'AWL-TEST',

@@ -16,6 +16,8 @@ export const OperatorErrors = {
   NETWORK: 'Network error. Please try submitting this job again.',
   SUBMISSION_FAILED:
     "We couldn't submit this application. Please try again or contact support.",
+  RESUME_MISSING:
+    "We couldn't retrieve the resume for this application. Please verify the candidate's resume and try again.",
   FORM_FILL_FAILED:
     "We couldn't complete this job form. Please review the answers and try again.",
   SUBMIT_BUTTON_MISSING:
@@ -104,6 +106,10 @@ export function normalizeOperatorErrorMessage(
   if (isZohoError(msg)) return OperatorErrors.ZOHO_NOT_CONNECTED;
   if (isProfileError(msg)) return OperatorErrors.PROFILE_NOT_RETRIEVED;
   if (isPlaywrightScanError(msg)) return OperatorErrors.SCAN_FAILED;
+
+  if (/submit_resume_missing|resume.*(?:s3|storage|fetch|404)|could not fetch.*resume|resume unavailable/i.test(msg)) {
+    return OperatorErrors.RESUME_MISSING;
+  }
 
   const lower = msg.toLowerCase();
 

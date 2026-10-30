@@ -1,8 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import { captureFailureDiagnostics } from '../src/submitter/domFailureCapture.js';
+import { buildFailureDiagnostic } from '../src/utils/failureDiagnostics.js';
 import type { Page } from 'playwright';
 
 describe('captureFailureDiagnostics', () => {
+  it('does not redact short numeric choice identifiers as phone numbers', () => {
+    const diagnostic = buildFailureDiagnostic({
+      category: 'FORM_VALIDATION',
+      reason: 'Amsterdam, Netherlands choice id 12345678 was unresolved',
+      metadata: { fieldLabel: 'Amsterdam, Netherlands', value: '12345678' },
+    });
+    expect(diagnostic.reason).toContain('12345678');
+  });
+
+  it('redacts phone-shaped values with ten or more digits', () => {
+    const diagnostic = buildFailureDiagnostic({
+      category: 'FORM_VALIDATION',
+      reason: 'phone +44 7405 805275 was invalid',
+    });
+    expect(diagnostic.reason).toContain('[REDACTED_PHONE]');
+    expect(diagnostic.reason).not.toContain('7405 805275');
+  });
+
   it('detects inline field validation errors', async () => {
     const mockPage = {
       title: async () => 'Job Application',

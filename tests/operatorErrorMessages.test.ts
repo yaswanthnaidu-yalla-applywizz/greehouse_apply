@@ -39,6 +39,13 @@ describe('operatorErrorMessages', () => {
     );
   });
 
+  it('keeps missing-resume failures actionable', () => {
+    assert.equal(
+      normalizeOperatorErrorMessage('SUBMIT_RESUME_MISSING: failed to fetch resume from S3'),
+      OperatorErrors.RESUME_MISSING
+    );
+  });
+
   it('preserves already-friendly copy', () => {
     const friendly = OperatorErrors.TOO_MANY_QUESTIONS;
     assert.equal(normalizeOperatorErrorMessage(friendly, 'SKIPPED'), friendly);

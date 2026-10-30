@@ -120,6 +120,20 @@ export function isClosedJobNoEmbeddedForm(params: {
   return !hasEmbeddedForm && !hasSubmitButton;
 }
 
+/** Returns a direct Greenhouse application URL exposed by a marketing-page iframe. */
+export function findEmbeddedGreenhouseApplicationUrl(frameUrls: string[]): string | null {
+  for (const frameUrl of frameUrls) {
+    if (!frameUrl || !/greenhouse\.io/i.test(frameUrl) || !/(?:embed\/job_app|job_app)/i.test(frameUrl)) continue;
+    try {
+      const parsed = new URL(frameUrl);
+      if (/^(?:https?:)?\/\//i.test(frameUrl) && parsed.protocol.startsWith('http')) return parsed.toString();
+    } catch {
+      // Ignore malformed frame URLs and continue scanning the page itself.
+    }
+  }
+  return null;
+}
+
 /**
  * Utility to generate a randomized delay within [min, max] range.
  *
@@ -469,6 +483,17 @@ export class PlaywrightScanner {
       if (httpStatus >= 400) {
         template.isExpired = true;
         return template;
+      }
+
+      // Some company marketing pages host the real Greenhouse form in an iframe.
+      // Follow the embedded application URL so downstream extraction sees the ATS DOM.
+      const embeddedApplicationUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+      if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
+        await page.goto(embeddedApplicationUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: this.timeoutMs,
+        });
+        template.jobUrl = embeddedApplicationUrl;
       }
 
       // Check if redirected to generic index page without job path
