@@ -1,3 +1,19 @@
+# Current Session Update (2026-10-30 - Implemented Failure Rate Reduction Plan)
+
+- **Branch**: `fix/failure-rate-reduction` (commits `81dd8cd..HEAD`)
+- **Implemented Fixes**:
+  - **T1 (RC-GH-1)**: Bypassed `skipOptional` for phone-section country select (`name='country'`, `type='select'`) so `computeForcedCountryValue` supplies "United States", satisfying Greenhouse's client-side validation requirement (`src/submitter/formFiller.ts`).
+  - **T7 (RC-ASH-2a)**: Dispatched synthetic `change` and `input` events after `setInputFiles` in Ashby submitter so React controlled file inputs commit and render file chips (`src/submitter/ashbyFormFiller.ts`).
+  - **T8 (RC-ASH-2b)**: Added `dispatchReactChangeEvent` helper to trigger React change/input synchronization after typing or selecting on custom fields (`src/submitter/ashbyFormFiller.ts`).
+  - **T4a & T10 (RC-GH-4, RC-ASH-4)**: Added Cloudflare Turnstile detection at page load to early-skip blocked Greenhouse submissions, and increased Ashby post-submit confirmation signal timeout to 60s (`src/submitter/liveSubmit.ts`, `src/submitter/ashbySubmit.ts`).
+  - **T5 (RC-GH-5)**: Added `isClosedJobNoEmbeddedForm` check in `playwrightScanner.ts` to identify informational/external job pages and mark them expired at scan time (`src/scanner/playwrightScanner.ts`).
+  - **T3b (RC-GH-3b)**: Added synthetic `input` and `change` event dispatch upon searchable/React-Select blur in `formFiller.ts`.
+  - **T9 (RC-ASH-3)**: Added preflight proxy probe retry logic (retries once on network/503 glitch before aborting) in `ashbySubmit.ts`.
+- **Verification**:
+  - Full TypeScript build cleanly passed (`npm run build`).
+  - Canonical Vitest suite passed 110/110 tests (`npm run test:vitest`).
+  - Specific Ashby and Turnstile integration test suites passed 18/18 tests (`node --import tsx --test`).
+
 # Current Session Update (2026-10-29 - Configurable Stats Rollup & Pruning via ENABLE_STATS_ROLLUP)
 
 - **Requirement**: Make stats rollup and working table pruning configurable via ENABLE_STATS_ROLLUP with NO default value (strictly required in environment), while keeping the Migration 027 guard intact.
