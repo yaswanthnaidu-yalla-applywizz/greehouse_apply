@@ -102,12 +102,15 @@ scratch_screenshots/
 .codex/
 .aws/
 .superpowers/
+.ai/architecture/
 .ai/skill-updates/
 .ai/skill-observations/review-*.txt
 .ai/skill-observations/evidence/
+**/.id-claims/
 
 # Ignore all one-off scripts by default; whitelist only maintained/operational scripts
 scripts/*
+!scripts/auditChoiceMetadata.ts
 !scripts/demo.ts
 !scripts/syncDemoFixture31428.ts
 !scripts/runDoorDashHeadfulSelectDemo.ts

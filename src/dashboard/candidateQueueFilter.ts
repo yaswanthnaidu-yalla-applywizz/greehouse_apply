@@ -90,6 +90,14 @@ export function isSkippedApplicationJob(row: { status?: string | null }): boolea
   return (row.status || '').trim().toUpperCase() === 'SKIPPED';
 }
 
+/** The job card only needs to show whether the operator approved the job. */
+export function isOperatorApprovedApplicationJob(row: {
+  operator_approved_at?: string | null;
+  operatorApprovedAt?: string | null;
+}): boolean {
+  return Boolean(row.operator_approved_at || row.operatorApprovedAt);
+}
+
 type ResolvedFieldLike = {
   source?: string | null;
   resolvedByTier?: number | null;

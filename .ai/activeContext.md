@@ -1628,3 +1628,13 @@ _Last updated: 2026-10-09_
 - 2026-10-28 dashboard stats discovery: audited `gh_application_stats_daily`, role dashboards, and polling. User interview pending on success/status semantics, distinct AWL count, timezone, graph windows, and historical cutover before implementation.
 - Interview decisions: period stats use status-change dates; graph counts distinct AWL IDs per bucket; IST Monday weeks; success includes APPLIED and EMAIL_PROOF_PENDING; chart shows final outcome only, attributed to latest outcome date; defaults 30 days, 12 weeks, 12 months with custom range.
 - Stats architecture recommendation (2026-10-28): query `gh_candidate_applications` by IST created_at cohort and current status using grouped SQL; chart groups same rows by creation day/week/month with distinct AWL count; authorized Supabase Broadcast invalidates/refetches after DB commit; no routine polling while connected. Validate EXPLAIN before adding indexes. Existing event facts are unsuitable for this contract.- 2026-10-28: New implementation spec and plan at docs/superpowers/plans/2026-10-28-dashboard-stats-and-refresh{,-spec}.md. Interview confirmed date filters apply only to application counts; Dev clients count distinct AWL IDs with APPLIED/EMAIL_PROOF_PENDING; Submitted is ever attempted. Execution underway in the shared dev branch at operator direction. Overlaps older dashboard performance plan.
+# Current Session Update (2026-10-30 - Operator Approval and Choice Metadata Fixes)
+
+- Implemented the approved TDD plan for operator card labels, stale status protection, and choice-option integrity.
+- Job-card labels now depend only on explicit `operator_approved_at`; existing rows remain `Pending` until an operator approves them after migration 045 is applied.
+- Added read-only choice metadata audit. It found six existing rows where non-binary questions carry Yes/No options. No database writes or migration application were performed.
+- Verification passed: typecheck, 72 Node tests, 110 Vitest tests, targeted regression tests, and production build.
+- Migration 045 has been applied and verified through the configured Supabase API.
+- Historical cleanup is complete for the six audited rows. The post-write audit reports zero invalid non-binary Yes/No metadata rows.
+
+- **Greenhouse failure hardening (2026-10-30):** Implemented surgical fixes for optional resume obligations, country-aware phone formatting, actual DOM commitment gating, broader post-submit error detection, embedded Greenhouse iframe discovery, diagnostics redaction, and missing-resume operator mapping. Focused verification: 50 Vitest tests, 13 Node tests, and root/dashboard typecheck passed. OTP delivery suppression remains an external provider fault; no browser retry change was made.

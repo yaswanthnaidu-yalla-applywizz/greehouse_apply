@@ -1,3 +1,14 @@
+2026-10-30 session-checkpoint: exported 14,026 rows from DB2 gh_candidate_qa_bank to docs/qa_bank.csv; verified CSV RFC-4180 parsing integrity (14,026/14,026 rows parsed); no new observations
+2026-10-30 session-start scan: files=7 parsed=7 (diagnosing Greenhouse and Ashby failures from 10-29 and 10-30, screenshot analysis, root cause diagnosis)
+2026-10-30 session-start scan: files=6 parsed=6 (downloading qa bank from db 2 to docs/qa_bank.csv)
+2026-10-30 session-checkpoint: checked DB2 for applied Ashby applications with email proof; found 64 APPLIED applications with email_proof_status='captured' and structured proof_email_json across 15 employers and 42 candidates; identified 1 FAILED application with matched email proof; no new observations
+2026-10-30 session-checkpoint: queried DB2 for today (2026-10-30) and yesterday (2026-10-29) IST application stats; reported combined and day-by-day totals for Total (716 applied, 419 failed, 1255 ca needed), Greenhouse (515 applied, 177 failed, 479 ca needed), and Ashby (201 applied, 242 failed, 776 ca needed); grouped failure reasons by date and ATS; no new observations
+2026-10-30 session-checkpoint: queried DB2 for gh_candidate_applications stats across total, ashby, and greenhouse; reported applied (direct + email proof pending), failed, and ca needed; grouped failure reasons for greenhouse (177) and ashby (242); no new observations
+2026-10-30 session-start scan: files=6 parsed=6 (querying DB2 gh_candidate_applications stats: overall, greenhouse, ashby, and failure reasons)
+2026-10-30 session-start scan: files=6 parsed=6 (evaluating DB2 applications prior to 27th with status EMAIL_PROOF_PENDING to update to APPLIED)
+2026-10-30 session-checkpoint: queried DB2 for yesterday's (2026-10-29) READY_FOR_REVIEW applications created before 10 PM IST; found 33 distinct CAs across 150 applications (14 CAs under balaji@applywizz.ai with 57 apps, 19 CAs under ramakrishnaa.tejavath@applywizz.ai with 93 apps, 0 CAs unassigned); no new observations
+2026-10-30 session-checkpoint: queried DB2 for yesterday's (2026-10-29) READY_FOR_REVIEW applications grouped by manager_email; found 53 distinct CAs across 1,374 applications (26 CAs under balaji@applywizz.ai with 641 apps, 25 CAs under ramakrishnaa.tejavath@applywizz.ai with 677 apps, 2 CAs with NULL manager in gh_users with 56 apps); no new observations
+2026-10-30 session-start scan: files=5 parsed=5 (querying DB2 for yesterday's READY_FOR_REVIEW applications grouped by manager email and ca email)
 2026-10-29 session-checkpoint: completed Tasks 1-11 of Ashby master execution plan; implemented sessid stickiness (7067c12), multi-tier country resolution (9c7cecc), proxy preflight (742147f), live DOM fill verification (10b0556), stage telemetry (3580fc1), instant challenge quarantine (a9af67c), post-submit retry lockout (80beb70), corpus rejection matcher (8f77402), inbox proof strategies (7d24e3a), lifecycle wiring (9e9c474), and verification (1f1e3d7); 83/83 Ashby tests, 32/32 master E2E checkpoints, and 110/110 unit tests pass, typecheck clean; no new observations
 2026-10-29 session-checkpoint: added Ramakrishna@Applywizz.ai ingestion email and 1-hour follow-up with per-manager task breakdowns (Balaji and Ramakrishna Tejavath) CCing yaswanthnaiduyalla and vivek; diagnosed congratulatory email misfire (PostgREST URL overflow and error fallback treating failed queries as 0 remaining tasks), chunked query by 50, added fail-safe error handling and verified completion against active queue; 15/15 tests pass and typecheck clean; no new observations
 2026-10-29 session-start scan: files=5 parsed=5 (adding Ramakrishna ingestion notifications and followups, investigating congratulatory mail misfire)
@@ -931,3 +942,20 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-10-29 session-start scan: files=5 parsed=5 (fresh sandbox start with profiles preserved, submitter worker disabled, scanner workers=20, resolvers=6)
 2026-10-29 session-checkpoint: made stats rollup and pruning strictly configurable via ENABLE_STATS_ROLLUP without default value; kept migration 027 check and bypassed deletions when false.
 2026-10-30T02:31:00+05:30 | session-end | fully implemented failure-rate-reduction plan on fix/failure-rate-reduction | 8 atomic commits | all tests passing (110 vitest + 18 node:test) | build clean | recovered ~204+ failing application paths | no observations
+2026-10-30 session-start scan: files=6 parsed=6
+2026-10-30 session-checkpoint: fixed operator card approval labels and removed invented choice options; verification blocked by Node uv_os_get_passwd ENOMEM and pre-existing unreadable files
+2026-10-30 11:53 [greehouse_apply] session-start scan: files=6 parsed=6 principles=unparsed
+2026-10-30 session-checkpoint: no observations from date-bounded report task.
+2026-10-30 session-checkpoint: implemented operator approval state, monotonic status merges, and persisted choice metadata separation; read-only audit required chunked template reads and found 6 existing non-binary Yes/No rows; tests and build green.
+2026-10-30 session-checkpoint: applied migration 045, repaired the 6 audited historical choice records via stable candidate/job keys, and verified the post-write audit returns zero invalid rows.
+2026-10-30 session-checkpoint: diagnosed Greenhouse failure report against resolver, filler, scanner, OTP, and operator-error code; analysis-only, no code changes; no observations
+2026-10-30 session-checkpoint: designed Greenhouse hardening architecture, tallied blast radius, and saved implementation plan; runtime proof blocked by Node uv_os_get_passwd ENOMEM; no observations
+2026-10-30 session-checkpoint: implementation paused after resolver, phone, and pre-submit Greenhouse gate changes; focused gate/typecheck command was interrupted before result; no completion claim
+2026-10-30 13:29 [greehouse_apply] workspace: created=none
+2026-10-30 13:29 [greehouse_apply] session-start scan: files=7 parsed=7 principles=unparsed
+2026-10-30 session-checkpoint: Greenhouse failure hardening implemented; focused Vitest/Node tests and root/dashboard typecheck passed; OTP delivery suppression remains external provider fault
+2026-10-30 13:33 [greehouse_apply] checkpoint: observation 0040 open; change report saved for 2026-10-23 to 2026-10-30
+2026-10-30 13:34 [greehouse_apply] checkpoint: appended worktree updates to change report; no new observations
+
+2026-10-30 14:13 [greehouse_apply] session-start scan: files=7 parsed=7 principles=unparsed2026-10-30 session-checkpoint: remediation applied for form-filler checkbox regression, dead dashboard badges, audit-script ignore rule, and targeted EOL cleanup; focused tests and root/dashboard typecheck passed; no files staged or committed
+2026-10-30 14:45 [greehouse_apply] session-start scan: files=7 parsed=7 principles=unparsed

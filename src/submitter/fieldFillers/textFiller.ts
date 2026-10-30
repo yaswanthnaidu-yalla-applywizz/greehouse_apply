@@ -26,7 +26,7 @@ export async function fillTextField(
   const label = field.label || name;
 
   if (fieldId === 'phone' || name === 'phone' || /phone/i.test(label)) {
-    val = sanitizePhoneNumberForSubmission(val);
+    val = sanitizePhoneNumberForSubmission(val, options.phoneCountryCode || '+1');
   }
 
   const fillResult: FieldFillResult = {

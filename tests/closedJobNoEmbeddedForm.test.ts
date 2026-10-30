@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isClosedJobNoEmbeddedForm } from '../src/scanner/playwrightScanner.js';
+import { findEmbeddedGreenhouseApplicationUrl, isClosedJobNoEmbeddedForm } from '../src/scanner/playwrightScanner.js';
 
 describe('RC-GH-5: isClosedJobNoEmbeddedForm', () => {
   it('marks job expired/closed when hasEmbeddedForm is false and hasSubmitButton is false', () => {
@@ -17,5 +17,16 @@ describe('RC-GH-5: isClosedJobNoEmbeddedForm', () => {
 
   it('does NOT mark expired if submit button is present even if form wrapper was atypical', () => {
     expect(isClosedJobNoEmbeddedForm({ hasEmbeddedForm: false, hasSubmitButton: true, pageText: 'Submit Application' })).toBe(false);
+  });
+
+  it('finds the direct Greenhouse application URL in a marketing-page iframe', () => {
+    expect(findEmbeddedGreenhouseApplicationUrl([
+      'https://www.merchantsfleet.com/about/careers/job-board?gh_jid=8046371003',
+      'https://boards.greenhouse.io/embed/job_app?for=merchantsfleet&token=8046371003',
+    ])).toBe('https://boards.greenhouse.io/embed/job_app?for=merchantsfleet&token=8046371003');
+  });
+
+  it('ignores unrelated iframe URLs', () => {
+    expect(findEmbeddedGreenhouseApplicationUrl(['https://example.com/embed/job_app'])).toBeNull();
   });
 });

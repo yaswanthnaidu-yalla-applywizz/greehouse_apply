@@ -51,7 +51,14 @@ export async function scanAshbyDom(url: string): Promise<ScannedJobTemplate> {
 
         if (container.querySelector('input[type="file"]') || fieldPath.includes('resume')) {
           type = 'file';
-        } else if (container.querySelector('.ashby-application-form-input-yesno, button[data-option="yes"]')) {
+        } else if ((() => {
+          const optionButtons = Array.from(container.querySelectorAll('button[data-option]'))
+            .map((button) => button.getAttribute('data-option')?.trim().toLowerCase())
+            .filter(Boolean);
+          const hasYes = optionButtons.some((option) => option === 'yes');
+          const hasNo = optionButtons.some((option) => option === 'no');
+          return hasYes && hasNo;
+        })()) {
           type = 'select';
           options = ['Yes', 'No'];
         } else if (container.querySelector('input[type="radio"]')) {

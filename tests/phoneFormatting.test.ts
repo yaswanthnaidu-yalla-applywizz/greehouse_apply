@@ -23,4 +23,14 @@ describe('Phone Number Formatting', () => {
     const formatted = sanitizePhoneNumberForSubmission('8749249111');
     assert.equal(formatted, '8749249111');
   });
+
+  it('strips a UK calling code when the selected country is United Kingdom', () => {
+    const formatted = sanitizePhoneNumberForSubmission('+44 7405 805275', '+44');
+    assert.equal(formatted, '7405805275');
+  });
+
+  it('does not apply US stripping to a UK number when the country code is absent', () => {
+    const formatted = sanitizePhoneNumberForSubmission('+44 7405 805275', '+1');
+    assert.equal(formatted, '44 7405 805275');
+  });
 });

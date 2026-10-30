@@ -55,6 +55,8 @@ export interface CandidateDetail {
     companyName: string;
     jobTitle: string;
     status: string;
+    operator_approved_at?: string | null;
+    updated_at?: string | null;
     fieldsCount: number;
     hasManualEdits?: boolean;
     error_message?: string | null;
