@@ -118,4 +118,14 @@ describe('Authenticated WebSocket Scoping', () => {
     wsOp2.close();
     wsAdmin.close();
   });
+
+  test('wsManager.close() terminates sockets and clears intervals — no live clients remain', async () => {
+    const ws = new WebSocket(`ws://localhost:${port}/ws?token=valid-test-token&role=admin`);
+    await new Promise<void>((resolve) => ws.on('open', resolve));
+    assert.equal(wsManager.getConnectedClientsCount(), 1);
+    const closePromise = new Promise<void>((resolve) => ws.on('close', () => resolve()));
+    wsManager.close();
+    await closePromise;
+    assert.equal(wsManager.getConnectedClientsCount(), 0);
+  });
 });
