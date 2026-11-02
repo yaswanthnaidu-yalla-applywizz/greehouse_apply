@@ -1386,6 +1386,27 @@ export function getGreenhouseSubmitButtonSelectors(): string[] {
 }
 
 /**
+ * Determines whether a failure screenshot should be captured before closing the browser.
+ * Never captures when a screenshot is already taken or for terminal non-failure states
+ * such as SKIPPED, APPLIED, EMAIL_PROOF_PENDING, or OTP_REQUIRED.
+ */
+export function shouldCapturePreCloseFailureScreenshot(
+  terminalStatus: string | null | undefined,
+  screenshotAlreadyCaptured: boolean
+): boolean {
+  if (screenshotAlreadyCaptured) return false;
+  if (
+    terminalStatus === 'SKIPPED' ||
+    terminalStatus === 'APPLIED' ||
+    terminalStatus === 'EMAIL_PROOF_PENDING' ||
+    terminalStatus === 'OTP_REQUIRED'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Runs a live automated submission for a candidate job application.
  *
  * @param applicationOrId - Application DB record or UUID string
@@ -1445,6 +1466,7 @@ export async function runLiveSubmit(
   let fillSummary: FormFillSummary | undefined;
   let keepSessionOpen = false;
   let screenshotCaptured = false;
+  let terminalStatus: 'APPLIED' | 'SKIPPED' | 'OTP_REQUIRED' | 'EMAIL_PROOF_PENDING' | 'FAILED' | null = null;
 
   try {
     try {
@@ -1480,6 +1502,7 @@ export async function runLiveSubmit(
         }).catch(() => {});
       }
 
+      terminalStatus = 'FAILED';
       return {
         success: false,
         status: 'FAILED',
@@ -1514,6 +1537,7 @@ export async function runLiveSubmit(
           job_url: application.job_url,
         }).catch(() => {});
       }
+      terminalStatus = 'SKIPPED';
       return {
         success: false,
         status: 'SKIPPED',
@@ -1536,6 +1560,7 @@ export async function runLiveSubmit(
           job_url: application.job_url,
         }).catch(() => {});
       }
+      terminalStatus = 'SKIPPED';
       return {
         success: false,
         status: 'SKIPPED',
@@ -1724,8 +1749,10 @@ export async function runLiveSubmit(
 
     keepSessionOpen = postSubmit.keepSessionOpen;
     screenshotCaptured = postSubmit.screenshotCaptured;
+    terminalStatus = (postSubmit.result.status as any) || 'FAILED';
     return postSubmit.result;
   } catch (err: any) {
+    terminalStatus = 'FAILED';
     const isTimeout = /time.*out/i.test(err.message || '');
     const isFillError = /form filling error|fillSingleField|fillForm/i.test(err.message || '');
     let finalErrMsg = err.message || 'Submission execution failed.';
@@ -1791,7 +1818,7 @@ export async function runLiveSubmit(
     };
   } finally {
     if (!keepSessionOpen) {
-      if (page && !page.isClosed() && !screenshotCaptured) {
+      if (page && !page.isClosed() && shouldCapturePreCloseFailureScreenshot(terminalStatus, screenshotCaptured)) {
         try {
           log.info(`[Live Submit] 📸 Capturing failure screenshot before closing browser for ${applicationId}...`);
           const failed = await captureFailedScreenshot(page, application);
