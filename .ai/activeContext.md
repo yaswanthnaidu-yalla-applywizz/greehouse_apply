@@ -1,3 +1,27 @@
+# Current Session Update (2026-11-02 - Work History API Runtime Decoupling - COMPLETED)
+
+- **Decoupled Work History from Auth & Interactive Dashboard**:
+  - Fully removed the external ApplyWizz Work History API from operator login, notification streaming, dashboard metrics calculation, and admin candidate lists.
+  - All operator and admin candidate scoping now queries PostgreSQL directly (`gh_candidate_applications.assigned_ca_email` and `profiles.ca_email`).
+- **Implemented Fixes & Commits**:
+  1. **Commit `2816676` (`src/server/routes/auth.ts`, `tests/operatorDbScoping.test.ts`)**:
+     - Removed `fetchAllowedCandidates` and `setCachedWorkHistory` from `finalizeSuccessfulSignIn`.
+     - Scoped sign-in `allowedCandidateIds` via `distinctApplywizzIdsForOperatorEmails` in DB with `workHistoryUnreachable: false`.
+  2. **Commit `40be75c` (`src/server/routes/notifications.ts`)**:
+     - Replaced `mergeWorkHistoryForIstDates` in `GET /api/notifications` with `distinctApplywizzIdsForOperatorEmails([userEmail!], createdAtRange)`.
+  3. **Commit `5bb55a7` (`src/server/index.ts`)**:
+     - Replaced `mergeWorkHistoryForIstDates` in `GET /api/stats` with `distinctApplywizzIdsForOperatorEmails([userEmail!], createdAtRange)`.
+  4. **Commit `38cc0a1` (`src/server/routes/candidates.ts`)**:
+     - Removed `mergeWorkHistoryForIstDates` in `unrestricted` (dev/admin) mode. Admin now directly loads all candidates with applications in the selected date range via `distinctApplywizzIdsForCreatedAtRange`.
+  5. **Commit `0d318fe` (`src/server/managerTeamScope.ts`, `src/server/workHistorySpan.ts`, `src/server/workHistoryCache.ts`, `tests/`)**:
+     - Removed dead Work History fallback in `resolveTeamCandidateIdsForManager`.
+     - Deleted dead modules `src/server/workHistorySpan.ts` and `src/server/workHistoryCache.ts`.
+     - Expanded `tests/operatorDbScoping.test.ts` to statically assert zero imports or calls to Work History span merge across the server.
+- **Verification**:
+  - 100% tests pass (110/110 Vitest, 73/73 Node unit test runner, 9/9 operatorDbScoping, 2/2 operatorCaDirectQuery).
+  - Clean TypeScript compilation (`npm run typecheck`).
+  - Clean Vite production build (`npm run build:dashboard`).
+
 # Current Session Update (2026-11-02 - Worker Service Process Exhaustion & Retry Hardening - COMPLETED)
 
 - **Worker Service Health & Hardening Completed**:
