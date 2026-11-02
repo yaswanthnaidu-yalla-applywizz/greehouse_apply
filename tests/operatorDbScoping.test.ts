@@ -26,4 +26,9 @@ describe('Database-Only Operator Scoping', () => {
     assert.equal(code.includes('fetchAllowedCandidates'), false);
     assert.equal(code.includes('setCachedWorkHistory'), false);
   });
+
+  test('notifications.ts does not call mergeWorkHistoryForIstDates', () => {
+    const code = fs.readFileSync(path.resolve('src/server/routes/notifications.ts'), 'utf-8');
+    assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
+  });
 });

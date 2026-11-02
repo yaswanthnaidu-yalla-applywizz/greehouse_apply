@@ -9,11 +9,14 @@
 import { Router, Request, Response } from 'express';
 import { getRecentNotifications } from '../../db/applications.js';
 import { isUserAdmin } from './auth.js';
-import { istDatesForWorkHistory, parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
-import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
+import { parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
-import { resolveManagerViewAsOperatorScope, resolveViewAsOperatorManagerEmail } from '../managerTeamScope.js';
+import {
+  distinctApplywizzIdsForOperatorEmails,
+  resolveManagerViewAsOperatorScope,
+  resolveViewAsOperatorManagerEmail,
+} from '../managerTeamScope.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('Notifications');
@@ -52,12 +55,10 @@ notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> 
         });
         allowedCandidateIds = Array.from(scope.allowedIds);
       } else {
-        const merged = await mergeWorkHistoryForIstDates({
-          mode: 'ca',
-          caEmail: userEmail!,
-          dates: istDatesForWorkHistory(parsedRange),
+        allowedCandidateIds = await distinctApplywizzIdsForOperatorEmails([userEmail!], {
+          startIso: parsedRange.startIso,
+          endIso: parsedRange.endIso,
         });
-        allowedCandidateIds = merged.candidateIds;
       }
     }
 
