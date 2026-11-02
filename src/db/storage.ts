@@ -507,7 +507,31 @@ export async function getProfileResumeHttpUrl(applywizzId: string): Promise<stri
 }
 
 /**
+ * Downloads a candidate resume directly from the Supabase Storage 'resumes' bucket.
+ */
+export async function downloadResumeFromSupabaseStorage(storagePath: string): Promise<Buffer | null> {
+  if (!storagePath || !isSupabaseConfigured()) return null;
+  try {
+    const supabase = getDbClient();
+    const cleanPath = storagePath.replace(/^resumes\//, '').trim();
+    if (!cleanPath) return null;
+    const { data, error } = await supabase.storage.from('resumes').download(cleanPath);
+    if (!error && data) {
+      const buffer = Buffer.from(await data.arrayBuffer());
+      if (buffer.length >= 100) {
+        log.info(`[Storage] Resume successfully downloaded from Supabase Storage (${cleanPath})`);
+        return buffer;
+      }
+    }
+  } catch (err: any) {
+    log.warn(`[Storage] Supabase Storage resume download failed for ${storagePath}: ${err.message}`);
+  }
+  return null;
+}
+
+/**
  * Fetches the master resume PDF bytes using profile.resume_url (on-demand HTTP).
+ * Falls back to Supabase Storage resumes bucket if HTTP download fails or returns non-2xx.
  * AWL-YASWANTH may fall back to the legacy Supabase resumes bucket or local demo file.
  */
 export async function fetchResumePdfBuffer(applywizzId: string): Promise<Buffer> {
@@ -522,27 +546,44 @@ export async function fetchResumePdfBuffer(applywizzId: string): Promise<Buffer>
     }
   }
 
-  const resumeUrl = await loadProfileResumeUrl(applywizzId);
-  if (!resumeUrl) {
-    throw new Error(`No resume_url on profile for ${applywizzId}`);
+  const profile = await getProfile(applywizzId).catch(() => null);
+  const resumeUrl = profile?.resume_url?.trim();
+
+  let httpError: Error | null = null;
+  if (resumeUrl) {
+    try {
+      const httpUrl = resolveResumeHttpUrl(resumeUrl);
+      const response = await fetch(httpUrl, {
+        headers: { Accept: 'application/pdf,*/*', 'User-Agent': 'ApplyWizz-Greenhouse-Automation/1.0' },
+        signal: AbortSignal.timeout(RESUME_FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (buffer.length >= 100) {
+          log.info('Resume fetched on-demand from profile.resume_url');
+          return buffer;
+        }
+      } else {
+        httpError = new Error(`Resume download failed HTTP ${response.status} (${httpUrl})`);
+      }
+    } catch (err: any) {
+      httpError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
-  log.info('Resume fetched on-demand from profile.resume_url');
-
-  const httpUrl = resolveResumeHttpUrl(resumeUrl);
-  const response = await fetch(httpUrl, {
-    headers: { Accept: 'application/pdf,*/*', 'User-Agent': 'ApplyWizz-Greenhouse-Automation/1.0' },
-    signal: AbortSignal.timeout(RESUME_FETCH_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`Resume download failed HTTP ${response.status} (${httpUrl})`);
+  // Resilient fallback to Supabase Storage resumes bucket
+  if (profile?.resume_storage_path) {
+    log.info(`[Storage] Attempting Supabase Storage fallback for ${applywizzId} (${profile.resume_storage_path})`);
+    const storageBuffer = await downloadResumeFromSupabaseStorage(profile.resume_storage_path);
+    if (storageBuffer) {
+      return storageBuffer;
+    }
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.length < 100) {
-    throw new Error('Downloaded resume PDF is empty or invalid');
+  if (httpError) {
+    throw httpError;
   }
-  return buffer;
+  throw new Error(`No resume_url or valid resume_storage_path on profile for ${applywizzId}`);
 }
 
 /**
