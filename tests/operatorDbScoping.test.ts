@@ -20,4 +20,10 @@ describe('Database-Only Operator Scoping', () => {
     const code = fs.readFileSync(path.resolve('src/server/managerTeamScope.ts'), 'utf-8');
     assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
   });
+
+  test('auth.ts does not call fetchAllowedCandidates or setCachedWorkHistory', () => {
+    const code = fs.readFileSync(path.resolve('src/server/routes/auth.ts'), 'utf-8');
+    assert.equal(code.includes('fetchAllowedCandidates'), false);
+    assert.equal(code.includes('setCachedWorkHistory'), false);
+  });
 });
