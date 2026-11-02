@@ -36,4 +36,9 @@ describe('Database-Only Operator Scoping', () => {
     const code = fs.readFileSync(path.resolve('src/server/index.ts'), 'utf-8');
     assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
   });
+
+  test('candidates.ts does not call mergeWorkHistoryForIstDates', () => {
+    const code = fs.readFileSync(path.resolve('src/server/routes/candidates.ts'), 'utf-8');
+    assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
+  });
 });
