@@ -614,7 +614,7 @@ export class PlaywrightScanner {
                 options,
                 ...(options && options.length > 0 ? { optionsComplete: true } : {}),
                 metadata: {
-                  selector: `#${name}`,
+                  selector: `#${name.replace(/([\[\]#.:(),"'\\/])/g, '\\$1')}`,
                 },
               });
             }

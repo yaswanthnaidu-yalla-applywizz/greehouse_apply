@@ -26,6 +26,7 @@ import {
   captureAndSaveEmailProof,
 } from './proofCapture.js';
 import { emailProofPoller } from './emailProofPoller.js';
+import { findEmbeddedGreenhouseApplicationUrl } from '../scanner/playwrightScanner.js';
 import {
   activeSubmissions,
   PAUSED_SESSIONS,
@@ -1362,6 +1363,52 @@ export async function handlePostSubmitResponse(params: {
 }
 
 /**
+ * Ordered selectors for the Greenhouse application form submit button.
+ * Prioritizes Greenhouse application forms (#submit_app, form#application_form)
+ * and excludes generic page-level footer newsletter/search forms.
+ */
+export function getGreenhouseSubmitButtonSelectors(): string[] {
+  return [
+    '#submit_app',
+    'form#application_form button[type="submit"]',
+    'form#application_form input[type="submit"]',
+    'form[action*="greenhouse"] button[type="submit"]',
+    'form[action*="greenhouse"] input[type="submit"]',
+    '#application_form button:has-text("Submit Application")',
+    '#application_form input[value*="Submit"]',
+    'button:has-text("Submit Application")',
+    'button:has-text("Submit application")',
+    'input[value="Submit Application"]',
+    '#submit_application',
+    'button[type="submit"]:not(footer button):not(form[id*="newsletter"] button):not(form[class*="newsletter"] button)',
+    'input[type="submit"]:not(footer input):not(form[id*="newsletter"] input)',
+    'button:has-text("Apply")',
+  ];
+}
+
+/**
+ * Determines whether a failure screenshot should be captured before closing the browser.
+ * Never captures when a screenshot is already taken or for terminal non-failure states
+ * such as SKIPPED, APPLIED, EMAIL_PROOF_PENDING, or OTP_REQUIRED.
+ */
+export function shouldCapturePreCloseFailureScreenshot(
+  terminalStatus: string | null | undefined,
+  screenshotAlreadyCaptured: boolean
+): boolean {
+  if (screenshotAlreadyCaptured) return false;
+  if (
+    terminalStatus === 'FILTERED_OUT' ||
+    terminalStatus === 'SKIPPED' ||
+    terminalStatus === 'APPLIED' ||
+    terminalStatus === 'EMAIL_PROOF_PENDING' ||
+    terminalStatus === 'OTP_REQUIRED'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Runs a live automated submission for a candidate job application.
  *
  * @param applicationOrId - Application DB record or UUID string
@@ -1421,6 +1468,7 @@ export async function runLiveSubmit(
   let fillSummary: FormFillSummary | undefined;
   let keepSessionOpen = false;
   let screenshotCaptured = false;
+  let terminalStatus: 'APPLIED' | 'SKIPPED' | 'FILTERED_OUT' | 'OTP_REQUIRED' | 'EMAIL_PROOF_PENDING' | 'FAILED' | null = null;
 
   try {
     try {
@@ -1456,6 +1504,7 @@ export async function runLiveSubmit(
         }).catch(() => {});
       }
 
+      terminalStatus = 'FAILED';
       return {
         success: false,
         status: 'FAILED',
@@ -1479,20 +1528,44 @@ export async function runLiveSubmit(
       timeout: timeoutMs,
     });
 
+    // Company marketing pages often host the real Greenhouse form in an iframe.
+    // Follow the embedded application URL so live submission interacts directly with the ATS DOM.
+    let embeddedApplicationUrl: string | null = null;
+    const iframeEl = await page
+      .waitForSelector('iframe[src*="greenhouse"], iframe[src*="job_app"]', { timeout: 3000 })
+      .catch(() => null);
+    if (iframeEl) {
+      const src = await iframeEl.getAttribute('src').catch(() => null);
+      if (src && /greenhouse\.io/i.test(src) && /job_app/i.test(src)) {
+        embeddedApplicationUrl = src;
+      }
+    }
+    if (!embeddedApplicationUrl) {
+      embeddedApplicationUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((f) => f.url()));
+    }
+    if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
+      log.info(`[Live Submit] 🔀 Detected embedded Greenhouse application URL: ${embeddedApplicationUrl}. Navigating directly to ATS form...`);
+      await page.goto(embeddedApplicationUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: timeoutMs,
+      });
+    }
+
     if (isGreenhouseJobClosedUrl(page.url(), targetUrl)) {
       const skipReason = 'JOB_CLOSED';
       const errorMsg = 'Job posting is closed or unlisted (redirected away from job board)';
       log.warn(`[Live Submit] 🛑 ${errorMsg} for ${targetUrl} -> current URL: ${page.url()}`);
       if (application.id) {
-        await updateStatus(application.id, 'SKIPPED', {
+        await updateStatus(application.id, 'FILTERED_OUT', {
           error_message: errorMsg,
           error_details: { skipReason, stage: 'PREFLIGHT_NAVIGATE', finalUrl: page.url() },
           job_url: application.job_url,
         }).catch(() => {});
       }
+      terminalStatus = 'FILTERED_OUT';
       return {
         success: false,
-        status: 'SKIPPED',
+        status: 'FILTERED_OUT',
         applicationId,
         errorMessage: errorMsg,
       };
@@ -1512,6 +1585,7 @@ export async function runLiveSubmit(
           job_url: application.job_url,
         }).catch(() => {});
       }
+      terminalStatus = 'SKIPPED';
       return {
         success: false,
         status: 'SKIPPED',
@@ -1616,15 +1690,7 @@ export async function runLiveSubmit(
 
     const preSubmitUrl = page.url();
 
-    const submitSelectors = [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      '#submit_app',
-      'button:has-text("Submit Application")',
-      'input[value*="Submit"]',
-      'button:has-text("Apply")',
-      '#submit_application',
-    ];
+    const submitSelectors = getGreenhouseSubmitButtonSelectors();
 
     let submitClicked = false;
     for (const sel of submitSelectors) {
@@ -1708,8 +1774,10 @@ export async function runLiveSubmit(
 
     keepSessionOpen = postSubmit.keepSessionOpen;
     screenshotCaptured = postSubmit.screenshotCaptured;
+    terminalStatus = (postSubmit.result.status as any) || 'FAILED';
     return postSubmit.result;
   } catch (err: any) {
+    terminalStatus = 'FAILED';
     const isTimeout = /time.*out/i.test(err.message || '');
     const isFillError = /form filling error|fillSingleField|fillForm/i.test(err.message || '');
     let finalErrMsg = err.message || 'Submission execution failed.';
@@ -1775,7 +1843,7 @@ export async function runLiveSubmit(
     };
   } finally {
     if (!keepSessionOpen) {
-      if (page && !page.isClosed() && !screenshotCaptured) {
+      if (page && !page.isClosed() && shouldCapturePreCloseFailureScreenshot(terminalStatus, screenshotCaptured)) {
         try {
           log.info(`[Live Submit] 📸 Capturing failure screenshot before closing browser for ${applicationId}...`);
           const failed = await captureFailedScreenshot(page, application);

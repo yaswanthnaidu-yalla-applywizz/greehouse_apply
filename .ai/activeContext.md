@@ -1,3 +1,37 @@
+# Current Session Update (2026-11-02 - Greenhouse Submission Failure Remediations - COMPLETED)
+
+- **Root Causes Diagnosed & Generalized**:
+  - Analyzed 162 failed applications from 2026-11-01 cohort in DB2 and failure screenshots across 5 distinct domains.
+  - Implemented completely generalized fixes across all 5 domains without hardcoding any company names:
+  1. **Commit `c914b1b` (Demographic GDPR Consent Checkbox Auto-Confirmation)**:
+     - Expanded `isConsentOrPrivacyPolicyField(label)` with semantic demographic processing regex `/(consent|agree).*(collecting|storing|processing|use|share).*(demographic|survey)|(demographic|survey).*(consent|processing)|collecting.*storing.*processing/i`.
+     - Preserved SMS/marketing opt-out precedence (`isConsentSmsMarketingField(label)` returns false).
+     - Added demographic consent checkbox recognition to `rawType === 'checkbox'`, `rawType === 'select'`, and safety sweep (`input[type="checkbox"][name*="gdpr_demographic"], input[type="checkbox"][id*="gdpr_demographic"], input[type="checkbox"][name*="demographic_data_consent"]`).
+     - Added unit tests in `tests/consentCheckboxFill.test.ts` (2/2 passing).
+  2. **Commit `c4649b6` (Submit Button Scoping to Greenhouse Application Form)**:
+     - Exported `getGreenhouseSubmitButtonSelectors()` in `src/submitter/liveSubmit.ts`, prioritizing `#submit_app` and form-contained submit buttons ahead of generic page-level buttons.
+     - Excluded footer newsletter/search buttons (`:not(footer button):not(form[id*="newsletter"] button)`), preventing embedded job board redirection collisions.
+     - Added unit tests in `tests/liveSubmitSubmitButtonScoping.test.ts` (1/1 passing).
+  3. **Commit `8e502cd` (Radio Button Consent & Affirmative Agreement Matching)**:
+     - Exported `matchesAffirmativeRadioOption(label, optionText)` in `src/submitter/formFiller.ts` to match `I Agree`, `I Consent`, and `I am able to be in the office` when candidate response is affirmative.
+     - Strictly bypassed standard work authorization, visa, or general disqualifying questions.
+     - Added label-based fallback locator in `rawType === 'radio'` when target radio input options do not match exact strings.
+     - Added unit tests in `tests/radioConsentMatching.test.ts` (1/1 passing).
+  4. **Commit `26b1010` (Guarded Pre-Close Screenshot & SKIPPED Status Preservation)**:
+     - Exported `shouldCapturePreCloseFailureScreenshot(terminalStatus, screenshotCaptured)` in `src/submitter/liveSubmit.ts`.
+     - Tracked `terminalStatus` across `runLiveSubmit` and prevented `finally` block from capturing pre-close screenshots and overwriting `SKIPPED`, `APPLIED`, `EMAIL_PROOF_PENDING`, or `OTP_REQUIRED` to `FAILED`.
+     - Added explicit `result.status === 'SKIPPED'` handling in `SubmitterPool` (`src/submitter/submitterPool.ts`).
+     - Added unit tests in `tests/closedJobSkipPreservation.test.ts` (1/1 passing).
+  5. **Commit `09a678b` (Classic Greenhouse Selector Escaping & Checkbox Fallback)**:
+     - Exported `sanitizeMetadataSelector(selector)` in `src/submitter/formFiller.ts` to escape unescaped brackets in CSS ID selectors (`#question_69649528[]` -> `#question_69649528\\[\\]`) without double-escaping or breaking attribute selectors.
+     - Sanitized `metadata.selector` in `src/scanner/playwrightScanner.ts:617` and sanitized all selector lookups across `formFiller.ts`.
+     - Added label-based checkbox fallback DOM traversal in `rawType === 'select'` when name/ID locators yield 0 elements.
+     - Added unit tests in `tests/classicGreenhouseBracketSelector.test.ts` (1/1 passing).
+- **Verification**:
+  - 100% tests pass (110/110 Vitest, 22/22 Node unit tests including all 5 new suites).
+  - Clean TypeScript compilation (`npm run typecheck`).
+  - Working tree clean on branch `dev`.
+
 # Current Session Update (2026-11-02 - Form Validation Hardening & DB 2 Re-resolution - COMPLETED)
 
 - **Form Validation & Autocomplete Hardening**:
@@ -9,9 +43,11 @@
   - Added multi-checkbox referral fallback in `formFiller.ts`: checks LinkedIn first, then Company Website / first option.
   - Added mandatory EEO auto-decline fallback when demographic fields are required and empty.
   - Added `dismissCookieBannersIfPresent()` and `{ force: true }` click retry in `src/submitter/liveSubmit.ts` to prevent OneTrust overlays from intercepting submit button clicks.
-- **DB 2 Re-resolution**:
-  - Re-resolved all 219 failed applications created on 2026-11-01 in DB 2 in place, updating their `resolved_fields` with the fresh rules (cleaned locations, converted misclassified location fields back to text, filled discipline/month/referral defaults).
-  - Left application `status = 'FAILED'` as requested, ready to be requeued once code is pushed.
+- **DB 2 Re-resolution & SQL Regex Bugfix**:
+  - Identified root cause of empty `candidate_location`: PostgreSQL `standard_conforming_strings` treated `LIKE '%\n%'` as matching character `'n'`, causing `split_part(..., E'\n', 2)` to return empty strings for profiles without newlines.
+  - Fixed with `LIKE E'%\n%'` and verified across all 226 failed applications created on 2026-11-01 in DB 2.
+  - Re-resolved and updated all 226 failed applications in place: populated clean `City, State, Country` locations (0 empty locations remaining), normalized discipline dropdowns (`Computer Science`, `Data Science`), populated candidate name into text disclosure signature fields, filled education months (`08` / `05`), and added referral defaults (`LinkedIn`).
+  - Verified 0 empty required fields remain across all 226 failed applications. Status preserved as `FAILED` until user requeues.
 - **Verification**:
   - 4 new unit test suites created and passing (6/6 tests): `tests/locationFormattingFallback.test.ts`, `tests/disciplineWaterfallFallthrough.test.ts`, `tests/referralCheckboxFallback.test.ts`, `tests/cookieBannerDismiss.test.ts`.
   - Clean TypeScript compilation with 0 errors across root and dashboard (`npm run typecheck`).
