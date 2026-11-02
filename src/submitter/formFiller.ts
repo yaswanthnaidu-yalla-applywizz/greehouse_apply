@@ -1131,8 +1131,11 @@ export function extractLocationSearchPrefix(val: string): string {
  */
 export function isConsentOrPrivacyPolicyField(label: string): boolean {
   if (!label) return false;
-  return /privacy\s*(policy|notice)|candidate\s*privacy|electronic\s*record\s*and\s*signature|data\s*processing\s*consent|terms\s*and\s*conditions|consent\s*to\s*process|data\s*privacy/i.test(
-    label
+  if (isConsentSmsMarketingField(label)) return false;
+  return (
+    /privacy\s*(policy|notice)|candidate\s*privacy|electronic\s*record\s*and\s*signature|data\s*processing\s*consent|terms\s*and\s*conditions|consent\s*to\s*process|data\s*privacy|(consent|agree).*(collecting|storing|processing|use|share).*(demographic|survey)|(demographic|survey).*(consent|processing)|collecting.*storing.*processing/i.test(
+      label
+    )
   );
 }
 
@@ -1978,7 +1981,10 @@ export async function fillSingleField(
       // Checkbox
       // ==========================================
       const booleanValue = normalizeBooleanValue(val);
-      const isAffirmative = booleanValue === 'Yes';
+      const isConsent =
+        isConsentOrPrivacyPolicyField(label) ||
+        /gdpr_demographic|demographic_data_consent/i.test(`${name} ${fieldId}`);
+      const isAffirmative = booleanValue === 'Yes' || (isConsent && !isConsentSmsMarketingField(label));
       if (isAffirmative) {
         const checkboxSelectors = [
           (field as any).metadata?.selector,
@@ -2738,6 +2744,25 @@ export async function fillForm(
               label: 'Phone',
               valuePopulated: phoneVal,
               success: true,
+            });
+          }
+        }
+      }
+
+      // 4e. Safety Sweep for Demographic GDPR Consent Checkboxes
+      const demoConsentLoc = page.locator(
+        'input[type="checkbox"][name*="gdpr_demographic"], input[type="checkbox"][id*="gdpr_demographic"], input[type="checkbox"][name*="demographic_data_consent"]'
+      );
+      const demoCount = await demoConsentLoc.count().catch(() => 0);
+      for (let i = 0; i < demoCount; i++) {
+        const cb = demoConsentLoc.nth(i);
+        if (await cb.isVisible().catch(() => false)) {
+          const isChecked = await cb.isChecked().catch(() => false);
+          if (!isChecked) {
+            log.info('[Form Filler] 🛡️ Safety Sweep: Checking demographic GDPR consent checkbox');
+            await cb.scrollIntoViewIfNeeded().catch(() => {});
+            await cb.check({ force: true, timeout: 3000 }).catch(async () => {
+              await cb.click({ force: true });
             });
           }
         }
