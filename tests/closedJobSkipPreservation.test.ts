@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { shouldCapturePreCloseFailureScreenshot } from '../src/submitter/liveSubmit.js';
 
 test('shouldCapturePreCloseFailureScreenshot does not overwrite SKIPPED status', () => {
+  assert.equal(shouldCapturePreCloseFailureScreenshot('FILTERED_OUT', false), false);
   assert.equal(shouldCapturePreCloseFailureScreenshot('SKIPPED', false), false);
   assert.equal(shouldCapturePreCloseFailureScreenshot('APPLIED', false), false);
   assert.equal(shouldCapturePreCloseFailureScreenshot('EMAIL_PROOF_PENDING', false), false);

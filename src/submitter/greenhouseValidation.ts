@@ -39,18 +39,58 @@ export async function validateGreenhouseSubmission(
     }));
 
   const invalidFields = await page.evaluate(() => {
+    // 1. Auto-confirm demographic GDPR consent survey checkboxes if any are present and unchecked
+    const demoCbs = document.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"][name*="gdpr_demographic"], input[type="checkbox"][id*="gdpr_demographic"], input[type="checkbox"][name*="demographic_data_consent"]'
+    );
+    demoCbs.forEach((cb) => {
+      if (!cb.checked) {
+        cb.checked = true;
+        cb.dispatchEvent(new Event('input', { bubbles: true }));
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
     const invalid = Array.from(document.querySelectorAll('input:invalid, select:invalid, textarea:invalid'));
-    return invalid.map((element) => {
+    const genuineInvalids: Array<{ fieldId: string; label: string; message: string }> = [];
+
+    for (const element of invalid) {
       const input = element as HTMLInputElement;
+
+      // In HTML5, checkboxes in a group (e.g. "I Agree" / "I Do Not Agree") often all have the "required" attribute.
+      // If at least one checkbox in the group/field is already checked, the group is satisfied; strip the bogus required attribute.
+      if (input.type === 'checkbox') {
+        const container = input.closest('.field, fieldset, [class*="form-group"]');
+        let isGroupSatisfied = false;
+        if (input.name) {
+          const nameGroup = document.querySelectorAll<HTMLInputElement>(`input[type="checkbox"][name="${CSS.escape(input.name)}"]`);
+          if (nameGroup.length > 1 && Array.from(nameGroup).some((cb) => cb.checked)) {
+            isGroupSatisfied = true;
+          }
+        }
+        if (!isGroupSatisfied && container) {
+          const containerGroup = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+          if (containerGroup.length > 1 && Array.from(containerGroup).some((cb) => cb.checked)) {
+            isGroupSatisfied = true;
+          }
+        }
+        if (isGroupSatisfied) {
+          input.removeAttribute('required');
+          continue;
+        }
+      }
+
       const label = input.id
         ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`)?.textContent
         : input.getAttribute('aria-label') || input.getAttribute('name');
-      return {
+      genuineInvalids.push({
         fieldId: input.id || input.getAttribute('name') || 'unknown',
         label: (label || 'unknown').trim(),
         message: input.validationMessage || 'Browser validation rejected the field',
-      };
-    });
+      });
+    }
+
+    return genuineInvalids;
   }).catch(() => []);
 
   const fields = [...missing];

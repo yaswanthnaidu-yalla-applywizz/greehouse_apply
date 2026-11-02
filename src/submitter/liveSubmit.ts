@@ -26,6 +26,7 @@ import {
   captureAndSaveEmailProof,
 } from './proofCapture.js';
 import { emailProofPoller } from './emailProofPoller.js';
+import { findEmbeddedGreenhouseApplicationUrl } from '../scanner/playwrightScanner.js';
 import {
   activeSubmissions,
   PAUSED_SESSIONS,
@@ -1396,6 +1397,7 @@ export function shouldCapturePreCloseFailureScreenshot(
 ): boolean {
   if (screenshotAlreadyCaptured) return false;
   if (
+    terminalStatus === 'FILTERED_OUT' ||
     terminalStatus === 'SKIPPED' ||
     terminalStatus === 'APPLIED' ||
     terminalStatus === 'EMAIL_PROOF_PENDING' ||
@@ -1466,7 +1468,7 @@ export async function runLiveSubmit(
   let fillSummary: FormFillSummary | undefined;
   let keepSessionOpen = false;
   let screenshotCaptured = false;
-  let terminalStatus: 'APPLIED' | 'SKIPPED' | 'OTP_REQUIRED' | 'EMAIL_PROOF_PENDING' | 'FAILED' | null = null;
+  let terminalStatus: 'APPLIED' | 'SKIPPED' | 'FILTERED_OUT' | 'OTP_REQUIRED' | 'EMAIL_PROOF_PENDING' | 'FAILED' | null = null;
 
   try {
     try {
@@ -1526,21 +1528,44 @@ export async function runLiveSubmit(
       timeout: timeoutMs,
     });
 
+    // Company marketing pages often host the real Greenhouse form in an iframe.
+    // Follow the embedded application URL so live submission interacts directly with the ATS DOM.
+    let embeddedApplicationUrl: string | null = null;
+    const iframeEl = await page
+      .waitForSelector('iframe[src*="greenhouse"], iframe[src*="job_app"]', { timeout: 3000 })
+      .catch(() => null);
+    if (iframeEl) {
+      const src = await iframeEl.getAttribute('src').catch(() => null);
+      if (src && /greenhouse\.io/i.test(src) && /job_app/i.test(src)) {
+        embeddedApplicationUrl = src;
+      }
+    }
+    if (!embeddedApplicationUrl) {
+      embeddedApplicationUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((f) => f.url()));
+    }
+    if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
+      log.info(`[Live Submit] 🔀 Detected embedded Greenhouse application URL: ${embeddedApplicationUrl}. Navigating directly to ATS form...`);
+      await page.goto(embeddedApplicationUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: timeoutMs,
+      });
+    }
+
     if (isGreenhouseJobClosedUrl(page.url(), targetUrl)) {
       const skipReason = 'JOB_CLOSED';
       const errorMsg = 'Job posting is closed or unlisted (redirected away from job board)';
       log.warn(`[Live Submit] 🛑 ${errorMsg} for ${targetUrl} -> current URL: ${page.url()}`);
       if (application.id) {
-        await updateStatus(application.id, 'SKIPPED', {
+        await updateStatus(application.id, 'FILTERED_OUT', {
           error_message: errorMsg,
           error_details: { skipReason, stage: 'PREFLIGHT_NAVIGATE', finalUrl: page.url() },
           job_url: application.job_url,
         }).catch(() => {});
       }
-      terminalStatus = 'SKIPPED';
+      terminalStatus = 'FILTERED_OUT';
       return {
         success: false,
-        status: 'SKIPPED',
+        status: 'FILTERED_OUT',
         applicationId,
         errorMessage: errorMsg,
       };
