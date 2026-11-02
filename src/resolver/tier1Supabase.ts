@@ -10,6 +10,7 @@ import { generateFingerprint, normalizeText } from './fingerprint.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { isPhoneNumberField } from './candidateEvidence.js';
+import { formatLocationCityStateCountry } from '../submitter/formFiller.js';
 
 const US_STATE_NAMES_BY_ABBREVIATION: Record<string, string> = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -666,12 +667,12 @@ export function resolveStandardProfileAttribute(
   // Location (City, State, Residence) - must not match "United States" in visa questions
   if (
     /(candidate location|current location|\bcity\b|\bresidence\b|\baddress\b|\bpostal code\b|\bzip code\b)/i.test(combined) ||
-    (/\bstate\b/i.test(combined) && !/united states|sponsorship|visa/i.test(combined))
+    (/\bstate\b/i.test(combined) && !/united states|sponsorship|visa|salary|compensation|expected pay|desired pay|hourly|annual|please state|state whether/i.test(combined))
   ) {
-    if (/\bstate\b/i.test(combined)) {
+    if (/\bstate\b/i.test(combined) && !/city|location|address/i.test(combined)) {
       return profile.location ? extractStateValue(profile.location.trim()) : null;
     }
-    return profile.location || null;
+    return profile.location ? formatLocationCityStateCountry(profile.location) : null;
   }
 
   // Demographics / Salary / Experience from raw_api_payload if present
@@ -925,7 +926,9 @@ export function resolveFromPayloadStructured(
     formatState = false
   ): string | null =>
     pattern.test(normalizedLabel)
-      ? formatPayloadValue(value, fieldType, formatDate, formatState)
+      ? (fieldType === 'select' && Array.isArray(fieldOptions) && fieldOptions.length > 0
+          ? (matchBestOption(formatPayloadValue(value, fieldType, formatDate, formatState) || '', fieldOptions, normalizedLabel) || null)
+          : formatPayloadValue(value, fieldType, formatDate, formatState))
       : null;
   const matchBoolean = (pattern: RegExp, value: unknown): string | null =>
     pattern.test(normalizedLabel) ? formatPayloadBoolean(value) : null;

@@ -952,6 +952,28 @@ export function isGreenhouseJobClosedUrl(currentUrl: string, targetJobUrl: strin
 }
 
 /**
+ * Dismisses OneTrust and common cookie consent overlays before button interactions.
+ */
+export async function dismissCookieBannersIfPresent(page: Page | null): Promise<void> {
+  if (!page || page.isClosed()) return;
+  try {
+    const acceptBtn = page.locator('#onetrust-accept-btn-handler, button#accept-recommended-btn-handler, button:has-text("Accept All"), button:has-text("Accept Cookies"), #accept-cookies').first();
+    if (await acceptBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await acceptBtn.click({ timeout: 1500 }).catch(() => {});
+      await page.waitForTimeout(300);
+    }
+    await page.evaluate(() => {
+      const darkFilter = document.querySelector('.onetrust-pc-dark-filter');
+      if (darkFilter) darkFilter.remove();
+      const banner = document.querySelector('#onetrust-consent-sdk');
+      if (banner) banner.remove();
+    }).catch(() => {});
+  } catch {
+    // Non-fatal if banner is absent
+  }
+}
+
+/**
  * Executes form population and required-field verification.
  */
 export async function executeFormFill(
@@ -1609,7 +1631,12 @@ export async function runLiveSubmit(
       const btn = page.locator(sel).first();
       if ((await btn.count()) > 0 && (await btn.isVisible())) {
         log.info(`[Live Submit] 🖱️ Clicking submit button (${sel})...`);
-        await btn.click({ timeout: 5000 });
+        await dismissCookieBannersIfPresent(page);
+        await btn.click({ timeout: 5000 }).catch(async () => {
+          log.warn(`[Live Submit] Standard click failed on ${sel}, retrying with force: true`);
+          await dismissCookieBannersIfPresent(page);
+          await btn.click({ force: true, timeout: 3000 });
+        });
         submitClicked = true;
         break;
       }
