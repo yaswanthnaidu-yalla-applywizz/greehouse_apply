@@ -1362,6 +1362,30 @@ export async function handlePostSubmitResponse(params: {
 }
 
 /**
+ * Ordered selectors for the Greenhouse application form submit button.
+ * Prioritizes Greenhouse application forms (#submit_app, form#application_form)
+ * and excludes generic page-level footer newsletter/search forms.
+ */
+export function getGreenhouseSubmitButtonSelectors(): string[] {
+  return [
+    '#submit_app',
+    'form#application_form button[type="submit"]',
+    'form#application_form input[type="submit"]',
+    'form[action*="greenhouse"] button[type="submit"]',
+    'form[action*="greenhouse"] input[type="submit"]',
+    '#application_form button:has-text("Submit Application")',
+    '#application_form input[value*="Submit"]',
+    'button:has-text("Submit Application")',
+    'button:has-text("Submit application")',
+    'input[value="Submit Application"]',
+    '#submit_application',
+    'button[type="submit"]:not(footer button):not(form[id*="newsletter"] button):not(form[class*="newsletter"] button)',
+    'input[type="submit"]:not(footer input):not(form[id*="newsletter"] input)',
+    'button:has-text("Apply")',
+  ];
+}
+
+/**
  * Runs a live automated submission for a candidate job application.
  *
  * @param applicationOrId - Application DB record or UUID string
@@ -1616,15 +1640,7 @@ export async function runLiveSubmit(
 
     const preSubmitUrl = page.url();
 
-    const submitSelectors = [
-      'button[type="submit"]',
-      'input[type="submit"]',
-      '#submit_app',
-      'button:has-text("Submit Application")',
-      'input[value*="Submit"]',
-      'button:has-text("Apply")',
-      '#submit_application',
-    ];
+    const submitSelectors = getGreenhouseSubmitButtonSelectors();
 
     let submitClicked = false;
     for (const sel of submitSelectors) {
