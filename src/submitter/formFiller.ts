@@ -1160,6 +1160,31 @@ export function pickReferralOptionText(options: string[]): string {
 }
 
 /**
+ * Matches affirmative radio options for consent disclosures, recording waivers, and onsite requirements.
+ * Avoids matching standard authorization/sponsorship questions.
+ */
+export function matchesAffirmativeRadioOption(label: string, optionText: string): boolean {
+  if (!label || !optionText) return false;
+  if (/authorized|authorization|sponsorship|visa|eligible to work/i.test(label)) return false;
+
+  const isConsent =
+    isConsentOrPrivacyPolicyField(label) ||
+    /consent|recording|agreement|disclosure|acknowledg/i.test(label);
+  const isOnsite = /office|onsite|relocat|in person/i.test(label);
+  const cleanOption = optionText.trim().toLowerCase();
+
+  if (isConsent) {
+    if (/not agree|do not agree|decline|no\b/i.test(cleanOption)) return false;
+    return /^i agree\b|^agree\b|^i consent\b|^accept\b|^yes\b/i.test(cleanOption);
+  }
+  if (isOnsite) {
+    if (/no\b|remote|unable/i.test(cleanOption)) return false;
+    return /^i am able to be in the office\b|^able to be in the office\b|^yes\b|^able to work onsite\b/i.test(cleanOption);
+  }
+  return false;
+}
+
+/**
  * Fills a single resolved field into the active Playwright page DOM.
  */
 export async function fillSingleField(
@@ -1921,7 +1946,8 @@ export async function fillSingleField(
           const cleanTarget = target.toLowerCase().trim();
 
           const isSponsorshipMatch = isSponsorship && (/^yes\b/i.test(cleanLabel) || /^yes\b/i.test(cleanTarget) || ['true', '1'].includes(radioVal?.toLowerCase() || ''));
-          if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget) || isSponsorshipMatch) {
+          const isAffirmativeAgreement = (booleanValue === 'Yes' || !val) && matchesAffirmativeRadioOption(label, labelText);
+          if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget) || isSponsorshipMatch || isAffirmativeAgreement) {
             const optionSelector =
               radioVal && booleanValue && radioVal.toLowerCase() === booleanValue.toLowerCase()
                 ? `input[type="radio"][value="${booleanValue}"]`
@@ -1947,9 +1973,16 @@ export async function fillSingleField(
       }
 
       if (!checked) {
-        const labelLoc = isSponsorship
+        let labelLoc = isSponsorship
           ? page.locator('label').filter({ hasText: /^yes\b/i }).first()
           : page.locator('label').filter({ hasText: isReferralSource ? /LinkedIn|Social Media|Online/i : val }).first();
+        if ((await labelLoc.count()) === 0 && (booleanValue === 'Yes' || !val)) {
+          if (matchesAffirmativeRadioOption(label, 'I Agree')) {
+            labelLoc = page.locator('label').filter({ hasText: /^i agree\b|^agree\b|^i consent\b/i }).first();
+          } else if (matchesAffirmativeRadioOption(label, 'I am able to be in the office')) {
+            labelLoc = page.locator('label').filter({ hasText: /^i am able to be in the office\b|^able to work onsite\b/i }).first();
+          }
+        }
         if ((await labelLoc.count()) > 0) {
           if (isSponsorship) {
             await labelLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
