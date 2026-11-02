@@ -17,7 +17,6 @@ import {
 } from '../services/workHistoryClient.js';
 import type { DashboardCreatedAtRange } from './dashboardDateRange.js';
 import { istDatesForWorkHistory } from './dashboardDateRange.js';
-import { mergeWorkHistoryForCaEmails } from './workHistorySpan.js';
 import type { Response } from 'express';
 import { createLogger } from '../utils/logger.js';
 
@@ -146,7 +145,7 @@ export async function distinctApplywizzIdsForOperatorEmails(
 
 export async function resolveTeamCandidateIdsForManager(
   managerEmail: string,
-  dates: string[],
+  _dates?: string[],
   createdAtRange?: CreatedAtRangeFilter
 ): Promise<{
   operatorEmails: string[];
@@ -171,15 +170,8 @@ export async function resolveTeamCandidateIdsForManager(
   let whUnreachable = false;
   let whCandidateIds: string[] = [];
 
-  // Query external Work History API only if local DB has zero candidate mappings
   const profileIds = await applywizzIdsForManagerTeamProfiles(manager);
   const dbIds = await distinctApplywizzIdsForOperatorEmails(operatorEmails, createdAtRange);
-  if (profileIds.length === 0 && dbIds.length === 0) {
-    const wh = await mergeWorkHistoryForCaEmails(operatorEmails, dates);
-    whRecords = wh.records;
-    whUnreachable = wh.unreachable;
-    whCandidateIds = wh.candidateIds;
-  }
 
   const merged = new Set<string>();
   for (const id of [...whCandidateIds, ...profileIds, ...dbIds]) {

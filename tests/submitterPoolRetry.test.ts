@@ -97,6 +97,7 @@ describe('SubmitterPool automatic retry policy', { skip: !hasRetrySeams }, () =>
       extra: {
         error_message: 'Required field is unresolved.',
         job_url: application.job_url,
+        proof_failed_url: undefined,
       },
     });
   });

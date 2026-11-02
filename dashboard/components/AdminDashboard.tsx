@@ -4,6 +4,7 @@ import { DevSwitcher } from './DevSwitcher.js';
 import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
 import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
+import { TetrominoLoader } from './TetrominoLoader.js';
 
 interface EmailProofData {
   subject?: string;
@@ -624,7 +625,7 @@ export const AdminDashboard: React.FC = () => {
   }, [ingestRun?.running, ingestRun?.error, ingestRun?.finishedAt]);
 
   if (authLoading) {
-    return <main className="min-h-screen p-8 text-xs font-mono font-bold bg-[#0a0a0a] text-[#8e8e93]">Checking access…</main>;
+    return <TetrominoLoader />;
   }
 
   if (!token || !isAuthorized) {

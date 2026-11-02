@@ -16,13 +16,10 @@ import { getDbClient, getSupabaseServerApiKey, isSupabaseConfigured } from '../.
 import { config } from '../../config/env.js';
 import { sendOtpEmail } from '../../services/azureEmail.js';
 import { checkOtpCooldown, generateAndStoreOtp, verifyStoredOtp } from '../../services/otpStore.js';
-import { fetchAllowedCandidates } from '../../services/workHistoryClient.js';
-
-import { setCachedWorkHistory } from '../workHistoryCache.js';
+import { distinctApplywizzIdsForOperatorEmails } from '../managerTeamScope.js';
 import { createLogger } from '../../utils/logger.js';
 import { insertAuditEvent } from '../../db/events.js';
 import { syncDashboardUserAfterSignIn } from '../../services/operatorManagerMapping.js';
-import type { WorkHistoryResult } from '../../services/workHistoryClient.js';
 import { getDashboardUserByEmail } from '../../db/users.js';
 import { findAuthUserByEmail } from '../authUserLookup.js';
 import { normalizeAppRole } from './requireRole.js';
@@ -222,9 +219,9 @@ export function logAuthRoleResolved(email: string, role: AppRole): void {
   log.info(`[Auth] ✅ ${normalized} resolved as ${role}`);
 }
 
-/** Only operators use ApplyWizz work_history on sign-in (CA assignment + manager mapping). */
-export function shouldFetchOperatorWorkHistoryOnSignIn(role: AppRole): boolean {
-  return role === 'operator';
+/** Deprecated: Work history on sign-in is disabled; operator candidates are scoped directly from PostgreSQL. */
+export function shouldFetchOperatorWorkHistoryOnSignIn(_role: AppRole): boolean {
+  return false;
 }
 
 /** Resolve role at sign-in (map → users.role → operator). */
@@ -248,20 +245,10 @@ async function finalizeSuccessfulSignIn(input: {
   authUser: { email?: string | null; user_metadata?: Record<string, unknown> | null };
 }): Promise<{ allowedCandidateIds: string[]; workHistoryUnreachable: boolean }> {
   let allowedCandidateIds: string[] = [];
-  let workHistoryUnreachable = false;
-  let whResult: WorkHistoryResult | undefined;
+  const workHistoryUnreachable = false;
 
   if (input.role === 'operator') {
-    whResult = await fetchAllowedCandidates(input.normalizedEmail);
-    allowedCandidateIds = whResult.candidateIds;
-    workHistoryUnreachable = whResult.unreachable;
-    setCachedWorkHistory(
-      input.normalizedEmail,
-      whResult.records,
-      whResult.candidateIds,
-      workHistoryUnreachable,
-      whResult.resolvedDate
-    );
+    allowedCandidateIds = await distinctApplywizzIdsForOperatorEmails([input.normalizedEmail]);
   }
 
   log.info(
@@ -273,7 +260,6 @@ async function finalizeSuccessfulSignIn(input: {
     email: input.normalizedEmail,
     role: input.role,
     authUser: input.authUser,
-    whResult,
   });
 
   await persistRoleClaim(input.userId, input.role);
