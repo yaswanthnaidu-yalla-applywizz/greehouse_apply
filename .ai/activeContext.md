@@ -1,3 +1,22 @@
+# Current Session Update (2026-11-02 - Form Validation Hardening & DB 2 Re-resolution - COMPLETED)
+
+- **Form Validation & Autocomplete Hardening**:
+  - Implemented `formatLocationCityStateCountry()` to clean candidate locations into `City, State, Country` format and prevent spurious name or line break issues.
+  - Made `location_autocomplete` resilient in `formFiller.ts`: if zero dropdown options appear (plain text or unlisted locations), commits typed text and dispatches input/change events rather than failing with an uncommitted option error.
+  - Fixed Tier 1 `matchProfileAdditionalPayload` in `src/resolver/tier1Supabase.ts` to validate select options against `fieldOptions`. Unlisted values (e.g. "of Computer Applications") now fall through to Tier 3/Tier 5 (LLM Synthesizer) where AI matches against valid dropdown options.
+  - Fixed false `\bstate\b` regex match in `tier1Supabase.ts` on compensation questions containing "please state".
+  - Added education discipline and degree fallbacks in `formFiller.ts` (both native `<select>` and searchable combobox).
+  - Added multi-checkbox referral fallback in `formFiller.ts`: checks LinkedIn first, then Company Website / first option.
+  - Added mandatory EEO auto-decline fallback when demographic fields are required and empty.
+  - Added `dismissCookieBannersIfPresent()` and `{ force: true }` click retry in `src/submitter/liveSubmit.ts` to prevent OneTrust overlays from intercepting submit button clicks.
+- **DB 2 Re-resolution**:
+  - Re-resolved all 219 failed applications created on 2026-11-01 in DB 2 in place, updating their `resolved_fields` with the fresh rules (cleaned locations, converted misclassified location fields back to text, filled discipline/month/referral defaults).
+  - Left application `status = 'FAILED'` as requested, ready to be requeued once code is pushed.
+- **Verification**:
+  - 4 new unit test suites created and passing (6/6 tests): `tests/locationFormattingFallback.test.ts`, `tests/disciplineWaterfallFallthrough.test.ts`, `tests/referralCheckboxFallback.test.ts`, `tests/cookieBannerDismiss.test.ts`.
+  - Clean TypeScript compilation with 0 errors across root and dashboard (`npm run typecheck`).
+  - Node unit test suite passed cleanly with 73/73 tests (`npm run test:unit`).
+
 # Current Session Update (2026-11-02 - Work History API Runtime Decoupling - COMPLETED)
 
 - **Decoupled Work History from Auth & Interactive Dashboard**:

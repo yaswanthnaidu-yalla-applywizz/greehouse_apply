@@ -980,3 +980,5 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-11-02 07:18 [greehouse_apply] checkpoint: systematic debugging of 100 required field failures; downloaded 100 screenshots; no observations
 2026-11-02 07:23 [greehouse_apply] checkpoint: cross-referenced failure_diagnostics and drafted implementation plan; no new observations
 2026-11-02 07:55 [greehouse_apply] checkpoint: executed plan inline in native mode; all 5 tasks implemented and verified; full typecheck clean; no new observations
+2026-11-02 10:40 [greehouse_apply] session-start scan: files=7 parsed=7
+2026-11-02 11:57 [greehouse_apply] checkpoint: form validation hardening and DB 2 re-resolution completed; no new observations
