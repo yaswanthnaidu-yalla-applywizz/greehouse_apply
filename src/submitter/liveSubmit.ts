@@ -942,6 +942,16 @@ export async function prepareSubmissionPreflight(
 }
 
 /**
+ * Detects whether Greenhouse redirected away from the job application (e.g. ?error=true or to the company board root).
+ */
+export function isGreenhouseJobClosedUrl(currentUrl: string, targetJobUrl: string): boolean {
+  if (!currentUrl || !targetJobUrl) return false;
+  if (currentUrl.includes('error=true')) return true;
+  if (targetJobUrl.includes('/jobs/') && !currentUrl.includes('/jobs/')) return true;
+  return false;
+}
+
+/**
  * Executes form population and required-field verification.
  */
 export async function executeFormFill(
@@ -1072,6 +1082,7 @@ export async function handlePostSubmitResponse(params: {
         context,
         page,
         application,
+        browserId: managedBrowser?.browserId,
         startedAt: pausedAt,
       });
 
@@ -1445,6 +1456,25 @@ export async function runLiveSubmit(
       waitUntil: 'domcontentloaded',
       timeout: timeoutMs,
     });
+
+    if (isGreenhouseJobClosedUrl(page.url(), targetUrl)) {
+      const skipReason = 'JOB_CLOSED';
+      const errorMsg = 'Job posting is closed or unlisted (redirected away from job board)';
+      log.warn(`[Live Submit] 🛑 ${errorMsg} for ${targetUrl} -> current URL: ${page.url()}`);
+      if (application.id) {
+        await updateStatus(application.id, 'SKIPPED', {
+          error_message: errorMsg,
+          error_details: { skipReason, stage: 'PREFLIGHT_NAVIGATE', finalUrl: page.url() },
+          job_url: application.job_url,
+        }).catch(() => {});
+      }
+      return {
+        success: false,
+        status: 'SKIPPED',
+        applicationId,
+        errorMessage: errorMsg,
+      };
+    }
 
     // Check for blocking Cloudflare Turnstile / anti-bot challenge on page load
     const turnstileFrame = page.locator(
