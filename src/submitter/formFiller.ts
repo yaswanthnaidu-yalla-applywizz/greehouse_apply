@@ -126,6 +126,20 @@ function escapeAttr(str: string): string {
 }
 
 /**
+ * Sanitizes a metadata CSS selector, ensuring CSS ID selectors (#id) have brackets escaped
+ * without double-escaping or breaking CSS attribute selectors ([name="..."]).
+ */
+export function sanitizeMetadataSelector(selector?: string): string {
+  if (!selector) return '';
+  if (selector.startsWith('#')) {
+    const idPart = selector.slice(1);
+    const escaped = idPart.replace(/(?<!\\)([\[\]])/g, '\\$1');
+    return '#' + escaped;
+  }
+  return selector;
+}
+
+/**
  * Returns candidate selectors for locating the resume file input element.
  */
 export function getResumeFileSelectors(
@@ -177,7 +191,7 @@ async function isResolvedFieldVisible(page: Page, field: ResolvedField): Promise
   const fieldId = field.fieldId || field.name || '';
   const label = field.label || name;
   const selectors = [
-    (field as any).metadata?.selector,
+    sanitizeMetadataSelector((field as any).metadata?.selector),
     `#${escapeId(name)}`,
     `#${escapeId(fieldId)}`,
     `input[name="${escapeAttr(name)}"]`,
@@ -1131,8 +1145,11 @@ export function extractLocationSearchPrefix(val: string): string {
  */
 export function isConsentOrPrivacyPolicyField(label: string): boolean {
   if (!label) return false;
-  return /privacy\s*(policy|notice)|candidate\s*privacy|electronic\s*record\s*and\s*signature|data\s*processing\s*consent|terms\s*and\s*conditions|consent\s*to\s*process|data\s*privacy/i.test(
-    label
+  if (isConsentSmsMarketingField(label)) return false;
+  return (
+    /privacy\s*(policy|notice)|candidate\s*privacy|electronic\s*record\s*and\s*signature|data\s*processing\s*consent|terms\s*and\s*conditions|consent\s*to\s*process|data\s*privacy|(consent|agree).*(collecting|storing|processing|use|share).*(demographic|survey)|(demographic|survey).*(consent|processing)|collecting.*storing.*processing/i.test(
+      label
+    )
   );
 }
 
@@ -1157,6 +1174,31 @@ export function pickReferralOptionText(options: string[]): string {
 }
 
 /**
+ * Matches affirmative radio options for consent disclosures, recording waivers, and onsite requirements.
+ * Avoids matching standard authorization/sponsorship questions.
+ */
+export function matchesAffirmativeRadioOption(label: string, optionText: string): boolean {
+  if (!label || !optionText) return false;
+  if (/authorized|authorization|sponsorship|visa|eligible to work/i.test(label)) return false;
+
+  const isConsent =
+    isConsentOrPrivacyPolicyField(label) ||
+    /consent|recording|agreement|disclosure|acknowledg/i.test(label);
+  const isOnsite = /office|onsite|relocat|in person/i.test(label);
+  const cleanOption = optionText.trim().toLowerCase();
+
+  if (isConsent) {
+    if (/not agree|do not agree|decline|no\b/i.test(cleanOption)) return false;
+    return /^i agree\b|^agree\b|^i consent\b|^accept\b|^yes\b/i.test(cleanOption);
+  }
+  if (isOnsite) {
+    if (/no\b|remote|unable/i.test(cleanOption)) return false;
+    return /^i am able to be in the office\b|^able to be in the office\b|^yes\b|^able to work onsite\b/i.test(cleanOption);
+  }
+  return false;
+}
+
+/**
  * Fills a single resolved field into the active Playwright page DOM.
  */
 export async function fillSingleField(
@@ -1173,6 +1215,7 @@ export async function fillSingleField(
   const name = field.name || field.fieldId || '';
   const fieldId = field.fieldId || field.name || '';
   const label = field.label || name;
+  const metaSelector = sanitizeMetadataSelector((field as any).metadata?.selector);
   const isCountryCode = isCountryCodeField(fieldId, name, label);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
   const isWorkAuthRelocation =
@@ -1285,7 +1328,7 @@ export async function fillSingleField(
       // File Upload (Master Resume PDF ONLY)
       // ==========================================
       const fileSelectors = getResumeFileSelectors(
-        (field as any).metadata?.selector,
+        metaSelector,
         name,
         fieldId
       );
@@ -1341,7 +1384,7 @@ export async function fillSingleField(
       // Textarea
       // ==========================================
       const textareaSelectors = [
-        (field as any).metadata?.selector,
+        metaSelector,
         `textarea#${escapeId(name)}`,
         `textarea#${escapeId(fieldId)}`,
         `#${escapeId(name)}`,
@@ -1435,6 +1478,7 @@ export async function fillSingleField(
           }
           if (radioClicked) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
             log.info(
               `[Submitter] Sponsorship field → selector: ${radioSelectorUsed || 'radio[name=' + name + ']'} → attempted click: ${targetIsNo ? 'No' : 'Yes'} → result: selected`
             );
@@ -1444,10 +1488,21 @@ export async function fillSingleField(
       }
 
       // Check for choice question rendered as checkbox inputs in the DOM (e.g. name="question_123[]")
-      const checkboxGroup = page.locator(
+      let checkboxGroup = page.locator(
         `input[type="checkbox"][name="${escapeAttr(name)}"], input[type="checkbox"][name="${escapeAttr(fieldId)}[]"], input[type="checkbox"][name*="${escapeAttr(fieldId)}"]`
       );
-      const cbCount = await checkboxGroup.count().catch(() => 0);
+      let cbCount = await checkboxGroup.count().catch(() => 0);
+      if (cbCount === 0 && label) {
+        const labelLoc = page.locator('label').filter({ hasText: label }).first();
+        if ((await labelLoc.count().catch(() => 0)) > 0) {
+          const parent = labelLoc.locator('xpath=ancestor-or-self::*[contains(@class, "field") or contains(@class, "row") or self::label]').first();
+          const fallbackCb = parent.locator('input[type="checkbox"]').first();
+          if ((await fallbackCb.count().catch(() => 0)) > 0) {
+            checkboxGroup = fallbackCb;
+            cbCount = 1;
+          }
+        }
+      }
       if (cbCount > 0) {
         let cbChecked = false;
         let checkedSelectorUsed = '';
@@ -1525,6 +1580,7 @@ export async function fillSingleField(
 
         if (cbChecked) {
           fillResult.success = true;
+          fillResult.domCommitted = true;
           log.info(
             `[Submitter] Checkbox option field "${fieldId}" → selector: ${checkedSelectorUsed} → value: ${selectValue} → checked ✅`
           );
@@ -1533,7 +1589,7 @@ export async function fillSingleField(
       }
 
       const selectSelectors = [
-        (field as any).metadata?.selector,
+        metaSelector,
         ...(isCountryCode ? [
           '#country',
           'input#country',
@@ -1597,7 +1653,7 @@ export async function fillSingleField(
             fieldId,
             name,
             label,
-            (field as any).metadata?.selector
+            metaSelector
           );
           if (searchable) {
             found = searchable;
@@ -1613,7 +1669,7 @@ export async function fillSingleField(
           fieldId,
           name,
           label,
-          (field as any).metadata?.selector
+          metaSelector
         );
         if (searchable) {
           found = searchable;
@@ -1825,6 +1881,7 @@ export async function fillSingleField(
           const debugFilled = await debugSponsorshipComboboxSequence(page, selectValue);
           if (debugFilled) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
             return fillResult;
           }
         }
@@ -1834,7 +1891,7 @@ export async function fillSingleField(
           fieldId,
           name,
           label,
-          (field as any).metadata?.selector
+          metaSelector
         );
         if (searchable) {
           let selected = false;
@@ -1850,6 +1907,7 @@ export async function fillSingleField(
           }
           if (selected) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
             return fillResult;
           }
         }
@@ -1918,7 +1976,8 @@ export async function fillSingleField(
           const cleanTarget = target.toLowerCase().trim();
 
           const isSponsorshipMatch = isSponsorship && (/^yes\b/i.test(cleanLabel) || /^yes\b/i.test(cleanTarget) || ['true', '1'].includes(radioVal?.toLowerCase() || ''));
-          if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget) || isSponsorshipMatch) {
+          const isAffirmativeAgreement = (booleanValue === 'Yes' || !val) && matchesAffirmativeRadioOption(label, labelText);
+          if (cleanLabel === cleanTarget || (radioVal && radioVal.toLowerCase() === cleanTarget) || isSponsorshipMatch || isAffirmativeAgreement) {
             const optionSelector =
               radioVal && booleanValue && radioVal.toLowerCase() === booleanValue.toLowerCase()
                 ? `input[type="radio"][value="${booleanValue}"]`
@@ -1944,9 +2003,16 @@ export async function fillSingleField(
       }
 
       if (!checked) {
-        const labelLoc = isSponsorship
+        let labelLoc = isSponsorship
           ? page.locator('label').filter({ hasText: /^yes\b/i }).first()
           : page.locator('label').filter({ hasText: isReferralSource ? /LinkedIn|Social Media|Online/i : val }).first();
+        if ((await labelLoc.count()) === 0 && (booleanValue === 'Yes' || !val)) {
+          if (matchesAffirmativeRadioOption(label, 'I Agree')) {
+            labelLoc = page.locator('label').filter({ hasText: /^i agree\b|^agree\b|^i consent\b/i }).first();
+          } else if (matchesAffirmativeRadioOption(label, 'I am able to be in the office')) {
+            labelLoc = page.locator('label').filter({ hasText: /^i am able to be in the office\b|^able to work onsite\b/i }).first();
+          }
+        }
         if ((await labelLoc.count()) > 0) {
           if (isSponsorship) {
             await labelLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
@@ -1978,10 +2044,13 @@ export async function fillSingleField(
       // Checkbox
       // ==========================================
       const booleanValue = normalizeBooleanValue(val);
-      const isAffirmative = booleanValue === 'Yes';
+      const isConsent =
+        isConsentOrPrivacyPolicyField(label) ||
+        /gdpr_demographic|demographic_data_consent/i.test(`${name} ${fieldId}`);
+      const isAffirmative = booleanValue === 'Yes' || (isConsent && !isConsentSmsMarketingField(label));
       if (isAffirmative) {
         const checkboxSelectors = [
-          (field as any).metadata?.selector,
+          metaSelector,
           `input[type="checkbox"][name="${escapeAttr(name)}"]`,
           `input[type="checkbox"][name="${escapeAttr(fieldId)}"]`,
           `input[type="checkbox"]#${escapeId(name)}`,
@@ -2020,7 +2089,7 @@ export async function fillSingleField(
       // Location Autocomplete (Native & React-Select)
       // ==========================================
       const locationSelectors = [
-        (field as any).metadata?.selector,
+        metaSelector,
         '#candidate-location',
         '#candidate_location',
         `#${escapeId(name)}`,
@@ -2085,7 +2154,7 @@ export async function fillSingleField(
       // Default: Standard Text Input / Auto-Detected Dropdown
       // ==========================================
       const textSelectors: (string | undefined)[] = [
-        (field as any).metadata?.selector,
+        metaSelector,
       ];
 
       // Prioritize standard field selectors
@@ -2738,6 +2807,25 @@ export async function fillForm(
               label: 'Phone',
               valuePopulated: phoneVal,
               success: true,
+            });
+          }
+        }
+      }
+
+      // 4e. Safety Sweep for Demographic GDPR Consent Checkboxes
+      const demoConsentLoc = page.locator(
+        'input[type="checkbox"][name*="gdpr_demographic"], input[type="checkbox"][id*="gdpr_demographic"], input[type="checkbox"][name*="demographic_data_consent"]'
+      );
+      const demoCount = await demoConsentLoc.count().catch(() => 0);
+      for (let i = 0; i < demoCount; i++) {
+        const cb = demoConsentLoc.nth(i);
+        if (await cb.isVisible().catch(() => false)) {
+          const isChecked = await cb.isChecked().catch(() => false);
+          if (!isChecked) {
+            log.info('[Form Filler] 🛡️ Safety Sweep: Checking demographic GDPR consent checkbox');
+            await cb.scrollIntoViewIfNeeded().catch(() => {});
+            await cb.check({ force: true, timeout: 3000 }).catch(async () => {
+              await cb.click({ force: true });
             });
           }
         }
