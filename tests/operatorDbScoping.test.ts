@@ -41,4 +41,14 @@ describe('Database-Only Operator Scoping', () => {
     const code = fs.readFileSync(path.resolve('src/server/routes/candidates.ts'), 'utf-8');
     assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
   });
+
+  test('managerTeamScope.ts does not call mergeWorkHistoryForCaEmails', () => {
+    const code = fs.readFileSync(path.resolve('src/server/managerTeamScope.ts'), 'utf-8');
+    assert.equal(code.includes('mergeWorkHistoryForCaEmails'), false);
+  });
+
+  test('workHistorySpan and workHistoryCache files are deleted', () => {
+    assert.equal(fs.existsSync(path.resolve('src/server/workHistorySpan.ts')), false);
+    assert.equal(fs.existsSync(path.resolve('src/server/workHistoryCache.ts')), false);
+  });
 });

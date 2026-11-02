@@ -6,7 +6,6 @@ import { createLogger } from '../../utils/logger.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import {
-  ADMIN_WORK_HISTORY_CACHE_KEY,
   getISTDateString,
   type WorkHistoryCandidateRecord,
 } from '../../services/workHistoryClient.js';
@@ -45,7 +44,6 @@ import {
   type CandidateQueueStatus,
 } from '../../db/applications.js';
 import {
-  istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
   serializeDateRange,
 } from '../dashboardDateRange.js';
@@ -297,7 +295,6 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
     res.status(400).json({ error: parsedRange.error });
     return;
   }
-  const whDates = istDatesForWorkHistory(parsedRange);
 
   let allowedIds: Set<string> | null = null;
   let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
