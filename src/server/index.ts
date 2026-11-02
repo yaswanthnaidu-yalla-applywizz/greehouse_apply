@@ -72,9 +72,9 @@ import {
   parseDashboardStatsRange,
   serializeDateRange,
 } from './dashboardDateRange.js';
-import { mergeWorkHistoryForIstDates } from './workHistorySpan.js';
 import {
   hasUnrestrictedDashboardAccess,
+  distinctApplywizzIdsForOperatorEmails,
   resolveRequestAppRole,
   resolveTeamCandidateIdsForManager,
   resolveViewAsOperatorManagerEmail,
@@ -685,12 +685,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         );
         allowedCandidateIds = team.candidateIds;
       } else {
-        const merged = await mergeWorkHistoryForIstDates({
-          mode: 'ca',
-          caEmail: userEmail!,
-          dates: istDatesForWorkHistory(parsedRange),
-        });
-        allowedCandidateIds = merged.candidateIds;
+        allowedCandidateIds = await distinctApplywizzIdsForOperatorEmails([userEmail!], createdAtRange);
       }
     }
 
