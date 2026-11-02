@@ -868,6 +868,14 @@ export function applyEducationFieldFallbacks<T extends { fieldId: string; name?:
       log.info(`[Form Filler] Education discipline defaulted to "Computer Science" — field blank`);
       return { ...f, value: 'Computer Science' };
     }
+    if (/\b(start_date|start-date).*(month)\b|start.*month/i.test(combined)) {
+      log.info(`[Form Filler] Education start month defaulted to "08" — field blank`);
+      return { ...f, value: '08' };
+    }
+    if (/\b(end_date|end-date).*(month)\b|end.*month/i.test(combined)) {
+      log.info(`[Form Filler] Education end month defaulted to "05" — field blank`);
+      return { ...f, value: '05' };
+    }
     if (/\b(start_date|start-year)\b|start year|start date/.test(combined)) {
       log.info(`[Form Filler] Education start date defaulted to "2018" — field blank`);
       return { ...f, value: '2018' };
@@ -1066,6 +1074,37 @@ async function clickBooleanOption(
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`Could not click boolean option ${selector}`);
+}
+
+/**
+ * Sanitizes location values by stripping any prepended candidate name or newline delimiters.
+ */
+export function sanitizeLocationString(val: string): string {
+  if (!val) return '';
+  const trimmed = val.trim();
+  if (trimmed.includes('\n')) {
+    const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
+    return lines[lines.length - 1] || '';
+  }
+  return trimmed;
+}
+
+/**
+ * Extracts the city / prefix portion of a location string for autocomplete typing.
+ */
+export function extractLocationSearchPrefix(val: string): string {
+  const clean = sanitizeLocationString(val);
+  return clean.includes(',') ? clean.split(',')[0].trim() : clean;
+}
+
+/**
+ * Detects whether a field label relates to privacy notices, consent to process data, terms & disclosures.
+ */
+export function isConsentOrPrivacyPolicyField(label: string): boolean {
+  if (!label) return false;
+  return /privacy\s*(policy|notice)|candidate\s*privacy|electronic\s*record\s*and\s*signature|data\s*processing\s*consent|terms\s*and\s*conditions|consent\s*to\s*process|data\s*privacy/i.test(
+    label
+  );
 }
 
 /**
@@ -1375,7 +1414,17 @@ export async function fillSingleField(
             const parentL = cb.locator('..').first();
             if ((await parentL.count()) > 0) cbText = (await parentL.innerText().catch(() => '')) || '';
           }
-          if (cbText && (cbText.trim().toLowerCase() === selectValue.trim().toLowerCase() || choiceOptionTextMatches(cbText, selectValue))) {
+          const isConsentSingleCb =
+            cbCount === 1 &&
+            (isConsentOrPrivacyPolicyField(label) ||
+              isConsentOrPrivacyPolicyField(cbText) ||
+              /acknowledge|confirm|agree|consent/i.test(selectValue));
+          if (
+            isConsentSingleCb ||
+            (cbText &&
+              (cbText.trim().toLowerCase() === selectValue.trim().toLowerCase() ||
+                choiceOptionTextMatches(cbText, selectValue)))
+          ) {
             checkedSelectorUsed = cbId ? `#${cbId}` : `input[name="${name}"]`;
             await cb.scrollIntoViewIfNeeded().catch(() => {});
             await cb.check({ force: true, timeout: 3000 }).catch(async () => {
@@ -1868,11 +1917,12 @@ export async function fillSingleField(
 
       const found = await findElementLocator(page, locationSelectors, timeoutMs);
       if (found) {
+        val = sanitizeLocationString(val);
         await found.locator.scrollIntoViewIfNeeded().catch(() => {});
         await found.locator.click().catch(() => {});
         await found.locator.fill('');
 
-        const searchPrefix = val.includes(',') ? val.split(',')[0].trim() : val;
+        const searchPrefix = extractLocationSearchPrefix(val);
         await found.locator.pressSequentially(searchPrefix, { delay: 40 });
 
         await page.waitForSelector(
@@ -2216,10 +2266,11 @@ function isExplicitEducationField(field: ResolvedField | ScannedField): boolean 
   const normName = (field.name || '').toLowerCase();
   const normLabel = (field.label || '').toLowerCase();
   return (
-    /^(school|degree|discipline|start_date|end_date|start-year|end-year)--\d+/i.test(normId) ||
-    /^(school|degree|discipline|start_date|end_date|start-year|end-year)--\d+/i.test(normName) ||
+    /^(school|degree|discipline|start_date|end_date|start-year|end-year|start_date_month|end_date_month)--\d+/i.test(normId) ||
+    /^(school|degree|discipline|start_date|end_date|start-year|end-year|start_date_month|end_date_month)--\d+/i.test(normName) ||
     /\beducation_attributes\b/i.test(normName) ||
-    (/\b(school|degree|discipline)\b/i.test(normLabel) && /--\d+/.test(`${normId} ${normName}`))
+    /\beducation_attributes\b/i.test(normId) ||
+    (/\b(school|degree|discipline|start date month|end date month)\b/i.test(normLabel) && /--\d+/.test(`${normId} ${normName}`))
   );
 }
 
