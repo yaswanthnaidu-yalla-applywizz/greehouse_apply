@@ -32,6 +32,8 @@ export interface SubmitterPoolOptions {
   submitFn?: (applicationId: string, options: LiveSubmitOptions) => Promise<LiveSubmitResult>;
   submitAshbyFn?: (application: ApplicationRow, options: { headless?: boolean }) => Promise<LiveSubmitResult>;
   requeueFn?: typeof requeueApplicationForRetry;
+  launchFailureCooldownMs?: number;
+  poolSize?: number;
 }
 
 interface QueuedSubmission {
@@ -48,6 +50,8 @@ export class SubmitterPool {
   private readonly submitAshbyFn: (application: ApplicationRow, options: { headless?: boolean }) => Promise<LiveSubmitResult>;
   private readonly requeueFn: typeof requeueApplicationForRetry;
   private readonly poolSize: number;
+  private readonly launchFailureCooldownMs: number;
+  private launchFailureCooldownUntil = 0;
   private readonly lanes: QueuedSubmission[][];
   private readonly workerBusy: boolean[];
   private readonly inFlightApplicationIds = new Set<string>();
@@ -65,7 +69,8 @@ export class SubmitterPool {
     this.submitFn = options.submitFn ?? runLiveSubmit;
     this.submitAshbyFn = options.submitAshbyFn ?? submitAshbyApplication;
     this.requeueFn = options.requeueFn ?? requeueApplicationForRetry;
-    const poolSize = parseInt(config.SUBMISSION_POOL_SIZE ?? '3', 10);
+    this.launchFailureCooldownMs = options.launchFailureCooldownMs ?? 30000;
+    const poolSize = options.poolSize ?? parseInt(config.SUBMISSION_POOL_SIZE ?? '3', 10);
     this.poolSize = Number.isInteger(poolSize) && poolSize > 0 ? Math.min(poolSize, 6) : 3;
     this.lanes = Array.from({ length: this.poolSize }, () => []);
     this.workerBusy = Array.from({ length: this.poolSize }, () => false);
@@ -248,6 +253,19 @@ export class SubmitterPool {
   }
 
   public async dispatchOnce(): Promise<{ idleWorkers: number; dequeued: number; inFlight: number }> {
+    const now = Date.now();
+    if (now < this.launchFailureCooldownUntil) {
+      const remainingMs = this.launchFailureCooldownUntil - now;
+      log.warn(
+        `[Pool] ⏳ Launch failure circuit breaker active (${Math.ceil(remainingMs / 1000)}s remaining); skipping dequeue to allow container process reclamation.`
+      );
+      return {
+        idleWorkers: this.getIdleCount(),
+        dequeued: 0,
+        inFlight: this.inFlightApplicationIds.size,
+      };
+    }
+
     try {
       await recoverStaleApplyingApplications();
     } catch {}
@@ -364,6 +382,12 @@ export class SubmitterPool {
           const retryReason = getRetryReason(result);
           let finalStatus = 'FAILED';
           if (isAutomaticRetryAllowed(retryReason)) {
+            if (retryReason === 'BROWSER_LAUNCH_FAILED' && this.launchFailureCooldownMs > 0) {
+              this.launchFailureCooldownUntil = Date.now() + this.launchFailureCooldownMs;
+              log.warn(
+                `[Pool] ⚠️ Browser launch failure encountered for app-${applicationId}. Engaging ${this.launchFailureCooldownMs}ms cooldown before next dequeue.`
+              );
+            }
             const retryOutcome = await this.requeueFn(
               applicationId,
               failureMessage,
@@ -388,6 +412,12 @@ export class SubmitterPool {
         let finalStatus = 'FAILED';
         const retryReason = getRetryReason(error instanceof Error ? error : String(error));
         if (isAutomaticRetryAllowed(retryReason)) {
+          if (retryReason === 'BROWSER_LAUNCH_FAILED' && this.launchFailureCooldownMs > 0) {
+            this.launchFailureCooldownUntil = Date.now() + this.launchFailureCooldownMs;
+            log.warn(
+              `[Pool] ⚠️ Browser launch failure encountered for app-${applicationId}. Engaging ${this.launchFailureCooldownMs}ms cooldown before next dequeue.`
+            );
+          }
           try {
             const retryOutcome = await this.requeueFn(
               applicationId,

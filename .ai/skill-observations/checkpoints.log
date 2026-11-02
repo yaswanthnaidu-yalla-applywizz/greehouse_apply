@@ -1,3 +1,13 @@
+2026-11-02 session-checkpoint: completed finishing-a-development-branch on dev; verified 32/32 master E2E integration tests; merged origin/main into dev with 0 conflicts; verified green post-merge test run; pushed dev to origin; opened GitHub Pull Request #72 (dev -> main); no new observations
+2026-11-02 session-checkpoint: completed native TDD implementation to decouple Work History API from auth and dashboard (commits 2816676..0d318fe); decoupled operator sign-in, notifications, stats, and admin candidate list to direct PostgreSQL queries; purged dead workHistorySpan and workHistoryCache modules; 100% tests pass (110 vitest, 73 node:test, 9 operatorDbScoping), clean typecheck, clean Vite build; no new observations
+2026-11-02 session-start scan: files=7 parsed=7 (investigating workhistory api usage across ca sign in and dashboard loading)
+2026-11-02 session-start scan: files=7 parsed=7 (auditing committed and uncommitted changes since last push, classifying fixes vs feats)
+2026-11-02 session-checkpoint: implemented and verified worker process exhaustion & retry hardening across 4 tasks (commits 9611575, 91e8640, 2762754, 3fde2a5): 1) preserved browserId in otpSession & liveSubmit to free BrowserManager semaphore slots on clearPausedSession; 2) added SubmitterPool circuit breaker (launchFailureCooldownMs) to pause dequeuing on BROWSER_LAUNCH_FAILED; 3) added tini init PID 1 in Dockerfile to reap zombie Chromium subprocesses; 4) aligned submitterPoolRetry test assertions; 100% tests pass (12/12 submitterPool, 110/110 vitest, 8/8 browserManager), clean tsc & vite production build; no new observations
+2026-11-02 session-checkpoint: executed /pstack:blast-radius on 3 worker service remediations: 1) browserId preservation in otpSession/liveSubmit (proven safe via live script; activeCount drops to 0 vs leaking 1 slot); 2) SubmitterPool circuit breaker for BROWSER_LAUNCH_FAILED (proven safe; avoids retry storm without DB lock contention); 3) Docker PID 1 tini init adoption (diagnosed Node PID 1 zombie child leak under high Chromium churn); no new observations
+2026-11-02 session-checkpoint: analyzed Railway worker service error logs and DB2 event telemetry; diagnosed primary root cause of 1,096+ failures between 16:00-19:00 UTC on 2026-11-01 as Linux container process/thread exhaustion (EAGAIN / pthread_create errno 11 / Target crashed) caused by zombie Chromium processes, OTP session browserId omission, and zero-backoff retry storm; diagnosed secondary causes (Scale AI unverified OTP submission, Smartsheet uncommitted required field, and S3 resume 403s); no new observations
+2026-11-02 session-start scan: files=7 parsed=7 (checking railway logs of worker service with error level and finding root causes)
+2026-10-30 session-checkpoint: analyzed 122 Greenhouse failure screenshots and technical event logs in DB2; identified 6 root causes: S3 403 Forbidden resume download, Cloudflare Turnstile CAPTCHA, dash character encoding mismatch on visa sponsorship, missed mandatory consent checkboxes, OTP poll timeout, and third-party site search field collision; no new observations
+2026-10-30 session-checkpoint: queried DB2 for gh_candidate_applications stats across Total, Greenhouse, and Ashby (Applied = APPLIED + EMAIL_PROOF_PENDING, Failed = FAILED, CA Needed = READY_FOR_REVIEW); grouped Greenhouse failures by reason; no new observations
 2026-10-30 session-checkpoint: exported 14,026 rows from DB2 gh_candidate_qa_bank to docs/qa_bank.csv; verified CSV RFC-4180 parsing integrity (14,026/14,026 rows parsed); no new observations
 2026-10-30 session-start scan: files=7 parsed=7 (diagnosing Greenhouse and Ashby failures from 10-29 and 10-30, screenshot analysis, root cause diagnosis)
 2026-10-30 session-start scan: files=6 parsed=6 (downloading qa bank from db 2 to docs/qa_bank.csv)
@@ -959,3 +969,14 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 
 2026-10-30 14:13 [greehouse_apply] session-start scan: files=7 parsed=7 principles=unparsed2026-10-30 session-checkpoint: remediation applied for form-filler checkbox regression, dead dashboard badges, audit-script ignore rule, and targeted EOL cleanup; focused tests and root/dashboard typecheck passed; no files staged or committed
 2026-10-30 14:45 [greehouse_apply] session-start scan: files=7 parsed=7 principles=unparsed
+2026-10-30 session-start scan: files=7 parsed=7
+2026-10-30 session-start scan: files=7 parsed=7
+2026-10-30 session-end: dashboard polling research completed; no new observations
+2026-10-30 session-end: compared dashboard realtime transports; no new observations
+2026-10-30 session-start scan: files=7
+2026-10-30 checkpoint: no observations; mapped ingestion email paths for MAIL_SEND requirements interview.
+2026-11-02 06:38 [greehouse_apply] session-start scan: files=7 parsed=7
+2026-11-02 06:51 [greehouse_apply] checkpoint: queried DB2 for 2026-11-01 application failure breakdown; no observations
+2026-11-02 07:18 [greehouse_apply] checkpoint: systematic debugging of 100 required field failures; downloaded 100 screenshots; no observations
+2026-11-02 07:23 [greehouse_apply] checkpoint: cross-referenced failure_diagnostics and drafted implementation plan; no new observations
+2026-11-02 07:55 [greehouse_apply] checkpoint: executed plan inline in native mode; all 5 tasks implemented and verified; full typecheck clean; no new observations

@@ -289,7 +289,9 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
                       (rawLabel && rawLabel.indexOf('*') !== -1) ||
                       hasHiddenRequiredInput(el);
 
-          var detectedType = (name.indexOf('location') !== -1 || id.indexOf('location') !== -1 || label.toLowerCase().indexOf('location') !== -1)
+          var isLocationNameOrId = name.indexOf('location') !== -1 || id.indexOf('location') !== -1;
+          var isStandardLocationLabel = /^(candidate\s*location|location\s*\(city\)|current\s*location|location)$/i.test(label.trim());
+          var detectedType = (isLocationNameOrId || (isStandardLocationLabel && label.length < 40))
             ? 'location_autocomplete'
             : 'select';
 
@@ -331,9 +333,7 @@ export async function extractVisibleFormFields(page: Page): Promise<ScannedField
         } else if (rawType === 'checkbox') {
           detectedType = 'checkbox';
         } else if (
-          name.toLowerCase().indexOf('location') !== -1 ||
-          id.toLowerCase().indexOf('location') !== -1 ||
-          label.toLowerCase().indexOf('location') !== -1
+          (name.indexOf('location') !== -1 || id.indexOf('location') !== -1 || /^(candidate\s*location|location\s*\(city\)|current\s*location|location)$/i.test(label.trim())) && label.length < 40
         ) {
           detectedType = 'location_autocomplete';
         }

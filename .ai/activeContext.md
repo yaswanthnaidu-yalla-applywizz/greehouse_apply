@@ -1,3 +1,92 @@
+# Current Session Update (2026-11-02 - Work History API Runtime Decoupling - COMPLETED)
+
+- **Decoupled Work History from Auth & Interactive Dashboard**:
+  - Fully removed the external ApplyWizz Work History API from operator login, notification streaming, dashboard metrics calculation, and admin candidate lists.
+  - All operator and admin candidate scoping now queries PostgreSQL directly (`gh_candidate_applications.assigned_ca_email` and `profiles.ca_email`).
+- **Implemented Fixes & Commits**:
+  1. **Commit `2816676` (`src/server/routes/auth.ts`, `tests/operatorDbScoping.test.ts`)**:
+     - Removed `fetchAllowedCandidates` and `setCachedWorkHistory` from `finalizeSuccessfulSignIn`.
+     - Scoped sign-in `allowedCandidateIds` via `distinctApplywizzIdsForOperatorEmails` in DB with `workHistoryUnreachable: false`.
+  2. **Commit `40be75c` (`src/server/routes/notifications.ts`)**:
+     - Replaced `mergeWorkHistoryForIstDates` in `GET /api/notifications` with `distinctApplywizzIdsForOperatorEmails([userEmail!], createdAtRange)`.
+  3. **Commit `5bb55a7` (`src/server/index.ts`)**:
+     - Replaced `mergeWorkHistoryForIstDates` in `GET /api/stats` with `distinctApplywizzIdsForOperatorEmails([userEmail!], createdAtRange)`.
+  4. **Commit `38cc0a1` (`src/server/routes/candidates.ts`)**:
+     - Removed `mergeWorkHistoryForIstDates` in `unrestricted` (dev/admin) mode. Admin now directly loads all candidates with applications in the selected date range via `distinctApplywizzIdsForCreatedAtRange`.
+  5. **Commit `0d318fe` (`src/server/managerTeamScope.ts`, `src/server/workHistorySpan.ts`, `src/server/workHistoryCache.ts`, `tests/`)**:
+     - Removed dead Work History fallback in `resolveTeamCandidateIdsForManager`.
+     - Deleted dead modules `src/server/workHistorySpan.ts` and `src/server/workHistoryCache.ts`.
+     - Expanded `tests/operatorDbScoping.test.ts` to statically assert zero imports or calls to Work History span merge across the server.
+- **Verification**:
+  - 100% tests pass (110/110 Vitest, 73/73 Node unit test runner, 9/9 operatorDbScoping, 2/2 operatorCaDirectQuery).
+  - Clean TypeScript compilation (`npm run typecheck`).
+  - Clean Vite production build (`npm run build:dashboard`).
+
+# Current Session Update (2026-11-02 - Worker Service Process Exhaustion & Retry Hardening - COMPLETED)
+
+- **Worker Service Health & Hardening Completed**:
+  - Implemented, verified, and committed the 4-part hardening plan eliminating container-level process/thread exhaustion (`EAGAIN` / `pthread_create: errno 11`) and zero-backoff retry storms.
+- **Implemented Fixes & Commits**:
+  1. **Commit `9611575` (`src/submitter/otpSession.ts`, `src/submitter/liveSubmit.ts`)**:
+     - Preserved `browserId` across `storePausedSession` and `registerSubmissionSession` (`browserId: session.browserId ?? existing?.browserId`).
+     - Passed `browserId: managedBrowser?.browserId` from `liveSubmit.ts`.
+     - Verified with `tests/otpSessionBrowserId.test.ts` proving `BrowserManager` slots are properly freed on `clearPausedSession`.
+  2. **Commit `91e8640` (`src/submitter/submitterPool.ts`)**:
+     - Added `launchFailureCooldownMs` (default 30,000ms) and `launchFailureCooldownUntil`.
+     - Engaged cooldown on `BROWSER_LAUNCH_FAILED` in worker loop and early-exited in `dispatchOnce()`, preventing zero-backoff retry storms.
+     - Verified with `tests/submitterPoolCircuitBreaker.test.ts` (1/1 pass).
+  3. **Commit `2762754` (`Dockerfile`)**:
+     - Added `tini` to `apt-get install` and configured `ENTRYPOINT ["/usr/bin/tini", "--"]`.
+     - Ensures container PID 1 reaps orphaned zombie Chromium processes and cleanly forwards shutdown signals.
+  4. **Commit `3fde2a5` (`tests/submitterPoolRetry.test.ts`)**:
+     - Aligned unit test assertions with failure proof metadata (`proof_failed_url: undefined`).
+- **Full Verification Suite Passed**:
+  - `tests/browserManager.test.ts`: 8/8 passed.
+  - Submitter pool test suite (`tests/submitterPool.test.ts`, `tests/submitterPoolRetry.test.ts`, `tests/otpSessionBrowserId.test.ts`, `tests/submitterPoolCircuitBreaker.test.ts`): 12/12 passed.
+  - Full Vitest suite (`npm run test:vitest`): 110/110 passed.
+  - Production build & typecheck (`npm run build`): clean build with zero TypeScript errors.
+- **Plan File**: [`docs/superpowers/plans/2026-11-02-worker-process-exhaustion-and-retry-hardening.md`](file:///C:/Users/yaswa/Dev/greehouse_apply/docs/superpowers/plans/2026-11-02-worker-process-exhaustion-and-retry-hardening.md).
+
+# Current Session Update (2026-11-02 - Required-Field Failure Hardening)
+
+- **Hardening Completed**: Resolved root causes of the 100 `SUBMIT_REQUIRED_FIELD_EMPTY` failures recorded on 2026-11-01.
+- **Implemented Fixes**:
+  1. **Resume Storage Fallback (`src/db/storage.ts`)**: Implemented `downloadResumeFromSupabaseStorage()` and updated `fetchResumePdfBuffer()` so HTTP 403 or S3 failures on candidate `resume_url` automatically fall back to downloading from Supabase Storage `resumes` bucket (`profile.resume_storage_path`).
+  2. **Location Sanitizer & Autocomplete Guard (`src/submitter/formFiller.ts`, `src/scanner/playwrightScanner.ts`, `src/submitter/cascadeDetector.ts`)**: Added `sanitizeLocationString()` and `extractLocationSearchPrefix()` to strip candidate names and newline delimiters from `profiles.location` before typing into autocomplete comboboxes. Narrowed scanner regexes so open-ended text questions containing the word "location" are not forced into `location_autocomplete`.
+  3. **Consent & Privacy Policy Checkbox Auto-Confirmation (`src/submitter/formFiller.ts`)**: Added `isConsentOrPrivacyPolicyField()` to auto-check single-checkbox agreements (`cbCount === 1`) where DOM labels contain privacy/policy/disclosure text, and escaped ID selector syntax.
+  4. **Education Month Dropdowns (`src/submitter/formFiller.ts`)**: Added default start/end month fallbacks (`"08"` / `"05"`) in `applyEducationFieldFallbacks()` and updated `isExplicitEducationField()`.
+  5. **Closed Job Redirect Guard (`src/submitter/liveSubmit.ts`)**: Added `isGreenhouseJobClosedUrl()` to fast-fail Greenhouse `?error=true` or directory redirects as `JOB_CLOSED` / `SKIPPED` rather than attempting form fill and throwing false DOM missing errors.
+- **Verification**:
+  - All 5 new unit test suites passed (`tests/storageResumeFallback.test.ts`, `tests/locationParsingPrecision.test.ts`, `tests/consentCheckboxFill.test.ts`, `tests/educationMonthFallback.test.ts`, `tests/closedJobRedirect.test.ts`).
+  - Full TypeScript typecheck passed cleanly with 0 errors across root and dashboard (`npm run typecheck`).
+  - Form filler precision test suite passed 24/24 tests (`tests/formFillerPrecision.test.ts`).
+- **Plan File**: [`docs/superpowers/plans/2026-11-02-required-field-missing-hardening.md`](file:///C:/Users/yaswa/Dev/greehouse_apply/docs/superpowers/plans/2026-11-02-required-field-missing-hardening.md).
+
+# Current Session Update (2026-11-02 - Worker Service Railway Error Logs Root Cause Analysis)
+
+- **Worker Service Health & Deploy State**:
+  - Service `worker` (ID: `dc3f3ee8-83e5-4aae-a6b7-ba63dd2fcf0b`, region `sfo`, 3/3 replicas running) on deployment `210efb27-1ab2-4224-8578-6f36003f7a18` running continuously since 2026-10-30 14:57 IST.
+  - Currently idling (`idleWorkers=3 dequeued=0 inFlight=0`).
+- **Telemetry & Error Log Investigation**:
+  - Analyzed Railway error logs (`@level:error`) and production DB2 `gh_application_events` failure events since 2026-11-01.
+  - Failure volume concentrated between 16:00 and 19:00 UTC on 2026-11-01 (16:00: 38, 17:00: 231, 18:00: 843 failures).
+- **Identified Root Causes**:
+  1. **Primary Root Cause: Linux Container Process/Thread Exhaustion (95.8% of errors, 1,096+ events)**:
+     - `Error: spawn .../chrome-headless-shell EAGAIN` (823 events) and `pthread_create: Resource temporarily unavailable (errno 11)` -> `Target page, context or browser has been closed` / `Target crashed` (273 events).
+     - *Mechanisms*:
+       a) **Long-lived Replicas & PID Buildup**: Container ran for 3+ days without restart; PIDs reached >32,500.
+       b) **OTP Paused Session Browser Leak**: When an application requires OTP, `liveSubmit.ts` keeps the browser open (`keepSessionOpen: true`), but `registerSubmissionSession` called `storePausedSession` without passing `browserId`. When `clearPausedSession` ran, `browserManager.releaseBrowser(session.browserId)` was skipped, leaving browsers tracked in memory and disconnected Playwright child processes until forced kills.
+       c) **Zero-Backoff Retry Storm**: `BROWSER_LAUNCH_FAILED` was classified as retryable. When `EAGAIN` hit, the worker instantly reset status from `APPLYING -> QUEUED`. The idle worker pool immediately dequeued the application within milliseconds and re-attempted spawning Chromium, spiraling into 843 spawn failures in a single hour and hitting Docker/cgroup `pids.max` / `RLIMIT_NPROC`.
+  2. **Secondary Root Causes**:
+     - `[OTP_FETCH:TIMEOUT]` / `[OTP_SUBMISSION:UNVERIFIED]` (28 events): OTP emails delayed or expired, or post-OTP confirmation tokens not received (e.g. Scale AI).
+     - `SUBMIT_REQUIRED_FIELD_EMPTY` / Dropdown mismatches (32 events): Greenhouse custom dropdowns and client-side validations (e.g. Smartsheet required field, Location options).
+     - S3 Resume Fetch Failures (18 events): 403 Forbidden or network drops while obtaining candidate resume PDFs.
+
+- **Blast Radius Analysis on Remediation (/pstack:blast-radius)**:
+  - **Remediation 1 (browserId preservation in otpSession/liveSubmit)**: Proven via live code reproduction. Current code drops `browserId` when `registerSubmissionSession` overwrites `storePausedSession`, causing `BrowserManager.activeBrowsers` to leak slots (verified: active count remained 1 instead of 0 after cleanup). Fix is safe because `releaseBrowser` is idempotent and guarded by `activeBrowsers.has(id)`.
+  - **Remediation 2 (SubmitterPool circuit breaker on BROWSER_LAUNCH_FAILED)**: Proven safe. Pausing dequeueing for 30s upon launch failure breaks the tight 2-second retry storm that burned 843 retries in 1 hour. No DB locks are held; unit test seam uses configurable `launchFailureCooldownMs`.
+  - **Remediation 3 (Docker PID 1 tini init adoption)**: Diagnosed Docker container deficit. `Dockerfile` runs `CMD ["node", "dist/server/index.js"]` as PID 1 without `tini`. Node does not reap orphaned Chromium subprocesses, causing thousands of defunct zombies over days and exhausting Linux `pid_max` (32,768). Adding `tini` as init reaps zombies automatically.
+
 # Current Session Update (2026-10-30 - Implemented Failure Rate Reduction Plan)
 
 - **Branch**: `fix/failure-rate-reduction` (commits `81dd8cd..HEAD`)

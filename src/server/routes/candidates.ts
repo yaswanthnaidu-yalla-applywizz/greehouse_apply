@@ -6,12 +6,10 @@ import { createLogger } from '../../utils/logger.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import {
-  ADMIN_WORK_HISTORY_CACHE_KEY,
   getISTDateString,
   type WorkHistoryCandidateRecord,
 } from '../../services/workHistoryClient.js';
 import { sanitizeHttpHeaderValue } from '../httpHeaders.js';
-import { mergeWorkHistoryForIstDates } from '../workHistorySpan.js';
 import {
   applicationAssignedCaAllowedForRequest,
   hasUnrestrictedDashboardAccess,
@@ -46,7 +44,6 @@ import {
   type CandidateQueueStatus,
 } from '../../db/applications.js';
 import {
-  istDatesForWorkHistory,
   parseDashboardCreatedAtRange,
   serializeDateRange,
 } from '../dashboardDateRange.js';
@@ -298,7 +295,6 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
     res.status(400).json({ error: parsedRange.error });
     return;
   }
-  const whDates = istDatesForWorkHistory(parsedRange);
 
   let allowedIds: Set<string> | null = null;
   let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
@@ -306,13 +302,8 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
   let restrictedAccess: Awaited<ReturnType<typeof resolveDashboardCandidateAccess>> | null = null;
 
   if (unrestricted) {
-    const merged = await mergeWorkHistoryForIstDates({
-      mode: 'admin',
-      caEmail: ADMIN_WORK_HISTORY_CACHE_KEY,
-      dates: whDates,
-    });
-    workHistoryUnreachable = merged.unreachable;
-    workHistoryRecords = merged.records;
+    workHistoryUnreachable = false;
+    workHistoryRecords = [];
   } else {
     restrictedAccess = await resolveDashboardCandidateAccess(req, parsedRange, res);
     if (restrictedAccess.authError) {

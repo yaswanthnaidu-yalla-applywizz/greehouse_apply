@@ -5,6 +5,7 @@ import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
 import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 import { DevTrendChart, type TrendPoint, type TrendMetric, type TrendBucket } from './DevTrendChart.js';
+import { TetrominoLoader } from './TetrominoLoader.js';
 
 interface DevHealthProbe {
   name: string;
@@ -337,7 +338,7 @@ export const DevDashboard: React.FC = () => {
   };
 
   if (authLoading) {
-    return <main className="min-h-screen p-8 text-xs font-mono font-bold bg-[#0a0a0a] text-[#8e8e93]">Checking access…</main>;
+    return <TetrominoLoader />;
   }
 
   if (!token || !isAuthorized) {

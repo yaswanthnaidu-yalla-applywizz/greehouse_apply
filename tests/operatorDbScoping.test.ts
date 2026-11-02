@@ -20,4 +20,35 @@ describe('Database-Only Operator Scoping', () => {
     const code = fs.readFileSync(path.resolve('src/server/managerTeamScope.ts'), 'utf-8');
     assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
   });
+
+  test('auth.ts does not call fetchAllowedCandidates or setCachedWorkHistory', () => {
+    const code = fs.readFileSync(path.resolve('src/server/routes/auth.ts'), 'utf-8');
+    assert.equal(code.includes('fetchAllowedCandidates'), false);
+    assert.equal(code.includes('setCachedWorkHistory'), false);
+  });
+
+  test('notifications.ts does not call mergeWorkHistoryForIstDates', () => {
+    const code = fs.readFileSync(path.resolve('src/server/routes/notifications.ts'), 'utf-8');
+    assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
+  });
+
+  test('index.ts does not call mergeWorkHistoryForIstDates', () => {
+    const code = fs.readFileSync(path.resolve('src/server/index.ts'), 'utf-8');
+    assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
+  });
+
+  test('candidates.ts does not call mergeWorkHistoryForIstDates', () => {
+    const code = fs.readFileSync(path.resolve('src/server/routes/candidates.ts'), 'utf-8');
+    assert.equal(code.includes('mergeWorkHistoryForIstDates'), false);
+  });
+
+  test('managerTeamScope.ts does not call mergeWorkHistoryForCaEmails', () => {
+    const code = fs.readFileSync(path.resolve('src/server/managerTeamScope.ts'), 'utf-8');
+    assert.equal(code.includes('mergeWorkHistoryForCaEmails'), false);
+  });
+
+  test('workHistorySpan and workHistoryCache files are deleted', () => {
+    assert.equal(fs.existsSync(path.resolve('src/server/workHistorySpan.ts')), false);
+    assert.equal(fs.existsSync(path.resolve('src/server/workHistoryCache.ts')), false);
+  });
 });

@@ -597,7 +597,10 @@ export class PlaywrightScanner {
                 }
               } else if (f.type === 'checkbox') {
                 fieldType = 'checkbox';
-              } else if (name.includes('location') || rawLabel.toLowerCase().includes('location')) {
+              } else if (
+                (name === 'candidate_location' || name === 'location' || name === 'job_application_location' || /^job_application\[.*location.*\]$/i.test(name)) ||
+                (/^(candidate\s*location|location\s*\(city\)|current\s*location|city,\s*state)$/i.test(rawLabel.trim()))
+              ) {
                 fieldType = 'location_autocomplete';
               }
 

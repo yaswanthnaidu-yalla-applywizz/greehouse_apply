@@ -148,7 +148,7 @@ export function storePausedSession(
     browser: session.browser,
     page: session.page,
     context: session.context,
-    browserId: session.browserId,
+    browserId: session.browserId ?? existing?.browserId,
     otpFieldSelector: session.otpFieldSelector,
     applicationId: canonicalKey,
     pausedAt,
