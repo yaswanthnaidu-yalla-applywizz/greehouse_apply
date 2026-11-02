@@ -1090,6 +1090,35 @@ export function sanitizeLocationString(val: string): string {
 }
 
 /**
+ * Formats a location string into clean "City, State, Country".
+ */
+export function formatLocationCityStateCountry(val: string): string {
+  if (!val) return '';
+  const cleaned = sanitizeLocationString(val);
+  const parts = cleaned.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return '';
+
+  const normalizedParts = parts.map((part) => {
+    // If it's a 2-letter state code like TX or CA, keep it uppercase
+    if (/^[a-zA-Z]{2}$/.test(part)) return part.toUpperCase();
+    if (/^usa$/i.test(part)) return 'United States';
+    // Capitalize words
+    return part
+      .split(' ')
+      .map((w) => (w.length > 0 ? w.charAt(0).toUpperCase() + w.slice(1) : ''))
+      .join(' ');
+  });
+
+  if (normalizedParts.length === 1) {
+    return normalizedParts[0];
+  }
+  if (normalizedParts.length === 2) {
+    return `${normalizedParts[0]}, ${normalizedParts[1]}, United States`;
+  }
+  return normalizedParts.join(', ');
+}
+
+/**
  * Extracts the city / prefix portion of a location string for autocomplete typing.
  */
 export function extractLocationSearchPrefix(val: string): string {
@@ -1105,6 +1134,26 @@ export function isConsentOrPrivacyPolicyField(label: string): boolean {
   return /privacy\s*(policy|notice)|candidate\s*privacy|electronic\s*record\s*and\s*signature|data\s*processing\s*consent|terms\s*and\s*conditions|consent\s*to\s*process|data\s*privacy/i.test(
     label
   );
+}
+
+/**
+ * Detects whether a field label asks where the candidate heard about the job or referral source.
+ */
+export function isReferralSourceQuestion(label: string): boolean {
+  if (!label) return false;
+  return /how did you hear|where did you hear|how did you find|referral source|job source/i.test(label);
+}
+
+/**
+ * Selects the best option for referral questions, prioritizing LinkedIn then Company Website.
+ */
+export function pickReferralOptionText(options: string[]): string {
+  if (!options || options.length === 0) return '';
+  const linkedIn = options.find((o) => /linkedin/i.test(o));
+  if (linkedIn) return linkedIn;
+  const website = options.find((o) => /company website|website|job board|google|indeed/i.test(o));
+  if (website) return website;
+  return options[0] || '';
 }
 
 /**
@@ -1434,6 +1483,46 @@ export async function fillSingleField(
             break;
           }
         }
+        if (!cbChecked && cbCount > 1 && field.isRequired) {
+          const allOptions: { index: number; text: string; locator: any; id: string }[] = [];
+          for (let c = 0; c < cbCount; c++) {
+            const cb = checkboxGroup.nth(c);
+            const cbId = (await cb.getAttribute('id').catch(() => '')) || '';
+            let cbText = '';
+            if (cbId) {
+              const lLoc = page.locator(`label[for="${escapeId(cbId)}"]`).first();
+              if ((await lLoc.count()) > 0) cbText = (await lLoc.innerText().catch(() => '')) || '';
+            }
+            if (!cbText) {
+              const parentL = cb.locator('..').first();
+              if ((await parentL.count()) > 0) cbText = (await parentL.innerText().catch(() => '')) || '';
+            }
+            allOptions.push({ index: c, text: cbText.trim(), locator: cb, id: cbId });
+          }
+
+          let targetItem: (typeof allOptions)[0] | undefined;
+          if (isReferralSourceQuestion(label)) {
+            const chosenText = pickReferralOptionText(allOptions.map((o) => o.text));
+            targetItem = allOptions.find((o) => o.text === chosenText);
+          } else if (isDemographicOrEeoField(fieldId, name, label)) {
+            targetItem = allOptions.find((o) => /decline|prefer not|not wish|don't wish/i.test(o.text));
+          }
+
+          if (!targetItem && allOptions.length > 0) {
+            targetItem = allOptions[0];
+          }
+
+          if (targetItem) {
+            await targetItem.locator.scrollIntoViewIfNeeded().catch(() => {});
+            await targetItem.locator.check({ force: true, timeout: 3000 }).catch(async () => {
+              await targetItem!.locator.click({ force: true });
+            });
+            cbChecked = true;
+            checkedSelectorUsed = targetItem.id ? `#${targetItem.id}` : `input[name="${name}"]`;
+            log.info(`[Submitter] Multi-checkbox fallback for "${fieldId}" → checked option: "${targetItem.text}"`);
+          }
+        }
+
         if (cbChecked) {
           fillResult.success = true;
           log.info(
@@ -1582,6 +1671,18 @@ export async function fillSingleField(
             );
           }
 
+          const isDisciplineOrDegree = /discipline|major|field of study|degree/i.test(`${fieldId} ${name} ${label}`);
+          if (!selected && isDisciplineOrDegree) {
+            log.info(`[Submitter] Education option for "${val}" not matched directly — attempting "Other" or first catalog match`);
+            selected = await fillSearchableSelectInput(
+              page,
+              found.locator,
+              found.selector,
+              'Other',
+              fuzzyOptionTextMatch
+            );
+          }
+
           if (selected) {
             fillResult.success = true;
             if (isCountryCode) {
@@ -1671,6 +1772,23 @@ export async function fillSingleField(
                   break;
                 } catch {}
               }
+            }
+          }
+
+          if (!selected) {
+            const isDisciplineOrDegree = /discipline|major|field of study|degree/i.test(`${fieldId} ${name} ${label}`);
+            if (isDisciplineOrDegree) {
+              try {
+                const optionsList = await found.locator.locator('option').allInnerTexts();
+                const cleanedOptions = optionsList.map((o) => o.trim()).filter((o) => Boolean(o) && !/select|choose/i.test(o));
+                if (cleanedOptions.length > 0) {
+                  const match = matchDropdownOption(cleanedOptions, val);
+                  const fallbackOpt = match.matchedOption || cleanedOptions[0];
+                  await found.locator.selectOption({ label: fallbackOpt }, { force: true, timeout: 2000 });
+                  selected = true;
+                  log.info(`[Submitter] Education fallback selected "${fallbackOpt}" in ${found.selector}`);
+                }
+              } catch {}
             }
           }
 
@@ -1952,8 +2070,12 @@ export async function fillSingleField(
           await targetOption.click({ timeout: 2500 }).catch(() => {});
           fillResult.success = true;
         } else {
-          fillResult.success = false;
-          fillResult.error = `Location option "${val}" was not committed`;
+          // Fallback: value was typed; dispatch input/change events and accept without failing
+          await found.locator.dispatchEvent('input').catch(() => {});
+          await found.locator.dispatchEvent('change').catch(() => {});
+          await found.locator.blur().catch(() => {});
+          log.warn(`[Form Filler] No autocomplete dropdown match for "${val}". Kept typed text.`);
+          fillResult.success = true;
         }
       } else {
         throw new Error(`Location autocomplete input not found for ${name}`);
