@@ -522,3 +522,52 @@ small,
     white-space: normal;
   }
 }
+
+
+/* ── Tetromino access-check loader ───────────────────────────── */
+/*
+  To resize: change --t-w and --t-h only. Everything else is derived.
+*/
+.tetrominos {
+  --t-w:  96px;
+  --t-h:  112px;
+  --t-xs: calc(var(--t-w) / 2);        /* w/2  — derived, don't touch */
+  --t-ys: calc(var(--t-h) / 4 - 1px); /* h/4-1 — derived, don't touch */
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(calc(-1 * var(--t-h)), calc(-1 * var(--t-w)));
+}
+
+.tetromino {
+  width: var(--t-w);
+  height: var(--t-h);
+  position: absolute;
+  transition: all ease 0.3s;
+  background: url('data:image/svg+xml;utf-8,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 684"%3E%3Cpath fill="%23010101" d="M305.7 0L0 170.9v342.3L305.7 684 612 513.2V170.9L305.7 0z"/%3E%3Cpath fill="%23fff" d="M305.7 80.1l-233.6 131 233.6 131 234.2-131-234.2-131"/%3E%3C/svg%3E') no-repeat top center;
+}
+
+.box1 { animation: tetromino1 1.5s ease-out infinite; }
+.box2 { animation: tetromino2 1.5s ease-out infinite; }
+.box3 { animation: tetromino3 1.5s ease-out infinite; z-index: 2; }
+.box4 { animation: tetromino4 1.5s ease-out infinite; }
+
+@keyframes tetromino1 {
+  0%,  40% { transform: translate(0, 0); }
+  50%       { transform: translate(var(--t-xs), calc(-1 * var(--t-ys))); }
+  60%, 100% { transform: translate(calc(var(--t-xs) * 2), 0); }
+}
+@keyframes tetromino2 {
+  0%,  20%  { transform: translate(calc(var(--t-xs) * 2), 0); }
+  40%, 100% { transform: translate(calc(var(--t-xs) * 3), var(--t-ys)); }
+}
+@keyframes tetromino3 {
+  0%        { transform: translate(calc(var(--t-xs) * 3), var(--t-ys)); }
+  20%, 60%  { transform: translate(calc(var(--t-xs) * 2), calc(var(--t-ys) * 2)); }
+  90%, 100% { transform: translate(var(--t-xs), var(--t-ys)); }
+}
+@keyframes tetromino4 {
+  0%,  60%  { transform: translate(var(--t-xs), var(--t-ys)); }
+  90%, 100% { transform: translate(0, 0); }
+}
+/* ─────────────────────────────────────────────────────────────── */
