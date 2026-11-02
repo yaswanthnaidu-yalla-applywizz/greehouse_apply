@@ -255,12 +255,25 @@ class WebSocketManager {
       // Send initial heartbeat acknowledgment
       ws.send(JSON.stringify({ type: 'CONNECTED', timestamp: new Date().toISOString() }));
 
+      // Ping every 30s to keep Railway's load balancer from dropping idle connections.
+      // The ws client responds with a pong frame automatically per spec; if the socket
+      // is already dead the close event fires and clears the interval below.
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.ping();
+        } else {
+          clearInterval(pingInterval);
+        }
+      }, 30_000);
+
       ws.on('close', () => {
+        clearInterval(pingInterval);
         this.clients.delete(ws);
         log.info(`[WebSocket] 🔌 Operator dashboard disconnected. Active clients: ${this.clients.size}`);
       });
 
       ws.on('error', (err) => {
+        clearInterval(pingInterval);
         log.warn(`[WebSocket] ⚠️ Client socket error: ${err.message}`);
         this.clients.delete(ws);
       });
