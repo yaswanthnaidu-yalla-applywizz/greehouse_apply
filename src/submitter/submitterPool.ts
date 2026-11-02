@@ -404,11 +404,11 @@ export class SubmitterPool {
           }
           await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
           this.emitFailure(application, failureMessage, result);
-        } else if (result.status === 'SKIPPED') {
+        } else if (result.status === 'SKIPPED' || result.status === 'FILTERED_OUT') {
           log.info(
-            `[Submitter] ⏭️ Terminal Status → SKIPPED (app-${applicationId}) - reason: ${result.errorMessage}`
+            `[Submitter] ⏭️ Terminal Status → ${result.status} (app-${applicationId}) - reason: ${result.errorMessage}`
           );
-          await logQueueStatusChange(applicationId, 'APPLYING', 'SKIPPED');
+          await logQueueStatusChange(applicationId, 'APPLYING', result.status);
         } else if (result.status === 'QUEUED') {
           await logQueueStatusChange(applicationId, 'APPLYING', 'QUEUED');
         }

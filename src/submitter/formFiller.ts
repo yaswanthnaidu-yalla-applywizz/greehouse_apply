@@ -1478,6 +1478,7 @@ export async function fillSingleField(
           }
           if (radioClicked) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
             log.info(
               `[Submitter] Sponsorship field → selector: ${radioSelectorUsed || 'radio[name=' + name + ']'} → attempted click: ${targetIsNo ? 'No' : 'Yes'} → result: selected`
             );
@@ -1579,6 +1580,7 @@ export async function fillSingleField(
 
         if (cbChecked) {
           fillResult.success = true;
+          fillResult.domCommitted = true;
           log.info(
             `[Submitter] Checkbox option field "${fieldId}" → selector: ${checkedSelectorUsed} → value: ${selectValue} → checked ✅`
           );
@@ -1879,6 +1881,7 @@ export async function fillSingleField(
           const debugFilled = await debugSponsorshipComboboxSequence(page, selectValue);
           if (debugFilled) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
             return fillResult;
           }
         }
@@ -1904,6 +1907,7 @@ export async function fillSingleField(
           }
           if (selected) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
             return fillResult;
           }
         }
