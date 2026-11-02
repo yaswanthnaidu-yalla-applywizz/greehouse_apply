@@ -126,6 +126,20 @@ function escapeAttr(str: string): string {
 }
 
 /**
+ * Sanitizes a metadata CSS selector, ensuring CSS ID selectors (#id) have brackets escaped
+ * without double-escaping or breaking CSS attribute selectors ([name="..."]).
+ */
+export function sanitizeMetadataSelector(selector?: string): string {
+  if (!selector) return '';
+  if (selector.startsWith('#')) {
+    const idPart = selector.slice(1);
+    const escaped = idPart.replace(/(?<!\\)([\[\]])/g, '\\$1');
+    return '#' + escaped;
+  }
+  return selector;
+}
+
+/**
  * Returns candidate selectors for locating the resume file input element.
  */
 export function getResumeFileSelectors(
@@ -177,7 +191,7 @@ async function isResolvedFieldVisible(page: Page, field: ResolvedField): Promise
   const fieldId = field.fieldId || field.name || '';
   const label = field.label || name;
   const selectors = [
-    (field as any).metadata?.selector,
+    sanitizeMetadataSelector((field as any).metadata?.selector),
     `#${escapeId(name)}`,
     `#${escapeId(fieldId)}`,
     `input[name="${escapeAttr(name)}"]`,
@@ -1201,6 +1215,7 @@ export async function fillSingleField(
   const name = field.name || field.fieldId || '';
   const fieldId = field.fieldId || field.name || '';
   const label = field.label || name;
+  const metaSelector = sanitizeMetadataSelector((field as any).metadata?.selector);
   const isCountryCode = isCountryCodeField(fieldId, name, label);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
   const isWorkAuthRelocation =
@@ -1313,7 +1328,7 @@ export async function fillSingleField(
       // File Upload (Master Resume PDF ONLY)
       // ==========================================
       const fileSelectors = getResumeFileSelectors(
-        (field as any).metadata?.selector,
+        metaSelector,
         name,
         fieldId
       );
@@ -1369,7 +1384,7 @@ export async function fillSingleField(
       // Textarea
       // ==========================================
       const textareaSelectors = [
-        (field as any).metadata?.selector,
+        metaSelector,
         `textarea#${escapeId(name)}`,
         `textarea#${escapeId(fieldId)}`,
         `#${escapeId(name)}`,
@@ -1472,10 +1487,21 @@ export async function fillSingleField(
       }
 
       // Check for choice question rendered as checkbox inputs in the DOM (e.g. name="question_123[]")
-      const checkboxGroup = page.locator(
+      let checkboxGroup = page.locator(
         `input[type="checkbox"][name="${escapeAttr(name)}"], input[type="checkbox"][name="${escapeAttr(fieldId)}[]"], input[type="checkbox"][name*="${escapeAttr(fieldId)}"]`
       );
-      const cbCount = await checkboxGroup.count().catch(() => 0);
+      let cbCount = await checkboxGroup.count().catch(() => 0);
+      if (cbCount === 0 && label) {
+        const labelLoc = page.locator('label').filter({ hasText: label }).first();
+        if ((await labelLoc.count().catch(() => 0)) > 0) {
+          const parent = labelLoc.locator('xpath=ancestor-or-self::*[contains(@class, "field") or contains(@class, "row") or self::label]').first();
+          const fallbackCb = parent.locator('input[type="checkbox"]').first();
+          if ((await fallbackCb.count().catch(() => 0)) > 0) {
+            checkboxGroup = fallbackCb;
+            cbCount = 1;
+          }
+        }
+      }
       if (cbCount > 0) {
         let cbChecked = false;
         let checkedSelectorUsed = '';
@@ -1561,7 +1587,7 @@ export async function fillSingleField(
       }
 
       const selectSelectors = [
-        (field as any).metadata?.selector,
+        metaSelector,
         ...(isCountryCode ? [
           '#country',
           'input#country',
@@ -1625,7 +1651,7 @@ export async function fillSingleField(
             fieldId,
             name,
             label,
-            (field as any).metadata?.selector
+            metaSelector
           );
           if (searchable) {
             found = searchable;
@@ -1641,7 +1667,7 @@ export async function fillSingleField(
           fieldId,
           name,
           label,
-          (field as any).metadata?.selector
+          metaSelector
         );
         if (searchable) {
           found = searchable;
@@ -1862,7 +1888,7 @@ export async function fillSingleField(
           fieldId,
           name,
           label,
-          (field as any).metadata?.selector
+          metaSelector
         );
         if (searchable) {
           let selected = false;
@@ -2020,7 +2046,7 @@ export async function fillSingleField(
       const isAffirmative = booleanValue === 'Yes' || (isConsent && !isConsentSmsMarketingField(label));
       if (isAffirmative) {
         const checkboxSelectors = [
-          (field as any).metadata?.selector,
+          metaSelector,
           `input[type="checkbox"][name="${escapeAttr(name)}"]`,
           `input[type="checkbox"][name="${escapeAttr(fieldId)}"]`,
           `input[type="checkbox"]#${escapeId(name)}`,
@@ -2059,7 +2085,7 @@ export async function fillSingleField(
       // Location Autocomplete (Native & React-Select)
       // ==========================================
       const locationSelectors = [
-        (field as any).metadata?.selector,
+        metaSelector,
         '#candidate-location',
         '#candidate_location',
         `#${escapeId(name)}`,
@@ -2124,7 +2150,7 @@ export async function fillSingleField(
       // Default: Standard Text Input / Auto-Detected Dropdown
       // ==========================================
       const textSelectors: (string | undefined)[] = [
-        (field as any).metadata?.selector,
+        metaSelector,
       ];
 
       // Prioritize standard field selectors
