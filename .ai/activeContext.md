@@ -1,3 +1,38 @@
+# Current Session Update (2026-11-03 - Massive Residential Proxy Integration - COMPLETED)
+
+- **Replaced DataImpulse with Massive Residential Proxy as primary provider**:
+  - Live testing confirmed genuine residential egress on ISPs including Charter Spectrum, Google Fiber, and Comcast Cable.
+  - Implemented `buildAshbyProxyConfig` in `src/submitter/ashbyProxy.ts`:
+    - Generates Massive username format: `<username>-country-<ISO2>-city-<CITY>-session-<cleanId>_<token>-sessionttl-30`.
+    - Handles city name preservation with URL encoding (`San%20Francisco`) via `parseCityFromLocation(..., { preserveSpaces: true })`.
+    - Automatically trims whitespace on `MASSIVE_ENDPOINT`.
+    - Preserves failover to DataImpulse when Massive credentials are not present.
+  - Exported `MASSIVE_ENDPOINT`, `MASSIVE_USERNAME`, and `MASSIVE_PASSWORD` in `src/config/env.ts`.
+  - Added unit test suite in `tests/ashbyProxy.test.ts` (19/19 passing).
+  - Full project verification: 39/39 proxy unit tests pass; `npm run typecheck` clean.
+
+# Current Session Update (2026-11-02 - Greenhouse Submission Failure Remediations & DB2 Requeue - COMPLETED)
+
+- **Committed & Pushed to `origin/dev` (`b9fc6b3`)**:
+  - `src/submitter/liveSubmit.ts`:
+    - Routed closed/expired Greenhouse jobs to `FILTERED_OUT` (excluded from all stats calculations per Migration 032).
+    - Guarded `terminalStatus === 'FILTERED_OUT'` in `shouldCapturePreCloseFailureScreenshot` to prevent failure screenshot overwrite.
+    - Added embedded ATS iframe URL resolution on marketing pages (e.g. Movable Ink) to navigate directly to the ATS application form and bypass marketing newsletter collisions.
+  - `src/submitter/submitterPool.ts`:
+    - Added `FILTERED_OUT` handling alongside `SKIPPED` to complete worker sessions cleanly without retry loops.
+  - `src/submitter/formFiller.ts`:
+    - Added `fillResult.domCommitted = true` across all early-return branches (affirmative radios, checkbox options, searchable comboboxes).
+  - `src/submitter/greenhouseValidation.ts`:
+    - Auto-checks demographic GDPR consent survey checkboxes if any remain unchecked before validation.
+    - For multi-checkbox groups, recognizes that if at least one checkbox is checked (e.g. "I Agree"), the field is answered; strips native `required` from sibling options so browser validation doesn't reject the submission.
+  - `tests/closedJobSkipPreservation.test.ts`:
+    - Added unit test asserting `shouldCapturePreCloseFailureScreenshot('FILTERED_OUT', false) === false`.
+- **DB2 Production Requeue Executed**:
+  - Requeued **543** failed applications to `QUEUED` (retry_count=0, cleared error_message and error_details).
+  - Preserved **32** S3 resume 403 errors in `FAILED`.
+  - Backfilled closed jobs (`671fd7df-7c22-415f-a5d2-4d8eaa9f58a2`) to `FILTERED_OUT`.
+  - Worker pool actively dequeuing (initial 8 moved into `APPLYING`).
+
 # Current Session Update (2026-11-02 - Greenhouse Submission Failure Remediations - COMPLETED)
 
 - **Root Causes Diagnosed & Generalized**:
