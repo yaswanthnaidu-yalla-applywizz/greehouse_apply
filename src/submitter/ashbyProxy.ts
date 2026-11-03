@@ -13,10 +13,14 @@ export interface ProxyConfig {
 }
 
 export interface ProxyOptions {
+  provider?: 'massive' | 'dataimpulse';
   login?: string;
   password?: string;
   host?: string;
   port?: number | string;
+  massiveUsername?: string;
+  massivePassword?: string;
+  massiveEndpoint?: string;
   attemptToken?: string;
 }
 
@@ -209,11 +213,19 @@ export function resolveCountryCode(profile: Partial<ProfileRow> | Record<string,
 }
 
 /**
- * Parses city name without spaces from standard 'City, State, Country' or 'City, State' location strings.
+ * Parses city name from standard 'City, State, Country' or 'City, State' location strings.
+ * For DataImpulse, non-alphanumeric characters and whitespace are stripped.
+ * For Massive, letters, digits, and single spaces are preserved for URI encoding.
  */
-export function parseCityFromLocation(location?: string | null): string {
+export function parseCityFromLocation(
+  location?: string | null,
+  options: { preserveSpaces?: boolean } = {}
+): string {
   if (!location || typeof location !== 'string') return '';
   const firstSegment = location.split(',')[0].trim();
+  if (options.preserveSpaces) {
+    return firstSegment.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+  }
   // Remove whitespace and non-alphanumeric characters for DataImpulse city tag
   return firstSegment.replace(/[^a-zA-Z0-9]/g, '');
 }
@@ -226,14 +238,71 @@ export function buildAshbyProxyConfig(
   profile: ProfileRow,
   options: ProxyOptions = {}
 ): ProxyConfig {
-  const login = options.login || process.env.DATAIMPULSE_LOGIN;
-  const password = options.password || process.env.DATAIMPULSE_PASSWORD;
+  const requestedProvider = options.provider;
+
+  const hasExplicitDataImpulseOptions = Boolean(
+    options.login !== undefined || options.password !== undefined || options.host || options.port
+  );
+  const preferDataImpulse =
+    requestedProvider === 'dataimpulse' ||
+    (hasExplicitDataImpulseOptions && !options.massiveUsername && !options.massivePassword);
+
+  const massiveUser =
+    options.massiveUsername !== undefined
+      ? options.massiveUsername
+      : !preferDataImpulse
+        ? process.env.MASSIVE_USERNAME || ''
+        : '';
+  const massivePass =
+    options.massivePassword !== undefined
+      ? options.massivePassword
+      : !preferDataImpulse
+        ? process.env.MASSIVE_PASSWORD || ''
+        : '';
+  const massiveEndpoint = (
+    options.massiveEndpoint ||
+    process.env.MASSIVE_ENDPOINT ||
+    'https://network.joinmassive.com:65535'
+  ).trim();
+
+  if (!preferDataImpulse && massiveUser && massivePass) {
+    const countryCode = resolveCountryCode(profile).toUpperCase();
+    const city = parseCityFromLocation(profile.location, { preserveSpaces: true });
+
+    const cleanId = String(profile.applywizz_id || 'candidate').replace(/[^a-zA-Z0-9]/g, '');
+    const attemptToken = options.attemptToken || randomBytes(4).toString('hex');
+
+    let username = `${massiveUser}-country-${countryCode}`;
+    if (city) {
+      username += `-city-${encodeURIComponent(city)}`;
+    }
+    username += `-session-${cleanId}_${attemptToken}-sessionttl-30`;
+
+    return {
+      server: massiveEndpoint,
+      username,
+      password: massivePass,
+    };
+  }
+
+  const login =
+    options.login !== undefined
+      ? options.login
+      : options.provider !== 'massive'
+        ? process.env.DATAIMPULSE_LOGIN || ''
+        : '';
+  const password =
+    options.password !== undefined
+      ? options.password
+      : options.provider !== 'massive'
+        ? process.env.DATAIMPULSE_PASSWORD || ''
+        : '';
   const host = options.host || process.env.DATAIMPULSE_HOST || 'gw.dataimpulse.com';
   const port = options.port || process.env.DATAIMPULSE_PORT || 823;
 
   if (!login || !password) {
     throw new Error(
-      'Ashby application submission requires residential proxy, but DATAIMPULSE_LOGIN or DATAIMPULSE_PASSWORD is missing.'
+      'Ashby application submission requires residential proxy, but DATAIMPULSE_LOGIN or DATAIMPULSE_PASSWORD is missing (and MASSIVE_USERNAME or MASSIVE_PASSWORD is not configured).'
     );
   }
 
