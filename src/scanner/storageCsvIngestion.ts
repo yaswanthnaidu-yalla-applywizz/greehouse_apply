@@ -35,6 +35,9 @@ import { upsertIngestRun } from '../db/ingestRuns.js';
 import { runStatsRollup } from '../db/statsRollup.js';
 import { selectCsvIngestionTarget } from '../candidate/csvUploadValidation.js';
 import { sendEmail } from '../services/azureEmail.js';
+import { saveIngestFunnelStats } from '../db/funnelStats.js';
+import * as fastCsv from 'fast-csv';
+import { normalizeGreenhouseUrl } from './csvDeduplicator.js';
 import {
   clearCurrentIngestFilterReport,
   writeCurrentIngestFilterReport,
@@ -115,6 +118,116 @@ export async function listPendingDropzoneCsvs(): Promise<{
 /**
  * Checks the `csv_uploads` storage bucket, ingests the latest CSV file, and moves it to `archive/`.
  */
+export function computeIngestFunnelStats(
+  csvRows: Array<{ task_id?: string; applywizz_id?: string; job_url?: string; company_name?: string }>,
+  createdTaskIds: Set<string>,
+  profiles: Map<string, { zoho_connected?: boolean }>,
+  templates: Map<string, { is_expired?: boolean }>
+) {
+  const dropReasons = {
+    zoho_disconnected: 0,
+    job_expired: 0,
+    no_scan_template: 0,
+    already_applied: 0,
+    exclusions_or_other: 0,
+  };
+
+  const droppedDetails: Array<{
+    applywizzId: string;
+    companyName: string;
+    jobUrl: string;
+    reason: string;
+  }> = [];
+
+  for (const r of csvRows) {
+    const taskId = r.task_id || '';
+    if (taskId && createdTaskIds.has(taskId)) {
+      continue;
+    }
+    const cid = (r.applywizz_id || '').toUpperCase();
+    const normUrl = normalizeGreenhouseUrl(r.job_url || '');
+    const profile = profiles.get(cid);
+    const template = templates.get(normUrl) || templates.get(r.job_url || '');
+
+    let reasonKey: keyof typeof dropReasons = 'exclusions_or_other';
+    let reasonText = 'Excluded or filtered at resolution';
+
+    if (profile && profile.zoho_connected === false) {
+      reasonKey = 'zoho_disconnected';
+      reasonText = 'Candidate Zoho mailbox not connected';
+    } else if (template && template.is_expired) {
+      reasonKey = 'job_expired';
+      reasonText = 'Job posting closed or expired';
+    } else if (!template) {
+      reasonKey = 'no_scan_template';
+      reasonText = 'Job template not found / scanning failed';
+    }
+
+    dropReasons[reasonKey]++;
+    droppedDetails.push({
+      applywizzId: cid,
+      companyName: r.company_name || 'Unknown',
+      jobUrl: r.job_url || '',
+      reason: reasonText,
+    });
+  }
+
+  return {
+    totalCsvRows: csvRows.length,
+    tasksCreated: createdTaskIds.size,
+    droppedRows: csvRows.length - createdTaskIds.size,
+    dropReasons,
+    droppedDetails,
+  };
+}
+
+export async function recordIngestFunnel(tempFilePath: string, runId: string): Promise<void> {
+  try {
+    const rows: any[] = [];
+    await new Promise<void>((resolve, reject) => {
+      fs.createReadStream(tempFilePath)
+        .pipe(fastCsv.parse({ headers: true, trim: true }))
+        .on('error', reject)
+        .on('data', (r) => rows.push(r))
+        .on('end', () => resolve());
+    });
+
+    const supabase = getDbClient();
+    const { data: recentApps } = await supabase
+      .from('gh_candidate_applications')
+      .select('task_id')
+      .gte('created_at', new Date(Date.now() - 3 * 3600 * 1000).toISOString());
+
+    const createdTaskIds = new Set((recentApps || []).map((a) => a.task_id).filter(Boolean));
+    const uniqueCandidateIds = Array.from(new Set(rows.map((r) => (r.applywizz_id || '').trim().toUpperCase())));
+    const profilesMap = new Map();
+    for (let i = 0; i < uniqueCandidateIds.length; i += 50) {
+      const chunk = uniqueCandidateIds.slice(i, i + 50);
+      const { data } = await supabase.from('profiles').select('applywizz_id, zoho_connected').in('applywizz_id', chunk);
+      for (const p of data || []) {
+        profilesMap.set(p.applywizz_id.toUpperCase(), p);
+      }
+    }
+
+    const uniqueUrls = Array.from(new Set(rows.map((r) => normalizeGreenhouseUrl(r.job_url || ''))));
+    const templatesMap = new Map();
+    for (let i = 0; i < uniqueUrls.length; i += 50) {
+      const chunk = uniqueUrls.slice(i, i + 50);
+      const { data } = await supabase.from('gh_scanned_job_templates').select('job_url, is_expired').in('job_url', chunk);
+      for (const t of data || []) {
+        templatesMap.set(t.job_url, t);
+      }
+    }
+
+    const stats = computeIngestFunnelStats(rows, createdTaskIds, profilesMap, templatesMap);
+    const todayIST = new Date().toISOString().slice(0, 10);
+    await saveIngestFunnelStats(todayIST, { ...stats, runId });
+    log.info(`[Storage CSV Ingestion] Recorded funnel stats: ${stats.tasksCreated}/${stats.totalCsvRows} created`);
+  } catch (err: any) {
+    log.warn(`[Storage CSV Ingestion] Could not record funnel stats: ${err.message}`);
+  }
+}
+
 export async function ingestCsvFromStorage(options?: {
   runId?: string;
   triggeredBy?: string;
@@ -330,6 +443,7 @@ export async function ingestCsvFromStorage(options?: {
     }
 
     const pr = pipelineResult;
+    await recordIngestFunnel(tempFilePath, runId);
     log.info(
       `[Storage CSV Ingestion] pipeline complete file="${targetFile.name}" candidates=${pr?.uniqueCandidates ?? '?'} urls=${pr?.uniqueUrls ?? '?'} applications=${pr?.resolvedApplications ?? '?'} duration_ms=${pr?.durationMs ?? '?'} status=${pr?.status ?? '?'}`
     );
