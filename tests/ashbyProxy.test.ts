@@ -254,3 +254,11 @@ test('throws descriptive error when neither Massive nor DataImpulse credentials 
     /Ashby application submission requires residential proxy/i
   );
 });
+
+test('formats multi-word city names cleanly for Massive username tag', () => {
+  const cfg = buildAshbyProxyConfig(
+    { applywizz_id: 'AWL-001', country: 'United States', location: 'San Francisco, CA' } as any,
+    { provider: 'massive', massiveUsername: 'user', massivePassword: 'pw' }
+  );
+  assert.ok(cfg.username.includes('-city-San%20Francisco'));
+});
