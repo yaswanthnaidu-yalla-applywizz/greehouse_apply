@@ -143,7 +143,12 @@ REQUIRE_ZOHO_CONNECTED=false       # Ingest gate: when true, drop candidates wit
 SUPABASE_STORAGE_BUCKET_RESUMES=resumes
 SUPABASE_STORAGE_BUCKET_PROOFS=proofs_web
 
-# DataImpulse Residential Proxy (Ashby)
+# Massive Residential Proxy (Ashby)
+MASSIVE_ENDPOINT=https://network.joinmassive.com:65535
+MASSIVE_USERNAME=
+MASSIVE_PASSWORD=
+
+# DataImpulse Residential Proxy (Ashby Fallback)
 DATAIMPULSE_LOGIN=
 DATAIMPULSE_PASSWORD=
 DATAIMPULSE_HOST=gw.dataimpulse.com
