@@ -200,3 +200,9 @@ test('buildAshbyProxyConfig throws InvalidCountryError when country cannot be re
     InvalidCountryError
   );
 });
+
+test('config exports Massive proxy settings with default trimmed endpoint', async () => {
+  const { config } = await import('../src/config/env.js');
+  assert.equal(typeof (config as any).MASSIVE_ENDPOINT, 'string');
+  assert.equal((config as any).MASSIVE_ENDPOINT.trim(), (config as any).MASSIVE_ENDPOINT);
+});
