@@ -1,3 +1,32 @@
+# Current Session Update (2026-11-03 - Dev Dashboard "Filtered" Funnel Breakdown - COMPLETED)
+
+- **Conversion Funnel Breakdown Feature Shipped**:
+  - **Context & Requirement**: Added a dedicated `Filtered` tab in the Developer Dashboard (`/dev`) to explain why only $X$ of total tasks in the CSV were created (pre-creation drop-offs) and why only $Z$ were auto-applied vs. held for review vs. filtered out (post-creation task resolution states).
+  - **Database Persistence**: Stored structured funnel metadata in `system_config` table under `key: ingest_funnel_stats:<date>` via `src/db/funnelStats.ts` (`saveIngestFunnelStats` and `getIngestFunnelStats`). Backfilled `2026-11-03` data (1,482 CSV rows, 758 tasks created, 724 dropped rows).
+  - **Ingest Automation**: Integrated `computeIngestFunnelStats` and `recordIngestFunnel` in `src/scanner/storageCsvIngestion.ts` so future pipeline ingestion runs persist conversion metrics automatically.
+  - **Backend Endpoint**: Implemented `GET /api/dev/filtered-stats` in `src/server/routes/devDashboard.ts`. Parses cohort date ranges (`range`, `date`, `from`, `to`), aggregates pre-creation drop reasons, and queries `gh_candidate_applications` to compute auto-applied, review triggers, and filter triggers.
+  - **Frontend UI**: Built `dashboard/components/DevFilteredView.tsx` and wired into `dashboard/components/DevDashboard.tsx`. Includes 4 KPI summary cards, visual progress bars for top/bottom funnel triggers, and an itemized searchable/filterable paginated drill-down table.
+  - **Verification**: All unit and route tests pass (`tests/db/funnelStats.test.ts`, `tests/scanner/funnelStats.test.ts`, `tests/server/filteredStatsRoute.test.ts`), and `npm run build` (tsc + vite) succeeds with zero errors.
+
+# Current Session Update (2026-11-03 - DB2 Anthropic Tasks Cleanup & OTP Requeue - COMPLETED)
+
+- **Anthropic Tasks Cleanup on DB2**:
+  - Permanently deleted **38** pending/unapplied Anthropic tasks (`31` in `READY_FOR_REVIEW`, `7` in `FAILED`) across all dates from `gh_candidate_applications` and purged **109** related `gh_application_events`.
+  - Preserved all **190** `APPLIED` and **7** `EMAIL_PROOF_PENDING` Anthropic records along with their full submission web proofs intact.
+  - Zero active/failing Anthropic tasks remain in DB2.
+- **Selective OTP Failures Requeue (Today's Cohort - Nov 3 IST)**:
+  - Requeued **33** non-Anthropic OTP failures created today to `QUEUED` (cleared `retry_count` to 0, cleared `error_message`, `error_details`, and `scheduled_not_before`).
+  - Recorded 33 `FAILED -> QUEUED` transition audit events in `gh_application_events`.
+  - Confirmed the worker pool immediately began picking up tasks (9 moved directly into `APPLYING`, 24 in `QUEUED`).
+
+# Current Session Update (2026-11-03 - Silence LLM Per-Application Cost Logs - COMPLETED)
+
+- **Silenced LLM Cost Console/Stdout Logs**:
+  - Removed per-application stdout log noise (`[Token Usage] 📊 Updated ... total_cost=...` and `[Token Usage] 📊 Recorded ... cost=...`) and unconfigured debug log in [`src/db/tokenUsage.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply/src/db/tokenUsage.ts).
+  - Cleaned the summary log in [`src/resolver/answerResolver.ts`](file:///C:/Users/yaswa/Dev/greehouse_apply/src/resolver/answerResolver.ts) to omit `AI Token Cost: $...` output.
+  - Kept all database writes to `gh_application_token_usage`, error warnings, and background metric calculations completely intact.
+  - Verified: `npm run build` succeeds clean, and all 32/32 tests in `tests/e2eIntegration.test.ts` plus 4/4 in `tests/claudeHaikuResolution.test.ts` pass.
+
 # Current Session Update (2026-11-03 - Massive Residential Proxy Integration - COMPLETED)
 
 - **Replaced DataImpulse with Massive Residential Proxy as primary provider**:
