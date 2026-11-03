@@ -213,11 +213,19 @@ export function resolveCountryCode(profile: Partial<ProfileRow> | Record<string,
 }
 
 /**
- * Parses city name without spaces from standard 'City, State, Country' or 'City, State' location strings.
+ * Parses city name from standard 'City, State, Country' or 'City, State' location strings.
+ * For DataImpulse, non-alphanumeric characters and whitespace are stripped.
+ * For Massive, letters, digits, and single spaces are preserved for URI encoding.
  */
-export function parseCityFromLocation(location?: string | null): string {
+export function parseCityFromLocation(
+  location?: string | null,
+  options: { preserveSpaces?: boolean } = {}
+): string {
   if (!location || typeof location !== 'string') return '';
   const firstSegment = location.split(',')[0].trim();
+  if (options.preserveSpaces) {
+    return firstSegment.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+  }
   // Remove whitespace and non-alphanumeric characters for DataImpulse city tag
   return firstSegment.replace(/[^a-zA-Z0-9]/g, '');
 }
@@ -259,7 +267,7 @@ export function buildAshbyProxyConfig(
 
   if (!preferDataImpulse && massiveUser && massivePass) {
     const countryCode = resolveCountryCode(profile).toUpperCase();
-    const city = parseCityFromLocation(profile.location);
+    const city = parseCityFromLocation(profile.location, { preserveSpaces: true });
 
     const cleanId = String(profile.applywizz_id || 'candidate').replace(/[^a-zA-Z0-9]/g, '');
     const attemptToken = options.attemptToken || randomBytes(4).toString('hex');
