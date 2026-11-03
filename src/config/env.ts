@@ -247,6 +247,24 @@ const envSchema = z.object({
   /** DataImpulse Proxy Gateway Port */
   DATAIMPULSE_PORT: z.coerce.number().int().positive().default(823),
 
+  /** Massive Residential Proxy Endpoint */
+  MASSIVE_ENDPOINT: z.preprocess((val) => {
+    if (typeof val === 'string') return val.trim();
+    return val;
+  }, z.string().default('https://network.joinmassive.com:65535')),
+
+  /** Massive Residential Proxy Username */
+  MASSIVE_USERNAME: z.preprocess((val) => {
+    if (typeof val === 'string') return val.trim();
+    return val;
+  }, z.string().optional()),
+
+  /** Massive Residential Proxy Password */
+  MASSIVE_PASSWORD: z.preprocess((val) => {
+    if (typeof val === 'string') return val.trim();
+    return val;
+  }, z.string().optional()),
+
   /** ApplyWizz S3 Bucket Base URL for master resumes */
   APPLYWIZZ_S3_BASE_URL: z.string().default('https://applywizz-prod.s3.us-east-2.amazonaws.com'),
 
