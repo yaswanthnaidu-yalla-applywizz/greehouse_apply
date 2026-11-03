@@ -206,3 +206,51 @@ test('config exports Massive proxy settings with default trimmed endpoint', asyn
   assert.equal(typeof (config as any).MASSIVE_ENDPOINT, 'string');
   assert.equal((config as any).MASSIVE_ENDPOINT.trim(), (config as any).MASSIVE_ENDPOINT);
 });
+
+test('builds valid Massive proxy config with country, city, and sticky session', () => {
+  const cfg = buildAshbyProxyConfig(
+    { applywizz_id: 'AWL-32959', country: 'United States', location: 'Austin, TX' } as any,
+    {
+      provider: 'massive',
+      massiveUsername: 'testuser',
+      massivePassword: 'testpass',
+      massiveEndpoint: ' https://network.joinmassive.com:65535 ',
+      attemptToken: 'beef1234',
+    }
+  );
+
+  assert.equal(cfg.server, 'https://network.joinmassive.com:65535');
+  assert.equal(cfg.password, 'testpass');
+  assert.equal(
+    cfg.username,
+    'testuser-country-US-city-Austin-session-AWL32959_beef1234-sessionttl-30'
+  );
+});
+
+test('falls back to DataImpulse when Massive credentials are not provided', () => {
+  const cfg = buildAshbyProxyConfig(
+    { applywizz_id: 'AWL-32959', country: 'United States', location: 'Austin, TX' } as any,
+    {
+      login: 'dataimpulse_user',
+      password: 'dataimpulse_pass',
+      host: 'gw.dataimpulse.com',
+      port: 823,
+      attemptToken: 'beef1234',
+    }
+  );
+
+  assert.equal(cfg.server, 'http://gw.dataimpulse.com:823');
+  assert.equal(cfg.password, 'dataimpulse_pass');
+  assert.ok(cfg.username.startsWith('dataimpulse_user__cr.us'));
+});
+
+test('throws descriptive error when neither Massive nor DataImpulse credentials are provided', () => {
+  assert.throws(
+    () =>
+      buildAshbyProxyConfig(
+        { applywizz_id: 'AWL-32959', country: 'United States' } as any,
+        { provider: 'massive', massiveUsername: '', massivePassword: '' }
+      ),
+    /Ashby application submission requires residential proxy/i
+  );
+});
