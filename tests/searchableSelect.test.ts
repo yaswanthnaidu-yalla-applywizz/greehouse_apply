@@ -426,6 +426,41 @@ async function runSearchableSelectTests(): Promise<void> {
       console.log('  ✅ Mixed numeric field identity does not fill page-wide decoy');
     });
 
+    await withMockPage(`<!DOCTYPE html><form id="application_form">
+      <div class="select-shell">
+        <input role="combobox" value="" />
+        <div class="select__menu" style="display:none"><div class="select__option" role="option">Decline to self-identify</div></div>
+      </div>
+      <input type="hidden" id="selected_value" value="" />
+      <script>
+        const control = document.querySelector('[role="combobox"]');
+        const menu = document.querySelector('.select__menu');
+        control.addEventListener('focus', () => { menu.style.display = 'block'; });
+        control.addEventListener('click', () => { menu.style.display = 'block'; });
+        control.addEventListener('input', () => { menu.style.display = 'block'; });
+        menu.querySelector('[role="option"]').addEventListener('click', (event) => {
+          document.querySelector('#selected_value').value = event.target.textContent;
+          control.value = event.target.textContent;
+        });
+      </script>
+    </form>`, async (url) => {
+      const page = await browser!.newPage();
+      await page.goto(url);
+      await fillSingleField(page, {
+        fieldId: '',
+        name: '',
+        type: 'select',
+        label: '',
+        value: 'Decline to self-identify',
+        options: ['Decline to self-identify'],
+        isRequired: true,
+        source: 'profile',
+      }, 'TEST', []);
+      assert((await page.locator('#selected_value').inputValue()) === 'Decline to self-identify', 'An unlabelled searchable select without IDs should use the generic combobox fallback');
+      await page.close();
+      console.log('  ✅ Unlabelled searchable select without IDs uses generic fallback');
+    });
+
     console.log('\n✅ All searchable select tests passed.');
   } finally {
     await browser?.close();

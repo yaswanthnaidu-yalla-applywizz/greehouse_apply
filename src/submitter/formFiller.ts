@@ -410,7 +410,7 @@ async function findSearchableSelectControl(
       );
     }
   }
-  if (!hasNumericIdentity && ids.length > 0) {
+  if (!hasNumericIdentity) {
     candidates.push('[aria-combobox="true"]');
   }
 
@@ -1962,9 +1962,7 @@ export async function fillSingleField(
           ? []
           : [
               ...[name, fieldId].filter(Boolean).map((id) => `[id*="select2-${escapeId(id)}"]`),
-              ...(!name && !fieldId
-                ? []
-                : ['.select2-selection', '.css-control', 'input[role="combobox"]', '[aria-combobox="true"]']),
+              '.select2-selection', '.css-control', 'input[role="combobox"]', '[aria-combobox="true"]',
             ];
         const select2Trigger = page.locator(fallbackSelectors.join(', ') || '.__no_matching_select_fallback__').first();
 
