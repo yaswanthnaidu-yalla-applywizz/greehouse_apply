@@ -24,7 +24,7 @@ export function classifyFieldIntent(field: ScannedField): FieldIntent {
     [/salary|compensation|expected pay/, 'compensation'],
     [/gender|pronoun|veteran|military|race|disability|demographic/, 'demographics'],
     [/education|degree|school|start date|availability/, 'availability_education'],
-    [/why|motivation|describe|project|narrative/, 'creative'],
+    [/why|motivation|describe|project|narrative|tell us about|story|challenge/, 'creative'],
     [/name|phone/, 'contact_profile'],
   ];
   return { family: rules.find(([pattern]) => pattern.test(text))?.[1] || 'unknown' };
