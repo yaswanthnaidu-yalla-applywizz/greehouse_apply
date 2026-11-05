@@ -134,6 +134,21 @@ export function findEmbeddedGreenhouseApplicationUrl(frameUrls: string[]): strin
   return null;
 }
 
+/** Waits briefly for a delayed direct Greenhouse application iframe to attach. */
+export async function waitForEmbeddedGreenhouseApplicationUrl(page: Page, timeoutMs: number): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const url = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+    if (url) return url;
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return null;
+    await page.waitForTimeout(Math.min(100, remainingMs));
+  }
+}
+
+const EMBEDDED_GREENHOUSE_FRAME_WAIT_MS = 1_000;
+
 /**
  * Utility to generate a randomized delay within [min, max] range.
  *
@@ -487,7 +502,10 @@ export class PlaywrightScanner {
 
       // Some company marketing pages host the real Greenhouse form in an iframe.
       // Follow the embedded application URL so downstream extraction sees the ATS DOM.
-      const embeddedApplicationUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+      const embeddedApplicationUrl = await waitForEmbeddedGreenhouseApplicationUrl(
+        page,
+        EMBEDDED_GREENHOUSE_FRAME_WAIT_MS,
+      );
       if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
         await page.goto(embeddedApplicationUrl, {
           waitUntil: 'domcontentloaded',

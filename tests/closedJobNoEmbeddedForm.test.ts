@@ -6,6 +6,10 @@ describe('RC-GH-5: isClosedJobNoEmbeddedForm', () => {
     expect(isClosedJobNoEmbeddedForm({ hasEmbeddedForm: false, hasSubmitButton: false, pageText: 'Please apply on our portal' })).toBe(true);
   });
 
+  it('keeps a generic parent newsletter form from counting as an embedded application', () => {
+    expect(isClosedJobNoEmbeddedForm({ hasEmbeddedForm: false, hasSubmitButton: false, pageText: 'Subscribe to our newsletter' })).toBe(true);
+  });
+
   it('marks job expired/closed when page text explicitly says apply on external portal or link', () => {
     const text = 'This position is managed via an external portal. Please visit our careers site to apply.';
     expect(isClosedJobNoEmbeddedForm({ hasEmbeddedForm: false, hasSubmitButton: false, pageText: text })).toBe(true);
