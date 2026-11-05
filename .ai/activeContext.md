@@ -1,3 +1,23 @@
+# Current Session Update (2026-11-05 - Auto-Queue Yield & Pre-Submit Failure Remediations - COMPLETED)
+
+- **Diagnostic Investigation on DB2 (Nov 3 & Nov 4 Cohorts)**:
+  - Investigated low auto-queue conversion and submitter failures across Ashby & Greenhouse.
+  - Root causes identified:
+    1. Ashby Location: `_systemfield_location` had dead-code resolver & was wiped to unresolved by choice aligner.
+    2. Ashby SMS Consent: Radio labeled "Phone" was misclassified as phone input.
+    3. Greenhouse Common Custom Questions: Policy questions (Meta contractor, medical coverage, references, referral name, InterSystems) fell to Tier 5 AI, holding tasks in `READY_FOR_REVIEW`.
+    4. Greenhouse Sponsorship Combobox: 105-character strings with dashes filtered out options in React-Select.
+    5. Greenhouse EEOC Demographic Conditional Fields: When sponsorship answered "No", dependent demographic fields (Gender, Pronouns, Veteran) were never rendered on DOM, causing submitter timeout.
+- **Implemented & Verified 5 Surgical Remediations**:
+  - **Task 1 (Commit `0ba5970`)**: Wired `resolveAshbySystemField` into raw & Tier 2 resolution waterfalls in `src/resolver/answerResolver.ts`; guarded `alignResolvedChoice` so options-less system fields are preserved. Unit tests passing in `tests/ashbySystemFields.test.ts`.
+  - **Task 2 (Commit `108d4d3`)**: Excluded SMS consent options from `isPhoneNumberField` in `src/resolver/candidateEvidence.ts`; added deterministic "No" resolution in `resolvePreTierField` in `src/resolver/answerResolver.ts`. Unit tests passing in `tests/resolverDiagnosedFixes.test.ts`.
+  - **Task 3 (Commit `047dc92`)**: Added Tier 1 deterministic policy rules in `src/resolver/tier1Supabase.ts` for Meta contractor ("No"), medical coverage ("Yes"), references ("N/A"), referral person ("N/A"), and InterSystems ("No"). Unit tests passing in `tests/resolverDiagnosedFixes.test.ts`.
+  - **Task 4 (Commit `778c129`)**: Prioritized binary intent ("Yes" / "No") in `selectAttempts` and `debugSponsorshipComboboxSequence` in `src/submitter/formFiller.ts`.
+  - **Task 5 (Commit `b23f222`)**: Added `isConditionalFieldInactive` in `src/submitter/formFiller.ts` to skip unrendered conditional sub-fields with `skippedRequired: true, domCommitted: true`; updated `src/submitter/greenhouseValidation.ts` to accept skipped conditional fields. Verified with 4/4 passing in `tests/greenhouseValidation.test.ts`.
+- **Full Verification**:
+  - Root TypeScript compile (`npx tsc --noEmit`) passes clean.
+  - Dashboard build (`npm run build:dashboard` via Vite) passes clean.
+
 # Current Session Update (2026-11-03 - Dev Dashboard "Filtered" Funnel Breakdown - COMPLETED)
 
 - **Conversion Funnel Breakdown Feature Shipped**:
@@ -1846,3 +1866,9 @@ _Last updated: 2026-10-09_
 - Historical cleanup is complete for the six audited rows. The post-write audit reports zero invalid non-binary Yes/No metadata rows.
 
 - **Greenhouse failure hardening (2026-10-30):** Implemented surgical fixes for optional resume obligations, country-aware phone formatting, actual DOM commitment gating, broader post-submit error detection, embedded Greenhouse iframe discovery, diagnostics redaction, and missing-resume operator mapping. Focused verification: 50 Vitest tests, 13 Node tests, and root/dashboard typecheck passed. OTP delivery suppression remains an external provider fault; no browser retry change was made.
+
+## Required-field diagnostic follow-up (2026-11-03)
+Live, non-submitting control replays confirmed numeric-option normalization, country mis-targeting, punctuation search, and numeric-ID selector failures. Samsung raw date-to-month resolution reproduced; Walker-Miller template points at newsletter instead of embedded application. No production fixes applied. Evidence and unresolved coverage: .ai/diagnostics/required-fields-2026-11-03/REPORT.md.
+
+Cross River follow-up reproduced a false-positive React-Select commitment result: the filler reports success while hidden required controls remain invalid. The fix must verify selected or hidden required state before returning success. Evidence is in the same report.
+
