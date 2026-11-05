@@ -510,7 +510,7 @@ async function hiddenRequiredInputDisplaysAnswer(
 
   const associatedValues = await shell.locator('input').evaluateAll((inputs) =>
     inputs
-      .filter((input) => input.type === 'hidden' || input.classList.contains('requiredInput'))
+      .filter((input) => (input as HTMLInputElement).type === 'hidden' || input.classList.contains('requiredInput'))
       .map((input) => (input as HTMLInputElement).value.trim())
   ).catch(() => []);
   const values = [...associatedValues];
