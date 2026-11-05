@@ -382,6 +382,7 @@ async function findSearchableSelectControl(
   metadataSelector?: string
 ): Promise<{ locator: Locator; selector: string } | null> {
   const ids = Array.from(new Set([name, fieldId].filter(Boolean)));
+  const hasNonNumericIdentity = ids.some((id) => !/^\d+$/.test(id));
   const candidates: string[] = [];
 
   if (metadataSelector && !/^select#/i.test(metadataSelector.trim())) {
@@ -400,12 +401,15 @@ async function findSearchableSelectControl(
     );
   }
 
-  candidates.push(
-    `input[role="combobox"][id*="${escapeAttr(name)}"]`,
-    `input[role="combobox"][id*="${escapeAttr(fieldId)}"]`,
-    `[role="combobox"][id*="${escapeAttr(name)}"]`,
-    `[aria-combobox="true"]`
-  );
+  for (const id of ids.filter((value) => !/^\d+$/.test(value))) {
+    candidates.push(
+      `input[role="combobox"][id*="${escapeAttr(id)}"]`,
+      `[role="combobox"][id*="${escapeAttr(id)}"]`
+    );
+  }
+  if (hasNonNumericIdentity || ids.length === 0) {
+    candidates.push('[aria-combobox="true"]');
+  }
 
   const fromSelectors = await findElementLocator(page, candidates);
   if (fromSelectors && (await isInteractiveSelectControl(fromSelectors.locator))) {
@@ -1950,9 +1954,13 @@ export async function fillSingleField(
           }
         }
 
-        const select2Trigger = page.locator(
-          `[id*="select2-${escapeId(name)}"], [id*="select2-${escapeId(fieldId)}"], .select2-selection, .css-control, input[role="combobox"], [aria-combobox="true"]`
-        ).first();
+        const fallbackSelectors = [
+          ...[name, fieldId].filter((id) => id && !/^\d+$/.test(id)).map((id) => `[id*="select2-${escapeId(id)}"]`),
+          ...([name, fieldId].some((id) => id && !/^\d+$/.test(id)) || (!name && !fieldId)
+            ? ['.select2-selection', '.css-control', 'input[role="combobox"]', '[aria-combobox="true"]']
+            : []),
+        ];
+        const select2Trigger = page.locator(fallbackSelectors.join(', ') || '.__no_matching_select_fallback__').first();
 
         const count = await select2Trigger.count();
         if (count > 0) {
