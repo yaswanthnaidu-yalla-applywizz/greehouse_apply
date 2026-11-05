@@ -4,13 +4,14 @@
 
 import type { ScannedField, ScannedJobTemplate } from '../types/index.js';
 import { browserManager } from '../submitter/browserManager.js';
+import { toAshbyApplicationUrl } from './atsDetector.js';
 
 /**
  * Scans an Ashby job form directly from the browser DOM.
  * Targets [data-field-path] elements, extracting labels, required status, and field types.
  */
 export async function scanAshbyDom(url: string): Promise<ScannedJobTemplate> {
-  const applicationUrl = url.includes('/application') ? url : `${url.replace(/\/+$/, '')}/application`;
+  const applicationUrl = toAshbyApplicationUrl(url) || url;
 
   const managed = await browserManager.acquireBrowser({ headless: true });
   let page = null;
@@ -34,6 +35,32 @@ export async function scanAshbyDom(url: string): Promise<ScannedJobTemplate> {
       companyName = parts[1].trim();
     }
 
+    const headerInfo = await page.evaluate(() => {
+      let location = '';
+      let address = '';
+      let locationType = '';
+      const rawFacts: Record<string, string> = {};
+
+      const textNodes = Array.from(document.querySelectorAll('div, span, p, h1, h2, h3, h4'))
+        .map((el) => (el as HTMLElement).innerText?.trim())
+        .filter(Boolean);
+
+      for (let i = 0; i < textNodes.length; i++) {
+        const t = textNodes[i];
+        if (/^location$/i.test(t) && textNodes[i + 1] && !location) {
+          location = textNodes[i + 1];
+          rawFacts.location = location;
+        } else if (/^address$/i.test(t) && textNodes[i + 1] && !address) {
+          address = textNodes[i + 1];
+          rawFacts.address = address;
+        } else if (/^location\s*type$/i.test(t) && textNodes[i + 1] && !locationType) {
+          locationType = textNodes[i + 1];
+          rawFacts.locationType = locationType;
+        }
+      }
+      return { location, address, locationType, rawFacts };
+    });
+
     const rawFields = await page.evaluate(() => {
       const entries = Array.from(document.querySelectorAll('[data-field-path]'));
       return entries.map((container) => {
@@ -45,6 +72,15 @@ export async function scanAshbyDom(url: string): Promise<ScannedJobTemplate> {
           container.querySelector('[aria-required="true"]') ||
           (labelEl && (labelEl as HTMLElement).innerText.includes('*'))
         );
+
+        let classification: 'answerable' | 'system_widget' = 'answerable';
+        if (
+          fieldPath.startsWith('_systemfield_education') ||
+          fieldPath.includes('education_history') ||
+          /^education\s*history$/i.test(labelText)
+        ) {
+          classification = 'system_widget';
+        }
 
         let type = 'text';
         let options: string[] = [];
@@ -100,7 +136,7 @@ export async function scanAshbyDom(url: string): Promise<ScannedJobTemplate> {
           type = 'textarea';
         }
 
-        return { fieldPath, labelText, isRequired, type, options };
+        return { fieldPath, labelText, isRequired, type, options, classification };
       });
     });
 
@@ -111,7 +147,21 @@ export async function scanAshbyDom(url: string): Promise<ScannedJobTemplate> {
       type: f.type as any,
       isRequired: f.isRequired,
       options: f.options.length > 0 ? f.options : undefined,
+      classification: f.classification,
     }));
+
+    if (scannedFields.length === 0) {
+      throw new Error(`Scan failed: Ashby form yielded zero fields for ${url}`);
+    }
+
+    const jobPostingLocation = headerInfo.location || undefined;
+    const jobPostingFacts = jobPostingLocation
+      ? {
+          location: jobPostingLocation,
+          locations: [jobPostingLocation],
+          raw: headerInfo.rawFacts,
+        }
+      : undefined;
 
     return {
       jobUrl: url,
@@ -120,6 +170,8 @@ export async function scanAshbyDom(url: string): Promise<ScannedJobTemplate> {
       fields: scannedFields,
       scannedAt: new Date().toISOString(),
       isExpired: false,
+      jobPostingLocation,
+      jobPostingFacts,
     };
   } finally {
     if (page && !page.isClosed()) {

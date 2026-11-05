@@ -5,6 +5,26 @@
 const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 /**
+ * Canonicalizes an Ashby job/application URL to its application route.
+ * Preserves query parameters and returns null for custom domains where slug/path cannot be resolved directly.
+ */
+export function toAshbyApplicationUrl(url: string): string | null {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url.trim());
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'jobs.ashbyhq.com' || host === 'localhost' || host === '127.0.0.1') {
+      const cleanPath = parsed.pathname.replace(/\/+$/, '');
+      const appPath = cleanPath.endsWith('/application') ? cleanPath : `${cleanPath}/application`;
+      return `${parsed.origin}${appPath}${parsed.search}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Checks if a URL targets Ashby ATS.
  */
 export function isAshbyUrl(url: string): boolean {
