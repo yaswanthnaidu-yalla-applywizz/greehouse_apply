@@ -14,7 +14,7 @@ import { updateStatus } from '../db/applications/crud.js';
 import { getProfile } from '../db/profiles.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { buildAshbyProxyConfig, resolveCountryCode, verifyProxyPreflight } from './ashbyProxy.js';
-import { fillAshbyForm, sleep, verifyRequiredFieldsCommitted } from './ashbyFormFiller.js';
+import { fillAshbyForm, glideCursor, sleep, verifyRequiredFieldsCommitted } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
@@ -272,33 +272,77 @@ export async function submitAshbyApplication(
       locale: 'en-US',
     });
 
-    page = await context.newPage();
-
-    // Listen for GraphQL submitApplication responses to capture status code
-    page.on('response', (response: any) => {
-      try {
-        const url = response.url().toLowerCase();
-        if (url.includes('submitapplication') || url.includes('submit-application')) {
-          submitResponseStatus = response.status();
-        } else if (url.includes('graphql')) {
-          const postData = response.request().postData() || '';
-          if (postData.includes('SubmitApplication') || postData.includes('submitApplication')) {
+    const attachResponseListener = (targetPage: any) => {
+      targetPage.on('response', (response: any) => {
+        try {
+          const url = response.url().toLowerCase();
+          if (url.includes('submitapplication') || url.includes('submit-application')) {
             submitResponseStatus = response.status();
+          } else if (url.includes('graphql')) {
+            const postData = response.request().postData() || '';
+            if (postData.includes('SubmitApplication') || postData.includes('submitApplication')) {
+              submitResponseStatus = response.status();
+            }
           }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
-      }
-    });
+      });
+    };
 
-    // 2.5 Verify proxy preflight probe (with 1 automatic retry on network/503 glitch)
+    page = await context.newPage();
+    attachResponseListener(page);
+
+    // 2.5 Verify proxy preflight probe (with automatic fallback on 471 route error / city exhaustion)
     stage = 'PREFLIGHT';
     log.info(`[AshbySubmit] Probing proxy preflight for ${applicationId} (${countryCode})...`);
     let preflight = await verifyProxyPreflight(page, countryCode);
     if (!preflight.success) {
-      log.warn(`[AshbySubmit] ⚠️ Proxy preflight initial attempt failed for ${applicationId}: ${preflight.error}. Retrying once...`);
-      await sleep(1000, 2000);
-      preflight = await verifyProxyPreflight(page, countryCode);
+      log.warn(`[AshbySubmit] ⚠️ Proxy preflight initial attempt failed for ${applicationId}: ${preflight.error}.`);
+
+      const isRouteFailure = /471|no_route|route_match|status.*471/i.test(preflight.error || '');
+      if (isRouteFailure || profile.location) {
+        log.info(`[AshbySubmit] 🔄 Attempting preflight fallback to country-wide routing without city constraint...`);
+        try {
+          if (page && !page.isClosed()) await page.close().catch(() => {});
+          if (managedBrowser) await browserManager.releaseBrowser(managedBrowser.browserId).catch(() => {});
+          managedBrowser = null;
+          page = null;
+
+          // Build country-level fallback without city constraint
+          proxyConfig = buildAshbyProxyConfig(profile, { includeCity: false, deviceType: 'residential' });
+          managedBrowser = await browserManager.acquireBrowser({
+            headless: isHeadless,
+            proxy: {
+              server: proxyConfig.server,
+              username: proxyConfig.username,
+              password: proxyConfig.password,
+            },
+            args: [
+              '--disable-blink-features=AutomationControlled',
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-dev-shm-usage',
+              ...(isHeadless ? [] : ['--start-maximized', '--window-position=50,50']),
+            ],
+          });
+          const fallbackContext = await managedBrowser.browser.newContext({
+            viewport: { width: 1440, height: 900 },
+            userAgent:
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            timezoneId: 'America/New_York',
+            locale: 'en-US',
+          });
+          page = await fallbackContext.newPage();
+          attachResponseListener(page);
+          preflight = await verifyProxyPreflight(page, countryCode);
+        } catch (fallbackErr: any) {
+          log.warn(`[AshbySubmit] ⚠️ Preflight country fallback re-acquisition error: ${fallbackErr.message}`);
+        }
+      } else {
+        await sleep(1000, 2000);
+        preflight = await verifyProxyPreflight(page, countryCode);
+      }
     }
     if (!preflight.success) {
       log.warn(`[AshbySubmit] ⚠️ Proxy preflight failed for ${applicationId}: ${preflight.error}`);
@@ -359,11 +403,11 @@ export async function submitAshbyApplication(
       throw new Error('Submit button not found on Ashby form');
     }
 
-    log.info('[AshbySubmit] Clicking submit button...');
+    log.info('[AshbySubmit] Clicking submit button with humanized cursor glide...');
     submitClickedAt = new Date().toISOString();
     submitClicked = true;
     stage = 'SUBMIT_CLICK';
-    await submitBtn.click();
+    await glideCursor(page, submitBtn, { click: true });
 
     // 6. Wait for success signal with instant interactive challenge quarantine (3s grace window)
     // Reference: ashby_application_success.png

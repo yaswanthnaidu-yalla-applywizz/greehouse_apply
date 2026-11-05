@@ -265,6 +265,12 @@ const envSchema = z.object({
     return val;
   }, z.string().optional()),
 
+  /** Massive Device Type targeting ('mobile' | 'residential' | 'common' | 'auto') */
+  MASSIVE_DEVICE_TYPE: z.preprocess((val) => {
+    if (typeof val === 'string') return val.trim();
+    return val;
+  }, z.enum(['mobile', 'residential', 'common', 'auto']).default('mobile')),
+
   /** ApplyWizz S3 Bucket Base URL for master resumes */
   APPLYWIZZ_S3_BASE_URL: z.string().default('https://applywizz-prod.s3.us-east-2.amazonaws.com'),
 

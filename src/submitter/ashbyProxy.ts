@@ -22,6 +22,8 @@ export interface ProxyOptions {
   massivePassword?: string;
   massiveEndpoint?: string;
   attemptToken?: string;
+  deviceType?: 'mobile' | 'residential' | 'common' | 'auto';
+  includeCity?: boolean;
 }
 
 export class InvalidCountryError extends Error {
@@ -267,16 +269,21 @@ export function buildAshbyProxyConfig(
 
   if (!preferDataImpulse && massiveUser && massivePass) {
     const countryCode = resolveCountryCode(profile).toUpperCase();
-    const city = parseCityFromLocation(profile.location, { preserveSpaces: true });
+    const city = options.includeCity !== false ? parseCityFromLocation(profile.location, { preserveSpaces: true }) : '';
 
     const cleanId = String(profile.applywizz_id || 'candidate').replace(/[^a-zA-Z0-9]/g, '');
     const attemptToken = options.attemptToken || randomBytes(4).toString('hex');
+    const deviceType = options.deviceType || process.env.MASSIVE_DEVICE_TYPE || 'mobile';
 
-    let username = `${massiveUser}-country-${countryCode}`;
+    let username = massiveUser;
+    if (deviceType && deviceType !== 'auto') {
+      username += `-type-${deviceType}`;
+    }
+    username += `-country-${countryCode}`;
     if (city) {
       username += `-city-${encodeURIComponent(city)}`;
     }
-    username += `-session-${cleanId}_${attemptToken}-sessionttl-30`;
+    username += `-session-${cleanId}_${attemptToken}-sessionttl-30-sessionmode-flex`;
 
     return {
       server: massiveEndpoint,
