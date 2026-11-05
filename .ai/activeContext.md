@@ -1,3 +1,10 @@
+# Current Session Update (2026-11-05 - Greenhouse Required-Field Integrity)
+
+- Tasks 1–5 are implemented and verified; Task 6 produced a read-only DB2 remediation report for 15 confirmed scanner/date-provenance records.
+- No historical application rows were modified, retried, queued, or submitted. Any future historical operation requires separate operator review and approval.
+- Walker-Miller live replay redirected to generic careers content, so the stored two-field template is documented as stale evidence and the current job page must be verified before any future rescan.
+- See `docs/operations/greenhouse-required-field-remediation-2026-11-05.md` and `.ai/diagnostics/required-fields-2026-11-03/remediation-report-2026-11-05.md`.
+
 # Current Session Update (2026-11-03 - Dev Dashboard "Filtered" Funnel Breakdown - COMPLETED)
 
 - **Conversion Funnel Breakdown Feature Shipped**:
