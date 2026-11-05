@@ -25,6 +25,22 @@ export type ScannedFieldType =
   | 'file'
   | 'location_autocomplete';
 
+export type FieldClassification = 'answerable' | 'system_field' | 'system_widget';
+export type FieldFamily =
+  | 'contact_profile' | 'employer_history' | 'work_authorization' | 'sponsorship'
+  | 'legal_history' | 'agreement_consent' | 'workplace_preference' | 'residence'
+  | 'compensation' | 'demographics' | 'availability_education' | 'creative' | 'unknown';
+export interface FieldIntent { family: FieldFamily; qualifier?: string }
+export interface JobPostingFacts { location?: string; locations?: string[]; raw?: Record<string, unknown> }
+export interface ResolutionProvenance {
+  family: FieldFamily;
+  evidenceKind?: string;
+  evidenceKey?: string;
+  policyId?: string;
+  choiceMatch?: string;
+  confidence?: number;
+}
+
 /**
  * Additional DOM context metadata captured during form scraping.
  */
@@ -65,6 +81,8 @@ export interface ScannedField {
   optionsComplete?: boolean;
   /** Optional metadata containing selector and section hierarchy */
   metadata?: ScannedFieldMetadata;
+  classification?: FieldClassification;
+  intent?: FieldIntent;
 }
 
 /**
@@ -84,6 +102,8 @@ export interface ScannedJobTemplate {
   /** Flag indicating if the job posting has closed or returns a 404 */
   isExpired: boolean;
   ats?: 'greenhouse' | 'ashby';
+  jobPostingLocation?: string;
+  jobPostingFacts?: JobPostingFacts;
 }
 
 // ============================================================================
@@ -301,6 +321,7 @@ export interface ResolvedField {
   isRequired?: boolean;
   /** Optional hint for corporate default answer injection at Tier 5 */
   corporateDefaultHint?: string;
+  provenance?: ResolutionProvenance;
 }
 
 /**
