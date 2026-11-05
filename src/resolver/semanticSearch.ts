@@ -10,6 +10,8 @@ import type { ProfileRow } from '../db/profiles.js';
 import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { getProfileFacts, type ProfileFact } from './profileFacts.js';
+import { classifyFieldIntent, isEvidenceCompatible } from './fieldIntent.js';
+import type { FieldIntent } from '../types/index.js';
 
 const log = createLogger('Semantic');
 
@@ -207,21 +209,45 @@ export async function findSemanticMatch(
   applywizzId: string,
   fieldType: string,
   options?: string[],
-  threshold: number = 0.82,
-  profile?: ProfileRow | null
+  threshold: number = 0.88,
+  profile?: ProfileRow | null,
+  intent?: FieldIntent
 ): Promise<SemanticMatchResult | null> {
   lastSemanticScore = 0;
+  const fieldIntent =
+    intent ||
+    classifyFieldIntent({
+      label: questionLabel,
+      name: '',
+      fieldId: '',
+      type: fieldType as any,
+      isRequired: true,
+      options,
+    });
+
+  if (fieldIntent.family === 'creative') {
+    return null;
+  }
+
   const embedding = await embedText(questionLabel);
   if (!embedding) {
     return null;
   }
 
   const profileFacts = getProfileFacts(profile);
-  if (profileFacts.length > 0) {
-    const factEmbeddings = await embedTexts(profileFacts.map((fact) => fact.label));
+  const compatibleProfileFacts = profileFacts.filter((fact) =>
+    isEvidenceCompatible(fieldIntent, {
+      kind: 'profile_fact',
+      key: fact.label,
+      value: fact.value,
+    })
+  );
+
+  if (compatibleProfileFacts.length > 0) {
+    const factEmbeddings = await embedTexts(compatibleProfileFacts.map((fact) => fact.label));
     const bestFact = bestSemanticProfileFact(
       embedding,
-      profileFacts,
+      compatibleProfileFacts,
       factEmbeddings,
       threshold
     );
@@ -268,8 +294,15 @@ export async function findSemanticMatch(
     }
 
     const rows = Array.isArray(data) ? data : data ? [data] : [];
-    if (rows.length > 0 && rows[0]?.value) {
-      const top = rows[0];
+    const compatibleRows = rows.filter((r) =>
+      isEvidenceCompatible(fieldIntent, {
+        kind: 'qa_bank',
+        key: r.question_label,
+        value: r.value,
+      })
+    );
+    if (compatibleRows.length > 0 && compatibleRows[0]?.value) {
+      const top = compatibleRows[0];
       const similarity = Number(top.similarity ?? 0);
       lastSemanticScore = Math.max(lastSemanticScore, similarity);
       if (similarity >= threshold) {

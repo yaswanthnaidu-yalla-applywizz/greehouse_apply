@@ -10,7 +10,6 @@
  */
 
 import React, { useMemo } from 'react';
-import { DifficultyBadge } from './components/DifficultyBadge.js';
 import type { CandidateDetail } from './types.js';
 import {
   candidateDetailMatchesSelection,
@@ -168,14 +167,14 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
               key={`${jobKey}-${idx}`}
               type="button"
               onClick={() => handleJobCardClick(job)}
-              className={`mobile-job-card flex-shrink-0 text-left px-3.5 py-2.5 rounded-xl transition-all duration-150 min-w-[230px] max-w-[280px] ${
+              className={`mobile-job-card flex-shrink-0 text-left px-3.5 py-2.5 rounded-xl transition-all duration-150 min-w-[200px] max-w-[260px] ${
                 isSelected
                   ? 'bg-[#2c2c2e] border border-[#3a3a3c]'
                   : 'bg-[#1c1c1e] border border-[#2c2c2e] hover:bg-[#2c2c2e]/60'
               }`}
             >
-              {/* Top Row: Company Initial Badge + Company Name + Difficulty */}
-              <div className="flex items-center justify-between mb-1.5">
+              {/* Top Row: Company Initial Badge + Company Name + Status Pill */}
+              <div className="flex items-center justify-between gap-2 mb-1.5">
                 <div className="flex items-center gap-1.5 truncate max-w-[150px]">
                   <span className="w-5 h-5 rounded bg-[#2c2c2e] border border-[#3a3a3c] text-[10px] font-bold text-[#ffffff] flex items-center justify-center shrink-0">
                     {initial}
@@ -185,41 +184,22 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                   </span>
                 </div>
 
-                <DifficultyBadge fieldsCount={job.fieldsCount} />
-              </div>
-
-              {/* Job Title & Queue Priority Badge */}
-              <div className="flex items-center justify-between gap-1.5 mb-1">
-                <div className="text-xs text-[#8e8e93] font-medium truncate">
-                  {cardTitle}
-                </div>
-                {Boolean((job as any).has_manual_edits || job.hasManualEdits) && (
-                  <span
-                    className="text-[9px] font-mono font-bold text-[#ff9f0a] bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-md shrink-0"
-                    title="Application has manual operator edits and is queued last"
-                  >
-                    ⚠️ Edited (Queued Last)
-                  </span>
-                )}
-              </div>
-
-              {/* Bottom Row: Status Pill & Question Count */}
-              <div className="flex items-center justify-between text-[10px] mt-1 pt-1 border-t border-[#2c2c2e] gap-1">
-                <span className="font-mono text-[#8e8e93] shrink-0">
-                  {job.fieldsCount ? `${job.fieldsCount} Qs` : 'Scanned'}
-                </span>
-
-                <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                <div className="shrink-0">
                   {isOperatorApprovedApplicationJob(job) ? (
-                    <span className="text-[10px] font-mono text-[#30d158] font-semibold bg-[#30d158]/15 border border-[#30d158]/30 px-1.5 py-0.5 rounded-full">
+                    <span className="text-[10px] font-mono text-[#30d158] font-semibold bg-[#30d158]/15 border border-[#30d158]/30 px-2 py-0.5 rounded-full">
                       Submitted
                     </span>
                   ) : (
-                    <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-1.5 py-0.5 rounded-full">
+                    <span className="text-[10px] font-mono text-[#ff9f0a] font-semibold bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 px-2 py-0.5 rounded-full">
                       Pending
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* Bottom Row: Job Title */}
+              <div className="text-xs text-[#8e8e93] font-medium truncate">
+                {cardTitle}
               </div>
             </button>
           );

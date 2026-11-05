@@ -18,7 +18,12 @@ import config from '../config/env.js';
 import { getProfile, type ProfileRow } from '../db/profiles.js';
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
-import { resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
+import {
+  isDateComponentField,
+  resolveContextualDateComponent,
+  resolveFromPayloadStructured,
+  resolveTier1,
+} from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
@@ -42,6 +47,8 @@ import type {
   CandidateJobApplication,
   CandidateSegment,
   IngestFilterApplication,
+  JobPostingFacts,
+  ResolutionExecution,
   ResolvedField,
   ScannedField,
   ScannedJobTemplate,
@@ -52,6 +59,8 @@ import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import { wsManager } from '../server/ws.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
+import { classifyFieldIntent } from './fieldIntent.js';
+import { resolveDeterministicPolicy } from './deterministicPolicies.js';
 import {
   applicationNeedsOperatorReview,
   applicationShouldBeFilteredOut,
@@ -169,6 +178,14 @@ export function alignResolvedChoice(
     ...(field.metadata ? { metadata: field.metadata } : {}),
   };
   if (resolved.source === 'unresolved' || !resolved.value.trim()) return baseWithOptions;
+  if (
+    (field.type === 'select' || field.type === 'radio') &&
+    /\b(?:month|year)\b/i.test(field.label) &&
+    /\b(?:start|end|graduation)\b/i.test(field.label) &&
+    /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(resolved.value.trim())
+  ) {
+    return { ...baseWithOptions, value: '', source: 'unresolved', resolvedByTier: null, confidence: 0 };
+  }
   if (isUnsupportedUuidAnswer(field, resolved.value)) {
     log.warn(`[Resolver] Rejected UUID-shaped answer for non-identifier field "${field.label}"`);
     return {
@@ -181,6 +198,12 @@ export function alignResolvedChoice(
   }
   if (field.type === 'checkbox') return baseWithOptions;
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
+
+  // System fields with no scanned options (e.g. Ashby _systemfield_location autocomplete select)
+  if (field.fieldId?.startsWith('_systemfield_') && (!options || options.length === 0)) {
+    return baseWithOptions;
+  }
+
   if (field.optionsComplete === false) {
     if (isSchoolField(field)) {
       return { ...baseWithOptions, ...(field.options ? { options: field.options } : {}) };
@@ -241,6 +264,16 @@ export function resolvePreTierField(
   if (policyVal !== null) {
     const finalVal = alignResolvedChoiceOrNull(field, policyVal);
     if (finalVal) return { ...base, value: finalVal };
+  }
+
+  // SMS / Text message marketing consent (Always negative / No)
+  const opts = field.options || options;
+  if (
+    Array.isArray(opts) &&
+    opts.some((opt) => /\b(?:text messages?|sms|whatsapp|consent to receiv)/i.test(opt))
+  ) {
+    const noOption = matchChoiceOption('No', opts);
+    if (noOption) return { ...base, value: noOption };
   }
 
   const isOnsiteWillingness = /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
@@ -450,6 +483,22 @@ export function resolveStructuredEeocField(
 /**
  * Returns a human-readable resolution source label for logging.
  */
+
+export interface ResolutionJobContext {
+  companyName?: string;
+  jobTitle?: string;
+  jobUrl?: string;
+  role?: string;
+  jobPostingLocation?: string;
+  jobPostingFacts?: JobPostingFacts;
+}
+
+export interface CachedResolutionEvidence {
+  profile?: ProfileRow | null;
+  parsedResume?: ResumeParsedRow | null;
+  qaEntries?: QABankRow[];
+}
+
 export function formatResolutionSource(resolved: ResolvedField): string {
   if (resolved.source === 'unresolved' || resolved.resolvedByTier === null) {
     return '⚪ Unresolved';
@@ -562,7 +611,13 @@ export class AnswerResolver {
     const profile = context?.profile || (await getProfile(applywizzId));
     const jobContext = context?.jobContext || { companyName: 'Company', jobTitle: 'Position' };
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+    if (isDateComponentField(field) && (!profile || !resolveContextualDateComponent(field, profile))) {
+      return this.unresolvedField(field);
+    }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
+
+    const ashbySystem = resolveAshbySystemField(field, profile, isRequired);
+    if (ashbySystem) return ashbySystem;
 
     const preTier = resolvePreTierField(field, profile, isRequired);
     if (preTier) return preTier;
@@ -609,14 +664,17 @@ export class AnswerResolver {
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
-    const semanticMatch = await findSemanticMatch(
-      field.label,
-      applywizzId,
-      resolutionField.type,
-      resolutionField.options,
-      0.82,
-      profile
-    );
+    const allowEmbedding = (context as any)?.execution?.mode !== 'shadow';
+    const semanticMatch = allowEmbedding
+      ? await findSemanticMatch(
+          field.label,
+          applywizzId,
+          resolutionField.type,
+          resolutionField.options,
+          0.82,
+          profile
+        )
+      : null;
     if (semanticMatch) {
       const phone = isPhoneNumberField(field)
         ? resumeAnswerMatchesPhone(semanticMatch.value, parsedResume?.structured, parsedResume?.raw_text)
@@ -729,7 +787,8 @@ export class AnswerResolver {
       profile?: ProfileRow | null;
       parsedResume?: ResumeParsedRow | null;
       qaEntries?: QABankRow[];
-      jobContext?: { companyName: string; jobTitle: string };
+      jobContext?: ResolutionJobContext;
+      execution?: ResolutionExecution;
     }
   ): Promise<ResolvedField> {
     const resolved = await this.resolveFieldThroughTier2Raw(applywizzId, field, context);
@@ -743,15 +802,39 @@ export class AnswerResolver {
       profile?: ProfileRow | null;
       parsedResume?: ResumeParsedRow | null;
       qaEntries?: QABankRow[];
-      jobContext?: { companyName: string; jobTitle: string };
+      jobContext?: ResolutionJobContext;
+      execution?: ResolutionExecution;
     }
   ): Promise<ResolvedField> {
     const profile = context.profile || (await getProfile(applywizzId));
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+    if (isDateComponentField(field) && (!profile || !resolveContextualDateComponent(field, profile))) {
+      return this.unresolvedField(field);
+    }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
+    const intent = field.intent || classifyFieldIntent(field);
 
-    const preTier = resolvePreTierField(field, profile, isRequired);
-    if (preTier) return preTier;
+    const ashbySystem = resolveAshbySystemField(field, profile, isRequired);
+    if (ashbySystem) {
+      return {
+        ...ashbySystem,
+        provenance: ashbySystem.provenance || { family: 'system', evidenceKind: 'ashby_system' },
+      };
+    }
+
+    const isPolicyField =
+      intent.family === 'agreement_consent' ||
+      intent.family === 'workplace_preference';
+
+    if (!isPolicyField) {
+      const preTier = resolvePreTierField(field, profile, isRequired);
+      if (preTier) {
+        return {
+          ...preTier,
+          provenance: preTier.provenance || { family: intent.family, evidenceKind: 'pretier_policy' },
+        };
+      }
+    }
 
     if (/cover\s*letter|cover_letter/i.test(`${field.name} ${field.fieldId} ${field.label}`)) {
       return {
@@ -764,15 +847,25 @@ export class AnswerResolver {
         resolvedByTier: 1,
         confidence: 1.0,
         isRequired,
+        provenance: { family: 'cover_letter', evidenceKind: 'suppressed' },
       };
     }
 
     const structuredEeoc = resolveStructuredEeocField(resolutionField, profile, isRequired);
-    if (structuredEeoc) return structuredEeoc;
+    if (structuredEeoc) {
+      return {
+        ...structuredEeoc,
+        provenance: structuredEeoc.provenance || { family: intent.family, evidenceKind: 'structured_eeoc' },
+      };
+    }
 
     const tier1 = await resolveTier1(applywizzId, resolutionField, profile);
     if (tier1) {
-      return { ...tier1, isRequired };
+      return {
+        ...tier1,
+        isRequired,
+        provenance: tier1.provenance || { family: intent.family, evidenceKind: 'tier1_supabase' },
+      };
     }
 
     const parsedResume =
@@ -782,32 +875,45 @@ export class AnswerResolver {
 
     const tier2 = await resolveTier2(applywizzId, resolutionField, parsedResume);
     if (tier2) {
-      return { ...tier2, isRequired };
+      return {
+        ...tier2,
+        isRequired,
+        provenance: tier2.provenance || { family: intent.family, evidenceKind: 'tier2_resume' },
+      };
     }
 
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
-    const semanticMatch = await findSemanticMatch(
-      field.label,
-      applywizzId,
-      resolutionField.type,
-      resolutionField.options,
-      0.82,
-      profile
-    );
+    const allowEmbedding = context.execution?.mode !== 'shadow';
+    const semanticMatch = allowEmbedding
+      ? await findSemanticMatch(
+          field.label,
+          applywizzId,
+          resolutionField.type,
+          resolutionField.options,
+          0.82,
+          profile
+        )
+      : null;
     if (semanticMatch) {
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: semanticMatch.value,
-        source: 'semantic',
-        resolvedByTier: 3,
-        confidence: semanticMatch.confidence,
-        isRequired,
-      };
+      const phone = isPhoneNumberField(field)
+        ? resumeAnswerMatchesPhone(semanticMatch.value, parsedResume?.structured, parsedResume?.raw_text)
+        : semanticMatch.value;
+      if (phone) {
+        return {
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: phone,
+          source: 'semantic',
+          resolvedByTier: 3,
+          confidence: semanticMatch.confidence,
+          isRequired,
+          provenance: { family: intent.family, evidenceKind: 'tier3_semantic' },
+        };
+      }
     }
 
     // ------------------------------------------------------------------------
@@ -821,20 +927,192 @@ export class AnswerResolver {
     );
     if (tier4) {
       if (!isUnsupportedUuidAnswer(field, tier4.value)) {
-        return {
-          ...tier4,
-          resolvedByTier: 4,
-          isRequired,
-        };
+        const phone = isPhoneNumberField(field)
+          ? resumeAnswerMatchesPhone(tier4.value, parsedResume?.structured, parsedResume?.raw_text)
+          : tier4.value;
+        if (phone) {
+          return {
+            ...tier4,
+            value: phone,
+            resolvedByTier: 4,
+            isRequired,
+            provenance: { family: intent.family, evidenceKind: 'tier4_fuzzy' },
+          };
+        }
       }
+    }
+
+    // ------------------------------------------------------------------------
+    // Immediately-pre-Tier-5 Deterministic Policy Registry
+    // ------------------------------------------------------------------------
+    const policy = resolveDeterministicPolicy(field, intent, profile, context.jobContext);
+    if (policy) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: policy.value,
+        source: 'policy',
+        resolvedByTier: 1,
+        confidence: policy.confidence,
+        isRequired,
+        provenance: policy.provenance,
+        ...(field.options ? { options: field.options } : {}),
+        ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+        ...(field.metadata ? { metadata: field.metadata } : {}),
+      };
     }
 
     return this.unresolvedField(field);
   }
 
-  /**
-   * Resolves all form fields for a candidate-job pairing.
-   */
+  public async resolveFormFields(
+    applywizzId: string,
+    fields: ScannedField[],
+    jobContext: ResolutionJobContext,
+    evidence?: CachedResolutionEvidence,
+    execution: ResolutionExecution = { mode: 'live' }
+  ): Promise<ResolvedField[]> {
+    const profile = evidence?.profile !== undefined ? evidence.profile : await getProfile(applywizzId);
+    const hasRequiredFields = fields.some(
+      (field) => Boolean(field.isRequired || (field as any).required || (field as any).is_required) || isAttachmentObligation(field)
+    );
+    const parsedResume =
+      evidence?.parsedResume !== undefined
+        ? evidence.parsedResume
+        : hasRequiredFields
+        ? await getOrParseResume(applywizzId)
+        : null;
+    const qaEntries =
+      evidence?.qaEntries !== undefined
+        ? evidence.qaEntries
+        : hasRequiredFields
+        ? await findAnswersByCandidate(applywizzId)
+        : [];
+
+    const resolvedFields: ResolvedField[] = [];
+    const tier5Pending: ScannedField[] = [];
+    const tier5Slots: number[] = [];
+    const resolutionContext = {
+      profile,
+      parsedResume,
+      qaEntries,
+      jobContext: {
+        companyName: jobContext.companyName || 'Company',
+        jobTitle: jobContext.jobTitle || 'Position',
+        jobUrl: jobContext.jobUrl,
+        jobPostingLocation: jobContext.jobPostingLocation || (jobContext as any).postingLocation,
+        jobPostingFacts: jobContext.jobPostingFacts || (jobContext as any).postingFacts,
+      },
+      execution,
+    };
+
+    for (const field of fields) {
+      const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+      if (!isRequired && !isAttachmentObligation(field)) {
+        resolvedFields.push(this.blankOptionalField(field));
+        continue;
+      }
+
+      const intent = field.intent || classifyFieldIntent(field);
+      const classifiedField = { ...field, intent };
+
+      const resolved = await this.resolveFieldThroughTier2(applywizzId, classifiedField, resolutionContext);
+
+      if (resolved.source === 'unresolved') {
+        if (execution.mode === 'shadow') {
+          const shadowResolved: ResolvedField = {
+            ...resolved,
+            isRequired,
+            provenance: {
+              family: intent.family,
+              evidenceKind: 'tier5_required',
+            },
+          };
+          resolvedFields.push(shadowResolved);
+          if (execution.recordDecision) {
+            execution.recordDecision({
+              fieldId: field.fieldId,
+              name: field.name,
+              label: field.label,
+              intent,
+              outcome: 'tier5_required',
+            });
+          }
+        } else {
+          resolvedFields.push(resolved);
+          if (profile) {
+            tier5Slots.push(resolvedFields.length - 1);
+            tier5Pending.push(classifiedField);
+          }
+        }
+      } else {
+        resolvedFields.push(resolved);
+      }
+    }
+
+    if (execution.mode === 'live' && tier5Pending.length > 0 && profile) {
+      const resumeText = parsedResume?.raw_text || '';
+      const jobDescription = '';
+      const effectiveJobContext = {
+        companyName: jobContext.companyName || 'Company',
+        jobTitle: jobContext.jobTitle || 'Position',
+        jobUrl: jobContext.jobUrl,
+        role: jobContext.jobTitle || 'Position',
+      };
+
+      for (let offset = 0; offset < tier5Pending.length; offset += TIER5_BATCH_CHUNK_SIZE) {
+        throwIfPipelineAborted('Answer resolution');
+        const chunkFields = tier5Pending.slice(offset, offset + TIER5_BATCH_CHUNK_SIZE);
+        const chunkSlots = tier5Slots.slice(offset, offset + TIER5_BATCH_CHUNK_SIZE);
+        if (chunkFields.length === 0) continue;
+
+        const batchResults = await resolveTier5Batch(
+          applywizzId,
+          chunkFields,
+          profile,
+          effectiveJobContext,
+          resumeText,
+          jobDescription
+        );
+
+        for (let i = 0; i < chunkFields.length; i++) {
+          const tier5 = batchResults[i];
+          const chunkField = chunkFields[i];
+          if (tier5 && tier5.value && tier5.value.trim().length > 0) {
+            const alignedTier5 = alignResolvedChoice(
+              chunkField,
+              tier5,
+              getEffectiveFieldOptions(chunkField)
+            );
+            alignedTier5.provenance = {
+              family: (chunkField.intent || classifyFieldIntent(chunkField)).family,
+              evidenceKind: 'tier5_ai',
+            };
+            resolvedFields[chunkSlots[i]] = alignedTier5;
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
+      let resolved = resolvedFields[i];
+      if (resolved) {
+        resolved = enforceCorporatePolicy(field, resolved);
+        if (field.metadata) resolved.metadata = { ...field.metadata, ...resolved.metadata };
+        if (field.options) resolved.options = field.options;
+        if (field.optionsComplete !== undefined) {
+          resolved.optionsComplete = field.optionsComplete;
+        }
+        resolvedFields[i] = resolved;
+      }
+    }
+
+    return resolvedFields;
+  }
+
   public async resolveJobApplication(
     applywizzId: string,
     template: ScannedJobTemplate

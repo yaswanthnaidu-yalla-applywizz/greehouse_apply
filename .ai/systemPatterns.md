@@ -254,6 +254,8 @@ The codebase was decomposed from earlier monolithic files into cohesive submodul
 | `fields_schema` | JSONB | Array of `ScannedField` |
 | `field_count` | INTEGER | Computed; compared to `MAX_JOB_QUESTIONS` |
 | `is_expired` | BOOLEAN | |
+| `job_posting_location` | TEXT | Captured posting location (Migration **046**) |
+| `job_posting_facts` | JSONB | Structured posting location facts (Migration **046**) |
 
 ### `gh_candidate_applications`
 | Column | Type | Notes |

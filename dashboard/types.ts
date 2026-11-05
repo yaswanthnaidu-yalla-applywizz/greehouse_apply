@@ -9,6 +9,7 @@
 import type {
   ApplyWizzCandidateProfile,
   CandidateJobApplication,
+  ResolutionProvenance,
   ResolvedField,
   SourceTag,
 } from '../src/types/index.js';
@@ -20,7 +21,7 @@ import type {
   EmailProofStatus,
 } from '../src/db/applications.js';
 
-export type { ApplyWizzCandidateProfile, CandidateJobApplication, ResolvedField, SourceTag };
+export type { ApplyWizzCandidateProfile, CandidateJobApplication, ResolutionProvenance, ResolvedField, SourceTag };
 
 /**
  * Candidate summary record returned by `GET /api/candidates`.
@@ -56,6 +57,8 @@ export interface CandidateDetail {
     jobTitle: string;
     status: string;
     operator_approved_at?: string | null;
+    submitted_at?: string | null;
+    submittedAt?: string | null;
     updated_at?: string | null;
     fieldsCount: number;
     hasManualEdits?: boolean;

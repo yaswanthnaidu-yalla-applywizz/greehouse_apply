@@ -47,10 +47,13 @@ function firstResumeHeaderLines(resumeFacts: unknown, resumeText: string): strin
   return source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 8);
 }
 
-export function isPhoneNumberField(field: Pick<ScannedField, 'label' | 'name' | 'fieldId'>): boolean {
+export function isPhoneNumberField(field: Pick<ScannedField, 'label' | 'name' | 'fieldId'> & { options?: string[] }): boolean {
   const combined = `${field.label} ${field.name} ${field.fieldId}`;
   if (/\b(?:country|calling|dialing)\s*code\b|\bphone\s*extension\b/i.test(combined)) return false;
   if (/\b(?:consent|sms|text message|communication preference|opt[- ]?in)\b/i.test(combined)) return false;
+  if (Array.isArray(field.options) && field.options.some((o: string) => /\b(?:text messages?|sms|whatsapp|consent to receiv)/i.test(o))) {
+    return false;
+  }
   return /\b(?:phone|mobile|cell|telephone|contact number)\b/i.test(combined);
 }
 

@@ -24,6 +24,7 @@ import type {
 import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
 import { choiceOptionTextMatches, matchChoiceOption } from '../utils/choiceOptions.js';
+import { buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
 
 const log = createLogger('Form Filler');
 
@@ -65,40 +66,15 @@ export interface FormFillSummary {
   results: FieldFillResult[];
 }
 
-function sanitizeResumeNamePart(value: string | null | undefined, fallback: string): string {
-  const sanitized = (value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '_')
-    .replace(/[^a-z0-9_]/g, '');
-  return sanitized || fallback;
-}
 
-function resumeJobShortcode(companyName: string, jobTitle: string): string {
-  const jobContext = `${companyName} ${jobTitle}`;
-  if (/software\s*engineer|developer|engineering/i.test(jobContext)) return 'SDE';
-  if (/data\s*analyst|data\s*science|analytics/i.test(jobContext)) return 'DA';
-  if (/product\s*manager/i.test(jobContext)) return 'PM';
-  if (/business\s*analyst/i.test(jobContext)) return 'BA';
-  if (/marketing/i.test(jobContext)) return 'MKT';
-  if (/finance|accounting/i.test(jobContext)) return 'FIN';
-  if (/designer|ux/i.test(jobContext)) return 'UX';
-  if (/devops|cloud|infrastructure/i.test(jobContext)) return 'OPS';
-  return 'GEN';
-}
 
 function buildResumeFilename(
   profile: ProfileRow | null,
   companyName: string,
   jobTitle: string
 ): string {
-  const clientNameParts = (profile?.client_name || '').trim().split(/\s+/).filter(Boolean);
-  const firstName = sanitizeResumeNamePart(profile?.first_name || clientNameParts[0], 'candidate');
-  const lastName = sanitizeResumeNamePart(
-    profile?.last_name || clientNameParts.slice(1).join(' ') || clientNameParts[0],
-    'resume'
-  );
-  return `resume_${firstName}_${lastName}_${resumeJobShortcode(companyName, jobTitle)}.pdf`;
+  const clientName = profile?.client_name || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || undefined;
+  return buildResumeSubmissionFilename(clientName, jobTitle, companyName);
 }
 
 /**
@@ -218,6 +194,32 @@ async function isResolvedFieldVisible(page: Page, field: ResolvedField): Promise
   }
 
   return false;
+}
+
+export function getExactControlSelectors(
+  field: Pick<ResolvedField, 'fieldId' | 'name' | 'metadata'>
+): string[] {
+  const fieldId = field.fieldId || '';
+  const name = field.name || '';
+  const hasNumericIdentity = [fieldId, name].some((identity) => /^\d+$/.test(identity));
+  return [
+    sanitizeMetadataSelector(field.metadata?.selector),
+    fieldId ? `[id="${escapeAttr(fieldId)}"]` : '',
+    name ? `[name="${escapeAttr(name)}"]` : '',
+    !hasNumericIdentity && fieldId ? `[id*="${escapeAttr(fieldId)}"]` : '',
+    !hasNumericIdentity && name ? `[name*="${escapeAttr(name)}"]` : '',
+  ].filter(Boolean);
+}
+
+export function getSelectValue(field: ResolvedField, rawValue: string): string {
+  if (field.options?.some((option) => option === rawValue)) return rawValue;
+  return normalizeBooleanValue(rawValue) || rawValue;
+}
+
+function isPhoneCountryControl(field: ResolvedField, label: string, name: string, fieldId: string): boolean {
+  const context = `${fieldId} ${name} ${label} ${field.metadata?.section || ''}`;
+  const hasDialCodeChoices = (field.options || []).some((option) => /\+\d{1,4}\b/.test(option));
+  return /phone|mobile|calling|dial(?:ing)?\s*code/i.test(context) && hasDialCodeChoices;
 }
 
 const CUSTOM_SELECT_OPTION_LOCATOR =
@@ -357,6 +359,7 @@ async function findSearchableSelectControl(
   metadataSelector?: string
 ): Promise<{ locator: Locator; selector: string } | null> {
   const ids = Array.from(new Set([name, fieldId].filter(Boolean)));
+  const hasNumericIdentity = ids.some((id) => /^\d+$/.test(id));
   const candidates: string[] = [];
 
   if (metadataSelector && !/^select#/i.test(metadataSelector.trim())) {
@@ -375,12 +378,17 @@ async function findSearchableSelectControl(
     );
   }
 
-  candidates.push(
-    `input[role="combobox"][id*="${escapeAttr(name)}"]`,
-    `input[role="combobox"][id*="${escapeAttr(fieldId)}"]`,
-    `[role="combobox"][id*="${escapeAttr(name)}"]`,
-    `[aria-combobox="true"]`
-  );
+  if (!hasNumericIdentity) {
+    for (const id of ids) {
+      candidates.push(
+        `input[role="combobox"][id*="${escapeAttr(id)}"]`,
+        `[role="combobox"][id*="${escapeAttr(id)}"]`
+      );
+    }
+  }
+  if (!hasNumericIdentity) {
+    candidates.push('[aria-combobox="true"]');
+  }
 
   const fromSelectors = await findElementLocator(page, candidates);
   if (fromSelectors && (await isInteractiveSelectControl(fromSelectors.locator))) {
@@ -455,24 +463,7 @@ async function comboboxDisplaysAnswer(
     if (single && matchOption(single, answerText)) return true;
   }
   const tagName = await control.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
-  if (tagName === 'INPUT') {
-    const inputVal = (await control.inputValue().catch(() => '')).trim();
-    const expanded = await control.getAttribute('aria-expanded').catch(() => null);
-    if (!inputVal || !matchOption(inputVal, answerText)) return false;
-    if (expanded !== 'true') return true;
-
-    // Some Greenhouse controls leave aria-expanded stale after committing a choice.
-    // A matching value with no visible menu options is still a committed selection.
-    const visibleOptions = control
-      .locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select_input-container")][1]')
-      .first()
-      .locator(CUSTOM_SELECT_OPTION_LOCATOR);
-    const optionCount = await visibleOptions.count().catch(() => 0);
-    for (let i = 0; i < optionCount; i++) {
-      if (await visibleOptions.nth(i).isVisible().catch(() => false)) return false;
-    }
-    return true;
-  }
+  if (tagName === 'INPUT') return false;
   const controlText = (await control.innerText().catch(() => '')).trim();
   return Boolean(controlText && matchOption(controlText, answerText));
 }
@@ -482,19 +473,37 @@ async function hiddenRequiredInputDisplaysAnswer(
   answerText: string,
   matchOption: OptionTextMatcher
 ): Promise<boolean> {
-  const shell = control
-    .locator(
-      'xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select_input-container") or contains(@class,"field-wrapper") or contains(@class,"remix-css-")][1]'
-    )
+  let shell = control
+    .locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"field-wrapper")][1]')
     .first();
+  if ((await shell.count().catch(() => 0)) === 0) {
+    shell = control.locator('xpath=ancestor::*[contains(@class,"remix-css-")][1]').first();
+  }
+  if ((await shell.count().catch(() => 0)) === 0) {
+    shell = control.locator('xpath=ancestor::*[contains(@class,"select_input-container")][1]').first();
+  }
   if ((await shell.count().catch(() => 0)) === 0) return false;
 
-  const requiredInputs = shell.locator(
-    'input.requiredInput, input[class*="requiredInput"], input[type="hidden"][required], input[type="hidden"][name*="required" i]'
-  );
-  const count = await requiredInputs.count().catch(() => 0);
-  for (let index = 0; index < count; index += 1) {
-    const value = (await requiredInputs.nth(index).inputValue().catch(() => '')).trim();
+  const associatedValues = await shell.locator('input').evaluateAll((inputs) =>
+    inputs
+      .filter((input) => (input as HTMLInputElement).type === 'hidden' || input.classList.contains('requiredInput'))
+      .map((input) => (input as HTMLInputElement).value.trim())
+  ).catch(() => []);
+  const values = [...associatedValues];
+  if (values.length === 0) {
+    const controlId = await control.getAttribute('id').catch(() => null);
+    const controlName = await control.getAttribute('name').catch(() => null);
+    const inferredName = controlId?.replace(/_input$/, '');
+    const form = control.locator('xpath=ancestor::form[1]').first();
+    if ((await form.count().catch(() => 0)) > 0 && (controlName || inferredName)) {
+      values.push(...await form.locator('input[type="hidden"]').evaluateAll((inputs, names) =>
+        inputs
+          .filter((input) => names.includes((input as HTMLInputElement).name))
+          .map((input) => (input as HTMLInputElement).value.trim()),
+      [controlName, inferredName].filter((name): name is string => Boolean(name))).catch(() => []));
+    }
+  }
+  for (const value of values) {
     if (value && (matchOption(value, answerText) || choiceOptionTextMatches(value, answerText))) return true;
   }
   return false;
@@ -614,8 +623,7 @@ async function fillInteractiveSelectDropdown(
       await searchInput.click({ force: true }).catch(() => {});
     }
     await searchInput.fill('').catch(() => {});
-    const textToType = normalizeForCombobox(answerText);
-    await searchInput.pressSequentially(textToType, { delay: 35 });
+    await searchInput.pressSequentially(answerText, { delay: 35 });
     await page.waitForTimeout(500);
   } else {
     await openTrigger.click({ force: true }).catch(() => {});
@@ -654,7 +662,17 @@ async function fillInteractiveSelectDropdown(
   if (!clicked && matchOption !== exactOptionTextMatch) {
     clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
   }
+  if (!clicked && searchInput) {
+    const normalizedAnswer = normalizeForCombobox(answerText);
+    if (normalizedAnswer !== answerText) {
+      await searchInput.fill('').catch(() => {});
+      await searchInput.pressSequentially(normalizedAnswer, { delay: 35 });
+      await page.waitForTimeout(350);
+      clicked = await clickDropdownOptionMultiStage(page, answerText, optionScope);
+    }
+  }
 
+  let verified = false;
   if (clicked) {
     if (searchInput) {
       await searchInput.evaluate((input: HTMLInputElement) => {
@@ -665,7 +683,7 @@ async function fillInteractiveSelectDropdown(
     await searchInput?.blur().catch(() => {});
     await page.waitForTimeout(250);
     const committedMatch = choiceOptionTextMatches;
-    const verified =
+    verified =
       (await comboboxDisplaysAnswer(searchInput || control, answerText, committedMatch)) ||
       (await hiddenRequiredInputDisplaysAnswer(searchInput || control, answerText, committedMatch));
     if (!verified && retryCount === 0) {
@@ -678,7 +696,7 @@ async function fillInteractiveSelectDropdown(
     await searchInput?.blur().catch(() => {});
   }
 
-  return clicked;
+  return verified;
 }
 
 async function fillSearchableSelectInput(
@@ -1045,12 +1063,13 @@ async function debugSponsorshipComboboxSequence(page: Page, answerText: string):
   await target.click({ timeout: 3000 }).catch((e) => {
     log.debug(`[Sponsorship DEBUG] click failed: ${e.message}`);
   });
-  await target.pressSequentially(answerText, { delay: 40 }).catch((e) => {
+  const binaryIntent = /^no\b/i.test(answerText.trim()) ? 'No' : 'Yes';
+  await target.pressSequentially(binaryIntent, { delay: 40 }).catch((e) => {
     log.debug(`[Sponsorship DEBUG] type failed: ${e.message}`);
   });
 
   const option = page
-    .locator('[role="option"]', { hasText: new RegExp(`^${answerText}\\b`, 'i') })
+    .locator('[role="option"]', { hasText: new RegExp(`^${binaryIntent}\\b`, 'i') })
     .first();
   try {
     await option.waitFor({ state: 'visible', timeout: 4000 });
@@ -1201,6 +1220,32 @@ export function matchesAffirmativeRadioOption(label: string, optionText: string)
 /**
  * Fills a single resolved field into the active Playwright page DOM.
  */
+export function isConditionalFieldInactive(
+  field: ResolvedField,
+  allFields: ResolvedField[]
+): boolean {
+  const dependsOn = field.metadata?.dependsOn;
+  const triggerValue = field.metadata?.triggerValue;
+  if (!dependsOn || triggerValue === undefined) return false;
+
+  // Find the parent field in allFields
+  const parentField = allFields.find(
+    (f) => f.fieldId === dependsOn || f.name === dependsOn || f.metadata?.selector?.includes(dependsOn)
+  );
+  if (!parentField) return false;
+
+  const parentVal = (parentField.value || '').trim().toLowerCase();
+  const expectedTrigger = triggerValue.trim().toLowerCase();
+
+  // If trigger condition is not satisfied, the field is inactive / unrendered
+  if (expectedTrigger === 'yes' || expectedTrigger === 'true') {
+    return parentVal !== 'yes' && parentVal !== 'true';
+  }
+  if (expectedTrigger === 'no' || expectedTrigger === 'false') {
+    return parentVal !== 'no' && parentVal !== 'false';
+  }
+  return parentVal !== expectedTrigger;
+}
 export async function fillSingleField(
   page: Page,
   field: ResolvedField,
@@ -1216,7 +1261,7 @@ export async function fillSingleField(
   const fieldId = field.fieldId || field.name || '';
   const label = field.label || name;
   const metaSelector = sanitizeMetadataSelector((field as any).metadata?.selector);
-  const isCountryCode = isCountryCodeField(fieldId, name, label);
+  const isCountryCode = isPhoneCountryControl(field, label, name, fieldId);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
   const isWorkAuthRelocation =
     !isSponsorship &&
@@ -1282,6 +1327,7 @@ export async function fillSingleField(
     success: false,
     domCommitted: false,
   };
+  let controlCommitmentVerified = false;
   if (skipOptional) {
     fillResult.success = true;
     return fillResult;
@@ -1429,17 +1475,18 @@ export async function fillSingleField(
       // ==========================================
       // Select Dropdown (Native, Select2, React-Select)
       // ==========================================
-      const booleanValue = normalizeBooleanValue(val);
-      let selectValue = booleanValue || val;
+      let selectValue = getSelectValue(field, val);
+      const booleanValue = normalizeBooleanValue(selectValue);
 
       // Special resolution for country code dropdown (phone country) - strictly +1 (United States)
       const phoneCountry = resolvePhoneCountrySelection(options.phoneCountry, options.phoneCountryCode);
       let targetCountryName = phoneCountry.country;
       let targetDialCode = phoneCountry.dialCode;
-      if (isCountryCode) {
+      const exactCapturedChoice = field.options?.some((option) => option === val) ?? false;
+      if (isCountryCode && !exactCapturedChoice) {
         selectValue = targetCountryName;
       }
-      const selectOptionValues = isCountryCode ? [targetCountryName] : optionValues;
+      const selectOptionValues = isCountryCode && !exactCapturedChoice ? [targetCountryName] : optionValues;
 
       // Check for sponsorship question rendered as radio buttons in the DOM
       if (isSponsorship) {
@@ -1589,7 +1636,7 @@ export async function fillSingleField(
       }
 
       const selectSelectors = [
-        metaSelector,
+        ...getExactControlSelectors(field),
         ...(isCountryCode ? [
           '#country',
           'input#country',
@@ -1602,18 +1649,13 @@ export async function fillSingleField(
           'select[name*="country_code"]',
           '[data-testid="country-dropdown"]',
         ] : []),
-        `select#${escapeId(name)}`,
-        `select#${escapeId(fieldId)}`,
-        `select#${escapeId(name.replace(/_/g, '-'))}`,
-        `select#${escapeId(fieldId.replace(/_/g, '-'))}`,
-        `#${escapeId(name)}`,
-        `#${escapeId(fieldId)}`,
-        `#${escapeId(name.replace(/_/g, '-'))}`,
-        `#${escapeId(fieldId.replace(/_/g, '-'))}`,
-        `select[name="${escapeAttr(name)}"]`,
-        `select[name="${escapeAttr(fieldId)}"]`,
-        `input[id*="${escapeAttr(name)}"]`,
-        `input[id*="${escapeAttr(fieldId)}"]`,
+        ...[name, fieldId].filter((id) => id && !/^\d+$/.test(id)).flatMap((id) => [
+          `select#${escapeId(id)}`,
+          `select#${escapeId(id.replace(/_/g, '-'))}`,
+          `#${escapeId(id)}`,
+          `#${escapeId(id.replace(/_/g, '-'))}`,
+          `input[id*="${escapeAttr(id)}"]`,
+        ]),
       ].filter(Boolean);
 
       if (isSponsorship) {
@@ -1692,14 +1734,28 @@ export async function fillSingleField(
           const isEeoField = isDemographicOrEeoField(fieldId, name, label);
           const eeoFallback = isEeoField && field.options ? resolveEeoFallbackOption(field.options) : null;
           const isSchool = /school/i.test(`${fieldId} ${name} ${label}`);
+          const sponsorshipIntent = isSponsorship
+            ? (/^no\b/i.test(selectValue.trim()) ? 'No' : 'Yes')
+            : null;
           const selectAttempts = isReferralSource
             ? referralOptionValues
+            : isSponsorship
+            ? [sponsorshipIntent!, selectValue]
             : (selectValue ? [selectValue] : (eeoFallback ? [eeoFallback] : [selectValue]));
           if (isEeoField && eeoFallback && selectValue && !selectAttempts.includes(eeoFallback)) {
             selectAttempts.push(eeoFallback);
           }
-          const countryMatcher: OptionTextMatcher = (optText) =>
+          const matchesPhoneCountry = (optText: string): boolean =>
             new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
+          if (
+            isCountryCode &&
+            matchesPhoneCountry((await found.locator.getAttribute('aria-label').catch(() => '')) || '') &&
+            (await hiddenRequiredInputDisplaysAnswer(found.locator, targetDialCode, exactOptionTextMatch))
+          ) {
+            fillResult.success = true;
+            fillResult.domCommitted = true;
+            return fillResult;
+          }
           let selected = false;
           for (const attempt of selectAttempts) {
             selected = await fillSearchableSelectInput(
@@ -1708,7 +1764,7 @@ export async function fillSingleField(
               found.selector,
               isCountryCode ? targetCountryName : attempt,
               isCountryCode
-                ? countryMatcher
+                ? (optText) => matchesPhoneCountry(optText)
                 : isSponsorship || booleanValue || isReferralSource || isEeoField || isSchool
                 ? fuzzyOptionTextMatch
                 : exactOptionTextMatch
@@ -1741,6 +1797,8 @@ export async function fillSingleField(
 
           if (selected) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
+            controlCommitmentVerified = true;
             if (isCountryCode) {
               log.info(
                 `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
@@ -1912,9 +1970,14 @@ export async function fillSingleField(
           }
         }
 
-        const select2Trigger = page.locator(
-          `[id*="select2-${escapeId(name)}"], [id*="select2-${escapeId(fieldId)}"], .select2-selection, .css-control, input[role="combobox"], [aria-combobox="true"]`
-        ).first();
+        const hasNumericIdentity = [name, fieldId].some((id) => /^\d+$/.test(id));
+        const fallbackSelectors = hasNumericIdentity
+          ? []
+          : [
+              ...[name, fieldId].filter(Boolean).map((id) => `[id*="select2-${escapeId(id)}"]`),
+              '.select2-selection', '.css-control', 'input[role="combobox"]', '[aria-combobox="true"]',
+            ];
+        const select2Trigger = page.locator(fallbackSelectors.join(', ') || '.__no_matching_select_fallback__').first();
 
         const count = await select2Trigger.count();
         if (count > 0) {
@@ -2284,6 +2347,8 @@ export async function fillSingleField(
             exactOptionTextMatch,
             0
           );
+          fillResult.domCommitted = fillResult.success;
+          controlCommitmentVerified = true;
         } else {
           // Standard text input
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
@@ -2448,7 +2513,9 @@ export async function fillSingleField(
     }
   }
 
-  fillResult.domCommitted = fillResult.success && !fillResult.skippedRequired;
+  if (!controlCommitmentVerified) {
+    fillResult.domCommitted = fillResult.success && !fillResult.skippedRequired;
+  }
   return fillResult;
 }
 
@@ -2558,6 +2625,26 @@ export async function fillForm(
       const field = isConsentSmsMarketingField(activeFields[i].label || '')
         ? applyConsentSmsMarketingNo(activeFields[i])
         : activeFields[i];
+
+      if (isConditionalFieldInactive(field, activeFields)) {
+        log.info(
+          `[Form Filler] ⏭️ Skipping conditionally unrendered field "${field.label}" (${field.fieldId}) — depends on ${field.metadata?.dependsOn}=${field.metadata?.triggerValue}`
+        );
+        results.push({
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          valuePopulated: field.value,
+          isRequired: field.isRequired,
+          source: field.source,
+          skippedRequired: true,
+          domCommitted: true,
+          success: true,
+        });
+        continue;
+      }
+
       const fillRes = await fillSingleField(
         page,
         field,

@@ -9,7 +9,7 @@ describe('operator job-card status', () => {
     assert.equal(isOperatorApprovedApplicationJob({ status: 'FAILED' }), false);
   });
 
-  it('treats only the explicit approval timestamp as submitted', () => {
+  it('treats explicit submitted_at or approval timestamp as submitted', () => {
     assert.equal(
       isOperatorApprovedApplicationJob({
         status: 'READY_FOR_REVIEW',
@@ -19,8 +19,23 @@ describe('operator job-card status', () => {
     );
     assert.equal(
       isOperatorApprovedApplicationJob({
+        status: 'READY_FOR_REVIEW',
+        submitted_at: '2026-11-05T02:00:00.000Z',
+      }),
+      true
+    );
+    assert.equal(
+      isOperatorApprovedApplicationJob({
+        status: 'APPLIED',
+        submittedAt: '2026-11-05T02:00:00.000Z',
+      }),
+      true
+    );
+    assert.equal(
+      isOperatorApprovedApplicationJob({
         status: 'APPLIED',
         operator_approved_at: null,
+        submitted_at: null,
       }),
       false
     );

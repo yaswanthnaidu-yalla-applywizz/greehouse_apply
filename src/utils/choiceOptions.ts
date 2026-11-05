@@ -256,3 +256,104 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
 export function choiceOptionTextMatches(optionText: string, answerText: string): boolean {
   return matchChoiceOption(answerText, [optionText]) === optionText;
 }
+
+interface NumericInterval {
+  min: number;
+  max: number;
+  mid: number;
+}
+
+function parseSalaryInterval(text: string): NumericInterval | null {
+  if (!text) return null;
+  const matches = Array.from(text.matchAll(/(\d+(?:[.,]\d+)?)\s*(k|thousand|m|million)?/gi));
+  if (matches.length === 0) return null;
+
+  const numbers = matches.map((m) => {
+    let n = parseFloat(m[1].replace(/,/g, ''));
+    const mult = (m[2] || '').toLowerCase();
+    if (mult === 'k' || mult === 'thousand') n *= 1000;
+    if (mult === 'm' || mult === 'million') n *= 1000000;
+    return n;
+  });
+
+  if (numbers.length === 1) {
+    return { min: numbers[0], max: numbers[0], mid: numbers[0] };
+  }
+  const min = Math.min(...numbers);
+  const max = Math.max(...numbers);
+  return { min, max, mid: (min + max) / 2 };
+}
+
+export function mapSalaryRangeToOption(
+  salary: { min?: number; max?: number } | string,
+  options: string[]
+): string | null {
+  if (!salary || !options?.length) return null;
+
+  let candInterval: NumericInterval | null = null;
+  if (typeof salary === 'string') {
+    candInterval = parseSalaryInterval(salary);
+  } else if (typeof salary === 'object') {
+    const min = salary.min ?? salary.max ?? 0;
+    const max = salary.max ?? salary.min ?? 0;
+    candInterval = { min, max, mid: (min + max) / 2 };
+  }
+
+  if (!candInterval || candInterval.mid <= 0) return null;
+
+  const parsedOptions = options
+    .map((option) => ({ option, interval: parseSalaryInterval(option) }))
+    .filter((o): o is { option: string; interval: NumericInterval } => o.interval !== null);
+
+  if (parsedOptions.length === 0) return null;
+
+  const containing = parsedOptions.filter(
+    (o) => candInterval.mid >= o.interval.min && candInterval.mid <= o.interval.max
+  );
+  if (containing.length === 1) {
+    return containing[0].option;
+  }
+  if (containing.length > 1) {
+    const dist0 = Math.abs(candInterval.mid - containing[0].interval.mid);
+    const dist1 = Math.abs(candInterval.mid - containing[1].interval.mid);
+    if (Math.abs(dist0 - dist1) < 1e-6) {
+      return null;
+    }
+    return dist0 < dist1 ? containing[0].option : containing[1].option;
+  }
+
+  const ranked = parsedOptions
+    .map((o) => ({ option: o.option, dist: Math.abs(candInterval.mid - o.interval.mid) }))
+    .sort((a, b) => a.dist - b.dist);
+
+  if (ranked.length > 1 && Math.abs(ranked[0].dist - ranked[1].dist) < 1e-6) {
+    return null;
+  }
+
+  return ranked[0].option;
+}
+
+export function mapWorkplaceLocationToOption(
+  postingLocation: string,
+  options: string[]
+): string | null {
+  if (!postingLocation || !options?.length) return null;
+
+  const normLoc = normalize(postingLocation);
+  if (!normLoc) return null;
+
+  const alias = canonicalAlias(postingLocation);
+  const matches = options.filter((opt) => {
+    const normOpt = normalize(opt);
+    if (normOpt === normLoc) return true;
+    if (alias && (canonicalAlias(opt) === alias || normOpt === alias)) return true;
+    const locWords = normLoc.split(' ').filter((w) => w.length > 2);
+    const optWords = new Set(normOpt.split(' ').filter((w) => w.length > 2));
+    if (locWords.length > 0 && locWords.every((w) => optWords.has(w))) return true;
+    if (optWords.size > 0 && Array.from(optWords).every((w) => normLoc.includes(w))) return true;
+    return false;
+  });
+
+  if (matches.length === 1) return matches[0];
+  return null;
+}

@@ -8,11 +8,22 @@ import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import type { ProfileRow } from '../db/profiles.js';
 import { normalizeText } from './fingerprint.js';
 import { getProfileFacts } from './profileFacts.js';
-import type { ResolvedField, ScannedField } from '../types/index.js';
+import { classifyFieldIntent, isEvidenceCompatible } from './fieldIntent.js';
+import type { FieldIntent, ResolvedField, ScannedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 const log = createLogger('Tier4 Fuzzy Match');
+
+let fuzzyMatchingEnabled = true;
+
+export function setFuzzyMatchingEnabled(enabled: boolean): void {
+  fuzzyMatchingEnabled = enabled;
+}
+
+export function isFuzzyMatchingEnabled(): boolean {
+  return fuzzyMatchingEnabled;
+}
 
 function isAllowedUrlAnswer(field: ScannedField, value: string): boolean {
   return !/^https?:\/\//i.test(value.trim()) || /linkedin|github|portfolio|website|url/i.test(field.label);
@@ -40,12 +51,25 @@ export async function resolveTier3(
   applywizzId: string,
   field: ScannedField,
   qaEntriesCache?: QABankRow[],
-  profile?: ProfileRow | null
+  profile?: ProfileRow | null,
+  intent?: FieldIntent
 ): Promise<ResolvedField | null> {
   try {
+    const fieldIntent = intent || field.intent || classifyFieldIntent(field);
+    if (fieldIntent.family === 'creative') {
+      return null;
+    }
+
     const profileFacts = getProfileFacts(profile);
     const query = normalizeText(field.label);
-    const normalizedFacts = profileFacts.map((fact) => ({
+    const compatibleFacts = profileFacts.filter((fact) =>
+      isEvidenceCompatible(fieldIntent, {
+        kind: 'profile_fact',
+        key: fact.label,
+        value: fact.value,
+      })
+    );
+    const normalizedFacts = compatibleFacts.map((fact) => ({
       ...fact,
       normalized_label: normalizeText(fact.label),
     }));
@@ -71,35 +95,55 @@ export async function resolveTier3(
           source: 'supabase',
           resolvedByTier: 4,
           confidence: 0.95,
+          provenance: {
+            family: fieldIntent.family,
+            evidenceKind: 'profile_fact',
+            evidenceKey: fact.label,
+            confidence: 0.95,
+          },
         };
       }
     }
 
-    if (normalizedFacts.length > 0 && query) {
+    if (fuzzyMatchingEnabled && normalizedFacts.length > 0 && query) {
       const factSearch = new Fuse(normalizedFacts, {
         keys: ['normalized_label', 'label'],
         includeScore: true,
-        threshold: 0.4,
+        threshold: 0.25,
         ignoreLocation: true,
         minMatchCharLength: 3,
       }).search(query);
       if (factSearch.length > 0) {
         const bestMatch = factSearch[0];
-        let finalValue: string | null = bestMatch.item.value;
-        if (field.options?.length) {
-          finalValue = matchBestOption(finalValue, field.options);
-        }
-        if (finalValue && isAllowedUrlAnswer(field, finalValue)) {
-          return {
-            fieldId: field.fieldId,
-            name: field.name,
-            type: field.type,
-            label: field.label,
-            value: finalValue,
-            source: 'supabase',
-            resolvedByTier: 4,
-            confidence: Math.max(0.85, Number((1 - (bestMatch.score ?? 0)).toFixed(2))),
-          };
+        const distance = bestMatch.score ?? 1;
+        const similarity = 1 - distance;
+        const secondDistance = factSearch.length > 1 ? (factSearch[1].score ?? 1) : 1;
+        const secondSimilarity = 1 - secondDistance;
+        const uniqueness = similarity - secondSimilarity;
+
+        if (similarity >= 0.88 && (factSearch.length === 1 || uniqueness >= 0.08)) {
+          let finalValue: string | null = bestMatch.item.value;
+          if (field.options?.length) {
+            finalValue = matchBestOption(finalValue, field.options);
+          }
+          if (finalValue && isAllowedUrlAnswer(field, finalValue)) {
+            return {
+              fieldId: field.fieldId,
+              name: field.name,
+              type: field.type,
+              label: field.label,
+              value: finalValue,
+              source: 'supabase',
+              resolvedByTier: 4,
+              confidence: Math.max(0.85, Number(similarity.toFixed(2))),
+              provenance: {
+                family: fieldIntent.family,
+                evidenceKind: 'profile_fact',
+                evidenceKey: bestMatch.item.label,
+                confidence: Number(similarity.toFixed(2)),
+              },
+            };
+          }
         }
       }
     }
@@ -109,8 +153,15 @@ export async function resolveTier3(
       return null;
     }
 
-    // Index existing questions by normalized label
-    const searchableEntries = entries.map((e) => ({
+    const compatibleEntries = entries.filter((entry) =>
+      isEvidenceCompatible(fieldIntent, {
+        kind: 'qa_bank',
+        key: entry.question_label,
+        value: entry.value,
+      })
+    );
+
+    const searchableEntries = compatibleEntries.map((e) => ({
       ...e,
       normalized_label: normalizeText(e.question_label),
     }));
@@ -137,43 +188,65 @@ export async function resolveTier3(
           source: 'fuzzy_match',
           resolvedByTier: 4,
           confidence: 0.95,
+          provenance: {
+            family: fieldIntent.family,
+            evidenceKind: 'qa_bank',
+            evidenceKey: entry.question_fingerprint,
+            confidence: 0.95,
+          },
         };
       }
     }
 
-    // 2. Fuse.js Fuzzy match
-    const fuse = new Fuse(searchableEntries, {
-      keys: ['normalized_label', 'question_label'],
-      includeScore: true,
-      threshold: 0.4,
-      ignoreLocation: true,
-      minMatchCharLength: 3,
-    });
+    // 2. Fuse.js Fuzzy match (gated by fuzzyMatchingEnabled)
+    if (fuzzyMatchingEnabled && searchableEntries.length > 0) {
+      const fuse = new Fuse(searchableEntries, {
+        keys: ['normalized_label', 'question_label'],
+        includeScore: true,
+        threshold: 0.4,
+        ignoreLocation: true,
+        minMatchCharLength: 3,
+      });
 
-    const searchResults = fuse.search(query);
+      const searchResults = fuse.search(query);
 
-    if (searchResults.length > 0) {
-      const bestMatch = searchResults[0];
-      const distance = bestMatch.score ?? 0;
-      const confidence = Math.max(0.85, Number((1 - distance).toFixed(2)));
+      if (searchResults.length > 0) {
+        const bestMatch = searchResults[0];
+        const distance = bestMatch.score ?? 1;
+        const similarity = 1 - distance;
+        const secondDistance = searchResults.length > 1 ? (searchResults[1].score ?? 1) : 1;
+        const secondSimilarity = 1 - secondDistance;
+        const uniqueness = similarity - secondSimilarity;
 
-      let finalValue: string | null = bestMatch.item.value;
-      if (field.options && field.options.length > 0) {
-        finalValue = matchBestOption(finalValue, field.options);
-        if (!finalValue) return null;
+        // Reject weak scores or tied candidates (calibrated: similarity >= 0.88, uniqueness >= 0.08)
+        if (similarity < 0.88 || (searchResults.length > 1 && uniqueness < 0.08)) {
+          return null;
+        }
+
+        let finalValue: string | null = bestMatch.item.value;
+        if (field.options && field.options.length > 0) {
+          finalValue = matchBestOption(finalValue, field.options);
+          if (!finalValue) return null;
+        }
+        if (!isAllowedUrlAnswer(field, finalValue)) return null;
+
+        return {
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: finalValue,
+          source: 'fuzzy_match',
+          resolvedByTier: 4,
+          confidence: Math.max(0.85, Number(similarity.toFixed(2))),
+          provenance: {
+            family: fieldIntent.family,
+            evidenceKind: 'qa_bank',
+            evidenceKey: bestMatch.item.question_fingerprint,
+            confidence: Number(similarity.toFixed(2)),
+          },
+        };
       }
-      if (!isAllowedUrlAnswer(field, finalValue)) return null;
-
-      return {
-        fieldId: field.fieldId,
-        name: field.name,
-        type: field.type,
-        label: field.label,
-        value: finalValue,
-        source: 'fuzzy_match',
-        resolvedByTier: 4,
-        confidence,
-      };
     }
   } catch (err: any) {
     log.warn(`[Tier 4] Fuzzy match error for ${applywizzId}: ${err.message}`);

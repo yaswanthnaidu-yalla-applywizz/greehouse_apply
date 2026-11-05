@@ -30,6 +30,7 @@ import {
 } from '../src/db/applications.js';
 import { generateFingerprint } from '../src/resolver/fingerprint.js';
 import { AnswerResolver } from '../src/resolver/answerResolver.js';
+import { ResolverWorkerPool } from '../src/resolver/resolverWorkerPool.js';
 import { fillForm } from '../src/submitter/formFiller.js';
 import { verifySubmissionSignals } from '../src/submitter/liveSubmit.js';
 import { captureWebProof } from '../src/submitter/proofCapture.js';
@@ -259,6 +260,141 @@ async function runE2EIntegrationTestSuite() {
       applywizz_id: candidateId,
       job_url: testJobUrl,
     };
+
+    // =========================================================================
+    // Checkpoint 3B: Typed Deterministic Resolution & Parity Fixture
+    // =========================================================================
+    console.log('\n--- Checkpoint 3B: Typed Deterministic Resolution Fixture ---');
+    const typedFields: ScannedField[] = [
+      {
+        fieldId: 'field-sms',
+        name: 'sms_consent',
+        type: 'radio',
+        label: 'Do you consent to receive SMS communications regarding your application?',
+        options: ['Yes', 'No'],
+        required: true,
+      },
+      {
+        fieldId: 'field-employer',
+        name: 'current_company',
+        type: 'text',
+        label: 'Current Company',
+        required: true,
+      },
+      {
+        fieldId: 'field-work-loc',
+        name: 'office_location',
+        type: 'select',
+        label: 'Primary Work Location',
+        options: ['New York, NY', 'Remote, US'],
+        required: true,
+      },
+      {
+        fieldId: 'field-reloc',
+        name: 'relocation_pref',
+        type: 'radio',
+        label: 'Are you willing to relocate for this position?',
+        options: ['Yes', 'No'],
+        required: true,
+      },
+      {
+        fieldId: 'field-unrelated',
+        name: 'unrelated_fact',
+        type: 'text',
+        label: 'Random unrelated inquiry without matching candidate evidence',
+        required: false,
+      },
+      {
+        fieldId: 'field-widget',
+        name: 'widget_drop',
+        type: 'select',
+        label: 'Select favorite mascot',
+        options: ['Gopher', 'Octocat'],
+        required: false,
+      },
+      {
+        fieldId: 'field-creative',
+        name: 'why_acme',
+        type: 'textarea',
+        label: 'Why do you want to join Acme? Tell us your story and challenges.',
+        required: true,
+      },
+    ];
+
+    const typedCandidateProfile = {
+      ...savedProfile,
+      current_company: 'Acme Global Corp',
+      company_email: 'john@acme-corp.invalid',
+    };
+
+    const resolvedTypedFields = await resolver.resolveFormFields(
+      candidateId,
+      typedFields,
+      {
+        jobUrl: testJobUrl,
+        companyName: 'Acme Global',
+        jobTitle: 'Senior Platform Engineer',
+        postingLocation: 'New York, NY',
+        postingFacts: { location: 'New York, NY' },
+      },
+      { profile: typedCandidateProfile as any, qaEntries: [], parsedResume: null },
+      { mode: 'live' }
+    );
+
+    const smsRes = resolvedTypedFields.find((f) => f.fieldId === 'field-sms');
+    assert(smsRes?.value === 'No' && smsRes?.source === 'policy', 'SMS consent resolved to No via policy');
+
+    const empRes = resolvedTypedFields.find((f) => f.fieldId === 'field-employer');
+    assert(empRes?.value === 'Acme Global Corp' && empRes?.source === 'supabase', 'Employer question resolved from employer evidence, not email');
+
+    const locRes = resolvedTypedFields.find((f) => f.fieldId === 'field-work-loc');
+    assert(locRes?.value === 'New York, NY' && locRes?.source === 'policy', 'Workplace location resolved to posting location via policy');
+
+    // Test no-location affirmative relocation
+    const noLocRelocFields = await resolver.resolveFormFields(
+      candidateId,
+      [typedFields[3]],
+      {
+        jobUrl: testJobUrl,
+        companyName: 'Acme Global',
+        jobTitle: 'Senior Platform Engineer',
+      },
+      { profile: typedCandidateProfile as any, qaEntries: [], parsedResume: null },
+      { mode: 'live' }
+    );
+    const relocRes = noLocRelocFields[0];
+    assert(relocRes?.value === 'Yes' && relocRes?.source === 'policy', 'No-location affirmative relocation resolved to Yes via policy');
+
+    const unrelRes = resolvedTypedFields.find((f) => f.fieldId === 'field-unrelated');
+    assert(!unrelRes?.value, 'Semantic rejection left unrelated fact unforced');
+
+    const widgetRes = resolvedTypedFields.find((f) => f.fieldId === 'field-widget');
+    assert(!widgetRes?.value, 'Widget field excluded from deterministic policy matching');
+
+    const creativeRes = resolvedTypedFields.find((f) => f.fieldId === 'field-creative');
+    assert(!creativeRes?.value || creativeRes?.source === 'ai', 'Creative narrative field preserved for Tier 5 / review gate');
+
+    // Worker / Main parity check
+    const workerPool = new ResolverWorkerPool();
+    const workerResolved = await (workerPool as any).resolveFieldsWithSharedResolver(
+      candidateId,
+      typedFields,
+      {
+        jobUrl: testJobUrl,
+        companyName: 'Acme Global',
+        jobTitle: 'Senior Platform Engineer',
+        postingLocation: 'New York, NY',
+        postingFacts: { location: 'New York, NY' },
+      },
+      { profile: typedCandidateProfile as any, qaEntries: [], parsedResume: null },
+      { mode: 'live' }
+    );
+
+    assert(
+      JSON.stringify(resolvedTypedFields.map((f) => ({ id: f.fieldId, val: f.value, src: f.source }))) ===
+      JSON.stringify(workerResolved.map((f: any) => ({ id: f.fieldId, val: f.value, src: f.source }))),
+      'Worker and direct resolution yield identical values and sources'
+    );
 
     // =========================================================================
     // Checkpoint 4: Zero Duplicate API Calls on 2nd Run

@@ -444,3 +444,109 @@ export async function captureFormControlMetadata(
     };
   });
 }
+
+export interface CascadeBaseline {
+  fieldId: string;
+  name: string;
+  type: string;
+  selector?: string;
+  initialValue: string | boolean | null;
+  visibleFieldKeys: string[];
+}
+
+export async function getVisibleFieldKeys(page: Page): Promise<string[]> {
+  const fields = await extractVisibleFormFields(page);
+  return fields.map((f) => `${f.name || ''}:${f.fieldId}`).sort();
+}
+
+export async function captureCascadeBaseline(page: Page, field: ScannedField): Promise<CascadeBaseline> {
+  const visibleFieldKeys = await getVisibleFieldKeys(page);
+
+  const initialValue = await page.evaluate((f) => {
+    if (f.type === 'checkbox') {
+      const el = document.querySelector(
+        f.metadata?.selector || `input[type="checkbox"]#${CSS.escape(f.fieldId)}, input[type="checkbox"][name="${CSS.escape(f.name)}"]`
+      ) as HTMLInputElement | null;
+      return el ? el.checked : false;
+    }
+    if (f.type === 'radio') {
+      const checked = document.querySelector(
+        `input[type="radio"][name="${CSS.escape(f.name)}"]:checked, input[type="radio"][name="${CSS.escape(f.fieldId)}"]:checked`
+      ) as HTMLInputElement | null;
+      return checked ? checked.value : null;
+    }
+    if (f.type === 'select') {
+      const el = document.querySelector(
+        f.metadata?.selector || `select#${CSS.escape(f.fieldId)}, select[name="${CSS.escape(f.name)}"], #${CSS.escape(f.fieldId)}`
+      ) as HTMLSelectElement | null;
+      return el ? el.value : '';
+    }
+    return null;
+  }, field);
+
+  return {
+    fieldId: field.fieldId,
+    name: field.name,
+    type: field.type,
+    selector: field.metadata?.selector,
+    initialValue,
+    visibleFieldKeys,
+  };
+}
+
+export async function restoreCascadeBaseline(page: Page, baseline: CascadeBaseline): Promise<boolean> {
+  try {
+    await page.evaluate((b) => {
+      if (b.type === 'checkbox') {
+        const el = document.querySelector(
+          b.selector || `input[type="checkbox"]#${CSS.escape(b.fieldId)}, input[type="checkbox"][name="${CSS.escape(b.name)}"]`
+        ) as HTMLInputElement | null;
+        if (el) {
+          el.checked = Boolean(b.initialValue);
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } else if (b.type === 'radio') {
+        const radios = Array.from(
+          document.querySelectorAll(`input[type="radio"][name="${CSS.escape(b.name)}"], input[type="radio"][name="${CSS.escape(b.fieldId)}"]`)
+        ) as HTMLInputElement[];
+        let targetRadio: HTMLInputElement | null = null;
+        radios.forEach((r) => {
+          if (b.initialValue !== null && r.value === b.initialValue) {
+            r.checked = true;
+            targetRadio = r;
+          } else {
+            r.checked = false;
+          }
+        });
+        if (targetRadio) {
+          (targetRadio as HTMLInputElement).dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          radios.forEach((r) => r.dispatchEvent(new Event('change', { bubbles: true })));
+        }
+      } else if (b.type === 'select') {
+        const sel = document.querySelector(
+          b.selector || `select#${CSS.escape(b.fieldId)}, select[name="${CSS.escape(b.name)}"], #${CSS.escape(b.fieldId)}`
+        ) as HTMLSelectElement | null;
+        if (sel && sel.tagName === 'SELECT') {
+          sel.value = (b.initialValue as string) || '';
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    }, baseline);
+
+    await page.waitForTimeout(200);
+
+    const currentKeys = await getVisibleFieldKeys(page);
+    if (currentKeys.length !== baseline.visibleFieldKeys.length) {
+      return false;
+    }
+    const baselineSet = new Set(baseline.visibleFieldKeys);
+    for (const key of currentKeys) {
+      if (!baselineSet.has(key)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
