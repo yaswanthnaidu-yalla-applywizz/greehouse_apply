@@ -18,7 +18,12 @@ import config from '../config/env.js';
 import { getProfile, type ProfileRow } from '../db/profiles.js';
 import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
-import { resolveFromPayloadStructured, resolveTier1 } from './tier1Supabase.js';
+import {
+  isDateComponentField,
+  resolveContextualDateComponent,
+  resolveFromPayloadStructured,
+  resolveTier1,
+} from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
 import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
@@ -169,6 +174,14 @@ export function alignResolvedChoice(
     ...(field.metadata ? { metadata: field.metadata } : {}),
   };
   if (resolved.source === 'unresolved' || !resolved.value.trim()) return baseWithOptions;
+  if (
+    (field.type === 'select' || field.type === 'radio') &&
+    /\b(?:month|year)\b/i.test(field.label) &&
+    /\b(?:start|end|graduation)\b/i.test(field.label) &&
+    /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(resolved.value.trim())
+  ) {
+    return { ...baseWithOptions, value: '', source: 'unresolved', resolvedByTier: null, confidence: 0 };
+  }
   if (isUnsupportedUuidAnswer(field, resolved.value)) {
     log.warn(`[Resolver] Rejected UUID-shaped answer for non-identifier field "${field.label}"`);
     return {
@@ -562,6 +575,9 @@ export class AnswerResolver {
     const profile = context?.profile || (await getProfile(applywizzId));
     const jobContext = context?.jobContext || { companyName: 'Company', jobTitle: 'Position' };
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+    if (isDateComponentField(field) && (!profile || !resolveContextualDateComponent(field, profile))) {
+      return this.unresolvedField(field);
+    }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
     const preTier = resolvePreTierField(field, profile, isRequired);
@@ -748,6 +764,9 @@ export class AnswerResolver {
   ): Promise<ResolvedField> {
     const profile = context.profile || (await getProfile(applywizzId));
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
+    if (isDateComponentField(field) && (!profile || !resolveContextualDateComponent(field, profile))) {
+      return this.unresolvedField(field);
+    }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
     const preTier = resolvePreTierField(field, profile, isRequired);
