@@ -185,6 +185,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             source={field.source}
             confidence={field.confidence}
             isEdited={field.isEdited}
+            provenance={field.provenance}
           />
 
           {!isEditing && (
