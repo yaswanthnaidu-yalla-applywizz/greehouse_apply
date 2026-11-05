@@ -1138,3 +1138,10 @@ _Last updated: 2026-10-07_
 - **FIXED:** Greenhouse post-submit detection recognizes modern alert/live-region error surfaces; scanner follows embedded Greenhouse application iframes on marketing pages.
 - **FIXED:** Failure diagnostics preserve short numeric choice IDs while redacting phone-shaped values, and missing-resume storage failures map to actionable operator copy.
 - Verification passed: 50 focused Vitest tests, 13 focused Node tests, and root/dashboard typecheck.
+
+### Greenhouse Required-Field and Resolution Integrity (2026-11-05 Complete)
+- [x] Resolver date components require matching employment/education provenance; incomplete catalogs preserve contextual resolution and unknown context remains unresolved.
+- [x] Choice filling preserves exact option values and control identity, and only reports success when the browser exposes a committed visible or hidden selected value.
+- [x] Greenhouse submission validation keeps distinct required failures visible; embedded-frame scanning validates Greenhouse hosts and paths and waits only on candidate parent pages.
+- [x] Combined local fixture passed in headful and headless modes. Typecheck and focused resolver, filler, gate, scanner, searchable-select, country, and cascade checks passed. The Node-native normalization suite was run with Node because it has no Vitest suite. The full Node unit command required `ENABLE_STATS_ROLLUP=false`; see the task verification report for exact outcomes and remaining limits.
+- [x] Read-only DB2 remediation report records 12 rescan-and-reresolve recommendations, 1 reresolve recommendation, and 2 review-only records. No historical application data changed. The current Walker-Miller page redirected during replay, so its stored template mismatch does not prove the live fix against that target.
