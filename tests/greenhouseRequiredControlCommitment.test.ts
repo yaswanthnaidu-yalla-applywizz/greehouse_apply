@@ -64,8 +64,8 @@ await withMockPage(async (url) => {
     assert.equal(result.domCommitted, false, 'An uncommitted select must remain uncommitted');
 
     const gate = await validateGreenhouseSubmission(page, application, {
-      applicationId: 'app', jobUrl: url, totalFields: 1, filledFields: 0, failedFields: 1,
-      results: [result],
+      applicationId: 'app', jobUrl: url, totalFields: 0, filledFields: 0, failedFields: 0,
+      results: [],
     } as any);
     assert.equal(gate.ok, false);
     if (gate.ok) return;
@@ -98,6 +98,27 @@ await withMockPage(async (url) => {
     } as any);
     assert.equal(unsatisfiedCheckboxGate.ok, false, 'An unchecked required checkbox outside a satisfied field group must block');
     assert.equal(await page.locator('input[name="consent"][required]').last().getAttribute('required'), '');
+
+    await page.setContent(`<form>
+      <div class="select">
+        <label>Country</label>
+        <input id="shared-combobox" name="shared" role="combobox">
+        <input type="text" required value="" style="display:none">
+      </div>
+      <div class="select">
+        <label>Please identify your race</label>
+        <input id="shared-combobox" name="shared" role="combobox">
+        <input type="text" required value="" style="display:none">
+      </div>
+    </form>`);
+    const duplicateIdentityGate = await validateGreenhouseSubmission(page, application, {
+      applicationId: 'app', jobUrl: url, totalFields: 0, filledFields: 0, failedFields: 0, results: [],
+    } as any);
+    assert.equal(duplicateIdentityGate.ok, false);
+    if (duplicateIdentityGate.ok) return;
+    assert.deepEqual(duplicateIdentityGate.failure.fields.map((field) => field.label), ['Country', 'Please identify your race']);
+    assert.equal(new Set(duplicateIdentityGate.failure.fields.map((field) => field.fieldId)).size, 2);
+    assert(duplicateIdentityGate.failure.fields.every((field) => field.fieldId.length > 0));
     await page.close();
   } finally {
     await browser.close();

@@ -90,7 +90,7 @@ export async function validateGreenhouseSubmission(
         ? Array.from(root.querySelectorAll('input, select, textarea')).indexOf(input)
         : invalidIndex;
       const fieldId = combobox
-        ? combobox.id || combobox.getAttribute('name') || `control:${rootIndex}:${localInputIndex}`
+        ? `control:${rootIndex}:${combobox.id || combobox.getAttribute('name') || localInputIndex}`
         : `${root ? 'root' : 'document'}:${rootIndex}:${localInputIndex}`;
       genuineInvalids.push({
         fieldId,
