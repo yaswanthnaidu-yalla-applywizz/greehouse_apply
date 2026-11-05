@@ -1202,6 +1202,32 @@ export function matchesAffirmativeRadioOption(label: string, optionText: string)
 /**
  * Fills a single resolved field into the active Playwright page DOM.
  */
+export function isConditionalFieldInactive(
+  field: ResolvedField,
+  allFields: ResolvedField[]
+): boolean {
+  const dependsOn = field.metadata?.dependsOn;
+  const triggerValue = field.metadata?.triggerValue;
+  if (!dependsOn || triggerValue === undefined) return false;
+
+  // Find the parent field in allFields
+  const parentField = allFields.find(
+    (f) => f.fieldId === dependsOn || f.name === dependsOn || f.metadata?.selector?.includes(dependsOn)
+  );
+  if (!parentField) return false;
+
+  const parentVal = (parentField.value || '').trim().toLowerCase();
+  const expectedTrigger = triggerValue.trim().toLowerCase();
+
+  // If trigger condition is not satisfied, the field is inactive / unrendered
+  if (expectedTrigger === 'yes' || expectedTrigger === 'true') {
+    return parentVal !== 'yes' && parentVal !== 'true';
+  }
+  if (expectedTrigger === 'no' || expectedTrigger === 'false') {
+    return parentVal !== 'no' && parentVal !== 'false';
+  }
+  return parentVal !== expectedTrigger;
+}
 export async function fillSingleField(
   page: Page,
   field: ResolvedField,
@@ -2564,6 +2590,26 @@ export async function fillForm(
       const field = isConsentSmsMarketingField(activeFields[i].label || '')
         ? applyConsentSmsMarketingNo(activeFields[i])
         : activeFields[i];
+
+      if (isConditionalFieldInactive(field, activeFields)) {
+        log.info(
+          `[Form Filler] ⏭️ Skipping conditionally unrendered field "${field.label}" (${field.fieldId}) — depends on ${field.metadata?.dependsOn}=${field.metadata?.triggerValue}`
+        );
+        results.push({
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          valuePopulated: field.value,
+          isRequired: field.isRequired,
+          source: field.source,
+          skippedRequired: true,
+          domCommitted: true,
+          success: true,
+        });
+        continue;
+      }
+
       const fillRes = await fillSingleField(
         page,
         field,
