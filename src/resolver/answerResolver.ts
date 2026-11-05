@@ -262,6 +262,16 @@ export function resolvePreTierField(
     if (finalVal) return { ...base, value: finalVal };
   }
 
+  // SMS / Text message marketing consent (Always negative / No)
+  const opts = field.options || options;
+  if (
+    Array.isArray(opts) &&
+    opts.some((opt) => /\b(?:text messages?|sms|whatsapp|consent to receiv)/i.test(opt))
+  ) {
+    const noOption = matchChoiceOption('No', opts);
+    if (noOption) return { ...base, value: noOption };
+  }
+
   const isOnsiteWillingness = /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
     field.label
   );
