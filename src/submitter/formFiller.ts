@@ -225,12 +225,13 @@ export function getExactControlSelectors(
 ): string[] {
   const fieldId = field.fieldId || '';
   const name = field.name || '';
+  const hasNumericIdentity = [fieldId, name].some((identity) => /^\d+$/.test(identity));
   return [
     sanitizeMetadataSelector(field.metadata?.selector),
     fieldId ? `[id="${escapeAttr(fieldId)}"]` : '',
     name ? `[name="${escapeAttr(name)}"]` : '',
-    fieldId && !/^\d+$/.test(fieldId) ? `[id*="${escapeAttr(fieldId)}"]` : '',
-    name && !/^\d+$/.test(name) ? `[name*="${escapeAttr(name)}"]` : '',
+    !hasNumericIdentity && fieldId ? `[id*="${escapeAttr(fieldId)}"]` : '',
+    !hasNumericIdentity && name ? `[name*="${escapeAttr(name)}"]` : '',
   ].filter(Boolean);
 }
 
@@ -382,7 +383,7 @@ async function findSearchableSelectControl(
   metadataSelector?: string
 ): Promise<{ locator: Locator; selector: string } | null> {
   const ids = Array.from(new Set([name, fieldId].filter(Boolean)));
-  const hasNonNumericIdentity = ids.some((id) => !/^\d+$/.test(id));
+  const hasNumericIdentity = ids.some((id) => /^\d+$/.test(id));
   const candidates: string[] = [];
 
   if (metadataSelector && !/^select#/i.test(metadataSelector.trim())) {
@@ -401,13 +402,15 @@ async function findSearchableSelectControl(
     );
   }
 
-  for (const id of ids.filter((value) => !/^\d+$/.test(value))) {
-    candidates.push(
-      `input[role="combobox"][id*="${escapeAttr(id)}"]`,
-      `[role="combobox"][id*="${escapeAttr(id)}"]`
-    );
+  if (!hasNumericIdentity) {
+    for (const id of ids) {
+      candidates.push(
+        `input[role="combobox"][id*="${escapeAttr(id)}"]`,
+        `[role="combobox"][id*="${escapeAttr(id)}"]`
+      );
+    }
   }
-  if (hasNonNumericIdentity || ids.length === 0) {
+  if (!hasNumericIdentity && ids.length > 0) {
     candidates.push('[aria-combobox="true"]');
   }
 
@@ -1954,12 +1957,15 @@ export async function fillSingleField(
           }
         }
 
-        const fallbackSelectors = [
-          ...[name, fieldId].filter((id) => id && !/^\d+$/.test(id)).map((id) => `[id*="select2-${escapeId(id)}"]`),
-          ...([name, fieldId].some((id) => id && !/^\d+$/.test(id)) || (!name && !fieldId)
-            ? ['.select2-selection', '.css-control', 'input[role="combobox"]', '[aria-combobox="true"]']
-            : []),
-        ];
+        const hasNumericIdentity = [name, fieldId].some((id) => /^\d+$/.test(id));
+        const fallbackSelectors = hasNumericIdentity
+          ? []
+          : [
+              ...[name, fieldId].filter(Boolean).map((id) => `[id*="select2-${escapeId(id)}"]`),
+              ...(!name && !fieldId
+                ? []
+                : ['.select2-selection', '.css-control', 'input[role="combobox"]', '[aria-combobox="true"]']),
+            ];
         const select2Trigger = page.locator(fallbackSelectors.join(', ') || '.__no_matching_select_fallback__').first();
 
         const count = await select2Trigger.count();
