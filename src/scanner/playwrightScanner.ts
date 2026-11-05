@@ -584,6 +584,19 @@ export class PlaywrightScanner {
         template.jobTitle = remixState.title || '';
         template.companyName = remixState.company_name || remixState.organization_name || '';
 
+        const loc = remixState.job_post_location || (typeof remixState.location === 'string' ? remixState.location : remixState.location?.name);
+        if (loc) {
+          template.jobPostingLocation = loc;
+          template.jobPostingFacts = {
+            location: loc,
+            locations: [loc],
+            raw: {
+              job_post_location: remixState.job_post_location,
+              location: remixState.location,
+            },
+          };
+        }
+
         const fields: ScannedField[] = [];
 
         // 1. Standard & Custom Questions

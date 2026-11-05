@@ -18,6 +18,7 @@ import { fillAshbyForm, glideCursor, sleep, verifyRequiredFieldsCommitted } from
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { toAshbyApplicationUrl } from '../scanner/atsDetector.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 import { isAshbySubmissionRetryAllowed } from './submissionRetry.js';
 import {
@@ -351,9 +352,7 @@ export async function submitAshbyApplication(
     exitIpHash = preflight.exitIpHash;
     log.info(`[AshbySubmit] 🔒 Proxy preflight verified (exitIpHash: ${exitIpHash}, country: ${countryCode})`);
 
-    const targetUrl = application.job_url.includes('/application')
-      ? application.job_url
-      : `${application.job_url.replace(/\/+$/, '')}/application`;
+    const targetUrl = toAshbyApplicationUrl(application.job_url) || application.job_url;
 
     stage = 'NAVIGATION';
     log.info(`[AshbySubmit] Navigating to ${targetUrl}...`);

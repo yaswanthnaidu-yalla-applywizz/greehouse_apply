@@ -112,6 +112,8 @@ export async function exportScannedJobs(
         scanned_at: template.scannedAt || new Date().toISOString(),
         updated_at: new Date().toISOString(),
         ats: atsFromUrl(template.jobUrl),
+        job_posting_location: template.jobPostingLocation || null,
+        job_posting_facts: template.jobPostingFacts || null,
       }));
 
       const query = supabase
