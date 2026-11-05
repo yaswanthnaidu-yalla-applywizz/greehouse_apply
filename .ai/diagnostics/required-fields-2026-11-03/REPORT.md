@@ -73,3 +73,18 @@ The safe implementation boundary is to make React-Select success depend on the f
 ## Follow-up: Cross River replay after commitment fix — 2026-11-05
 
 Replayed `crossriver-probe.mjs` against the current embedded application without submitting. The page exposes `#country` as a visible `Country*` combobox and one matching `United States +1` option. After the option click, the filler now returns `success: false` and `domCommitted: false`; the input value and selected-value display remain empty. The form still reports two anonymous empty required inputs as invalid. This confirms that an available/clickable country option does not prove selection on this layout; the submission gate must retain both required failures.
+
+## Follow-up: combined required-field integrity fixture — 2026-11-05
+
+Added `tests/greenhouseRequiredFieldIntegrity.test.ts`, a local HTTP fixture that calls the real `AnswerResolver`, `fillSingleField`, and `validateGreenhouseSubmission`. It uses only synthetic profile/context data, local HTML, and a local embedded iframe; it does not use a candidate record or submit a form. The required valid policy choice passes the gate. A click-only searchable choice whose display and hidden required value remain empty fails filling and remains blocked by the gate. An unknown-context date resolves as `unresolved`. The fixture also exercises literal numeric option `0`, an em-dash choice, numeric ID `431`, separate address and phone-country controls, and a Greenhouse iframe.
+
+The new fixture passed headless and headful on this workstation (1/1 in each mode). The test defaults `TEST_HEADLESS` to `true`; the headful run set it to `false`. Initial sandbox runs failed before the test loaded with Node `uv_os_get_passwd ENOMEM`; the same local test passed when rerun with escalation. No submission or remote request was made by this fixture.
+
+Verification results:
+
+- `npm.cmd run typecheck`: passed. The current worktree includes an uncommitted TypeScript cast in `formFiller.ts:513` needed by the preceding implementation; the Task 5 evidence commit does not include that source change.
+- `ENABLE_STATS_ROLLUP=false; npm.cmd run test:unit`: passed, 73 Node tests and 55 Vitest tests. The worktree `.env` does not define the required `ENABLE_STATS_ROLLUP`, so the flag was supplied explicitly. Test logs include a simulated Anthropic 429 and expected failure-diagnostic messages; no test failed.
+- The targeted Vitest command passed 4 files / 31 tests. `tests/formFillerNormalization.test.ts` is a `node:test` file and Vitest reports “No test suite found”; run separately under Node, where all 11 tests passed. This is a runner mismatch, not a failing normalization assertion.
+- Blast-radius Node run passed: searchable-select 18/18; normalization 11/11; dynamic cascade 1/1; embedded Greenhouse scanner 5/5. The cascade case passed while logging that its synthetic candidate had no resume storage and its embedding request returned HTTP 402; those paths remain unverified by this fixture and are not called fixed here.
+
+The tested safety fact is that filler success for a custom choice requires a corresponding selected display value or associated hidden required value. The submission gate rejects a required result without commitment and checks browser-invalid required controls, so clicking a matching menu option alone does not clear the failure. This local fixture does not establish complete application success, OTP passage, all-country or all-ATS behavior, multi-select behavior, or the historical cause of unrelated failures.
