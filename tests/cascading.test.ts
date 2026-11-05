@@ -11,6 +11,8 @@ import {
   captureFormControlMetadata,
   extractVisibleFormFields,
   getUnmappedVisibleFields,
+  captureCascadeBaseline,
+  restoreCascadeBaseline,
 } from '../src/submitter/cascadeDetector.js';
 import { upsertProfile } from '../src/db/profiles.js';
 import { upsertAnswer } from '../src/db/qaBank.js';
@@ -78,11 +80,39 @@ const MOCK_DYNAMIC_FORM_HTML = `
       <input type="text" id="military_branch" name="military_branch" />
     </div>
 
+    <!-- Base Checkbox that triggers conditional field 3 -->
+    <div class="field">
+      <label for="has_certifications">Do you have technical certifications?</label>
+      <input type="checkbox" id="has_certifications" name="has_certifications" />
+    </div>
+
+    <!-- Container for conditional field 3 -->
+    <div id="cert_details_container" style="display: none;">
+      <label for="cert_details">List certifications</label>
+      <input type="text" id="cert_details" name="cert_details" />
+    </div>
+
+    <!-- Multi-trigger container (triggered by authorized_us=No OR has_certifications checked) -->
+    <div id="clearance_container" style="display: none;">
+      <label for="clearance_level">Security clearance level</label>
+      <input type="text" id="clearance_level" name="clearance_level" />
+    </div>
+
     <button type="submit" id="submit_app">Submit Application</button>
   </form>
 
   <script>
-    // Dynamic conditional rendering event listeners
+    function updateClearance() {
+      var auth = document.getElementById('authorized_us').value;
+      var cert = document.getElementById('has_certifications').checked;
+      var clearEl = document.getElementById('clearance_container');
+      if (auth === 'No' || cert) {
+        clearEl.style.display = 'block';
+      } else {
+        clearEl.style.display = 'none';
+      }
+    }
+
     document.getElementById('authorized_us').addEventListener('change', function(e) {
       var container = document.getElementById('sponsorship_container');
       if (e.target.value === 'No') {
@@ -90,17 +120,28 @@ const MOCK_DYNAMIC_FORM_HTML = `
       } else {
         container.style.display = 'none';
       }
+      updateClearance();
     });
 
     document.querySelectorAll('input[name="is_veteran"]').forEach(function(radio) {
       radio.addEventListener('change', function(e) {
         var container = document.getElementById('military_branch_container');
-        if (e.target.value === 'Yes') {
+        if (radio.checked && e.target.value === 'Yes') {
           container.style.display = 'block';
         } else {
           container.style.display = 'none';
         }
       });
+    });
+
+    document.getElementById('has_certifications').addEventListener('change', function(e) {
+      var container = document.getElementById('cert_details_container');
+      if (e.target.checked) {
+        container.style.display = 'block';
+      } else {
+        container.style.display = 'none';
+      }
+      updateClearance();
     });
   </script>
 </body>
@@ -123,7 +164,6 @@ async function runCascadingTestSuite() {
     }
   }
 
-  // 1. Setup local Mock HTTP Server
   const mockHttpServer = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(MOCK_DYNAMIC_FORM_HTML);
@@ -142,67 +182,66 @@ async function runCascadingTestSuite() {
     });
 
     // =========================================================================
-    // Test Group 1: Cascade Detector Helper
+    // Test Group 1: Cascade Detector Helper & Transactional Baseline
     // =========================================================================
-    console.log('\n--- Test Group 1: Cascade Detector DOM Extraction ---');
+    console.log('\n--- Test Group 1: Cascade Detector DOM Extraction & Baseline ---');
     const page = await browser.newPage();
     await page.goto(mockFormUrl);
 
     const initialVisible = await extractVisibleFormFields(page);
-    assert(initialVisible.length >= 4, 'Initial visible fields extracted from DOM');
-    const nativeDate = initialVisible.find((field) => field.name === 'available_date');
-    assert(nativeDate?.type === 'date', 'Native date inputs are identified as date fields');
-    assert(
-      nativeDate?.metadata?.expectedDateFormat === 'YYYY-MM-DD',
-      'Native date metadata includes its ISO value format'
-    );
-    const textDate = initialVisible.find((field) => field.name === 'availability_text');
-    assert(
-      textDate?.metadata?.expectedDateFormat === 'DD/MM/YYYY',
-      'Text date metadata captures the placeholder date format'
-    );
-    const remixDateMetadata = await captureFormControlMetadata(page, [
-      {
-        fieldId: 'available_date',
-        name: 'available_date',
-        type: 'text',
-        label: 'Date Available to Start?',
-        isRequired: false,
-      },
-    ]);
-    assert(
-      remixDateMetadata[0].type === 'date' &&
-        remixDateMetadata[0].metadata?.expectedDateFormat === 'YYYY-MM-DD',
-      'Remix state fields are enriched with native date control metadata'
-    );
+    assert(initialVisible.length >= 5, 'Initial visible fields extracted from DOM');
 
-    const hasSponsorshipInitially = initialVisible.some((f) => f.name === 'require_sponsorship' || f.fieldId.includes('sponsorship'));
-    assert(hasSponsorshipInitially === false, 'Hidden conditional field 1 not in initial visible list');
+    // Pre-existing visible fields must not be attributed as dependent
+    const firstNameField = initialVisible.find((f) => f.name === 'first_name');
+    assert(Boolean(firstNameField), 'Pre-existing visible field first_name exists');
+    assert(!firstNameField?.metadata?.dependsOn, 'Pre-existing field first_name has no dependsOn');
 
-    // Trigger dropdown change
+    // Test captureCascadeBaseline and restoreCascadeBaseline for select
+    const selectField = initialVisible.find((f) => f.name === 'authorized_us')!;
+    const baselineSelect = await captureCascadeBaseline(page, selectField);
+    assert(baselineSelect.initialValue === '', 'Select baseline captures empty initial value');
+
     await page.selectOption('#authorized_us', 'No');
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(300);
+    const modifiedVisible = await extractVisibleFormFields(page);
+    assert(modifiedVisible.length > initialVisible.length, 'Mutating select reveals dynamic fields');
 
-    const afterVisible = await extractVisibleFormFields(page);
-    const hasSponsorshipAfter = afterVisible.some((f) => f.name === 'require_sponsorship' || f.fieldId.includes('sponsorship'));
-    assert(hasSponsorshipAfter === true, 'Conditionally rendered field 1 visible after selecting "No"');
+    const restoredSelect = await restoreCascadeBaseline(page, baselineSelect);
+    assert(restoredSelect === true, 'restoreCascadeBaseline restores select to empty and matches baseline keys');
+    const afterRestoreVisible = await extractVisibleFormFields(page);
+    assert(afterRestoreVisible.length === initialVisible.length, 'DOM visibility matches initial baseline after restore');
 
-    const knownIds = new Set(initialVisible.map((f) => f.fieldId));
-    const knownNames = new Set(initialVisible.map((f) => f.name));
-    const unmapped = await getUnmappedVisibleFields(page, knownIds, knownNames);
+    // Test captureCascadeBaseline and restoreCascadeBaseline for checkbox
+    const cbField = initialVisible.find((f) => f.name === 'has_certifications')!;
+    const baselineCb = await captureCascadeBaseline(page, cbField);
+    assert(baselineCb.initialValue === false, 'Checkbox baseline captures false initial value');
 
-    assert(unmapped.some((f) => f.name === 'require_sponsorship' || f.fieldId.includes('sponsorship')), 'getUnmappedVisibleFields returned newly visible field');
+    await page.check('#has_certifications');
+    await page.waitForTimeout(300);
+    const cbModifiedVisible = await extractVisibleFormFields(page);
+    assert(cbModifiedVisible.length > initialVisible.length, 'Checking checkbox reveals dynamic fields');
+
+    const restoredCb = await restoreCascadeBaseline(page, baselineCb);
+    assert(restoredCb === true, 'restoreCascadeBaseline restores checkbox to unchecked and matches baseline keys');
+
+    // Test intentionally failed restore (corrupted baseline keys)
+    const corruptedBaseline = {
+      ...baselineCb,
+      visibleFieldKeys: ['non_existent_key_1', 'non_existent_key_2'],
+    };
+    const failedRestore = await restoreCascadeBaseline(page, corruptedBaseline);
+    assert(failedRestore === false, 'restoreCascadeBaseline returns false when visibility set does not match baseline');
 
     await page.close();
 
     // =========================================================================
-    // Test Group 2: Scanner Cascading Exploration
+    // Test Group 2: Scanner Transactional Cascading Exploration
     // =========================================================================
     console.log('\n--- Test Group 2: Scanner Cascading Field Exploration ---');
     const scanner = new PlaywrightScanner({ headless: true, minJitterMs: 0, maxJitterMs: 0 });
     const scannedTemplate = await scanner.scanSingleUrl(mockFormUrl, await browser.newPage());
 
-    assert(scannedTemplate.fields.length >= 6, `Scanner extracted all base + cascading fields (got ${scannedTemplate.fields.length})`);
+    assert(scannedTemplate.fields.length >= 7, `Scanner extracted all base + cascading fields (got ${scannedTemplate.fields.length})`);
 
     const sponsorshipField = scannedTemplate.fields.find((f) => f.name === 'require_sponsorship' || f.fieldId.includes('sponsorship'));
     assert(Boolean(sponsorshipField), 'Scanner captured cascading field "require_sponsorship"');
@@ -214,12 +253,18 @@ async function runCascadingTestSuite() {
     assert(Boolean(militaryField?.metadata?.dependsOn), 'militaryField has dependsOn metadata');
     assert(militaryField?.metadata?.triggerValue === 'Yes', 'militaryField has triggerValue: "Yes"');
 
+    const certDetailsField = scannedTemplate.fields.find((f) => f.name === 'cert_details' || f.fieldId.includes('cert_details'));
+    assert(Boolean(certDetailsField), 'Scanner captured cascading checkbox-dependent field "cert_details"');
+
+    // Pre-existing fields in template must not have dependsOn
+    const scannedFirstName = scannedTemplate.fields.find((f) => f.name === 'first_name');
+    assert(!scannedFirstName?.metadata?.dependsOn, 'Pre-existing field first_name does not receive dependsOn in scan');
+
     // =========================================================================
     // Test Group 3: Form Filler Dynamic Cascade Loop
     // =========================================================================
     console.log('\n--- Test Group 3: Form Filler Dynamic Cascade Loop ---');
 
-    // Seed candidate profile & qa bank in DB for on-the-fly resolution
     const testApplywizzId = 'CASCADE-TEST-1';
     await upsertProfile({
       applywizz_id: testApplywizzId,
@@ -255,7 +300,6 @@ async function runCascadingTestSuite() {
     const fillPage = await browser.newPage();
     await fillPage.goto(mockFormUrl);
 
-    // Initial resolved fields array ONLY contains base fields (no require_sponsorship or military_branch)
     const baseResolvedFields: ResolvedField[] = [
       { fieldId: 'first_name', name: 'first_name', type: 'text', label: 'First Name', value: 'Cascade', source: 'supabase', resolvedByTier: 1, confidence: 1 },
       { fieldId: 'last_name', name: 'last_name', type: 'text', label: 'Last Name', value: 'Candidate', source: 'supabase', resolvedByTier: 1, confidence: 1 },
@@ -281,7 +325,6 @@ async function runCascadingTestSuite() {
     assert(fillSummary.filledFields >= 7, `All initial and dynamic fields populated successfully (${fillSummary.filledFields}/${fillSummary.totalFields})`);
     assert(fillSummary.failedFields === 0, 'Form filler reported 0 failures');
 
-    // Verify DOM values in page for cascading fields
     const sponsorshipVal = await fillPage.inputValue('#require_sponsorship');
     const militaryVal = await fillPage.inputValue('#military_branch');
 

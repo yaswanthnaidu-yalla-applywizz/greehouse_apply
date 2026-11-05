@@ -59,6 +59,10 @@ export interface ScannedFieldMetadata {
   dependsOn?: string;
   /** Option or toggle value on parent field that triggers this field's visibility */
   triggerValue?: string;
+  /** Multiple option values on parent field that trigger this field's visibility */
+  triggerValues?: string[];
+  /** Flag indicating if multiple parents or conflicting triggers reveal this field */
+  ambiguousAttribution?: boolean;
 }
 
 /**

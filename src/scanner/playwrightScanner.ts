@@ -17,9 +17,10 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import { config } from '../config/env.js';
 import {
-  getUnmappedVisibleFields,
   extractVisibleFormFields,
   captureFormControlMetadata,
+  captureCascadeBaseline,
+  restoreCascadeBaseline,
 } from '../submitter/cascadeDetector.js';
 import type {
   ScannedField,
@@ -855,6 +856,8 @@ export class PlaywrightScanner {
 
       for (const optVal of optionsToTest) {
         try {
+          const baseline = await captureCascadeBaseline(page, parentField);
+
           // Select or toggle the option value in the active DOM
           if (parentField.type === 'select') {
             const selSelectors = [
@@ -914,28 +917,65 @@ export class PlaywrightScanner {
             }
           }
 
-          // Wait 500ms for DOM mutations
-          await page.waitForTimeout(500);
+          // Wait 300ms for DOM mutations
+          await page.waitForTimeout(300);
 
-          // Check for newly visible form fields
-          const newlyVisible = await getUnmappedVisibleFields(page, knownFieldIds, knownNames);
+          // Check for newly visible form fields relative to baseline
+          const baselineSet = new Set(baseline.visibleFieldKeys);
+          const currentVisible = await extractVisibleFormFields(page);
+          const newlyVisible = currentVisible.filter((f) => {
+            const key = `${f.name || ''}:${f.fieldId}`;
+            return !baselineSet.has(key) && !knownFieldIds.has(f.fieldId) && (!f.name || !knownNames.has(f.name));
+          });
+
+          // Transaction rollback & verification: restore baseline
+          const restored = await restoreCascadeBaseline(page, baseline);
+          if (!restored) {
+            log.warn(
+              `[Playwright Scanner] ⚠️ Cascade probe restore failed for ${parentField.fieldId} (${optVal}). Discarding probe.`
+            );
+            await emitFailureDiagnostic({
+              category: 'SCAN_FIELD_EXTRACTION',
+              stage: 'cascade_probing',
+              reason: `Cascade probe restoration failed for ${parentField.fieldId}`,
+              isTerminal: false,
+              isRetryable: true,
+            }).catch(() => {});
+            continue;
+          }
 
           const newlyVisibleWithRequiredState = await markHiddenRequiredFields(page, newlyVisible);
           for (const newField of newlyVisibleWithRequiredState) {
-            knownFieldIds.add(newField.fieldId);
-            if (newField.name) knownNames.add(newField.name);
+            const existing = allFields.find(
+              (f) => f.fieldId === newField.fieldId || (newField.name && f.name === newField.name)
+            );
+            if (existing) {
+              if (existing.metadata?.dependsOn && existing.metadata.dependsOn !== parentField.fieldId) {
+                existing.metadata.ambiguousAttribution = true;
+              } else if (existing.metadata?.dependsOn === parentField.fieldId) {
+                const trigs =
+                  existing.metadata.triggerValues || (existing.metadata.triggerValue ? [existing.metadata.triggerValue] : []);
+                if (!trigs.includes(optVal)) {
+                  existing.metadata.triggerValues = [...trigs, optVal];
+                }
+              }
+            } else {
+              knownFieldIds.add(newField.fieldId);
+              if (newField.name) knownNames.add(newField.name);
 
-            newField.metadata = {
-              ...(newField.metadata || {}),
-              dependsOn: parentField.fieldId,
-              triggerValue: optVal,
-            };
+              newField.metadata = {
+                ...(newField.metadata || {}),
+                dependsOn: parentField.fieldId,
+                triggerValue: optVal,
+                triggerValues: [optVal],
+              };
 
-            allFields.push(newField);
-            if (!compactLogs) {
-              log.info(
-                `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
-              );
+              allFields.push(newField);
+              if (!compactLogs) {
+                log.info(
+                  `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
+                );
+              }
             }
           }
 
