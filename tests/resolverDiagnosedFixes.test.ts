@@ -632,6 +632,26 @@ async function run(): Promise<void> {
     urlAnswer,
     'Tier 4 retains URLs for profile labels'
   );
+
+  // Task 2: Ashby SMS consent radio fields labeled "Phone" resolve to "No"
+  const smsRadio = makeField({
+    fieldId: '149e0551-475d-42ad-a129-0ee94622d9e1',
+    name: '149e0551-475d-42ad-a129-0ee94622d9e1',
+    type: 'radio',
+    label: 'Phone',
+    options: [
+      'Yes - I consent to receiving text messages',
+      'No - I do not consent to receiving text messages'
+    ],
+    isRequired: true,
+  });
+  const candidateProfile: ProfileRow = { applywizz_id: 'AWL-TEST', client_name: 'Test', phone: '9089231185' };
+  const smsResult = resolvePreTierField(smsRadio, candidateProfile, true);
+  assertEqual(
+    smsResult?.value,
+    'No - I do not consent to receiving text messages',
+    'SMS consent labeled Phone resolves to No option'
+  );
 }
 
 run().catch((error: unknown) => {
