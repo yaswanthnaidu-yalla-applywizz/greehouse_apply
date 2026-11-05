@@ -48,4 +48,19 @@ describe('Greenhouse submission gate', () => {
     expect(result.ok).toBe(false);
     expect(result.ok ? '' : result.failure.fields[0].message).toMatch(/Phone number is too long/);
   });
+
+  it('accepts skippedRequired conditional fields that are not rendered in the DOM', async () => {
+    const page = { evaluate: vi.fn().mockResolvedValue([]) } as any;
+    const condSummary = summary({
+      fieldId: 'gender_identity',
+      label: 'Gender Identity',
+      isRequired: true,
+      skippedRequired: true,
+      domCommitted: true,
+      success: true,
+      valuePopulated: '',
+    });
+    const result = await validateGreenhouseSubmission(page, application, condSummary);
+    expect(result.ok).toBe(true);
+  });
 });

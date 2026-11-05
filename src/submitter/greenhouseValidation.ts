@@ -31,7 +31,7 @@ export async function validateGreenhouseSubmission(
   fillSummary: FormFillSummary,
 ): Promise<GreenhouseSubmissionGateResult> {
   const missing = fillSummary.results
-    .filter((result) => isRequired(result) && (!result.success || result.domCommitted === false || !result.valuePopulated.trim()))
+    .filter((result) => isRequired(result) && !result.skippedRequired && (!result.success || result.domCommitted === false || !result.valuePopulated.trim()))
     .map((result) => ({
       fieldId: result.fieldId,
       label: result.label,
