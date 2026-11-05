@@ -387,8 +387,12 @@ export function resolveDeterministicPolicy(
 
   // 10. Workplace location & Relocation
   if (intent.family === 'workplace_preference') {
-    if (jobContext?.jobPostingLocation) {
-      const mapped = mapWorkplaceLocationToOption(jobContext.jobPostingLocation, options);
+    const targetLocation =
+      jobContext?.jobPostingLocation ||
+      (jobContext as any)?.postingLocation ||
+      jobContext?.jobPostingFacts?.location;
+    if (targetLocation) {
+      const mapped = mapWorkplaceLocationToOption(targetLocation, options);
       if (mapped) {
         return {
           value: mapped,
@@ -399,7 +403,7 @@ export function resolveDeterministicPolicy(
             family: intent.family,
             policyId: 'policy_workplace_location',
             evidenceKind: 'job_posting_location',
-            evidenceKey: jobContext.jobPostingLocation,
+            evidenceKey: targetLocation,
             choiceMatch: mapped,
             confidence: 0.98,
           },

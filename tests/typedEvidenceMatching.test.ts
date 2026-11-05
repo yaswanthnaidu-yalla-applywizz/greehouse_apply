@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyFieldIntent, isEvidenceCompatible } from '../src/resolver/fieldIntent.js';
-import { resolveTier3, setFuzzyMatchingEnabled } from '../src/resolver/tier3FuzzyMatch.js';
+import { resolveTier3, setFuzzyMatchingEnabled, isFuzzyMatchingEnabled } from '../src/resolver/tier3FuzzyMatch.js';
 import { findSemanticMatch, bestSemanticProfileFact } from '../src/resolver/semanticSearch.js';
 import type { ScannedField } from '../src/types/index.js';
 import type { ProfileRow } from '../src/db/profiles.js';
@@ -113,6 +113,7 @@ test('residence and workplace preferences do not overlap', () => {
 });
 
 test('Fuse candidates that tie or remain weak are rejected', async () => {
+  const initial = isFuzzyMatchingEnabled();
   setFuzzyMatchingEnabled(true);
   try {
     const field: ScannedField = {
@@ -147,7 +148,7 @@ test('Fuse candidates that tie or remain weak are rejected', async () => {
     const resolved = await resolveTier3('CAND_1', field, tiedEntries as any, null);
     assert.equal(resolved, null, 'Tied candidates must be rejected');
   } finally {
-    setFuzzyMatchingEnabled(false);
+    setFuzzyMatchingEnabled(initial);
   }
 });
 

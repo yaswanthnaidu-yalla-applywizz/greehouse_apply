@@ -209,7 +209,7 @@ export async function findSemanticMatch(
   applywizzId: string,
   fieldType: string,
   options?: string[],
-  threshold: number = 0.82,
+  threshold: number = 0.88,
   profile?: ProfileRow | null,
   intent?: FieldIntent
 ): Promise<SemanticMatchResult | null> {
