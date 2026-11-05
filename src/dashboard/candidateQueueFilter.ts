@@ -75,14 +75,16 @@ export function isFilteredOutApplicationJob(row: { status?: string | null }): bo
 }
 
 /**
- * Operator application queue — assigned rows excluding QUEUED (auto-applied) and FILTERED_OUT.
- * Keeps SKIPPED, READY_FOR_REVIEW, OTP_REQUIRED, FAILED, etc. unchanged.
+ * Operator application queue — assigned rows excluding QUEUED, FILTERED_OUT, and SKIPPED.
+ * Keeps READY_FOR_REVIEW, OTP_REQUIRED, FAILED, RETRY, etc. unchanged.
  */
 export function filterOperatorApplicationJobs<T extends ResolutionFieldsCarrier & { status?: string | null }>(
   jobs: T[]
 ): T[] {
   if (!Array.isArray(jobs)) return [];
-  return jobs.filter((job) => !isQueuedApplicationJob(job) && !isFilteredOutApplicationJob(job));
+  return jobs.filter(
+    (job) => !isQueuedApplicationJob(job) && !isFilteredOutApplicationJob(job) && !isSkippedApplicationJob(job)
+  );
 }
 
 
@@ -90,12 +92,16 @@ export function isSkippedApplicationJob(row: { status?: string | null }): boolea
   return (row.status || '').trim().toUpperCase() === 'SKIPPED';
 }
 
-/** The job card only needs to show whether the operator approved the job. */
+/** The job card shows submitted if submitted_at or operator_approved_at is present. */
 export function isOperatorApprovedApplicationJob(row: {
   operator_approved_at?: string | null;
   operatorApprovedAt?: string | null;
+  submitted_at?: string | null;
+  submittedAt?: string | null;
 }): boolean {
-  return Boolean(row.operator_approved_at || row.operatorApprovedAt);
+  return Boolean(
+    row.submitted_at || row.submittedAt || row.operator_approved_at || row.operatorApprovedAt
+  );
 }
 
 type ResolvedFieldLike = {

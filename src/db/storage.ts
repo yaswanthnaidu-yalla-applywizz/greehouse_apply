@@ -5,6 +5,7 @@ import { getDbClient, isSupabaseConfigured } from './client.js';
 import { getProfile } from './profiles.js';
 import config from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
+import { resolveResumeDomain, buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
 
 const log = createLogger('Storage');
 
@@ -46,38 +47,20 @@ export interface ResumeNamingProfile {
   workExperience?: Array<{ title?: string | null }>;
 }
 
-function sanitizeResumeNamePart(value: string | null | undefined, fallback: string): string {
-  const sanitized = (value || '')
-    .normalize('NFKD')
-    .replace(/[^\x00-\x7F]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, '_')
-    .replace(/[^a-z0-9_]/g, '')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return sanitized || fallback;
-}
+
 
 export function resumeDomainShortcode(profile?: ResumeNamingProfile): string {
-  const title = (profile?.jobTitle || profile?.workExperience?.[0]?.title || '').toLowerCase();
-  if (/data\s*(analyst|science)|data scientist/.test(title)) return 'DA';
-  if (/software\s*engineer|developer|\bswe\b/.test(title)) return 'SDE';
-  if (/product\s*manager/.test(title)) return 'PM';
-  if (/business\s*analyst/.test(title)) return 'BA';
-  if (/marketing/.test(title)) return 'MKT';
-  if (/finance|accounting/.test(title)) return 'FIN';
-  if (/designer|\bux\b/.test(title)) return 'UX';
-  if (/devops|cloud/.test(title)) return 'OPS';
-  return 'GEN';
+  const title = profile?.jobTitle || profile?.workExperience?.[0]?.title || '';
+  return resolveResumeDomain(title);
 }
 
 export function resumeStorageFilename(
   applywizzId: string,
   profile?: ResumeNamingProfile
 ): string {
-  const firstName = sanitizeResumeNamePart(profile?.firstName, 'candidate');
-  const lastName = sanitizeResumeNamePart(profile?.lastName, sanitizeResumeNamePart(applywizzId, 'resume'));
-  return `resume_${firstName}_${lastName}_${resumeDomainShortcode(profile)}.pdf`;
+  const clientName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || applywizzId;
+  const role = profile?.jobTitle || profile?.workExperience?.[0]?.title || '';
+  return buildResumeSubmissionFilename(clientName, role);
 }
 
 /**

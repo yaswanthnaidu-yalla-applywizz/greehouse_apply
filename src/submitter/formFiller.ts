@@ -24,6 +24,7 @@ import type {
 import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
 import { choiceOptionTextMatches, matchChoiceOption } from '../utils/choiceOptions.js';
+import { buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
 
 const log = createLogger('Form Filler');
 
@@ -65,40 +66,15 @@ export interface FormFillSummary {
   results: FieldFillResult[];
 }
 
-function sanitizeResumeNamePart(value: string | null | undefined, fallback: string): string {
-  const sanitized = (value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '_')
-    .replace(/[^a-z0-9_]/g, '');
-  return sanitized || fallback;
-}
 
-function resumeJobShortcode(companyName: string, jobTitle: string): string {
-  const jobContext = `${companyName} ${jobTitle}`;
-  if (/software\s*engineer|developer|engineering/i.test(jobContext)) return 'SDE';
-  if (/data\s*analyst|data\s*science|analytics/i.test(jobContext)) return 'DA';
-  if (/product\s*manager/i.test(jobContext)) return 'PM';
-  if (/business\s*analyst/i.test(jobContext)) return 'BA';
-  if (/marketing/i.test(jobContext)) return 'MKT';
-  if (/finance|accounting/i.test(jobContext)) return 'FIN';
-  if (/designer|ux/i.test(jobContext)) return 'UX';
-  if (/devops|cloud|infrastructure/i.test(jobContext)) return 'OPS';
-  return 'GEN';
-}
 
 function buildResumeFilename(
   profile: ProfileRow | null,
   companyName: string,
   jobTitle: string
 ): string {
-  const clientNameParts = (profile?.client_name || '').trim().split(/\s+/).filter(Boolean);
-  const firstName = sanitizeResumeNamePart(profile?.first_name || clientNameParts[0], 'candidate');
-  const lastName = sanitizeResumeNamePart(
-    profile?.last_name || clientNameParts.slice(1).join(' ') || clientNameParts[0],
-    'resume'
-  );
-  return `resume_${firstName}_${lastName}_${resumeJobShortcode(companyName, jobTitle)}.pdf`;
+  const clientName = profile?.client_name || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || undefined;
+  return buildResumeSubmissionFilename(clientName, jobTitle, companyName);
 }
 
 /**

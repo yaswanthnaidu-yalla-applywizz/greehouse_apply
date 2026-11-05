@@ -3,6 +3,7 @@
  */
 
 import fs from 'fs';
+import path from 'path';
 import type { Page } from 'playwright';
 import type {
   ApplicationRow,
@@ -18,6 +19,7 @@ import { fillAshbyForm, glideCursor, sleep, verifyRequiredFieldsCommitted } from
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
 import { toAshbyApplicationUrl } from '../scanner/atsDetector.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 import { isAshbySubmissionRetryAllowed } from './submissionRetry.js';
@@ -238,9 +240,19 @@ export async function submitAshbyApplication(
       throw proxyErr;
     }
 
-    // 2. Prepare resume temp file
+    // 2. Prepare resume temp file with standardized domain-specific naming
     try {
       resumeLocalPath = await downloadResumeTempFile(application.applywizz_id);
+      if (resumeLocalPath && fs.existsSync(resumeLocalPath)) {
+        const resumeFilename = buildResumeSubmissionFilename(
+          profile.client_name,
+          application.job_title,
+          application.company_name
+        );
+        const renamedResumePath = path.join(path.dirname(resumeLocalPath), resumeFilename);
+        fs.renameSync(resumeLocalPath, renamedResumePath);
+        resumeLocalPath = renamedResumePath;
+      }
     } catch (resumeErr: any) {
       log.warn(`[AshbySubmit] Failed to download resume temp file: ${resumeErr.message}`);
     }
