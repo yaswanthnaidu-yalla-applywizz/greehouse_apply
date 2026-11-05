@@ -1,3 +1,19 @@
+# Current Session Update (2026-11-05 - Ashby Proxy & reCAPTCHA Hardening - COMPLETED)
+
+- **Root Cause Diagnosis**:
+  - Investigated why Ashby submissions on Nov 3 & Nov 4 had 260 reCAPTCHA Enterprise blocks on Massive vs few on DataImpulse.
+  - Confirmed DataImpulse's "low count" was an artifact: Oct 28 had no challenge detection logic in code, and Oct 29 had 146 jobs drop at preflight 407 (only 6 reached submit, 4 hit reCAPTCHA = 66.7%).
+  - Massive Nov 3/4 successfully pushed 230-291 applications through to submit, hitting ~48-51% reCAPTCHA because Massive's default pool routes through desktop/TV compute nodes with poor IP reputation, and Ashby submitted using a raw programmatic click (`submitBtn.click()`).
+  - Identified 81 HTTP 471 drops caused by Massive's `X-Reason: no_route_match` when hyper-specific city filtering was enforced.
+- **Implemented & Verified 3 Surgical Remediations**:
+  - **Task 1 (Massive Mobile CGNAT Targeting & Flex Session)**: Added `MASSIVE_DEVICE_TYPE` in `src/config/env.ts` (default `mobile`). Updated `buildAshbyProxyConfig` in `src/submitter/ashbyProxy.ts` to route via `-type-mobile` and append `-sessionmode-flex`, and support `includeCity: false`.
+  - **Task 2 (Adaptive 471 Preflight Fallback)**: In `src/submitter/ashbySubmit.ts`, if preflight fails with HTTP 471 or routing failure, it cleanly releases the browser and re-acquires a country-wide residential proxy without city restriction instead of failing the job.
+  - **Task 3 (Humanized Bézier Gliding on Submit)**: Replaced raw `await submitBtn.click()` in `src/submitter/ashbySubmit.ts` with `await glideCursor(page, submitBtn, { click: true })`, providing natural human kinematics, hover hesitation, and mechanical down/up events to satisfy Google reCAPTCHA Enterprise client dynamics.
+- **Verification**:
+  - Live curl probes verified our active Massive credentials return HTTP 200 on `-type-mobile` and `-sessionmode-flex` across US, GB, and CA.
+  - 100% tests pass (20/20 in `tests/ashbyProxy.test.ts`, 40/40 in Ashby test suite, 32/32 master E2E integration checkpoints).
+  - TypeScript compilation and Vite dashboard build pass clean.
+
 # Current Session Update (2026-11-05 - Auto-Queue Yield & Pre-Submit Failure Remediations - COMPLETED)
 
 - **Diagnostic Investigation on DB2 (Nov 3 & Nov 4 Cohorts)**:
