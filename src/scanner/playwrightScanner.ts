@@ -17,9 +17,10 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import { config } from '../config/env.js';
 import {
-  getUnmappedVisibleFields,
   extractVisibleFormFields,
   captureFormControlMetadata,
+  captureCascadeBaseline,
+  restoreCascadeBaseline,
 } from '../submitter/cascadeDetector.js';
 import type {
   ScannedField,
@@ -123,16 +124,36 @@ export function isClosedJobNoEmbeddedForm(params: {
 /** Returns a direct Greenhouse application URL exposed by a marketing-page iframe. */
 export function findEmbeddedGreenhouseApplicationUrl(frameUrls: string[]): string | null {
   for (const frameUrl of frameUrls) {
-    if (!frameUrl || !/greenhouse\.io/i.test(frameUrl) || !/(?:embed\/job_app|job_app)/i.test(frameUrl)) continue;
+    if (!frameUrl) continue;
     try {
       const parsed = new URL(frameUrl);
-      if (/^(?:https?:)?\/\//i.test(frameUrl) && parsed.protocol.startsWith('http')) return parsed.toString();
+      const hostname = parsed.hostname.toLowerCase();
+      const isGreenhouseHost = hostname === 'greenhouse.io' || hostname.endsWith('.greenhouse.io');
+      const isApplicationPath = /^\/(?:embed\/)?job_app(?:\/|$)/i.test(parsed.pathname);
+      if ((parsed.protocol === 'https:' || parsed.protocol === 'http:') && isGreenhouseHost && isApplicationPath) {
+        return parsed.toString();
+      }
     } catch {
       // Ignore malformed frame URLs and continue scanning the page itself.
     }
   }
   return null;
 }
+
+/** Waits briefly for a delayed direct Greenhouse application iframe to attach. */
+export async function waitForEmbeddedGreenhouseApplicationUrl(page: Page, timeoutMs: number): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const url = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+    if (url) return url;
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return null;
+    await page.waitForTimeout(Math.min(100, remainingMs));
+  }
+}
+
+const EMBEDDED_GREENHOUSE_FRAME_WAIT_MS = 1_000;
 
 /**
  * Utility to generate a randomized delay within [min, max] range.
@@ -487,7 +508,13 @@ export class PlaywrightScanner {
 
       // Some company marketing pages host the real Greenhouse form in an iframe.
       // Follow the embedded application URL so downstream extraction sees the ATS DOM.
-      const embeddedApplicationUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+      const currentEmbeddedUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+      const pageHostname = new URL(page.url()).hostname.toLowerCase();
+      const isGreenhousePage = pageHostname === 'greenhouse.io' || pageHostname.endsWith('.greenhouse.io');
+      const parentForm = !isGreenhousePage ? await page.$('form').catch(() => null) : null;
+      const embeddedApplicationUrl = currentEmbeddedUrl || (parentForm
+        ? await waitForEmbeddedGreenhouseApplicationUrl(page, EMBEDDED_GREENHOUSE_FRAME_WAIT_MS)
+        : null);
       if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
         await page.goto(embeddedApplicationUrl, {
           waitUntil: 'domcontentloaded',
@@ -557,6 +584,19 @@ export class PlaywrightScanner {
       if (remixState) {
         template.jobTitle = remixState.title || '';
         template.companyName = remixState.company_name || remixState.organization_name || '';
+
+        const loc = remixState.job_post_location || (typeof remixState.location === 'string' ? remixState.location : remixState.location?.name);
+        if (loc) {
+          template.jobPostingLocation = loc;
+          template.jobPostingFacts = {
+            location: loc,
+            locations: [loc],
+            raw: {
+              job_post_location: remixState.job_post_location,
+              location: remixState.location,
+            },
+          };
+        }
 
         const fields: ScannedField[] = [];
 
@@ -816,6 +856,8 @@ export class PlaywrightScanner {
 
       for (const optVal of optionsToTest) {
         try {
+          const baseline = await captureCascadeBaseline(page, parentField);
+
           // Select or toggle the option value in the active DOM
           if (parentField.type === 'select') {
             const selSelectors = [
@@ -875,28 +917,65 @@ export class PlaywrightScanner {
             }
           }
 
-          // Wait 500ms for DOM mutations
-          await page.waitForTimeout(500);
+          // Wait 300ms for DOM mutations
+          await page.waitForTimeout(300);
 
-          // Check for newly visible form fields
-          const newlyVisible = await getUnmappedVisibleFields(page, knownFieldIds, knownNames);
+          // Check for newly visible form fields relative to baseline
+          const baselineSet = new Set(baseline.visibleFieldKeys);
+          const currentVisible = await extractVisibleFormFields(page);
+          const newlyVisible = currentVisible.filter((f) => {
+            const key = `${f.name || ''}:${f.fieldId}`;
+            return !baselineSet.has(key) && !knownFieldIds.has(f.fieldId) && (!f.name || !knownNames.has(f.name));
+          });
+
+          // Transaction rollback & verification: restore baseline
+          const restored = await restoreCascadeBaseline(page, baseline);
+          if (!restored) {
+            log.warn(
+              `[Playwright Scanner] ⚠️ Cascade probe restore failed for ${parentField.fieldId} (${optVal}). Discarding probe.`
+            );
+            await emitFailureDiagnostic({
+              category: 'SCAN_FIELD_EXTRACTION',
+              stage: 'cascade_probing',
+              reason: `Cascade probe restoration failed for ${parentField.fieldId}`,
+              isTerminal: false,
+              isRetryable: true,
+            }).catch(() => {});
+            continue;
+          }
 
           const newlyVisibleWithRequiredState = await markHiddenRequiredFields(page, newlyVisible);
           for (const newField of newlyVisibleWithRequiredState) {
-            knownFieldIds.add(newField.fieldId);
-            if (newField.name) knownNames.add(newField.name);
+            const existing = allFields.find(
+              (f) => f.fieldId === newField.fieldId || (newField.name && f.name === newField.name)
+            );
+            if (existing) {
+              if (existing.metadata?.dependsOn && existing.metadata.dependsOn !== parentField.fieldId) {
+                existing.metadata.ambiguousAttribution = true;
+              } else if (existing.metadata?.dependsOn === parentField.fieldId) {
+                const trigs =
+                  existing.metadata.triggerValues || (existing.metadata.triggerValue ? [existing.metadata.triggerValue] : []);
+                if (!trigs.includes(optVal)) {
+                  existing.metadata.triggerValues = [...trigs, optVal];
+                }
+              }
+            } else {
+              knownFieldIds.add(newField.fieldId);
+              if (newField.name) knownNames.add(newField.name);
 
-            newField.metadata = {
-              ...(newField.metadata || {}),
-              dependsOn: parentField.fieldId,
-              triggerValue: optVal,
-            };
+              newField.metadata = {
+                ...(newField.metadata || {}),
+                dependsOn: parentField.fieldId,
+                triggerValue: optVal,
+                triggerValues: [optVal],
+              };
 
-            allFields.push(newField);
-            if (!compactLogs) {
-              log.info(
-                `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
-              );
+              allFields.push(newField);
+              if (!compactLogs) {
+                log.info(
+                  `[Playwright Scanner] 🔗 Detected cascading field "${newField.label}" (${newField.fieldId}) triggered by ${parentField.fieldId} = "${optVal}"`
+                );
+              }
             }
           }
 

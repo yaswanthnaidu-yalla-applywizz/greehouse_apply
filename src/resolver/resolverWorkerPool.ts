@@ -7,13 +7,17 @@ import { findTemplateByJobUrl } from '../db/templates.js';
 import { getProfile } from '../db/profiles.js';
 import { findAnswersByCandidate } from '../db/qaBank.js';
 import { getOrParseResume } from './tier2ResumeParse.js';
-import { resolveTier1 } from './tier1Supabase.js';
-import { resolveTier2 } from './tier2ResumeParse.js';
-import { findSemanticMatch } from './semanticSearch.js';
-import { resolveTier3 } from './tier3FuzzyMatch.js';
-import { resolveBatchLlmFields, type UnresolvedFieldGroup } from './batchLlmResolver.js';
-import { resolvePreTierField } from './answerResolver.js';
-import type { ResolvedField, ScannedField, ScannedFieldType } from '../types/index.js';
+import {
+  AnswerResolver,
+  type ResolutionJobContext,
+  type CachedResolutionEvidence,
+} from './answerResolver.js';
+import type {
+  ResolutionExecution,
+  ResolvedField,
+  ScannedField,
+  ScannedFieldType,
+} from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 
@@ -40,6 +44,10 @@ function asScannedField(raw: any, index: number): ScannedField {
     label: String(raw?.label || raw?.question_label || ''),
     isRequired: Boolean(raw?.isRequired || raw?.required || raw?.is_required),
     options: Array.isArray(raw?.options) ? raw.options : undefined,
+    optionsComplete: raw?.optionsComplete,
+    metadata: raw?.metadata,
+    classification: raw?.classification,
+    intent: raw?.intent,
   };
 }
 
@@ -93,106 +101,58 @@ export class ResolverWorkerPool {
     return workers;
   }
 
-  private async resolveApplication(application: ApplicationRow, workerId: number): Promise<void> {
+  private async resolveApplication(application: ApplicationRow, _workerId: number): Promise<void> {
     const profile = await getProfile(application.applywizz_id);
     const parsedResume = await getOrParseResume(application.applywizz_id);
     const qaEntries = await findAnswersByCandidate(application.applywizz_id);
-    let existing: Array<ResolvedField | ScannedField> = Array.isArray(application.resolved_fields) ? application.resolved_fields : [];
-    if (existing.length === 0) {
-      const template = await findTemplateByJobUrl(application.job_url);
-      const schema = template?.fields_schema;
-      if (Array.isArray(schema) && schema.length > 0) {
-        existing = schema;
-        log.info(
-          `[Resolver] Loaded ${schema.length} fields from fields_schema for ${application.applywizz_id} ${application.job_url}`
-        );
-      }
-    }
-    const fields = existing.map((field, index) => asScannedField(field, index));
-    const resolved: ResolvedField[] = [];
-    const pending: ScannedField[] = [];
+    const template = await findTemplateByJobUrl(application.job_url);
 
-    for (const field of fields) {
-      const preTier = resolvePreTierField(field, profile, Boolean(field.isRequired));
-      if (preTier) {
-        resolved.push(preTier);
-        continue;
-      }
-      const tier1 = await resolveTier1(application.applywizz_id, field, profile);
-      const tier2 = tier1 || await resolveTier2(application.applywizz_id, field, parsedResume);
-      if (tier2) {
-        resolved.push(tier2);
-        continue;
-      }
-
-      const semantic = await findSemanticMatch(
-        field.label,
-        application.applywizz_id,
-        field.type,
-        field.options,
-        0.82,
-        profile
+    let fields: ScannedField[] = [];
+    if (template && Array.isArray(template.fields_schema) && template.fields_schema.length > 0) {
+      fields = template.fields_schema;
+      log.info(
+        `[Resolver] Loaded ${fields.length} fields from template for ${application.applywizz_id} ${application.job_url}`
       );
-      if (semantic) {
-        resolved.push({
-          fieldId: field.fieldId,
-          name: field.name,
-          type: field.type,
-          label: field.label,
-          value: semantic.value,
-          source: 'semantic',
-          resolvedByTier: 3,
-          confidence: semantic.confidence,
-          isRequired: Boolean(field.isRequired),
-        });
-        continue;
-      }
-
-      const fuzzy = await resolveTier3(
-        application.applywizz_id,
-        field,
-        qaEntries,
-        profile
-      );
-      if (fuzzy) resolved.push(fuzzy);
-      else pending.push(field);
+    } else if (Array.isArray(application.resolved_fields) && application.resolved_fields.length > 0) {
+      fields = application.resolved_fields.map((field, index) => asScannedField(field, index));
     }
 
-    log.info(
-      `[Resolver] Worker ${workerId} resolving ${application.applywizz_id} ${application.id || application.job_url} ` +
-      `(Tiers 1-4 complete, ${pending.length} questions pending LLM) | ` +
-      `${this.workerCount - 1} idle, 1 busy.`
+    if (fields.length === 0) {
+      log.info(
+        `[Resolver] ⏭️ Skipping ${application.applywizz_id} ${application.job_url} — no scanned fields available`
+      );
+      return;
+    }
+
+    const jobContext: ResolutionJobContext = {
+      companyName: template?.company_name || application.company_name || 'Company',
+      jobTitle: template?.job_title || application.job_title || 'Position',
+      jobUrl: application.job_url,
+      role: template?.job_title || application.job_title || 'Position',
+      jobPostingLocation: template?.job_posting_location ?? undefined,
+      jobPostingFacts: template?.job_posting_facts ?? undefined,
+    };
+
+    const resolved = await this.resolveFieldsWithSharedResolver(
+      application.applywizz_id,
+      fields,
+      jobContext,
+      { profile, parsedResume, qaEntries },
+      { mode: 'live' }
     );
 
-    if (pending.length > 0) {
-      const group: UnresolvedFieldGroup = {
-        applywizzId: application.applywizz_id,
-        jobUrl: application.job_url,
-        resumeText: parsedResume?.raw_text || '',
-        jobDescription: `${application.job_title || 'Position'} at ${application.company_name || 'Company'}`,
-        fields: pending,
-      };
-      const [batch] = await resolveBatchLlmFields([group]);
-      resolved.push(...batch.fields.map((field) => ({
-        ...field,
-        fieldId: field.label,
-        name: field.label,
-        type: field.type as ResolvedField['type'],
-        label: field.label,
-        resolvedByTier: 5 as const,
-      })));
+    const existingEdited = new Map<string, ResolvedField>();
+    if (Array.isArray(application.resolved_fields)) {
+      for (const rf of application.resolved_fields) {
+        if (rf && rf.isEdited) {
+          existingEdited.set(rf.fieldId || rf.name || rf.label, rf);
+        }
+      }
     }
 
-    const resolvedByKey = new Map(resolved.map((field) => [field.label, field]));
-    const finalFields = fields.map((field) => resolvedByKey.get(field.label) || {
-      fieldId: field.fieldId,
-      name: field.name,
-      type: field.type,
-      label: field.label,
-      value: '',
-      source: 'unresolved' as const,
-      resolvedByTier: null,
-      confidence: 0,
+    const finalFields = resolved.map((f) => {
+      const edited = existingEdited.get(f.fieldId) || existingEdited.get(f.name) || existingEdited.get(f.label);
+      return edited ? { ...f, ...edited, isEdited: true } : f;
     });
 
     if (!hasAnyNonEmptyResolvedField(finalFields)) {
@@ -211,6 +171,17 @@ export class ResolverWorkerPool {
       status: application.status,
       resolved_fields: finalFields,
     });
+  }
+
+  public async resolveFieldsWithSharedResolver(
+    applywizzId: string,
+    fields: ScannedField[],
+    jobContext: ResolutionJobContext,
+    evidence?: CachedResolutionEvidence,
+    execution: ResolutionExecution = { mode: 'live' }
+  ): Promise<ResolvedField[]> {
+    const resolver = new AnswerResolver();
+    return resolver.resolveFormFields(applywizzId, fields, jobContext, evidence, execution);
   }
 }
 

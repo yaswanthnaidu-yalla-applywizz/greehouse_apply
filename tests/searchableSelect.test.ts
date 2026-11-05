@@ -345,6 +345,7 @@ async function runSearchableSelectTests(): Promise<void> {
         type: 'select',
         label: 'Country',
         value: 'United States',
+        options: ['United States (+1)'],
         isRequired: true,
         metadata: { selector: '#country', section: 'Phone' },
         source: 'profile',
@@ -352,6 +353,112 @@ async function runSearchableSelectTests(): Promise<void> {
       assert(result.success, 'An already-selected United States phone-country control should be accepted');
       await page.close();
       console.log('  ✅ Preselected United States phone-country control is verified');
+    });
+
+    await withMockPage(`<!DOCTYPE html><form id="application_form">
+      <label>Race</label>
+      <div class="select-shell">
+        <input id="question_69882431" role="combobox" value="" />
+        <div class="select__menu" style="display:none"><div class="select__option" role="option">Decline to self-identify</div></div>
+      </div>
+      <input type="hidden" id="decoy_value" value="" />
+      <script>
+        const control = document.querySelector('#question_69882431');
+        const menu = document.querySelector('.select__menu');
+        control.addEventListener('focus', () => { menu.style.display = 'block'; });
+        control.addEventListener('input', () => { menu.style.display = 'block'; });
+        menu.querySelector('[role="option"]').addEventListener('click', (event) => {
+          document.querySelector('#decoy_value').value = event.target.textContent;
+          control.value = event.target.textContent;
+        });
+      </script>
+    </form>`, async (url) => {
+      const page = await browser!.newPage();
+      await page.goto(url);
+      await fillSingleField(page, {
+        fieldId: '431',
+        name: '431',
+        type: 'select',
+        label: '',
+        value: 'Decline to self-identify',
+        options: ['Decline to self-identify'],
+        isRequired: true,
+        source: 'profile',
+        metadata: { selector: '#missing_431' },
+      }, 'TEST', []);
+      assert((await page.locator('#decoy_value').inputValue()) === '', 'A numeric field ID must not fill substring decoy question_69882431');
+      await page.close();
+      console.log('  ✅ Numeric field ID does not fill substring decoy');
+    });
+
+    await withMockPage(`<!DOCTYPE html><form id="application_form">
+      <div class="select-shell">
+        <input id="question_69882431" role="combobox" value="" />
+        <div class="select__menu" style="display:none"><div class="select__option" role="option">Decline to self-identify</div></div>
+      </div>
+      <input type="hidden" id="decoy_value" value="" />
+      <script>
+        const control = document.querySelector('#question_69882431');
+        const menu = document.querySelector('.select__menu');
+        control.addEventListener('focus', () => { menu.style.display = 'block'; });
+        control.addEventListener('input', () => { menu.style.display = 'block'; });
+        menu.querySelector('[role="option"]').addEventListener('click', (event) => {
+          document.querySelector('#decoy_value').value = event.target.textContent;
+          control.value = event.target.textContent;
+        });
+      </script>
+    </form>`, async (url) => {
+      const page = await browser!.newPage();
+      await page.goto(url);
+      await fillSingleField(page, {
+        fieldId: '431',
+        name: 'race_question',
+        type: 'select',
+        label: '',
+        value: 'Decline to self-identify',
+        options: ['Decline to self-identify'],
+        isRequired: true,
+        source: 'profile',
+        metadata: { selector: '#missing_431' },
+      }, 'TEST', []);
+      assert((await page.locator('#decoy_value').inputValue()) === '', 'A numeric field ID with a descriptive name must not fill a page-wide combobox decoy');
+      await page.close();
+      console.log('  ✅ Mixed numeric field identity does not fill page-wide decoy');
+    });
+
+    await withMockPage(`<!DOCTYPE html><form id="application_form">
+      <div class="select-shell">
+        <input role="combobox" value="" />
+        <div class="select__menu" style="display:none"><div class="select__option" role="option">Decline to self-identify</div></div>
+      </div>
+      <input type="hidden" id="selected_value" value="" />
+      <script>
+        const control = document.querySelector('[role="combobox"]');
+        const menu = document.querySelector('.select__menu');
+        control.addEventListener('focus', () => { menu.style.display = 'block'; });
+        control.addEventListener('click', () => { menu.style.display = 'block'; });
+        control.addEventListener('input', () => { menu.style.display = 'block'; });
+        menu.querySelector('[role="option"]').addEventListener('click', (event) => {
+          document.querySelector('#selected_value').value = event.target.textContent;
+          control.value = event.target.textContent;
+        });
+      </script>
+    </form>`, async (url) => {
+      const page = await browser!.newPage();
+      await page.goto(url);
+      await fillSingleField(page, {
+        fieldId: '',
+        name: '',
+        type: 'select',
+        label: '',
+        value: 'Decline to self-identify',
+        options: ['Decline to self-identify'],
+        isRequired: true,
+        source: 'profile',
+      }, 'TEST', []);
+      assert((await page.locator('#selected_value').inputValue()) === 'Decline to self-identify', 'An unlabelled searchable select without IDs should use the generic combobox fallback');
+      await page.close();
+      console.log('  ✅ Unlabelled searchable select without IDs uses generic fallback');
     });
 
     console.log('\n✅ All searchable select tests passed.');

@@ -207,7 +207,7 @@ test('config exports Massive proxy settings with default trimmed endpoint', asyn
   assert.equal((config as any).MASSIVE_ENDPOINT.trim(), (config as any).MASSIVE_ENDPOINT);
 });
 
-test('builds valid Massive proxy config with country, city, and sticky session', () => {
+test('builds valid Massive proxy config with mobile targeting, country, city, and sticky flex session', () => {
   const cfg = buildAshbyProxyConfig(
     { applywizz_id: 'AWL-32959', country: 'United States', location: 'Austin, TX' } as any,
     {
@@ -223,7 +223,43 @@ test('builds valid Massive proxy config with country, city, and sticky session',
   assert.equal(cfg.password, 'testpass');
   assert.equal(
     cfg.username,
-    'testuser-country-US-city-Austin-session-AWL32959_beef1234-sessionttl-30'
+    'testuser-type-mobile-country-US-city-Austin-session-AWL32959_beef1234-sessionttl-30-sessionmode-flex'
+  );
+});
+
+test('allows overriding deviceType or omitting city for Massive proxy', () => {
+  const cfgResidential = buildAshbyProxyConfig(
+    { applywizz_id: 'AWL-32959', country: 'United States', location: 'Austin, TX' } as any,
+    {
+      provider: 'massive',
+      massiveUsername: 'testuser',
+      massivePassword: 'testpass',
+      deviceType: 'residential',
+      includeCity: false,
+      attemptToken: 'beef1234',
+    }
+  );
+
+  assert.equal(
+    cfgResidential.username,
+    'testuser-type-residential-country-US-session-AWL32959_beef1234-sessionttl-30-sessionmode-flex'
+  );
+
+  const cfgAuto = buildAshbyProxyConfig(
+    { applywizz_id: 'AWL-32959', country: 'United States', location: 'Austin, TX' } as any,
+    {
+      provider: 'massive',
+      massiveUsername: 'testuser',
+      massivePassword: 'testpass',
+      deviceType: 'auto',
+      includeCity: false,
+      attemptToken: 'beef1234',
+    }
+  );
+
+  assert.equal(
+    cfgAuto.username,
+    'testuser-country-US-session-AWL32959_beef1234-sessionttl-30-sessionmode-flex'
   );
 });
 

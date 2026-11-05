@@ -50,3 +50,62 @@ test('Ashby does not let a partial Yes marker override a real location select', 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test('Ashby rejects an active form with zero fields as a scan failure', async () => {
+  const server = http.createServer((_request, response) => {
+    response.setHeader('content-type', 'text/html');
+    response.end('<html><head><title>No Fields @ Example</title></head><body><p>No application fields here</p></body></html>');
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    await assert.rejects(
+      async () => {
+        await scanAshbyJob(`http://127.0.0.1:${address.port}/example/job`);
+      },
+      /Scan failed: Ashby form yielded zero fields/
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('Ashby extracts ordered posting facts and classifies system widgets conservatively', async () => {
+  const server = http.createServer((_request, response) => {
+    response.setHeader('content-type', 'text/html');
+    response.end(`<html><head><title>Senior Engineer @ Example</title></head><body>
+      <header>
+        <div>Location</div>
+        <div>New York City Office</div>
+        <div>Address</div>
+        <div>123 Broadway</div>
+        <div>Location Type</div>
+        <div>Hybrid</div>
+      </header>
+      <div data-field-path="_systemfield_resume"><label>Resume *</label><input type="file"></div>
+      <div data-field-path="_systemfield_education_history"><label>Education History</label><input type="checkbox"></div>
+      <div data-field-path="custom_consent"><label>Consent</label><input type="checkbox"></div>
+    </body></html>`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const template = await scanAshbyJob(`http://127.0.0.1:${address.port}/example/job`);
+    assert.equal(template.jobPostingLocation, 'New York City Office');
+    assert.deepEqual(template.jobPostingFacts?.locations, ['New York City Office']);
+    assert.equal(template.jobPostingFacts?.raw?.locationType, 'Hybrid');
+
+    const edu = template.fields.find((f) => f.fieldId === '_systemfield_education_history');
+    assert.ok(edu);
+    assert.equal(edu.classification, 'system_widget');
+
+    const consent = template.fields.find((f) => f.fieldId === 'custom_consent');
+    assert.ok(consent);
+    assert.equal(consent.classification, 'answerable');
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+

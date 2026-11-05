@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDbClient, isSupabaseConfigured } from './client.js';
-import type { ScannedField } from '../types/index.js';
+import type { JobPostingFacts, ScannedField } from '../types/index.js';
 
 export interface TemplateRow {
   id?: string;
@@ -19,6 +19,8 @@ export interface TemplateRow {
   ats?: 'greenhouse' | 'ashby';
   scanned_at?: string;
   updated_at?: string;
+  job_posting_location?: string | null;
+  job_posting_facts?: JobPostingFacts | null;
 }
 
 /**
@@ -109,6 +111,8 @@ export async function getTemplateByUrl(jobUrl: string): Promise<TemplateRow | nu
             job_title: found.jobTitle || found.job_title,
             fields_schema: found.fields || found.fields_schema || [],
             is_expired: Boolean(found.isExpired || found.is_expired),
+            job_posting_location: found.job_posting_location || found.jobPostingLocation || null,
+            job_posting_facts: found.job_posting_facts || found.jobPostingFacts || null,
           };
         }
       }
@@ -150,6 +154,8 @@ export async function listTemplates(): Promise<TemplateRow[]> {
           job_title: found.jobTitle || found.job_title,
           fields_schema: found.fields || found.fields_schema || [],
           is_expired: Boolean(found.isExpired || found.is_expired),
+          job_posting_location: found.job_posting_location || found.jobPostingLocation || null,
+          job_posting_facts: found.job_posting_facts || found.jobPostingFacts || null,
         }));
       }
     } catch {}
@@ -202,4 +208,3 @@ export async function findTemplateByJobUrl(jobUrl: string): Promise<TemplateRow 
 
   return null;
 }
-

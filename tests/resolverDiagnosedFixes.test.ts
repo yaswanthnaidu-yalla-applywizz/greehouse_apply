@@ -548,9 +548,12 @@ async function run(): Promise<void> {
     (await resolveTier1(
       'AWL-TEST',
       makeField({
+        fieldId: 'start_date--0',
+        name: 'start_date--0',
         type: 'select',
         label: 'Start Month',
         options: ['January', 'August', 'September', 'October'],
+        metadata: { section: 'Education' },
       }),
       profile
     ))?.value || null,
@@ -560,7 +563,7 @@ async function run(): Promise<void> {
   assertEqual(
     (await resolveTier1(
       'AWL-TEST',
-      makeField({ type: 'select', label: 'Graduation Year', options: ['2022', '2023', '2024'] }),
+      makeField({ fieldId: 'end_date--0', name: 'end_date--0', type: 'select', label: 'Graduation Year', options: ['2022', '2023', '2024'], metadata: { section: 'Education' } }),
       profile
     ))?.value || null,
     '2023',
@@ -569,11 +572,23 @@ async function run(): Promise<void> {
   assertEqual(
     (await resolveTier1(
       'AWL-TEST',
-      makeField({ type: 'select', label: 'Start date year', options: ['2020', '2021', '2022'] }),
+      makeField({ fieldId: 'start_date--0', name: 'start_date--0', type: 'select', label: 'Start date year', options: ['2020', '2021', '2022'], metadata: { section: 'Education' } }),
       profile
     ))?.value || null,
     '2020',
     'start-date year fields use the candidate education year, not a full desired-start date'
+  );
+  const conflictingEducation = {
+    ...profile,
+    education: [
+      { startDate: '2018-01-01', endDate: '2020-05-01' },
+      { startDate: '2022-09-01', endDate: '2025-06-01' },
+    ],
+  };
+  assertEqual(
+    (await resolveTier1('AWL-TEST', makeField({ fieldId: 'start_date--1', name: 'start_date--1', type: 'select', label: 'Start Month', options: ['January', 'September'], metadata: { section: 'Education' } }), conflictingEducation))?.value || null,
+    'September',
+    'education date resolution uses the record index in the field identity'
   );
   assertEqual(
     (await resolveTier1(
@@ -616,6 +631,80 @@ async function run(): Promise<void> {
     ))?.value || null,
     urlAnswer,
     'Tier 4 retains URLs for profile labels'
+  );
+
+  // Task 2: Ashby SMS consent radio fields labeled "Phone" resolve to "No"
+  const smsRadio = makeField({
+    fieldId: '149e0551-475d-42ad-a129-0ee94622d9e1',
+    name: '149e0551-475d-42ad-a129-0ee94622d9e1',
+    type: 'radio',
+    label: 'Phone',
+    options: [
+      'Yes - I consent to receiving text messages',
+      'No - I do not consent to receiving text messages'
+    ],
+    isRequired: true,
+  });
+  const candidateProfile: ProfileRow = { applywizz_id: 'AWL-TEST', client_name: 'Test', phone: '9089231185' };
+  const smsResult = resolvePreTierField(smsRadio, candidateProfile, true);
+  assertEqual(
+    smsResult?.value,
+    'No - I do not consent to receiving text messages',
+    'SMS consent labeled Phone resolves to No option'
+  );
+
+  // Task 3: Common custom employer questions resolved via Tier 1 standard policies
+  const metaField = makeField({
+    label: 'Have you ever worked as a Meta contingent worker or vendor?',
+    type: 'select',
+    options: ['Yes', 'No'],
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', metaField, candidateProfile))?.value,
+    'No',
+    'Meta contractor history resolves to No'
+  );
+
+  const medicalField = makeField({
+    label: 'Do you require comprehensive medical benefit coverage?',
+    type: 'select',
+    options: ['Yes', 'No'],
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', medicalField, candidateProfile))?.value,
+    'Yes',
+    'Medical coverage question resolves to Yes'
+  );
+
+  const referencesField = makeField({
+    label: 'Please provide professional references upon request',
+    type: 'textarea',
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', referencesField, candidateProfile))?.value,
+    'N/A',
+    'Professional references resolves to N/A'
+  );
+
+  const referralPersonField = makeField({
+    label: 'Who referred you to this position?',
+    type: 'text',
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', referralPersonField, candidateProfile))?.value,
+    'N/A',
+    'Referral person resolves to N/A'
+  );
+
+  const interSystemsField = makeField({
+    label: 'Have you or an immediate family member ever been employed by InterSystems?',
+    type: 'select',
+    options: ['Yes', 'No'],
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', interSystemsField, candidateProfile))?.value,
+    'No',
+    'InterSystems history resolves to No'
   );
 }
 

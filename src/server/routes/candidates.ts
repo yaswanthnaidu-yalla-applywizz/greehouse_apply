@@ -804,7 +804,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
       .from('gh_candidate_applications')
       .select('*')
       .eq('applywizz_id', applywizzId)
-      .neq('status', 'FILTERED_OUT');
+      .neq('status', 'FILTERED_OUT')
+      .neq('status', 'SKIPPED');
 
     if (!unrestricted) {
       appQuery = applyCreatedAtRangeFilter(appQuery, createdAtRange);
@@ -865,6 +866,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
         jobTitle: application.job_title || 'Job Opening',
         status: jobStatus,
         operator_approved_at: application.operator_approved_at ?? null,
+        submitted_at: application.submitted_at ?? null,
+        submittedAt: application.submitted_at ?? null,
         updated_at: application.updated_at ?? null,
         error_message: application.error_message ?? null,
         fieldsCount,
