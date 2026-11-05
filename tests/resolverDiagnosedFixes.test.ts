@@ -548,9 +548,12 @@ async function run(): Promise<void> {
     (await resolveTier1(
       'AWL-TEST',
       makeField({
+        fieldId: 'start_date--0',
+        name: 'start_date--0',
         type: 'select',
         label: 'Start Month',
         options: ['January', 'August', 'September', 'October'],
+        metadata: { section: 'Education' },
       }),
       profile
     ))?.value || null,
@@ -560,7 +563,7 @@ async function run(): Promise<void> {
   assertEqual(
     (await resolveTier1(
       'AWL-TEST',
-      makeField({ type: 'select', label: 'Graduation Year', options: ['2022', '2023', '2024'] }),
+      makeField({ fieldId: 'end_date--0', name: 'end_date--0', type: 'select', label: 'Graduation Year', options: ['2022', '2023', '2024'], metadata: { section: 'Education' } }),
       profile
     ))?.value || null,
     '2023',
@@ -569,11 +572,23 @@ async function run(): Promise<void> {
   assertEqual(
     (await resolveTier1(
       'AWL-TEST',
-      makeField({ type: 'select', label: 'Start date year', options: ['2020', '2021', '2022'] }),
+      makeField({ fieldId: 'start_date--0', name: 'start_date--0', type: 'select', label: 'Start date year', options: ['2020', '2021', '2022'], metadata: { section: 'Education' } }),
       profile
     ))?.value || null,
     '2020',
     'start-date year fields use the candidate education year, not a full desired-start date'
+  );
+  const conflictingEducation = {
+    ...profile,
+    education: [
+      { startDate: '2018-01-01', endDate: '2020-05-01' },
+      { startDate: '2022-09-01', endDate: '2025-06-01' },
+    ],
+  };
+  assertEqual(
+    (await resolveTier1('AWL-TEST', makeField({ fieldId: 'start_date--1', name: 'start_date--1', type: 'select', label: 'Start Month', options: ['January', 'September'], metadata: { section: 'Education' } }), conflictingEducation))?.value || null,
+    'September',
+    'education date resolution uses the record index in the field identity'
   );
   assertEqual(
     (await resolveTier1(

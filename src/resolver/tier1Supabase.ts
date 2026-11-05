@@ -91,10 +91,10 @@ function findPayloadUrl(profile: ProfileRow, keys: string[]): string | null {
   return null;
 }
 
-function getFirstEducationDate(education: unknown[], keys: string[]): string | null {
-  const first = education[0];
-  if (!first || typeof first !== 'object') return null;
-  const record = first as Record<string, unknown>;
+function getRecordDate(records: unknown[], keys: string[], recordIndex: number): string | null {
+  const recordValue = records[recordIndex];
+  if (!recordValue || typeof recordValue !== 'object') return null;
+  const record = recordValue as Record<string, unknown>;
   for (const key of keys) {
     const value = record[key];
     if (typeof value === 'string' || typeof value === 'number') {
@@ -119,21 +119,37 @@ function extractEducationYear(value: string): string | null {
   return value.match(/\b\d{4}\b/)?.[0] ?? null;
 }
 
-function resolveEducationDateField(field: ScannedField, profile: ProfileRow): string | null {
-  const label = field.label.toLowerCase();
-  if (!/(start.*(?:date|month|year)|end.*(?:date|month|year)|graduation (?:month|year))/i.test(label)) {
-    return null;
-  }
+export function getDateComponentContext(field: ScannedField): 'education' | 'employment' | null {
+  const section = field.metadata?.section?.toLowerCase() ?? '';
+  if (/education|academic|school|university/.test(section)) return 'education';
+  if (/employment|work experience|experience|professional/.test(section)) return 'employment';
+  return null;
+}
 
-  const education = Array.isArray(profile.education) ? profile.education : [];
+export function isDateComponentField(field: ScannedField): boolean {
+  return /\b(?:month|year)\b/i.test(field.label) && /\b(?:start|end|graduation)\b/i.test(field.label);
+}
+
+export function resolveContextualDateComponent(field: ScannedField, profile: ProfileRow): string | null {
+  const label = field.label.toLowerCase();
+  if (!isDateComponentField(field)) return null;
+  const context = getDateComponentContext(field);
+  if (!context) return null;
+  const records = context === 'education'
+    ? (Array.isArray(profile.education) ? profile.education : [])
+    : (Array.isArray(profile.work_experience) ? profile.work_experience : []);
   const isStart = /\bstart\b/i.test(label);
   const isEnd = /\bend\b/i.test(label);
   const dateKeys = isStart
     ? ['startDate', 'start_date', 'start']
     : isEnd
-      ? ['endDate', 'end_date', 'end', 'graduationDate', 'graduation_date']
+      ? ['endDate', 'end_date', 'end', ...(context === 'education' ? ['graduationDate', 'graduation_date'] : [])]
       : ['graduationDate', 'graduation_date', 'endDate', 'end_date', 'graduationYear', 'graduation_year'];
-  const dateValue = getFirstEducationDate(education, dateKeys);
+  const fieldIdentity = `${field.fieldId} ${field.name}`;
+  const recordIndex = fieldIdentity.match(/(?:--|\[)(\d+)(?:\]|\b)/)?.[1];
+  const index = recordIndex === undefined ? (records.length === 1 ? 0 : -1) : Number(recordIndex);
+  if (index < 0) return null;
+  const dateValue = getRecordDate(records, dateKeys, index);
   if (!dateValue) return null;
 
   const month = extractEducationMonth(dateValue);
@@ -141,8 +157,16 @@ function resolveEducationDateField(field: ScannedField, profile: ProfileRow): st
   const wantsMonth = /\bmonth\b/i.test(label);
   const wantsYear = /\byear\b/i.test(label);
   if (field.type === 'select' || field.type === 'radio') {
-    if (wantsMonth) return month ? matchChoiceOption(month, field.options) : null;
-    if (wantsYear) return year ? matchChoiceOption(year, field.options) : null;
+    if (wantsMonth) {
+      return month
+        ? (field.optionsComplete === false ? month : matchChoiceOption(month, field.options))
+        : null;
+    }
+    if (wantsYear) {
+      return year
+        ? (field.optionsComplete === false ? year : matchChoiceOption(year, field.options))
+        : null;
+    }
     return (
       (month ? matchChoiceOption(month, field.options) : null) ||
       (year ? matchChoiceOption(year, field.options) : null)
@@ -275,7 +299,7 @@ export function resolveStandardProfileAttribute(
     return profile.resume_storage_path || `resumes/${profile.applywizz_id}_resume.pdf`;
   }
 
-  const educationDate = resolveEducationDateField(field, profile);
+  const educationDate = resolveContextualDateComponent(field, profile);
   if (educationDate) return educationDate;
 
   // Phone Country / Dialing Code (must precede standard phone matching)
@@ -778,6 +802,7 @@ function resolveFromRawApiPayload(
   field: ScannedField,
   rawPayload?: Record<string, any> | null
 ): string | null {
+  if (isDateComponentField(field)) return null;
   if (!rawPayload || typeof rawPayload !== 'object') {
     return null;
   }
@@ -1020,6 +1045,24 @@ export async function resolveTier1(
 
   // Profile phone is not authoritative; Tier 2 extracts the number from resume facts.
   if (isPhoneNumberField(field)) return null;
+
+  if (isDateComponentField(field)) {
+    const value = candidateProfile ? resolveContextualDateComponent(field, candidateProfile) : null;
+    if (!value) return null;
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      type: field.type,
+      label: field.label,
+      value,
+      source: 'supabase',
+      resolvedByTier: 1,
+      confidence: 1,
+      isRequired: Boolean(field.isRequired),
+      ...(field.options ? { options: field.options } : {}),
+      ...(field.optionsComplete === undefined ? {} : { optionsComplete: field.optionsComplete }),
+    };
+  }
 
   if (isCountryField(field)) {
     const additional = candidateProfile?.raw_api_payload?.additional_information;
