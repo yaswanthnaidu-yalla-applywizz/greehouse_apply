@@ -57,3 +57,30 @@ test('scans the embedded application when its frame appears after DOMContentLoad
     await browser.close();
   }
 });
+
+test('does not poll for embedded frames on a direct Greenhouse job page', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.route('https://boards.greenhouse.io/**', (route) => route.fulfill({
+      contentType: 'text/html',
+      body: '<html><body><h1>Walker-Miller Energy Services</h1><form id="application_form"><label for="name">Name</label><input id="name" name="name"><button type="submit">Submit Application</button></form></body></html>',
+    }));
+    let waitCalls = 0;
+    const waitForTimeout = page.waitForTimeout.bind(page);
+    page.waitForTimeout = async (timeout) => {
+      waitCalls++;
+      await waitForTimeout(timeout);
+    };
+
+    const template = await new PlaywrightScanner({ timeoutMs: 1000 }).scanSingleUrl(
+      'https://boards.greenhouse.io/walker-miller/jobs/5281483007',
+      page,
+    );
+
+    assert.equal(template.isExpired, false);
+    assert.equal(waitCalls, 0);
+  } finally {
+    await browser.close();
+  }
+});

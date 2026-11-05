@@ -30,6 +30,18 @@ describe('RC-GH-5: isClosedJobNoEmbeddedForm', () => {
     ])).toBe('https://boards.greenhouse.io/embed/job_app?for=merchantsfleet&token=8046371003');
   });
 
+  it('rejects Greenhouse URLs embedded in an unrelated host URL', () => {
+    expect(findEmbeddedGreenhouseApplicationUrl([
+      'https://attacker.example/?next=https://boards.greenhouse.io/embed/job_app?for=merchantsfleet',
+    ])).toBeNull();
+  });
+
+  it('rejects non-application paths on Greenhouse hosts', () => {
+    expect(findEmbeddedGreenhouseApplicationUrl([
+      'https://boards.greenhouse.io/jobs/431?next=/embed/job_app',
+    ])).toBeNull();
+  });
+
   it('ignores unrelated iframe URLs', () => {
     expect(findEmbeddedGreenhouseApplicationUrl(['https://example.com/embed/job_app'])).toBeNull();
   });
