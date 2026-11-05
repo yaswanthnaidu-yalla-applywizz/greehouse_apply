@@ -1002,8 +1002,8 @@ export class AnswerResolver {
         companyName: jobContext.companyName || 'Company',
         jobTitle: jobContext.jobTitle || 'Position',
         jobUrl: jobContext.jobUrl,
-        jobPostingLocation: jobContext.jobPostingLocation,
-        jobPostingFacts: jobContext.jobPostingFacts,
+        jobPostingLocation: jobContext.jobPostingLocation || (jobContext as any).postingLocation,
+        jobPostingFacts: jobContext.jobPostingFacts || (jobContext as any).postingFacts,
       },
       execution,
     };

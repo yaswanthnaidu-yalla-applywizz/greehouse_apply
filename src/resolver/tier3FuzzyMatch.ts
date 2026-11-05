@@ -15,7 +15,7 @@ import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 const log = createLogger('Tier4 Fuzzy Match');
 
-let fuzzyMatchingEnabled = false;
+let fuzzyMatchingEnabled = true;
 
 export function setFuzzyMatchingEnabled(enabled: boolean): void {
   fuzzyMatchingEnabled = enabled;
@@ -109,7 +109,7 @@ export async function resolveTier3(
       const factSearch = new Fuse(normalizedFacts, {
         keys: ['normalized_label', 'label'],
         includeScore: true,
-        threshold: 0.4,
+        threshold: 0.25,
         ignoreLocation: true,
         minMatchCharLength: 3,
       }).search(query);
@@ -117,27 +117,33 @@ export async function resolveTier3(
         const bestMatch = factSearch[0];
         const distance = bestMatch.score ?? 1;
         const similarity = 1 - distance;
-        let finalValue: string | null = bestMatch.item.value;
-        if (field.options?.length) {
-          finalValue = matchBestOption(finalValue, field.options);
-        }
-        if (finalValue && isAllowedUrlAnswer(field, finalValue)) {
-          return {
-            fieldId: field.fieldId,
-            name: field.name,
-            type: field.type,
-            label: field.label,
-            value: finalValue,
-            source: 'supabase',
-            resolvedByTier: 4,
-            confidence: Math.max(0.85, Number(similarity.toFixed(2))),
-            provenance: {
-              family: fieldIntent.family,
-              evidenceKind: 'profile_fact',
-              evidenceKey: bestMatch.item.label,
-              confidence: Number(similarity.toFixed(2)),
-            },
-          };
+        const secondDistance = factSearch.length > 1 ? (factSearch[1].score ?? 1) : 1;
+        const secondSimilarity = 1 - secondDistance;
+        const uniqueness = similarity - secondSimilarity;
+
+        if (similarity >= 0.88 && (factSearch.length === 1 || uniqueness >= 0.08)) {
+          let finalValue: string | null = bestMatch.item.value;
+          if (field.options?.length) {
+            finalValue = matchBestOption(finalValue, field.options);
+          }
+          if (finalValue && isAllowedUrlAnswer(field, finalValue)) {
+            return {
+              fieldId: field.fieldId,
+              name: field.name,
+              type: field.type,
+              label: field.label,
+              value: finalValue,
+              source: 'supabase',
+              resolvedByTier: 4,
+              confidence: Math.max(0.85, Number(similarity.toFixed(2))),
+              provenance: {
+                family: fieldIntent.family,
+                evidenceKind: 'profile_fact',
+                evidenceKey: bestMatch.item.label,
+                confidence: Number(similarity.toFixed(2)),
+              },
+            };
+          }
         }
       }
     }
@@ -212,8 +218,8 @@ export async function resolveTier3(
         const secondSimilarity = 1 - secondDistance;
         const uniqueness = similarity - secondSimilarity;
 
-        // Reject weak scores or tied candidates
-        if (similarity < 0.6 || (searchResults.length > 1 && uniqueness < 0.05)) {
+        // Reject weak scores or tied candidates (calibrated: similarity >= 0.88, uniqueness >= 0.08)
+        if (similarity < 0.88 || (searchResults.length > 1 && uniqueness < 0.08)) {
           return null;
         }
 

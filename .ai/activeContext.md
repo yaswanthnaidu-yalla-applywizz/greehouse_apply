@@ -1,9 +1,61 @@
+# Current Session Update (2026-11-05 - Typed Deterministic Resolution Shipped - COMPLETED)
+
+- **Shipped Full 9-Task Typed Deterministic Resolution Pipeline**:
+  - **Task 1: Shared Typed Contracts (`src/types/index.ts`, `src/resolver/fieldIntent.ts`, `src/resolver/resolutionMode.ts`)**: Added `FieldIntent`, `FieldFamily`, `JobPostingFacts`, `ResolutionProvenance`, `ResolutionExecution`, and `ResolutionDecision`. Verified in `tests/fieldIntent.test.ts`.
+  - **Task 2: Ashby URL Canonicalization & Template Posting Facts (`src/scanner/atsDetector.ts`, `src/scanner/ashbyScanner.ts`, `src/scanner/playwrightScanner.ts`, `src/db/templates.ts`, `src/db/migrations/046_template_posting_facts.sql`)**: Canonicalizes Ashby tracked query URLs without stripping query parameters; preserves ordered location facts in templates (`job_posting_location`, `job_posting_facts`). Verified in `tests/ashbyScanner.test.ts` and `tests/templatePostingFacts.test.ts`.
+  - **Task 3: Transactional Greenhouse Cascade Probes (`src/submitter/cascadeDetector.ts`, `src/scanner/playwrightScanner.ts`)**: Implemented snapshot-probe-restore loop with baseline validation, preventing false dependencies on pre-existing controls. Verified in `tests/cascading.test.ts` (25/25 assertions passing).
+  - **Task 4: Evidence-Gated Tier 3 & Tier 4 Matching (`src/resolver/fieldIntent.ts`, `src/resolver/tier3FuzzyMatch.ts`, `src/resolver/semanticSearch.ts`)**: Intent filters candidates before scoring; strictly prevents cross-family collisions (e.g. company email resolving employer history, or URLs resolving contact names).
+  - **Task 5: Pre-Tier-5 Deterministic Policy Registry (`src/resolver/deterministicPolicies.ts`, `src/utils/choiceOptions.ts`)**: Implemented approved option-safe policies for SMS consent ("No"), mandatory agreements ("Yes"), workplace location mapping from posting facts, affirmative relocation when unspecified, demographics, legal history, and closest-band salary mapping.
+  - **Task 6: Consolidated Shared Waterfall Engine (`src/resolver/answerResolver.ts`, `src/resolver/resolverWorkerPool.ts`)**: Added `AnswerResolver.prototype.resolveFormFields` as the single shared owner for normal and worker pipelines, completely eliminating duplicated tier logic from `ResolverWorkerPool`. Verified in `tests/sharedResolutionPipeline.test.ts`.
+  - **Task 7: Operator Provenance & Review Gate Integrity (`dashboard/components/SourceBadge.tsx`, `dashboard/components/EditableFormField.tsx`, `src/resolver/needsReview.ts`)**: Renders controlled labels (`Policy`, `Raw profile`, `Resume`, `Employment history`, `QA match`, `Posting location`). Hard review gates strictly hold required Tier 5 AI, unresolved fields, mandatory cover letters, and negative salary in `READY_FOR_REVIEW`. Verified in `tests/sourceBadge.test.tsx` and `tests/needsReview.test.ts`.
+  - **Task 8: Capability-Free Shadow Resolution & Calibration (`src/resolver/shadowResolution.ts`, `.ai/diagnostics/typed-resolution-shadow-report-2026-11-05.md`)**: Structural shadow mode with zero LLM calls, zero QA writes, zero vector embedding calls, zero table mutations, and zero enqueueing (enforced by throwing adapters in `tests/shadowResolution.test.ts`). Calibrated Fuse.js similarity `>= 0.88` and uniqueness margin `>= 0.08`.
+  - **Task 9: Threshold Enablement & Verification**: Enabled calibrated thresholds, added Checkpoint 3B end-to-end fixture in `tests/e2eIntegration.test.ts` covering SMS No, employer evidence, posting location, no-location affirmative relocation, semantic rejection, widget exclusion, creative Tier 5 review, and worker/main parity (40/40 E2E assertions passing).
+- **Hard Rule Confirmation**: Zero retroactive rescan or re-resolve of existing production applications.
+
+# Current Session Update (2026-11-05 - Observability Analysis Tab, Admin Filtered Tab & Retryable Requeue Action)
+
+- Implemented **Admin Filtered Tab**: brought `DevFilteredView` directly into Admin Dashboard (`dashboard/components/AdminDashboard.tsx`) with an authenticated `/api/admin/filtered-stats` backend endpoint (`src/server/filteredStats.ts`). Full parity view with top/bottom funnel statistics and itemized drop inspectability.
+- Implemented **Analysis Observability Tab** for both Dev and Admin dashboards (`dashboard/components/AnalysisView.tsx`, `src/server/analysisStats.ts`):
+  - **ATS Platform Selector**: Toggle between `Both`, `Greenhouse`, and `Ashby`.
+  - **Selectable Metric Series**: Multi-select any combination of `Total`, `Applied` (Applied + Email proof pending), `Failed`, and `Client Count`.
+  - **Single Date Mode**: Comparative Bar Graph rendering side-by-side vertical pillars with count tags and descriptions for the chosen 24-hour IST date.
+  - **Period Range Mode**: Multi-day time-series SVG chart featuring curved paths, hover dots, coordinate grid lines, and interactive tooltips across `7D`, `14D`, `30D`, and `Custom` ranges.
+  - **Top KPI Cards**: Total Processed, Applied (+ success rate %), Failed (+ failure rate %), and Active Clients.
+  - **Failure Root-Cause Breakdown & Retryable Requeue**:
+    - Classified failure types based on interview criteria into **Retryable** (Page navigation/timeout, OTP retrieval timeout, Rate limit 429, Anti-bot / CAPTCHA challenge) vs **Terminal** (Email verification timeout, Cover letter required, Missing required fields, Job closed/duplicate).
+    - Added bulk **"Requeue All Retryable (N)"** button in the header and row-level **"Requeue (N)"** buttons on individual retryable category cards with confirmation dialogs and feedback toasts.
+    - Added `POST /api/dev/analysis/requeue` and `POST /api/admin/analysis/requeue` resetting `status = 'QUEUED'`, `error_message = null`, and `retry_count = 0` for applications with `retry_count < 3` within the active view.
+- **Verification**: 15/15 unit tests in `tests/analysisDashboard.test.ts` pass, 110/110 unit tests pass, and `npm run typecheck` passes with 0 errors.
+
+# Current Session Update (2026-11-05 - Operator Dashboard Clean Job Cards & Skipped Job Filter)
+
+- Excluded `SKIPPED` applications from the operator application queue in `filterOperatorApplicationJobs` and `GET /api/candidates/:applywizzId/jobs` database query (`.neq('status', 'SKIPPED')`).
+- Replaced `OperatorFormBlockedPanel` error banner ("⚠️ This application couldn't be submitted") in `FormRenderer.tsx` with a clean, neutral fallback if an unavailable application is selected.
+- Simplified horizontal job cards in `JobQueueView.tsx`: stripped Difficulty Badge (`[HARD]`/`[MEDIUM]`/`[EASY]`), question count (`XX Qs`), and `Edited (Queued Last)` badge. Each card now displays only Company Name, Job Title, and a clean `Submitted` vs `Pending` pill.
+- Exposed `submitted_at` / `submittedAt` in candidate jobs endpoint and updated `isOperatorApprovedApplicationJob` to treat either `submitted_at` or `operator_approved_at` as `Submitted`.
+- All unit tests (10/10 in `candidateQueueFilter.test.ts` & `operatorJobCardStatus.test.ts`), 32/32 master E2E integration tests, typecheck, and Vite build pass green.
+
+# Current Session Update (2026-11-05 - Typed Deterministic Resolution Plan Revision)
+
+- Operator approved one shared waterfall owner for ingestion, helpers, and `ResolverWorkerPool`; the worker will retain scheduling, hydration, and persistence only.
+- The approved policy boundary is after Tier 4 and immediately before Tier 5. SMS/WhatsApp communications consent resolves to No.
+- Workplace preference uses a unique posting-location option when available. When posting location is absent, it uses one unambiguous affirmative relocation option without requiring candidate evidence; otherwise it continues through the resolver waterfall.
+- The revised design and plan now cover typed Tier 3 and Tier 4 evidence gates, posting-fact persistence/hydration, capability-free shadow analysis, transactional cascade restoration, conservative widget exclusion, calibration before enablement, and worker/main parity tests.
+- Planning only: no product code, production data, templates, queues, submissions, or historical applications changed.
+
 # Current Session Update (2026-11-05 - Greenhouse Required-Field Integrity)
 
 - Tasks 1–6 are implemented, verified, and documented. The read-only DB2 remediation report lists 15 candidate records: 12 rescan-and-reresolve, 1 reresolve, and 2 review-only.
 - No historical application rows were modified, retried, queued, or submitted. Any future historical operation requires separate operator review and approval.
 - Walker-Miller live replay redirected to generic careers content, so the stored two-field template is documented as stale evidence and the current job page must be verified before any future rescan.
 - See `docs/operations/greenhouse-required-field-remediation-2026-11-05.md` and `.ai/diagnostics/required-fields-2026-11-03/remediation-report-2026-11-05.md`.
+
+# Current Session Update (2026-11-05 - Scanner and Resolver Integrity Diagnosis)
+
+- Read-only live sampling of the supplied Ashby/Greenhouse CSV found three code bugs before answer-policy work should proceed: Ashby tracked URLs append `/application` after query strings and can scan as zero fields; Ashby system widgets are exposed as answerable `true` checkbox questions; Greenhouse cascade exploration assigns false dependencies to controls already visible before its probe.
+- Replayed the Plaid operator screenshot exactly: `Current/Last Company` resolves to an email because Tier 4 fuzzy profile-fact matching accepts `company email` before the candidate's QA-bank company answer. This is a type/provenance resolver defect, not a dashboard-rendering issue.
+- No source code, templates, candidate facts, queue state, or historical applications were changed. Evidence and the proposed fix order are in `.ai/diagnostics/scanner-resolver-integrity-2026-11-05.md`.
+- Operator approved the typed deterministic-resolution design. The implementation plan is `docs/superpowers/plans/2026-11-05-typed-deterministic-resolution.md`; execution has not begun.
 
 # Current Session Update (2026-11-05 - Ashby Proxy & reCAPTCHA Hardening - COMPLETED)
 
