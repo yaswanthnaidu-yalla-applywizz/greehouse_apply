@@ -11,16 +11,16 @@ import {
 } from '../src/dashboard/candidateQueueFilter.js';
 
 describe('candidateQueueFilter', () => {
-  it('filterOperatorApplicationJobs keeps SKIPPED and unresolved rows', () => {
+  it('filterOperatorApplicationJobs excludes SKIPPED rows while keeping active rows', () => {
     const jobs = [
       { status: 'SKIPPED', resolved_fields: [] },
       { status: 'READY_FOR_REVIEW', resolved_fields: [] },
       { status: 'APPLIED', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
     ];
-    assert.equal(filterOperatorApplicationJobs(jobs).length, 3);
+    assert.equal(filterOperatorApplicationJobs(jobs).length, 2);
   });
 
-  it('filterOperatorApplicationJobs excludes QUEUED jobs while retaining other statuses', () => {
+  it('filterOperatorApplicationJobs excludes QUEUED and SKIPPED jobs while retaining other statuses', () => {
     const jobs = [
       { status: 'QUEUED', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
       { status: 'queued', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
@@ -32,8 +32,9 @@ describe('candidateQueueFilter', () => {
       { status: 'RETRY', resolved_fields: [] },
     ];
     const filtered = filterOperatorApplicationJobs(jobs);
-    assert.equal(filtered.length, 6);
+    assert.equal(filtered.length, 5);
     assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'QUEUED'), false);
+    assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'SKIPPED'), false);
     assert.equal(filtered.some((j) => j.status === 'READY_FOR_REVIEW'), true);
   });
 

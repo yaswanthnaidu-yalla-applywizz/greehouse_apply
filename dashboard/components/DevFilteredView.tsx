@@ -49,6 +49,7 @@ export interface DevFilteredViewProps {
   customFrom: string;
   customTo: string;
   loadJson: <T>(url: string) => Promise<T>;
+  apiEndpoint?: string;
 }
 
 const PAGE_SIZE = 50;
@@ -59,6 +60,7 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
   customFrom,
   customTo,
   loadJson,
+  apiEndpoint = '/api/dev/filtered-stats',
 }) => {
   const [data, setData] = useState<FilteredStatsResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -85,7 +87,7 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
           params.set('date', date);
         }
 
-        const res = await loadJson<FilteredStatsResponse>(`/api/dev/filtered-stats?${params.toString()}`);
+        const res = await loadJson<FilteredStatsResponse>(`${apiEndpoint}?${params.toString()}`);
         if (!cancelled) {
           setData(res);
           setPage(1);

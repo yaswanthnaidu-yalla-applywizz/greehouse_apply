@@ -20,7 +20,6 @@ import { EmailProofModal } from './components/EmailProofModal.js';
 import type { EmailProofJson } from './components/EmailProofRenderer.js';
 import type { ResolvedField, ApplicationStatus } from './types.js';
 import { isOperatorFormPanelBlocked } from '../src/dashboard/candidateQueueFilter.js';
-import { OperatorFormBlockedPanel } from './components/OperatorFormBlockedPanel.js';
 import { isActionableCarouselField } from './utils/fieldFilters.js';
 
 export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
@@ -214,10 +213,14 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   if (isOperatorFormPanelBlocked(currentStatus)) {
     return (
-      <>
+      <div className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
         {mobileBackButton}
-        <OperatorFormBlockedPanel application={application} />
-      </>
+        <div className="text-4xl mb-3">📋</div>
+        <p className="text-sm font-bold text-[#1A1A2E]">Application Unavailable</p>
+        <p className="text-xs text-[#64748B] mt-1 font-medium text-center">
+          This application is not available for operator review or submission.
+        </p>
+      </div>
     );
   }
 

@@ -5,6 +5,8 @@ import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
 import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 import { TetrominoLoader } from './TetrominoLoader.js';
+import { DevFilteredView } from './DevFilteredView.js';
+import { AnalysisView } from './AnalysisView.js';
 
 interface EmailProofData {
   subject?: string;
@@ -340,7 +342,7 @@ const ClientTable: React.FC<{
 export const AdminDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['admin']);
 
-  const [tab, setTab] = useState<'overview' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'>('overview');
+  const [tab, setTab] = useState<'overview' | 'analysis' | 'filtered' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'>('overview');
   const [dateMode, setDateMode] = useState<'today' | 'week' | 'month' | 'lifetime' | 'custom'>('today');
   const [customFrom, setCustomFrom] = useState<string>(getTodayIST);
   const [customTo, setCustomTo] = useState<string>(getTodayIST);
@@ -640,8 +642,8 @@ export const AdminDashboard: React.FC = () => {
     );
   }
 
-  const tabs: Array<'overview' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'> =
-    ['overview', 'managers', 'operators', 'applications', 'activity', 'system', 'guide'];
+  const tabs: Array<'overview' | 'analysis' | 'filtered' | 'managers' | 'operators' | 'applications' | 'activity' | 'system' | 'guide'> =
+    ['overview', 'analysis', 'filtered', 'managers', 'operators', 'applications', 'activity', 'system', 'guide'];
 
   const lightClass = (status?: string) =>
     status === 'ok'
@@ -870,6 +872,21 @@ export const AdminDashboard: React.FC = () => {
               </ul>
             </div>
           </>
+        )}
+
+        {tab === 'analysis' && (
+          <AnalysisView loadJson={loadJson} apiEndpoint="/api/admin/analysis" />
+        )}
+
+        {tab === 'filtered' && (
+          <DevFilteredView
+            date={date}
+            statsRange={dateMode === 'today' ? 'day' : dateMode}
+            customFrom={customFrom}
+            customTo={customTo}
+            loadJson={loadJson}
+            apiEndpoint="/api/admin/filtered-stats"
+          />
         )}
 
         {tab === 'managers' && !selectedManager && (

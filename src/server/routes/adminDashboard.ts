@@ -41,10 +41,16 @@ import {
 } from '../../candidate/csvUploadValidation.js';
 
 import { cleanupExpiredFailureDiagnostics } from '../../services/failureDiagnosticsRetention.js';
+import { handleFilteredStats } from '../filteredStats.js';
+import { handleAnalysisStats, handleRequeueRetryable } from '../analysisStats.js';
 
 const log = createLogger('Admin Dashboard');
 
 export const adminDashboardRouter = Router();
+
+adminDashboardRouter.get('/filtered-stats', handleFilteredStats);
+adminDashboardRouter.get('/analysis', handleAnalysisStats);
+adminDashboardRouter.post('/analysis/requeue', handleRequeueRetryable);
 
 adminDashboardRouter.post('/sync-ca-assignments', async (_req: Request, res: Response): Promise<void> => {
   try {
