@@ -54,38 +54,47 @@ export async function validateGreenhouseSubmission(
     const invalid = Array.from(document.querySelectorAll('input:invalid, select:invalid, textarea:invalid'));
     const genuineInvalids: Array<{ fieldId: string; label: string; message: string }> = [];
 
-    for (const element of invalid) {
+    for (const [invalidIndex, element] of invalid.entries()) {
       const input = element as HTMLInputElement;
-
-      // In HTML5, checkboxes in a group (e.g. "I Agree" / "I Do Not Agree") often all have the "required" attribute.
-      // If at least one checkbox in the group/field is already checked, the group is satisfied; strip the bogus required attribute.
       if (input.type === 'checkbox') {
         const container = input.closest('.field, fieldset, [class*="form-group"]');
-        let isGroupSatisfied = false;
-        if (input.name) {
-          const nameGroup = document.querySelectorAll<HTMLInputElement>(`input[type="checkbox"][name="${CSS.escape(input.name)}"]`);
-          if (nameGroup.length > 1 && Array.from(nameGroup).some((cb) => cb.checked)) {
-            isGroupSatisfied = true;
-          }
-        }
-        if (!isGroupSatisfied && container) {
-          const containerGroup = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-          if (containerGroup.length > 1 && Array.from(containerGroup).some((cb) => cb.checked)) {
-            isGroupSatisfied = true;
-          }
-        }
-        if (isGroupSatisfied) {
-          input.removeAttribute('required');
+        const containerGroup = container?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]') || [];
+        if (
+          containerGroup.length > 1 && Array.from(containerGroup).some((checkbox) => checkbox.checked)
+        ) {
           continue;
         }
       }
 
-      const label = input.id
-        ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`)?.textContent
-        : input.getAttribute('aria-label') || input.getAttribute('name');
+      const labelledBy = input.getAttribute('aria-labelledby')
+        ?.split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent?.trim())
+        .filter(Boolean)
+        .join(' ');
+      const root = input.closest('.select, .field-wrapper, .field');
+      const rootLabel = root?.querySelector('label')?.textContent?.trim();
+      const label = (input.id
+        ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`)?.textContent?.trim()
+        : undefined)
+        || labelledBy
+        || input.getAttribute('aria-label')?.trim()
+        || rootLabel
+        || input.getAttribute('name')?.trim()
+        || input.id
+        || `Required field ${invalidIndex + 1}`;
+      const combobox = root?.querySelector<HTMLElement>('[role="combobox"], input[aria-combobox="true"]');
+      const rootIndex = root
+        ? Array.from(document.querySelectorAll('.select, .field-wrapper, .field')).indexOf(root)
+        : -1;
+      const localInputIndex = root
+        ? Array.from(root.querySelectorAll('input, select, textarea')).indexOf(input)
+        : invalidIndex;
+      const fieldId = combobox
+        ? combobox.id || combobox.getAttribute('name') || `control:${rootIndex}:${localInputIndex}`
+        : `${root ? 'root' : 'document'}:${rootIndex}:${localInputIndex}`;
       genuineInvalids.push({
-        fieldId: input.id || input.getAttribute('name') || 'unknown',
-        label: (label || 'unknown').trim(),
+        fieldId,
+        label,
         message: input.validationMessage || 'Browser validation rejected the field',
       });
     }
