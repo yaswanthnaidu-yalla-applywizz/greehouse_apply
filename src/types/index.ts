@@ -29,7 +29,7 @@ export type FieldClassification = 'answerable' | 'system_field' | 'system_widget
 export type FieldFamily =
   | 'contact_profile' | 'employer_history' | 'work_authorization' | 'sponsorship'
   | 'legal_history' | 'agreement_consent' | 'workplace_preference' | 'residence'
-  | 'compensation' | 'demographics' | 'availability_education' | 'creative' | 'unknown';
+  | 'compensation' | 'demographics' | 'availability_education' | 'creative' | 'system' | 'cover_letter' | 'unknown';
 export interface FieldIntent { family: FieldFamily; qualifier?: string }
 export interface JobPostingFacts { location?: string; locations?: string[]; raw?: Record<string, unknown> }
 export interface ResolutionProvenance {
@@ -281,6 +281,11 @@ export interface IngestFilterReport {
  * - 'manual': Modified directly by operator.
  * - 'unresolved': Could not be resolved by any tier.
  */
+export interface ResolutionExecution {
+  mode?: 'live' | 'dry-run' | 'shadow';
+  recordDecision?: (decision: any) => void;
+}
+
 export type SourceTag =
   | 'supabase'
   | 'resume_parse'
@@ -289,6 +294,7 @@ export type SourceTag =
   | 'api'
   | 'ai'
   | 'manual'
+  | 'policy'
   | 'unresolved';
 
 export type AnswerSource = SourceTag;

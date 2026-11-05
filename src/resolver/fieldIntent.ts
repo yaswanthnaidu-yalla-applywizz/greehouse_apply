@@ -5,7 +5,10 @@ export interface EvidenceDescriptor { kind: string; key?: string; value?: unknow
 export function classifyFieldIntent(field: ScannedField): FieldIntent {
   const options = (field.options || []).join(' ').toLowerCase();
   const text = `${field.label} ${field.name} ${field.fieldId}`.toLowerCase();
-  if (/sms|text message|whatsapp/.test(options) && /yes|no|consent|agree|opt/.test(options)) return { family: 'agreement_consent', qualifier: 'sms' };
+  if (
+    (/sms|text message|whatsapp/.test(options) && /yes|no|consent|agree|opt/.test(options)) ||
+    (/sms|text message|whatsapp/.test(text) && !(field.metadata?.inputType === 'tel' || (field.type === 'text' && !/consent|opt/.test(text))))
+  ) return { family: 'agreement_consent', qualifier: 'sms' };
   if (/phone|telephone|mobile/.test(text) && (field.metadata?.inputType === 'tel' || field.type === 'text')) return { family: 'contact_profile', qualifier: 'phone' };
   if (/linkedin|github|portfolio|website|url/.test(text)) return { family: 'contact_profile', qualifier: 'url' };
   if (/email/.test(text)) return { family: 'contact_profile', qualifier: 'email' };

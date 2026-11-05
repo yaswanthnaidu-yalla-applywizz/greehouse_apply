@@ -11,6 +11,7 @@ import type { ResolvedField, ScannedField } from '../types/index.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { isPhoneNumberField } from './candidateEvidence.js';
 import { formatLocationCityStateCountry } from '../submitter/formFiller.js';
+import { classifyFieldIntent } from './fieldIntent.js';
 
 const US_STATE_NAMES_BY_ABBREVIATION: Record<string, string> = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -1120,7 +1121,10 @@ export async function resolveTier1(
     };
   }
 
-  if (candidateProfile) {
+  const intent = field.intent || classifyFieldIntent(field);
+  const isPreTier5Policy = (intent.family === 'agreement_consent' && intent.qualifier === 'sms') || intent.family === 'workplace_preference';
+
+  if (candidateProfile && !isPreTier5Policy) {
     const matchedVal = resolveStandardProfileAttribute(field, candidateProfile);
     if (matchedVal !== null && matchedVal !== undefined && matchedVal.trim().length > 0) {
       return {
