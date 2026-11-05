@@ -123,16 +123,36 @@ export function isClosedJobNoEmbeddedForm(params: {
 /** Returns a direct Greenhouse application URL exposed by a marketing-page iframe. */
 export function findEmbeddedGreenhouseApplicationUrl(frameUrls: string[]): string | null {
   for (const frameUrl of frameUrls) {
-    if (!frameUrl || !/greenhouse\.io/i.test(frameUrl) || !/(?:embed\/job_app|job_app)/i.test(frameUrl)) continue;
+    if (!frameUrl) continue;
     try {
       const parsed = new URL(frameUrl);
-      if (/^(?:https?:)?\/\//i.test(frameUrl) && parsed.protocol.startsWith('http')) return parsed.toString();
+      const hostname = parsed.hostname.toLowerCase();
+      const isGreenhouseHost = hostname === 'greenhouse.io' || hostname.endsWith('.greenhouse.io');
+      const isApplicationPath = /^\/(?:embed\/)?job_app(?:\/|$)/i.test(parsed.pathname);
+      if ((parsed.protocol === 'https:' || parsed.protocol === 'http:') && isGreenhouseHost && isApplicationPath) {
+        return parsed.toString();
+      }
     } catch {
       // Ignore malformed frame URLs and continue scanning the page itself.
     }
   }
   return null;
 }
+
+/** Waits briefly for a delayed direct Greenhouse application iframe to attach. */
+export async function waitForEmbeddedGreenhouseApplicationUrl(page: Page, timeoutMs: number): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const url = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+    if (url) return url;
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return null;
+    await page.waitForTimeout(Math.min(100, remainingMs));
+  }
+}
+
+const EMBEDDED_GREENHOUSE_FRAME_WAIT_MS = 1_000;
 
 /**
  * Utility to generate a randomized delay within [min, max] range.
@@ -487,7 +507,13 @@ export class PlaywrightScanner {
 
       // Some company marketing pages host the real Greenhouse form in an iframe.
       // Follow the embedded application URL so downstream extraction sees the ATS DOM.
-      const embeddedApplicationUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+      const currentEmbeddedUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+      const pageHostname = new URL(page.url()).hostname.toLowerCase();
+      const isGreenhousePage = pageHostname === 'greenhouse.io' || pageHostname.endsWith('.greenhouse.io');
+      const parentForm = !isGreenhousePage ? await page.$('form').catch(() => null) : null;
+      const embeddedApplicationUrl = currentEmbeddedUrl || (parentForm
+        ? await waitForEmbeddedGreenhouseApplicationUrl(page, EMBEDDED_GREENHOUSE_FRAME_WAIT_MS)
+        : null);
       if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
         await page.goto(embeddedApplicationUrl, {
           waitUntil: 'domcontentloaded',

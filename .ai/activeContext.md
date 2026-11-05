@@ -1,3 +1,10 @@
+# Current Session Update (2026-11-05 - Greenhouse Required-Field Integrity)
+
+- Tasks 1–6 are implemented, verified, and documented. The read-only DB2 remediation report lists 15 candidate records: 12 rescan-and-reresolve, 1 reresolve, and 2 review-only.
+- No historical application rows were modified, retried, queued, or submitted. Any future historical operation requires separate operator review and approval.
+- Walker-Miller live replay redirected to generic careers content, so the stored two-field template is documented as stale evidence and the current job page must be verified before any future rescan.
+- See `docs/operations/greenhouse-required-field-remediation-2026-11-05.md` and `.ai/diagnostics/required-fields-2026-11-03/remediation-report-2026-11-05.md`.
+
 # Current Session Update (2026-11-05 - Ashby Proxy & reCAPTCHA Hardening - COMPLETED)
 
 - **Root Cause Diagnosis**:
