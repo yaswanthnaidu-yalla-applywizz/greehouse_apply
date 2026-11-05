@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveAshbySystemField } from '../src/resolver/answerResolver.js';
-import type { ScannedField } from '../src/types/index.js';
+import { resolveAshbySystemField, alignResolvedChoice } from '../src/resolver/answerResolver.js';
+import type { ScannedField, ResolvedField } from '../src/types/index.js';
 
 test('resolveAshbySystemField resolves _systemfield_name', () => {
   const field: ScannedField = {
@@ -56,4 +56,43 @@ test('resolveAshbySystemField ignores non-system fields', () => {
   const profile: any = { client_name: 'John Doe' };
   const res = resolveAshbySystemField(field, profile, true);
   assert.equal(res, null);
+});
+
+test('resolveAshbySystemField resolves _systemfield_location from profile.location', () => {
+  const field: ScannedField = {
+    fieldId: '_systemfield_location',
+    name: '_systemfield_location',
+    type: 'select',
+    label: 'Location',
+    isRequired: true,
+  };
+  const profile: any = { location: 'Phoenix, Arizona, United States' };
+  const res = resolveAshbySystemField(field, profile, true);
+  assert.equal(res?.value, 'Phoenix, Arizona, United States');
+  assert.equal(res?.source, 'supabase');
+  assert.equal(res?.resolvedByTier, 1);
+});
+
+test('alignResolvedChoice preserves _systemfield_location select value when options are absent', () => {
+  const field: ScannedField = {
+    fieldId: '_systemfield_location',
+    name: '_systemfield_location',
+    type: 'select',
+    label: 'Location',
+    isRequired: true,
+  };
+  const resolved: ResolvedField = {
+    fieldId: '_systemfield_location',
+    name: '_systemfield_location',
+    type: 'select',
+    label: 'Location',
+    value: 'Phoenix, Arizona, United States',
+    source: 'supabase',
+    resolvedByTier: 1,
+    confidence: 1,
+    isRequired: true,
+  };
+  const aligned = alignResolvedChoice(field, resolved);
+  assert.equal(aligned.value, 'Phoenix, Arizona, United States');
+  assert.equal(aligned.source, 'supabase');
 });

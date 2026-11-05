@@ -194,6 +194,12 @@ export function alignResolvedChoice(
   }
   if (field.type === 'checkbox') return baseWithOptions;
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
+
+  // System fields with no scanned options (e.g. Ashby _systemfield_location autocomplete select)
+  if (field.fieldId?.startsWith('_systemfield_') && (!options || options.length === 0)) {
+    return baseWithOptions;
+  }
+
   if (field.optionsComplete === false) {
     if (isSchoolField(field)) {
       return { ...baseWithOptions, ...(field.options ? { options: field.options } : {}) };
@@ -580,6 +586,9 @@ export class AnswerResolver {
     }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
+    const ashbySystem = resolveAshbySystemField(field, profile, isRequired);
+    if (ashbySystem) return ashbySystem;
+
     const preTier = resolvePreTierField(field, profile, isRequired);
     if (preTier) return preTier;
 
@@ -768,6 +777,9 @@ export class AnswerResolver {
       return this.unresolvedField(field);
     }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
+
+    const ashbySystem = resolveAshbySystemField(field, profile, isRequired);
+    if (ashbySystem) return ashbySystem;
 
     const preTier = resolvePreTierField(field, profile, isRequired);
     if (preTier) return preTier;
