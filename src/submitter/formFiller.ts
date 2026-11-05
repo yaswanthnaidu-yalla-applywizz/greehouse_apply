@@ -1045,12 +1045,13 @@ async function debugSponsorshipComboboxSequence(page: Page, answerText: string):
   await target.click({ timeout: 3000 }).catch((e) => {
     log.debug(`[Sponsorship DEBUG] click failed: ${e.message}`);
   });
-  await target.pressSequentially(answerText, { delay: 40 }).catch((e) => {
+  const binaryIntent = /^no\b/i.test(answerText.trim()) ? 'No' : 'Yes';
+  await target.pressSequentially(binaryIntent, { delay: 40 }).catch((e) => {
     log.debug(`[Sponsorship DEBUG] type failed: ${e.message}`);
   });
 
   const option = page
-    .locator('[role="option"]', { hasText: new RegExp(`^${answerText}\\b`, 'i') })
+    .locator('[role="option"]', { hasText: new RegExp(`^${binaryIntent}\\b`, 'i') })
     .first();
   try {
     await option.waitFor({ state: 'visible', timeout: 4000 });
@@ -1692,8 +1693,13 @@ export async function fillSingleField(
           const isEeoField = isDemographicOrEeoField(fieldId, name, label);
           const eeoFallback = isEeoField && field.options ? resolveEeoFallbackOption(field.options) : null;
           const isSchool = /school/i.test(`${fieldId} ${name} ${label}`);
+          const sponsorshipIntent = isSponsorship
+            ? (/^no\b/i.test(selectValue.trim()) ? 'No' : 'Yes')
+            : null;
           const selectAttempts = isReferralSource
             ? referralOptionValues
+            : isSponsorship
+            ? [sponsorshipIntent!, selectValue]
             : (selectValue ? [selectValue] : (eeoFallback ? [eeoFallback] : [selectValue]));
           if (isEeoField && eeoFallback && selectValue && !selectAttempts.includes(eeoFallback)) {
             selectAttempts.push(eeoFallback);
