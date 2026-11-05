@@ -1737,11 +1737,11 @@ export async function fillSingleField(
           if (isEeoField && eeoFallback && selectValue && !selectAttempts.includes(eeoFallback)) {
             selectAttempts.push(eeoFallback);
           }
-          const countryMatcher: OptionTextMatcher = (optText) =>
+          const matchesPhoneCountry = (optText: string): boolean =>
             new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
           if (
             isCountryCode &&
-            countryMatcher((await found.locator.getAttribute('aria-label').catch(() => '')) || '') &&
+            matchesPhoneCountry((await found.locator.getAttribute('aria-label').catch(() => '')) || '') &&
             (await hiddenRequiredInputDisplaysAnswer(found.locator, targetDialCode, exactOptionTextMatch))
           ) {
             fillResult.success = true;
@@ -1756,7 +1756,7 @@ export async function fillSingleField(
               found.selector,
               isCountryCode ? targetCountryName : attempt,
               isCountryCode
-                ? countryMatcher
+                ? (optText) => matchesPhoneCountry(optText)
                 : isSponsorship || booleanValue || isReferralSource || isEeoField || isSchool
                 ? fuzzyOptionTextMatch
                 : exactOptionTextMatch
