@@ -652,6 +652,60 @@ async function run(): Promise<void> {
     'No - I do not consent to receiving text messages',
     'SMS consent labeled Phone resolves to No option'
   );
+
+  // Task 3: Common custom employer questions resolved via Tier 1 standard policies
+  const metaField = makeField({
+    label: 'Have you ever worked as a Meta contingent worker or vendor?',
+    type: 'select',
+    options: ['Yes', 'No'],
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', metaField, candidateProfile))?.value,
+    'No',
+    'Meta contractor history resolves to No'
+  );
+
+  const medicalField = makeField({
+    label: 'Do you require comprehensive medical benefit coverage?',
+    type: 'select',
+    options: ['Yes', 'No'],
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', medicalField, candidateProfile))?.value,
+    'Yes',
+    'Medical coverage question resolves to Yes'
+  );
+
+  const referencesField = makeField({
+    label: 'Please provide professional references upon request',
+    type: 'textarea',
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', referencesField, candidateProfile))?.value,
+    'N/A',
+    'Professional references resolves to N/A'
+  );
+
+  const referralPersonField = makeField({
+    label: 'Who referred you to this position?',
+    type: 'text',
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', referralPersonField, candidateProfile))?.value,
+    'N/A',
+    'Referral person resolves to N/A'
+  );
+
+  const interSystemsField = makeField({
+    label: 'Have you or an immediate family member ever been employed by InterSystems?',
+    type: 'select',
+    options: ['Yes', 'No'],
+  });
+  assertEqual(
+    (await resolveTier1('AWL-TEST', interSystemsField, candidateProfile))?.value,
+    'No',
+    'InterSystems history resolves to No'
+  );
 }
 
 run().catch((error: unknown) => {
