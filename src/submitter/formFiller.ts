@@ -487,24 +487,7 @@ async function comboboxDisplaysAnswer(
     if (single && matchOption(single, answerText)) return true;
   }
   const tagName = await control.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
-  if (tagName === 'INPUT') {
-    const inputVal = (await control.inputValue().catch(() => '')).trim();
-    const expanded = await control.getAttribute('aria-expanded').catch(() => null);
-    if (!inputVal || !matchOption(inputVal, answerText)) return false;
-    if (expanded !== 'true') return true;
-
-    // Some Greenhouse controls leave aria-expanded stale after committing a choice.
-    // A matching value with no visible menu options is still a committed selection.
-    const visibleOptions = control
-      .locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select_input-container")][1]')
-      .first()
-      .locator(CUSTOM_SELECT_OPTION_LOCATOR);
-    const optionCount = await visibleOptions.count().catch(() => 0);
-    for (let i = 0; i < optionCount; i++) {
-      if (await visibleOptions.nth(i).isVisible().catch(() => false)) return false;
-    }
-    return true;
-  }
+  if (tagName === 'INPUT') return false;
   const controlText = (await control.innerText().catch(() => '')).trim();
   return Boolean(controlText && matchOption(controlText, answerText));
 }
@@ -514,19 +497,37 @@ async function hiddenRequiredInputDisplaysAnswer(
   answerText: string,
   matchOption: OptionTextMatcher
 ): Promise<boolean> {
-  const shell = control
-    .locator(
-      'xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select_input-container") or contains(@class,"field-wrapper") or contains(@class,"remix-css-")][1]'
-    )
+  let shell = control
+    .locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"field-wrapper")][1]')
     .first();
+  if ((await shell.count().catch(() => 0)) === 0) {
+    shell = control.locator('xpath=ancestor::*[contains(@class,"remix-css-")][1]').first();
+  }
+  if ((await shell.count().catch(() => 0)) === 0) {
+    shell = control.locator('xpath=ancestor::*[contains(@class,"select_input-container")][1]').first();
+  }
   if ((await shell.count().catch(() => 0)) === 0) return false;
 
-  const requiredInputs = shell.locator(
-    'input.requiredInput, input[class*="requiredInput"], input[type="hidden"][required], input[type="hidden"][name*="required" i]'
-  );
-  const count = await requiredInputs.count().catch(() => 0);
-  for (let index = 0; index < count; index += 1) {
-    const value = (await requiredInputs.nth(index).inputValue().catch(() => '')).trim();
+  const associatedValues = await shell.locator('input').evaluateAll((inputs) =>
+    inputs
+      .filter((input) => input.type === 'hidden' || input.classList.contains('requiredInput'))
+      .map((input) => (input as HTMLInputElement).value.trim())
+  ).catch(() => []);
+  const values = [...associatedValues];
+  if (values.length === 0) {
+    const controlId = await control.getAttribute('id').catch(() => null);
+    const controlName = await control.getAttribute('name').catch(() => null);
+    const inferredName = controlId?.replace(/_input$/, '');
+    const form = control.locator('xpath=ancestor::form[1]').first();
+    if ((await form.count().catch(() => 0)) > 0 && (controlName || inferredName)) {
+      values.push(...await form.locator('input[type="hidden"]').evaluateAll((inputs, names) =>
+        inputs
+          .filter((input) => names.includes((input as HTMLInputElement).name))
+          .map((input) => (input as HTMLInputElement).value.trim()),
+      [controlName, inferredName].filter((name): name is string => Boolean(name))).catch(() => []));
+    }
+  }
+  for (const value of values) {
     if (value && (matchOption(value, answerText) || choiceOptionTextMatches(value, answerText))) return true;
   }
   return false;
@@ -695,6 +696,7 @@ async function fillInteractiveSelectDropdown(
     }
   }
 
+  let verified = false;
   if (clicked) {
     if (searchInput) {
       await searchInput.evaluate((input: HTMLInputElement) => {
@@ -705,7 +707,7 @@ async function fillInteractiveSelectDropdown(
     await searchInput?.blur().catch(() => {});
     await page.waitForTimeout(250);
     const committedMatch = choiceOptionTextMatches;
-    const verified =
+    verified =
       (await comboboxDisplaysAnswer(searchInput || control, answerText, committedMatch)) ||
       (await hiddenRequiredInputDisplaysAnswer(searchInput || control, answerText, committedMatch));
     if (!verified && retryCount === 0) {
@@ -718,7 +720,7 @@ async function fillInteractiveSelectDropdown(
     await searchInput?.blur().catch(() => {});
   }
 
-  return clicked;
+  return verified;
 }
 
 async function fillSearchableSelectInput(
@@ -1322,6 +1324,7 @@ export async function fillSingleField(
     success: false,
     domCommitted: false,
   };
+  let controlCommitmentVerified = false;
   if (skipOptional) {
     fillResult.success = true;
     return fillResult;
@@ -1786,6 +1789,8 @@ export async function fillSingleField(
 
           if (selected) {
             fillResult.success = true;
+            fillResult.domCommitted = true;
+            controlCommitmentVerified = true;
             if (isCountryCode) {
               log.info(
                 `[Submitter] Country code field → selector: ${found.selector} → attempted value: ${val || targetDialCode} → result: filled`
@@ -2334,6 +2339,8 @@ export async function fillSingleField(
             exactOptionTextMatch,
             0
           );
+          fillResult.domCommitted = fillResult.success;
+          controlCommitmentVerified = true;
         } else {
           // Standard text input
           await found.locator.scrollIntoViewIfNeeded().catch(() => {});
@@ -2498,7 +2505,9 @@ export async function fillSingleField(
     }
   }
 
-  fillResult.domCommitted = fillResult.success && !fillResult.skippedRequired;
+  if (!controlCommitmentVerified) {
+    fillResult.domCommitted = fillResult.success && !fillResult.skippedRequired;
+  }
   return fillResult;
 }
 
