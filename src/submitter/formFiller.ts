@@ -220,6 +220,31 @@ async function isResolvedFieldVisible(page: Page, field: ResolvedField): Promise
   return false;
 }
 
+export function getExactControlSelectors(
+  field: Pick<ResolvedField, 'fieldId' | 'name' | 'metadata'>
+): string[] {
+  const fieldId = field.fieldId || '';
+  const name = field.name || '';
+  return [
+    sanitizeMetadataSelector(field.metadata?.selector),
+    fieldId ? `[id="${escapeAttr(fieldId)}"]` : '',
+    name ? `[name="${escapeAttr(name)}"]` : '',
+    fieldId && !/^\d+$/.test(fieldId) ? `[id*="${escapeAttr(fieldId)}"]` : '',
+    name && !/^\d+$/.test(name) ? `[name*="${escapeAttr(name)}"]` : '',
+  ].filter(Boolean);
+}
+
+export function getSelectValue(field: ResolvedField, rawValue: string): string {
+  if (field.options?.some((option) => option === rawValue)) return rawValue;
+  return normalizeBooleanValue(rawValue) || rawValue;
+}
+
+function isPhoneCountryControl(field: ResolvedField, label: string, name: string, fieldId: string): boolean {
+  const context = `${fieldId} ${name} ${label} ${field.metadata?.section || ''}`;
+  const hasDialCodeChoices = (field.options || []).some((option) => /\+\d{1,4}\b/.test(option));
+  return /phone|mobile|calling|dial(?:ing)?\s*code/i.test(context) && hasDialCodeChoices;
+}
+
 const CUSTOM_SELECT_OPTION_LOCATOR =
   '.select__option:not(.iti__country), [id*="-option"]:not(.iti__country), [role="option"]:not(.iti__country), .select2-results__option:not(.iti__country), [role="listbox"] [role="option"]:not(.iti__country), [class*="menu"] [role="option"]:not(.iti__country)';
 
@@ -614,8 +639,7 @@ async function fillInteractiveSelectDropdown(
       await searchInput.click({ force: true }).catch(() => {});
     }
     await searchInput.fill('').catch(() => {});
-    const textToType = normalizeForCombobox(answerText);
-    await searchInput.pressSequentially(textToType, { delay: 35 });
+    await searchInput.pressSequentially(answerText, { delay: 35 });
     await page.waitForTimeout(500);
   } else {
     await openTrigger.click({ force: true }).catch(() => {});
@@ -653,6 +677,15 @@ async function fillInteractiveSelectDropdown(
   }
   if (!clicked && matchOption !== exactOptionTextMatch) {
     clicked = await clickDropdownOptionByMatch(page, answerText, matchOption, optionScope);
+  }
+  if (!clicked && searchInput) {
+    const normalizedAnswer = normalizeForCombobox(answerText);
+    if (normalizedAnswer !== answerText) {
+      await searchInput.fill('').catch(() => {});
+      await searchInput.pressSequentially(normalizedAnswer, { delay: 35 });
+      await page.waitForTimeout(350);
+      clicked = await clickDropdownOptionMultiStage(page, answerText, optionScope);
+    }
   }
 
   if (clicked) {
@@ -1216,7 +1249,7 @@ export async function fillSingleField(
   const fieldId = field.fieldId || field.name || '';
   const label = field.label || name;
   const metaSelector = sanitizeMetadataSelector((field as any).metadata?.selector);
-  const isCountryCode = isCountryCodeField(fieldId, name, label);
+  const isCountryCode = isPhoneCountryControl(field, label, name, fieldId);
   const isSponsorship = isSponsorshipQuestion(fieldId, name, label);
   const isWorkAuthRelocation =
     !isSponsorship &&
@@ -1429,17 +1462,18 @@ export async function fillSingleField(
       // ==========================================
       // Select Dropdown (Native, Select2, React-Select)
       // ==========================================
-      const booleanValue = normalizeBooleanValue(val);
-      let selectValue = booleanValue || val;
+      let selectValue = getSelectValue(field, val);
+      const booleanValue = normalizeBooleanValue(selectValue);
 
       // Special resolution for country code dropdown (phone country) - strictly +1 (United States)
       const phoneCountry = resolvePhoneCountrySelection(options.phoneCountry, options.phoneCountryCode);
       let targetCountryName = phoneCountry.country;
       let targetDialCode = phoneCountry.dialCode;
-      if (isCountryCode) {
+      const exactCapturedChoice = field.options?.some((option) => option === val) ?? false;
+      if (isCountryCode && !exactCapturedChoice) {
         selectValue = targetCountryName;
       }
-      const selectOptionValues = isCountryCode ? [targetCountryName] : optionValues;
+      const selectOptionValues = isCountryCode && !exactCapturedChoice ? [targetCountryName] : optionValues;
 
       // Check for sponsorship question rendered as radio buttons in the DOM
       if (isSponsorship) {
@@ -1589,7 +1623,7 @@ export async function fillSingleField(
       }
 
       const selectSelectors = [
-        metaSelector,
+        ...getExactControlSelectors(field),
         ...(isCountryCode ? [
           '#country',
           'input#country',
@@ -1602,18 +1636,13 @@ export async function fillSingleField(
           'select[name*="country_code"]',
           '[data-testid="country-dropdown"]',
         ] : []),
-        `select#${escapeId(name)}`,
-        `select#${escapeId(fieldId)}`,
-        `select#${escapeId(name.replace(/_/g, '-'))}`,
-        `select#${escapeId(fieldId.replace(/_/g, '-'))}`,
-        `#${escapeId(name)}`,
-        `#${escapeId(fieldId)}`,
-        `#${escapeId(name.replace(/_/g, '-'))}`,
-        `#${escapeId(fieldId.replace(/_/g, '-'))}`,
-        `select[name="${escapeAttr(name)}"]`,
-        `select[name="${escapeAttr(fieldId)}"]`,
-        `input[id*="${escapeAttr(name)}"]`,
-        `input[id*="${escapeAttr(fieldId)}"]`,
+        ...[name, fieldId].filter((id) => id && !/^\d+$/.test(id)).flatMap((id) => [
+          `select#${escapeId(id)}`,
+          `select#${escapeId(id.replace(/_/g, '-'))}`,
+          `#${escapeId(id)}`,
+          `#${escapeId(id.replace(/_/g, '-'))}`,
+          `input[id*="${escapeAttr(id)}"]`,
+        ]),
       ].filter(Boolean);
 
       if (isSponsorship) {
@@ -1700,6 +1729,15 @@ export async function fillSingleField(
           }
           const countryMatcher: OptionTextMatcher = (optText) =>
             new RegExp(`(?:${targetCountryName}|\\${targetDialCode})`, 'i').test(optText);
+          if (
+            isCountryCode &&
+            countryMatcher((await found.locator.getAttribute('aria-label').catch(() => '')) || '') &&
+            (await hiddenRequiredInputDisplaysAnswer(found.locator, targetDialCode, exactOptionTextMatch))
+          ) {
+            fillResult.success = true;
+            fillResult.domCommitted = true;
+            return fillResult;
+          }
           let selected = false;
           for (const attempt of selectAttempts) {
             selected = await fillSearchableSelectInput(

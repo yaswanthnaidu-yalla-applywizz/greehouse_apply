@@ -345,6 +345,7 @@ async function runSearchableSelectTests(): Promise<void> {
         type: 'select',
         label: 'Country',
         value: 'United States',
+        options: ['United States (+1)'],
         isRequired: true,
         metadata: { selector: '#country', section: 'Phone' },
         source: 'profile',
