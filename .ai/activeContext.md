@@ -1,3 +1,33 @@
+# Current Session Update (2026-11-07 - FADA Resolver Fixes from FADA Report - COMPLETED)
+
+- **Committed `7246a60`** — 4 surgical code fixes + 2 test file additions (43 tests, all pass):
+
+  1. **`corporatePolicies.ts` sponsorship inversion fix (CRITICAL)**: Replaced unanchored `|employed by` alternation with explicit past-tense verb forms (`have you been employed by`, `were you employed by`, `check if you have previously been employed by`). The bare `employed by` alternation was matching sponsorship questions containing "to be employed by [Company]", forcing them to "No" via the prior-employment corporate policy. 18 known incorrect answers traced to this bug (all SPONSORSHIP_INVERSION in the FADA report).
+
+  2. **`tier1Supabase.ts` same fix**: The parallel `employed by\b` pattern in `resolveStandardProfileAttribute` had the same inversion bug. Fixed identically.
+
+  3. **`answerResolver.ts` onsite willingness expansion**: Expanded `isOnsiteWillingness` regex to cover 84 AI fallback patterns observed in production: "work from our office in [City]", "in-office expectation", "office-first", "N days per week", "comfortable with this schedule", "hybrid arrangement/model", "able to commute/report", "on-site presence/attendance". Collapsed duplicate action block to use the computed boolean. These 84 questions now resolve deterministically at Tier 1 instead of falling to AI.
+
+  4. **`ashbyProxy.ts` preflight probe fallback**: Added fallback probe URL list (`api64.ipify.org?format=json`, `ipapi.co/json/`) tried on HTTP 400 specifically (proxy gateway rejects query-string params). Previously 48 Ashby submissions failed because the preflight returned 400 and was surfaced as a hard failure. Other non-200 statuses still surface immediately.
+
+- **Test coverage**: Added sponsorship non-match regression guard to `corporatePolicies.test.ts`. Added 4 new production-pattern cases to `agreementsAndOnsiteRules.test.ts` (iCapital Union Square, in-office expectation, 3x-per-week hybrid, office-first culture). All 43 tests pass.
+
+- **Pre-existing failures confirmed unchanged**: `resolverWaterfall.test.ts` Tier 3 fuzzy match failures (4 of 19) are pre-existing and unrelated to these changes (confirmed via git stash baseline comparison).
+
+- **Remaining FADA report items (not yet implemented)**:
+  - Fix 5: Greenhouse education/demographic dropdown commitment (14 failures — `School *`, `Degree *` left on placeholder; needs `formFiller.ts` read + test coverage read first).
+  - Fix 6: Location autocomplete blanking on 0 results for concatenated city names like `Saintpaul` (7 failures).
+  - Fix 7: Visa sponsorship temporary-auth Tier 1 resolution for the remaining 36 AI fallbacks (inspect `tier1Supabase.ts` sponsorship section to find why some fall through).
+
+# Current Session Update (2026-11-07 - FADA Production Diagnostics Skill Built - COMPLETED)
+
+- Built and verified project-specific skill **FADA** (`.agents/skills/fada/SKILL.md`) and automated engine (`.agents/skills/fada/scripts/fada-engine.ts`):
+  - **Triggers**: `fada` (full diagnostic audit), `fada-filter` (unresolved and AI field fallback diagnosis against original CSV and Tiers 1-4), and `fada-failed` (100% failure screenshot download and visual ground truth inspection).
+  - **Parameter Protocol**: Always prompts for time range / date if not specified; prompts for original CSV path when running filter diagnostics.
+  - **Filter Track**: Evaluates `FILTERED_OUT` and `READY_FOR_REVIEW` applications in DB 2, aggregates top unresolved and AI-resolved fields, and checks why candidate profile facts, resume cache, and deterministic policies were bypassed in favor of Tier 5.
+  - **Failed Track**: Queries DB 2, downloads 100% of failure screenshots to `.ai/diagnostics/failed_screenshots/<date>/`, generates `manifest.json`, and guides agent visual inspection via `read_file` to determine true failure root causes.
+  - Verified live execution against DB 2 via `npx tsx .agents/skills/fada/scripts/fada-engine.ts`.
+
 # Current Session Update (2026-11-05 - Typed Deterministic Resolution Shipped - COMPLETED)
 
 - **Shipped Full 9-Task Typed Deterministic Resolution Pipeline**:
