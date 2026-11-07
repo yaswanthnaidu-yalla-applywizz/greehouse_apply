@@ -353,7 +353,10 @@ export async function verifyProxyPreflight(
   options: { timeoutMs?: number; endpointUrl?: string } = {}
 ): Promise<ProxyPreflightResult> {
   const timeoutMs = options.timeoutMs ?? 3000;
-  const endpointUrl = options.endpointUrl || 'https://api.ipify.org?format=json';
+  const primaryUrl = options.endpointUrl || 'https://api.ipify.org?format=json';
+  // Fallback probe URLs tried on HTTP 400 from the primary (proxy gateway rejection of query params).
+  const fallbackUrls = ['https://api64.ipify.org?format=json', 'https://ipapi.co/json/'];
+  const probeUrls = [primaryUrl, ...fallbackUrls.filter((u) => u !== primaryUrl)];
 
   let timer: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -364,38 +367,47 @@ export async function verifyProxyPreflight(
 
   try {
     const probePromise = (async (): Promise<ProxyPreflightResult> => {
-      const response = await page.request.get(endpointUrl, { timeout: timeoutMs });
-      if (!response.ok() || response.status() !== 200) {
-        throw new Error(`Preflight probe failed with HTTP status ${response.status()}`);
-      }
-      const data = await response.json();
-      const ip = data?.ip || data?.query;
-      if (!ip || typeof ip !== 'string') {
-        throw new Error('Preflight probe did not return a valid IP');
-      }
-
-      if (expectedCountryCode) {
-        const respCountry = (data?.country || data?.country_code || data?.countryCode || '')
-          ?.toString()
-          .trim()
-          .toLowerCase();
-        if (respCountry && respCountry !== expectedCountryCode.trim().toLowerCase()) {
-          throw new Error(
-            `Proxy exit country mismatch: expected ${expectedCountryCode}, got ${respCountry}`
-          );
+      let lastStatus = 0;
+      for (const url of probeUrls) {
+        const response = await page.request.get(url, { timeout: timeoutMs });
+        lastStatus = response.status();
+        // Only retry on HTTP 400 (proxy gateway rejection) — other errors surface immediately.
+        if (!response.ok() || lastStatus !== 200) {
+          if (lastStatus === 400 && url !== probeUrls[probeUrls.length - 1]) {
+            continue;
+          }
+          throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
         }
+        const data = await response.json();
+        const ip = data?.ip || data?.query;
+        if (!ip || typeof ip !== 'string') {
+          throw new Error('Preflight probe did not return a valid IP');
+        }
+
+        if (expectedCountryCode) {
+          const respCountry = (data?.country || data?.country_code || data?.countryCode || '')
+            ?.toString()
+            .trim()
+            .toLowerCase();
+          if (respCountry && respCountry !== expectedCountryCode.trim().toLowerCase()) {
+            throw new Error(
+              `Proxy exit country mismatch: expected ${expectedCountryCode}, got ${respCountry}`
+            );
+          }
+        }
+
+        const exitIpHash = crypto
+          .createHash('sha256')
+          .update(ip.trim())
+          .digest('hex')
+          .slice(0, 12);
+
+        return {
+          success: true,
+          exitIpHash,
+        };
       }
-
-      const exitIpHash = crypto
-        .createHash('sha256')
-        .update(ip.trim())
-        .digest('hex')
-        .slice(0, 12);
-
-      return {
-        success: true,
-        exitIpHash,
-      };
+      throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
     })();
 
     return await Promise.race([probePromise, timeoutPromise]);

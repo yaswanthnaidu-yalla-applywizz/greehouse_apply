@@ -478,8 +478,10 @@ export function resolveStandardProfileAttribute(
   }
 
   // Prior Employment / Former Employee / Previous Interview History (Always "No")
+  // "employed by\b" is replaced with past-tense anchored variants to avoid matching
+  // sponsorship questions like "to be employed by [Company]".
   if (
-    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name|interviewed.*(?:before|prior|in the past|past \d+)|history with\b|employed by\b)/i.test(
+    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name|interviewed.*(?:before|prior|in the past|past \d+)|history with\b|\b(?:have you (?:been|ever been|previously been) employed by|were you (?:ever )?employed by|check if you have previously been employed by)\b)/i.test(
       combined
     )
   ) {

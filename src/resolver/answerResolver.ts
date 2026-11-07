@@ -276,9 +276,14 @@ export function resolvePreTierField(
     if (noOption) return { ...base, value: noOption };
   }
 
-  const isOnsiteWillingness = /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
-    field.label
-  );
+  const isOnsiteWillingness =
+    /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
+      field.label
+    ) ||
+    // Additional office/hybrid attendance patterns observed in production (84 AI fallbacks)
+    /\b(?:work from (?:our|the) office|in-office expectation|office-first|able to (?:work|be) (?:in|at) (?:our|the) office|comfortable with this schedule|confirm you are able to work|office presence|days? (?:in-?office|on-?site) (?:per week|a week|each week)|times? per week (?:in|at) (?:the|our) office|hybrid (?:schedule|arrangement|model|policy)|able to commute|able to report|report to (?:the|our) office|on-?site (?:presence|attendance|requirement)|working from (?:the|our) office)\b/i.test(
+      field.label
+    );
 
   if (!isOnsiteWillingness && /^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
 
@@ -314,11 +319,7 @@ export function resolvePreTierField(
   }
 
   // Onsite / In-person / Office Willingness (Always affirmative / Yes)
-  if (
-    /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
-      field.label
-    )
-  ) {
+  if (isOnsiteWillingness) {
     if (field.type === 'checkbox') return { ...base, value: 'true' };
     const finalVal = alignResolvedChoiceOrNull(field, 'Yes');
     if (!finalVal) return null;

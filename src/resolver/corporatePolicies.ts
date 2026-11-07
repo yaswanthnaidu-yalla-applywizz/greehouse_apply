@@ -3,7 +3,7 @@ import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 export const CORPORATE_POLICY_PROMPT_GUIDELINES = `
 CORPORATE POLICIES & MANDATORY ANSWER GUIDELINES:
-1. Prior Interview & Employment History: If the question asks if the candidate previously worked at, was employed by, or interviewed with the hiring company in the past, always answer No (or choose the negative option).
+1. Prior Interview & Employment History: If the question asks if the candidate previously worked at, was previously employed by, or has interviewed with the hiring company in the past, always answer No (or choose the negative option).
 2. Mandatory Agreements & Policies: For terms & conditions, arbitration agreements, privacy policies, AI usage/application policies, or declarations, always agree/accept (choose the affirmative option, e.g. "I agree", "Yes", or true).
 3. Communication & Messaging Consent: If asked for consent to receive text messages, SMS, or WhatsApp communications regarding the application, always decline (answer No, or false).
 4. Job Source / Referral: When asked how the candidate heard about this opportunity or role, select the option containing "LinkedIn" if available (fallback to "Job Board" or "Career site"), or return "LinkedIn" for free text.
@@ -19,8 +19,10 @@ export function matchCorporatePolicy(field: ScannedField): string | null {
   const combined = `${name} ${label}`.trim();
 
   // 1. Prior Interview & Employment History -> Always "No"
+  // "employed by" is restricted to past-tense phrasings to avoid matching sponsorship questions
+  // like "to be employed by [Company]" which contain the same substring.
   if (
-    /\b(?:interviewed|interviewing)\b.*(?:before|prior|in the past|past \d+|previously|with us|at this company)|history with.*(?:company|organization|firm)|previously (?:employed|worked)|former employee|past employment with|employed by/i.test(
+    /\b(?:interviewed|interviewing)\b.*(?:before|prior|in the past|past \d+|previously|with us|at this company)|history with.*(?:company|organization|firm)|previously (?:employed|worked)|former employee|past employment with|\b(?:have you (?:been|ever been|previously been) employed by|were you (?:ever )?employed by|check if you have previously been employed by)\b/i.test(
       combined
     )
   ) {
