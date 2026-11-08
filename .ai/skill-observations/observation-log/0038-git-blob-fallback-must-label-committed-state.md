@@ -1,7 +1,7 @@
 ---
 id: 38
 title: "Git-blob fallback must label committed-state evidence"
-status: open
+status: actioned
 type: open-source
 skill: [how, why, architect, blast-radius]
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "source acquisition when filesystem ACLs block tracked files"
 date: 2026-10-29
 session_context: "Grounding a safe decomposition design for large TypeScript modules on Windows"
 parked_until: ""
-resolved:
-resolution: ""
+resolved: 2026-11-08
+resolution: "Codified as Principle 11 in .ai/skill-observations/cross-cutting-principles.md requiring explicit labelling of git-blob fallback evidence as committed-state only."
 reference: ".ai/architecture/god-file-decomposition/design.md"
 ---
 

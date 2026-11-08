@@ -6,6 +6,7 @@ import { getDbClient, isSupabaseConfigured } from './client.js';
 import { getProfile, type ProfileRow } from './profiles.js';
 import { createLogger } from '../utils/logger.js';
 import { OperatorErrors } from '../operator/operatorErrorMessages.js';
+import { chunkArray } from '../utils/chunk.js';
 
 const log = createLogger('Zoho Connected');
 
@@ -35,18 +36,26 @@ export async function fetchZohoConnectedApplywizzIdSet(applywizzIds: string[]): 
 
   try {
     const supabase = getDbClient();
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('applywizz_id')
-      .eq('zoho_connected', true)
-      .in('applywizz_id', unique);
+    const result = new Set<string>();
 
-    if (error) {
-      log.warn(`[Zoho Connected] ⚠️ Could not load connected profiles: ${error.message}`);
-      return new Set();
+    for (const chunk of chunkArray(unique, 100)) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('applywizz_id')
+        .eq('zoho_connected', true)
+        .in('applywizz_id', chunk);
+
+      if (error) {
+        log.warn(`[Zoho Connected] ⚠️ Could not load connected profiles: ${error.message}`);
+        return new Set();
+      }
+
+      for (const row of data || []) {
+        result.add(String(row.applywizz_id).trim().toUpperCase());
+      }
     }
 
-    return new Set((data || []).map((row) => String(row.applywizz_id).trim().toUpperCase()));
+    return result;
   } catch (err: any) {
     log.warn(`[Zoho Connected] ⚠️ fetchZohoConnectedApplywizzIdSet failed: ${err.message}`);
     return new Set();

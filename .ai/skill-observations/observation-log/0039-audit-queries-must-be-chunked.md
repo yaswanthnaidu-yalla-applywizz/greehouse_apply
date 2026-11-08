@@ -1,7 +1,9 @@
 ---
 title: "Audit queries must chunk large membership filters"
 date: 2026-10-30
-status: open
+status: actioned
+resolved: 2026-11-08
+resolution: "Standardized chunkArray utility in src/utils/chunk.ts and documented/verified chunked query execution pattern for PostgREST .in() filters to prevent URI length overflows."
 skill: "systematic-debugging"
 proposes_skill: ""
 type: internal

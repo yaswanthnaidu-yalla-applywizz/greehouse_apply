@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, getDbClient } from '../src/db/client.js';
+import { chunkArray } from '../src/utils/chunk.js';
 
 export type ChoiceMetadataAuditInput = {
   label: string;
@@ -64,8 +65,7 @@ export async function auditChoiceMetadata(): Promise<Array<Record<string, unknow
   const rows = (applications || []) as ApplicationRow[];
   const jobUrls = [...new Set(rows.map((row) => row.job_url).filter(Boolean))];
   const templates: TemplateRow[] = [];
-  for (let offset = 0; offset < jobUrls.length; offset += 100) {
-    const chunk = jobUrls.slice(offset, offset + 100);
+  for (const chunk of chunkArray(jobUrls, 100)) {
     const { data, error } = await getDbClient()
       .from('gh_scanned_job_templates')
       .select('job_url, fields_schema')
