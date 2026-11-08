@@ -1,3 +1,7 @@
+# Current Session Update (2026-11-07 - Resolver Answer Accuracy Plan)
+
+- Implemented four resolver accuracy fixes locally: removed invented Ashby US location; moved unsupported candidate-specific defaults after candidate evidence; preserved blank optional fields through policy post-processing; and added compatible semantic QA selection with question-label provenance. Migration `047_semantic_qa_question_provenance.sql` is prepared but not applied to production. No production rows were re-resolved or submitted. Plan: `docs/superpowers/plans/2026-11-07-resolver-answer-accuracy.md`.
+
 # Current Session Update (2026-11-07 - FADA Resolver Fixes from FADA Report - COMPLETED)
 
 - **Committed `7246a60`** — 4 surgical code fixes + 2 test file additions (43 tests, all pass):
