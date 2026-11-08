@@ -86,6 +86,20 @@ describe('Corporate Policies Module', () => {
       };
       expect(matchCorporatePolicy(field)).toBeNull();
     });
+
+    it('does NOT match sponsorship questions containing "to be employed by" (regression guard)', () => {
+      // This phrasing previously triggered the prior-employment policy incorrectly.
+      const field: ScannedField = {
+        fieldId: 'q_sponsorship_latitude',
+        name: 'q_sponsorship_latitude',
+        type: 'radio',
+        label: 'Will you now, or in the future, require sponsorship to continue to be authorized under U.S. immigration law to be employed by Latitude AI?',
+        options: ['Yes', 'No'],
+        isRequired: true,
+      };
+      // Must return null so the sponsorship tier handles it, not the prior-employment policy.
+      expect(matchCorporatePolicy(field)).toBeNull();
+    });
   });
 
   describe('enforceCorporatePolicy (Post-Tier Clamping)', () => {

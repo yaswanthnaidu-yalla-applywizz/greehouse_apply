@@ -276,9 +276,14 @@ export function resolvePreTierField(
     if (noOption) return { ...base, value: noOption };
   }
 
-  const isOnsiteWillingness = /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
-    field.label
-  );
+  const isOnsiteWillingness =
+    /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
+      field.label
+    ) ||
+    // Additional office/hybrid attendance patterns observed in production (84 AI fallbacks)
+    /\b(?:work from (?:our|the) office|in-office expectation|office-first|able to (?:work|be) (?:in|at) (?:our|the) office|comfortable with this schedule|confirm you are able to work|office presence|days? (?:in-?office|on-?site) (?:per week|a week|each week)|times? per week (?:in|at) (?:the|our) office|hybrid (?:schedule|arrangement|model|policy)|able to commute|able to report|report to (?:the|our) office|on-?site (?:presence|attendance|requirement)|working from (?:the|our) office)\b/i.test(
+      field.label
+    );
 
   if (!isOnsiteWillingness && /^(do you|have you|are you)\b/i.test(field.label.trim())) return null;
 
@@ -314,11 +319,7 @@ export function resolvePreTierField(
   }
 
   // Onsite / In-person / Office Willingness (Always affirmative / Yes)
-  if (
-    /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
-      field.label
-    )
-  ) {
+  if (isOnsiteWillingness) {
     if (field.type === 'checkbox') return { ...base, value: 'true' };
     const finalVal = alignResolvedChoiceOrNull(field, 'Yes');
     if (!finalVal) return null;
@@ -418,7 +419,7 @@ export function resolveAshbySystemField(
   } else if (fieldId === '_systemfield_phone') {
     value = profile?.phone || null;
   } else if (fieldId === '_systemfield_location') {
-    value = profile?.location || profile?.country || 'United States';
+    value = profile?.location || profile?.country || null;
   } else if (fieldId === '_systemfield_resume') {
     return {
       fieldId: field.fieldId,
@@ -736,6 +737,18 @@ export class AnswerResolver {
           };
         }
       }
+    }
+
+    const policy = resolveDeterministicPolicy(field, field.intent || classifyFieldIntent(field), profile, jobContext);
+    if (policy && new Set([
+      'policy_deadline_none', 'policy_meta_history_no', 'policy_medical_coverage_yes',
+      'policy_references_na', 'policy_referral_name_na', 'policy_intersystems_history_no',
+    ]).has(policy.policyId)) {
+      return {
+        fieldId: field.fieldId, name: field.name, type: field.type, label: field.label,
+        value: policy.value, source: 'policy', resolvedByTier: 1,
+        confidence: policy.confidence, isRequired, provenance: policy.provenance,
+      };
     }
 
     // ------------------------------------------------------------------------
@@ -1100,7 +1113,7 @@ export class AnswerResolver {
       const field = fields[i];
       let resolved = resolvedFields[i];
       if (resolved) {
-        resolved = enforceCorporatePolicy(field, resolved);
+        if (resolved.isRequired || isAttachmentObligation(field)) resolved = enforceCorporatePolicy(field, resolved);
         if (field.metadata) resolved.metadata = { ...field.metadata, ...resolved.metadata };
         if (field.options) resolved.options = field.options;
         if (field.optionsComplete !== undefined) {
@@ -1213,7 +1226,7 @@ export class AnswerResolver {
       const field = template.fields[i];
       let resolved = resolvedFields[i];
       if (resolved) {
-        resolved = enforceCorporatePolicy(field, resolved);
+        if (resolved.isRequired || isAttachmentObligation(field)) resolved = enforceCorporatePolicy(field, resolved);
         if (field.metadata) resolved.metadata = { ...field.metadata, ...resolved.metadata };
         if (field.options) resolved.options = field.options;
         if (field.optionsComplete !== undefined) {

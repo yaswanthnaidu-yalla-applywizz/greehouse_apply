@@ -73,6 +73,15 @@ test('resolveAshbySystemField resolves _systemfield_location from profile.locati
   assert.equal(res?.resolvedByTier, 1);
 });
 
+test('resolveAshbySystemField does not invent a missing location', () => {
+  const field: ScannedField = {
+    fieldId: '_systemfield_location', name: '_systemfield_location',
+    type: 'select', label: 'Location', isRequired: true,
+  };
+  assert.equal(resolveAshbySystemField(field, {} as any, true), null);
+  assert.equal(resolveAshbySystemField(field, { country: 'Canada' } as any, true)?.value, 'Canada');
+});
+
 test('alignResolvedChoice preserves _systemfield_location select value when options are absent', () => {
   const field: ScannedField = {
     fieldId: '_systemfield_location',

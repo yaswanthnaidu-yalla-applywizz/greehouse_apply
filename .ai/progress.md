@@ -1,3 +1,18 @@
+### FADA Resolver Fixes from FADA Report (2026-11-07 Committed)
+- [x] **`corporatePolicies.ts` sponsorship inversion fix**: Replaced unanchored `|employed by` with past-tense anchored forms. 18 known incorrect answers eliminated. Regression guard added to `corporatePolicies.test.ts`.
+- [x] **`tier1Supabase.ts` same regex fix**: Parallel `employed by\b` pattern fixed in `resolveStandardProfileAttribute`.
+- [x] **`answerResolver.ts` onsite willingness expansion**: 84 AI fallback office/hybrid patterns now resolve at Tier 1. 4 new test cases in `agreementsAndOnsiteRules.test.ts`.
+- [x] **`ashbyProxy.ts` preflight probe fallback for HTTP 400**: Adds `api64.ipify.org` and `ipapi.co/json/` as fallback probe URLs on 400 from proxy gateway. 48 retryable Ashby failures now unblocked post-deploy.
+- Commit: `7246a60`
+
+### FADA Production Diagnostics Skill (2026-11-07 Complete)
+- [x] **Project-Specific FADA Skill (`.agents/skills/fada/SKILL.md`):** Complete workflow documentation and trigger specifications for `fada` (full diagnostic audit), `fada-filter` (unresolved and AI field fallback diagnosis against original CSV and Tiers 1-4), and `fada-failed` (100% failure screenshot download and visual ground truth inspection).
+- [x] **Automated Diagnostic Engine (`.agents/skills/fada/scripts/fada-engine.ts`):** High-performance CLI script connecting directly to DB 2 pooler. Features:
+  - IST/UTC date range parsing (`today`, `yesterday`, calendar dates, ISO bounds).
+  - Robust RFC-4180 CSV parsing and canonical URL matching with DB 2 applications.
+  - Deep resolver breakdown for `FILTERED_OUT` and `READY_FOR_REVIEW` applications: isolates unresolved vs AI-resolved fields and cross-references candidate profile facts, resume cache, and deterministic policies.
+  - 100% failure screenshot streaming download to `.ai/diagnostics/failed_screenshots/<date>/` with visual inspection manifest generation (`manifest.json`).
+
 ### Typed Deterministic Resolution & Pre-Tier-5 Policy Engine (2026-11-05 Complete)
 - [x] **Typed Intent & Execution Contracts (`src/types/index.ts`, `src/resolver/fieldIntent.ts`, `src/resolver/resolutionMode.ts`):** Defined `FieldClassification`, `FieldFamily`, `FieldIntent`, `JobPostingFacts`, `ResolutionProvenance`, `ResolutionExecution`, and `ResolutionDecision`. Verified in `tests/fieldIntent.test.ts`.
 - [x] **Ashby URL Canonicalization & Template Posting Facts (`src/scanner/atsDetector.ts`, `src/scanner/ashbyScanner.ts`, `src/scanner/playwrightScanner.ts`, `src/db/templates.ts`, `src/db/migrations/046_template_posting_facts.sql`):** Preserves URL query parameters across scanning and submission; persists ordered location posting facts in `gh_scanned_job_templates`. Verified in `tests/ashbyScanner.test.ts` and `tests/templatePostingFacts.test.ts`.
@@ -1198,3 +1213,7 @@ _Last updated: 2026-10-07_
 - **Confirmed Greenhouse scanner defect:** cascade exploration mislabels pre-existing fields as dependent on arbitrary test values because it does not diff against the pre-interaction visibility set. Treat current dependency metadata as untrusted until repaired.
 - **Confirmed resolver defect:** Tier 4 fuzzy matching can resolve a company field with `company email` ahead of a compatible QA-bank company answer. Add field-family/provenance gates before future policy expansion.
 - **Operator policy clarified, pending schema repair:** pronouns derive from gender (male -> he/him, female -> she/her); the proposed job-location rule applies only to intended workplace/location preferences, never the candidate's residence.
+
+### Resolver answer accuracy (2026-11-07 local implementation)
+
+- Local resolver fixes prevent invented Ashby US locations, let candidate evidence precede candidate-specific policy defaults, keep optional controls blank, and require labeled compatible QA matches in semantic search. Migration 047 is prepared but not applied to production. Production behavior remains unverified.

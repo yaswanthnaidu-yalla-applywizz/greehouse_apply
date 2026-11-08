@@ -72,4 +72,60 @@ describe('Agreements, AI Policy & Onsite Willingness Rules', () => {
     expect(res).not.toBeNull();
     expect(res?.value).toBe('Yes');
   });
+
+  it('resolves Yes for "work from our office in Union Square" (iCapital pattern)', () => {
+    const field: ScannedField = {
+      fieldId: 'q_icapital_office',
+      name: 'q_icapital_office',
+      type: 'select',
+      label: 'Will you be able to work from our office in Union Square, NYC?',
+      options: ['Yes', 'No'],
+      isRequired: true,
+    };
+    const res = resolvePreTierField(field, null, true);
+    expect(res).not.toBeNull();
+    expect(res?.value).toBe('Yes');
+  });
+
+  it('resolves Yes for "in-office expectation" schedule confirmation', () => {
+    const field: ScannedField = {
+      fieldId: 'q_inoffice_exp',
+      name: 'q_inoffice_exp',
+      type: 'select',
+      label: 'This role has a 5 days in-office expectation. Are you comfortable with this?',
+      options: ['Yes', 'No'],
+      isRequired: true,
+    };
+    const res = resolvePreTierField(field, null, true);
+    expect(res).not.toBeNull();
+    expect(res?.value).toBe('Yes');
+  });
+
+  it('resolves Yes for "3 times per week in the office" hybrid schedule', () => {
+    const field: ScannedField = {
+      fieldId: 'q_hybrid_3x',
+      name: 'q_hybrid_3x',
+      type: 'select',
+      label: 'Are you able to work from our NYC office (Three World Trade Center) 3 times per week in the office?',
+      options: ['Yes', 'No'],
+      isRequired: true,
+    };
+    const res = resolvePreTierField(field, null, true);
+    expect(res).not.toBeNull();
+    expect(res?.value).toBe('Yes');
+  });
+
+  it('resolves Yes for "office-first culture" schedule confirmation', () => {
+    const field: ScannedField = {
+      fieldId: 'q_office_first',
+      name: 'q_office_first',
+      type: 'select',
+      label: 'iCapital is an office-first culture. Are you comfortable with this schedule?',
+      options: ['Yes', 'No'],
+      isRequired: true,
+    };
+    const res = resolvePreTierField(field, null, true);
+    expect(res).not.toBeNull();
+    expect(res?.value).toBe('Yes');
+  });
 });
