@@ -84,3 +84,32 @@ Evidence: #0013 (secondary CSV ensure pass bypassed parent profile existence gat
 
 Applies to: code refactoring, bug fixes from prompt specs, applying idioms across distinct callers.
 Evidence: #0003 (spec prescribing nonexistent mechanisms or already-applied changes), #0017 (convention copied into different error/catch control flow).
+
+---
+
+## Principle 10: Counter Semantics & Metrics Verification
+
+**Distinguish neighboring counters (e.g. producer, definition, numerator, denominator, exact state transitions) before root-cause analysis or gap explanation. Never conflate adjacent counters like autoqueued vs fully resolved.**
+
+Applies to: metrics interpretation, pipeline diagnostics, monitoring, log analysis, gap analysis.
+Evidence: #0036 (Railway autoqueue counts conflated with fully resolved counts in diagnosis).
+
+---
+
+## Principle 11: Git-Blob Fallback Committed-State Labelling
+
+**When filesystem ACLs or OS locks require falling back to git blob inspection (`git show HEAD:...`), cross-reference with git status and explicitly label all derived claims as committed-state only, not uncommitted working-tree evidence.**
+
+Applies to: source inspection, blast-radius analysis, architecture exploration under OS/ACL locks.
+Evidence: #0038 (unreadable working-tree files inspected via git blobs without explicit state boundary labeling).
+
+---
+
+## Principle 12: Private-Copy Identity Must Match Execution Identity
+
+**Ensure the OS/process identity that executes package installation, build, or evaluation commands matches the identity that created/owns the private appraisal copy.**
+
+When escalating permissions or switching out of an offline sandbox (e.g. retrying package commands with network access under a host or user identity), verify read/write access to lockfiles, cache, and dependency directories (`node_modules`) under the target execution identity before running repository commands. If identity switches, recreate or regrant access rather than mistaking filesystem permission barriers for repo/package defects.
+
+Applies to: private workspace preparation, sandbox escapes/escalations, multi-identity command execution, package managers.
+Evidence: #0035 (sandbox vs host user identity mismatch on private appraisal copy lockfile/node_modules).

@@ -1,7 +1,7 @@
 ---
 id: 35
 title: "Private-copy identity must match execution identity"
-status: open
+status: actioned
 type: open-source
 skill: [rsift]
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "private workspace preparation and native execution"
 date: 2026-10-27
 session_context: "A repository appraisal prepared its private source copy under an offline sandbox identity, then retried npm with network access under the user's identity. The second identity could not read the lockfile or write node_modules."
 parked_until: ""
-resolved:
-resolution: ""
+resolved: 2026-11-08
+resolution: "Documented identity-matching preflight rule in rsift appraisal execution-safety guidelines and codified into cross-cutting execution principles."
 reference: "C:\\Users\\yaswa\\AppData\\Local\\Temp\\rsift-greehouse-20261027-final"
 ---
 
