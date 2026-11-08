@@ -419,7 +419,7 @@ export function resolveAshbySystemField(
   } else if (fieldId === '_systemfield_phone') {
     value = profile?.phone || null;
   } else if (fieldId === '_systemfield_location') {
-    value = profile?.location || profile?.country || 'United States';
+    value = profile?.location || profile?.country || null;
   } else if (fieldId === '_systemfield_resume') {
     return {
       fieldId: field.fieldId,
@@ -737,6 +737,18 @@ export class AnswerResolver {
           };
         }
       }
+    }
+
+    const policy = resolveDeterministicPolicy(field, field.intent || classifyFieldIntent(field), profile, jobContext);
+    if (policy && new Set([
+      'policy_deadline_none', 'policy_meta_history_no', 'policy_medical_coverage_yes',
+      'policy_references_na', 'policy_referral_name_na', 'policy_intersystems_history_no',
+    ]).has(policy.policyId)) {
+      return {
+        fieldId: field.fieldId, name: field.name, type: field.type, label: field.label,
+        value: policy.value, source: 'policy', resolvedByTier: 1,
+        confidence: policy.confidence, isRequired, provenance: policy.provenance,
+      };
     }
 
     // ------------------------------------------------------------------------
@@ -1101,7 +1113,7 @@ export class AnswerResolver {
       const field = fields[i];
       let resolved = resolvedFields[i];
       if (resolved) {
-        resolved = enforceCorporatePolicy(field, resolved);
+        if (resolved.isRequired || isAttachmentObligation(field)) resolved = enforceCorporatePolicy(field, resolved);
         if (field.metadata) resolved.metadata = { ...field.metadata, ...resolved.metadata };
         if (field.options) resolved.options = field.options;
         if (field.optionsComplete !== undefined) {
@@ -1214,7 +1226,7 @@ export class AnswerResolver {
       const field = template.fields[i];
       let resolved = resolvedFields[i];
       if (resolved) {
-        resolved = enforceCorporatePolicy(field, resolved);
+        if (resolved.isRequired || isAttachmentObligation(field)) resolved = enforceCorporatePolicy(field, resolved);
         if (field.metadata) resolved.metadata = { ...field.metadata, ...resolved.metadata };
         if (field.options) resolved.options = field.options;
         if (field.optionsComplete !== undefined) {

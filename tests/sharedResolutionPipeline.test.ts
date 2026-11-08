@@ -214,4 +214,16 @@ describe('Shared Resolution Pipeline Parity', () => {
       assert.deepEqual(w.metadata, d.metadata, `metadata match at index ${i}`);
     }
   });
+
+  it('leaves optional policy fields empty while resolving required ones', async () => {
+    const fields: ScannedField[] = [
+      { fieldId: 'optional-sms', name: 'sms', type: 'radio', label: 'I consent to receive SMS updates', options: ['Yes', 'No'], isRequired: false },
+      { fieldId: 'optional-terms', name: 'terms', type: 'checkbox', label: 'I agree to the terms and conditions', isRequired: false },
+      { fieldId: 'optional-source', name: 'source', type: 'text', label: 'How did you hear about us?', isRequired: false },
+      { fieldId: 'required-sms', name: 'sms_required', type: 'radio', label: 'I consent to receive SMS updates', options: ['Yes', 'No'], isRequired: true },
+    ];
+    const result = await new AnswerResolver().resolveFormFields('AWL-PARITY-1', fields, jobContext, evidence, { mode: 'shadow' });
+    assert.deepEqual(result.slice(0, 3).map((field) => field.value), ['', '', '']);
+    assert.equal(result[3].value, 'No');
+  });
 });

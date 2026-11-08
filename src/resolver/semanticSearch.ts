@@ -47,6 +47,28 @@ export interface SemanticMatchResult {
   confidence: number;
 }
 
+export function selectCompatibleQaMatch(
+  rows: Array<{ question_label?: unknown; value?: unknown; similarity?: unknown }>,
+  intent: FieldIntent,
+  options: string[] | undefined,
+  fieldType: string,
+  threshold: number
+): SemanticMatchResult | null {
+  const compatible = rows
+    .filter((row) => typeof row.question_label === 'string' && row.question_label.trim() && typeof row.value === 'string')
+    .filter((row) => isEvidenceCompatible(intent, { kind: 'qa_bank', key: row.question_label as string, value: row.value }))
+    .filter((row) => Number(row.similarity) >= threshold)
+    .sort((a, b) => Number(b.similarity) - Number(a.similarity));
+  for (const row of compatible) {
+    const value = String(row.value);
+    const aligned = options?.length && ['select', 'radio', 'checkbox'].includes(fieldType)
+      ? matchChoiceOption(value, options)
+      : value;
+    if (aligned) return { value: aligned, source: 'semantic', confidence: Number(row.similarity) };
+  }
+  return null;
+}
+
 function cosineSimilarity(left: number[], right: number[]): number {
   if (left.length === 0 || left.length !== right.length) return 0;
   let dot = 0;
@@ -276,7 +298,7 @@ export async function findSemanticMatch(
       query_vector: embedding,
       match_applywizz_id: applywizzId,
       match_threshold: 0.0,
-      match_count: 1,
+      match_count: 10,
     });
 
     if (error) {
@@ -294,40 +316,9 @@ export async function findSemanticMatch(
     }
 
     const rows = Array.isArray(data) ? data : data ? [data] : [];
-    const compatibleRows = rows.filter((r) =>
-      isEvidenceCompatible(fieldIntent, {
-        kind: 'qa_bank',
-        key: r.question_label,
-        value: r.value,
-      })
-    );
-    if (compatibleRows.length > 0 && compatibleRows[0]?.value) {
-      const top = compatibleRows[0];
-      const similarity = Number(top.similarity ?? 0);
-      lastSemanticScore = Math.max(lastSemanticScore, similarity);
-      if (similarity >= threshold) {
-        if (
-          options &&
-          options.length > 0 &&
-          ['select', 'radio', 'checkbox'].includes(fieldType)
-        ) {
-          const aligned = matchChoiceOption(String(top.value), options);
-          if (!aligned) return null;
-          return {
-            value: aligned,
-            source: 'semantic',
-            confidence: similarity,
-          };
-        }
-        return {
-          value: top.value,
-          source: 'semantic',
-          confidence: similarity,
-        };
-      }
-    }
-
-    return null;
+    const match = selectCompatibleQaMatch(rows, fieldIntent, options, fieldType, threshold);
+    if (match) lastSemanticScore = Math.max(lastSemanticScore, match.confidence);
+    return match;
   } catch (err: any) {
     const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
     await emitFailureDiagnostic({

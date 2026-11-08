@@ -1213,3 +1213,7 @@ _Last updated: 2026-10-07_
 - **Confirmed Greenhouse scanner defect:** cascade exploration mislabels pre-existing fields as dependent on arbitrary test values because it does not diff against the pre-interaction visibility set. Treat current dependency metadata as untrusted until repaired.
 - **Confirmed resolver defect:** Tier 4 fuzzy matching can resolve a company field with `company email` ahead of a compatible QA-bank company answer. Add field-family/provenance gates before future policy expansion.
 - **Operator policy clarified, pending schema repair:** pronouns derive from gender (male -> he/him, female -> she/her); the proposed job-location rule applies only to intended workplace/location preferences, never the candidate's residence.
+
+### Resolver answer accuracy (2026-11-07 local implementation)
+
+- Local resolver fixes prevent invented Ashby US locations, let candidate evidence precede candidate-specific policy defaults, keep optional controls blank, and require labeled compatible QA matches in semantic search. Migration 047 is prepared but not applied to production. Production behavior remains unverified.
