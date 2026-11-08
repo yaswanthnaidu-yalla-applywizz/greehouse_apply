@@ -5,6 +5,7 @@ import {
   isAttachmentObligation,
   resolveAvailabilityField,
   resolvePreTierField,
+  AnswerResolver,
 } from '../src/resolver/answerResolver.js';
 import { resolveTier1, resolveFromPayloadStructured } from '../src/resolver/tier1Supabase.js';
 import { resolveTier2 } from '../src/resolver/tier2ResumeParse.js';
@@ -653,14 +654,15 @@ async function run(): Promise<void> {
     'SMS consent labeled Phone resolves to No option'
   );
 
-  // Task 3: Common custom employer questions resolved via Tier 1 standard policies
+  // Task 3: Common custom employer questions resolved via candidate fallback policies
   const metaField = makeField({
     label: 'Have you ever worked as a Meta contingent worker or vendor?',
     type: 'select',
     options: ['Yes', 'No'],
   });
+  const resolver = new AnswerResolver();
   assertEqual(
-    (await resolveTier1('AWL-TEST', metaField, candidateProfile))?.value,
+    (await resolver.resolveFormFields('AWL-TEST', [metaField], {}, { profile: candidateProfile, qaEntries: [], parsedResume: null }, { mode: 'shadow' }))[0]?.value,
     'No',
     'Meta contractor history resolves to No'
   );
@@ -671,7 +673,7 @@ async function run(): Promise<void> {
     options: ['Yes', 'No'],
   });
   assertEqual(
-    (await resolveTier1('AWL-TEST', medicalField, candidateProfile))?.value,
+    (await resolver.resolveFormFields('AWL-TEST', [medicalField], {}, { profile: candidateProfile, qaEntries: [], parsedResume: null }, { mode: 'shadow' }))[0]?.value,
     'Yes',
     'Medical coverage question resolves to Yes'
   );
@@ -681,7 +683,7 @@ async function run(): Promise<void> {
     type: 'textarea',
   });
   assertEqual(
-    (await resolveTier1('AWL-TEST', referencesField, candidateProfile))?.value,
+    (await resolver.resolveFormFields('AWL-TEST', [referencesField], {}, { profile: candidateProfile, qaEntries: [], parsedResume: null }, { mode: 'shadow' }))[0]?.value,
     'N/A',
     'Professional references resolves to N/A'
   );
@@ -691,7 +693,7 @@ async function run(): Promise<void> {
     type: 'text',
   });
   assertEqual(
-    (await resolveTier1('AWL-TEST', referralPersonField, candidateProfile))?.value,
+    (await resolver.resolveFormFields('AWL-TEST', [referralPersonField], {}, { profile: candidateProfile, qaEntries: [], parsedResume: null }, { mode: 'shadow' }))[0]?.value,
     'N/A',
     'Referral person resolves to N/A'
   );
@@ -702,7 +704,7 @@ async function run(): Promise<void> {
     options: ['Yes', 'No'],
   });
   assertEqual(
-    (await resolveTier1('AWL-TEST', interSystemsField, candidateProfile))?.value,
+    (await resolver.resolveFormFields('AWL-TEST', [interSystemsField], {}, { profile: candidateProfile, qaEntries: [], parsedResume: null }, { mode: 'shadow' }))[0]?.value,
     'No',
     'InterSystems history resolves to No'
   );

@@ -6,6 +6,7 @@ import { getDbClient, isSupabaseConfigured } from "../client.js";
 import { createLogger } from "../../utils/logger.js";
 import { applicationRowHasPersistedResolution } from "../../dashboard/candidateQueueFilter.js";
 import { memoryApplications } from "./memoryStore.js";
+import { chunkArray } from "../../utils/chunk.js";
 import {
   SUBMITTED_STATUSES,
   FAILED_EQUIVALENT_STATUSES,
@@ -490,29 +491,35 @@ export async function fetchCandidateApplicationAggregatesByApplywizzIds(
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      let query = supabase
-        .from('gh_candidate_applications')
-        .select(
-          scoped
-            ? 'applywizz_id, status, assigned_ca_email, created_at'
-            : 'applywizz_id, status'
-        )
-        .in('applywizz_id', ids);
-      if (options?.createdAtRange) {
-        query = applyCreatedAtRangeFilter(query, options.createdAtRange);
-      }
-      const { data, error } = await query;
-      if (!error && data) {
-        loadedFromSupabase = true;
-        for (const row of data) {
-          const aggregateRow = row as unknown as CandidateApplicationAggregateRow;
-          if (options?.includeRow && !options.includeRow(aggregateRow)) continue;
-          const key = String(aggregateRow.applywizz_id || '').trim().toUpperCase();
-          if (!key) continue;
-          const list = statusesByKey.get(key) || [];
-          list.push(aggregateRow.status as ApplicationStatus);
-          statusesByKey.set(key, list);
+      let querySuccess = false;
+      for (const chunk of chunkArray(ids, 100)) {
+        let query = supabase
+          .from('gh_candidate_applications')
+          .select(
+            scoped
+              ? 'applywizz_id, status, assigned_ca_email, created_at'
+              : 'applywizz_id, status'
+          )
+          .in('applywizz_id', chunk);
+        if (options?.createdAtRange) {
+          query = applyCreatedAtRangeFilter(query, options.createdAtRange);
         }
+        const { data, error } = await query;
+        if (!error && data) {
+          querySuccess = true;
+          for (const row of data) {
+            const aggregateRow = row as unknown as CandidateApplicationAggregateRow;
+            if (options?.includeRow && !options.includeRow(aggregateRow)) continue;
+            const key = String(aggregateRow.applywizz_id || '').trim().toUpperCase();
+            if (!key) continue;
+            const list = statusesByKey.get(key) || [];
+            list.push(aggregateRow.status as ApplicationStatus);
+            statusesByKey.set(key, list);
+          }
+        }
+      }
+      if (querySuccess) {
+        loadedFromSupabase = true;
       }
     } catch {
       // fall through to memory
@@ -566,22 +573,28 @@ export async function countNonSkippedApplicationsByApplywizzIds(
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      let query = supabase
-        .from('gh_candidate_applications')
-        .select('applywizz_id, status, resolved_fields, created_at')
-        .in('applywizz_id', ids);
-      if (createdAtRange) {
-        query = applyCreatedAtRangeFilter(query, createdAtRange);
-      }
-      const { data, error } = await query;
-      if (!error && data) {
-        for (const row of data) {
-          if (row.status === 'SKIPPED') continue;
-          if (!applicationRowHasPersistedResolution(row)) continue;
-          const key = String(row.applywizz_id || '').trim().toUpperCase();
-          if (!key) continue;
-          counts.set(key, (counts.get(key) || 0) + 1);
+      let querySuccess = false;
+      for (const chunk of chunkArray(ids, 100)) {
+        let query = supabase
+          .from('gh_candidate_applications')
+          .select('applywizz_id, status, resolved_fields, created_at')
+          .in('applywizz_id', chunk);
+        if (createdAtRange) {
+          query = applyCreatedAtRangeFilter(query, createdAtRange);
         }
+        const { data, error } = await query;
+        if (!error && data) {
+          querySuccess = true;
+          for (const row of data) {
+            if (row.status === 'SKIPPED') continue;
+            if (!applicationRowHasPersistedResolution(row)) continue;
+            const key = String(row.applywizz_id || '').trim().toUpperCase();
+            if (!key) continue;
+            counts.set(key, (counts.get(key) || 0) + 1);
+          }
+        }
+      }
+      if (querySuccess) {
         return counts;
       }
     } catch {

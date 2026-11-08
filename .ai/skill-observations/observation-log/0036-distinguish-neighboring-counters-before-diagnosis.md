@@ -1,7 +1,7 @@
 ---
 id: 36
 title: "Distinguish neighboring counters before diagnosing a low number"
-status: open
+status: actioned
 type: open-source
 skill: [principle-explain-the-number]
 proposes_skill: []
@@ -10,8 +10,8 @@ area: "Counter semantics before root-cause analysis"
 date: 2026-10-29
 session_context: "Railway autoqueue diagnostics initially treated autoqueued counts as fully resolved counts until the user corrected the metric"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-11-08
+resolution: "Codified as Principle 10 in .ai/skill-observations/cross-cutting-principles.md requiring explicit counter definitions and neighbor comparison before root-cause diagnosis."
 reference: "docs/fkedup.md"
 ---
 

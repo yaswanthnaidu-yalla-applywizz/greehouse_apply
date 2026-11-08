@@ -39,6 +39,29 @@ export function resolveDeterministicPolicy(
   const options = field.options || [];
   const text = `${field.label} ${field.name} ${field.fieldId}`.toLowerCase();
 
+  const candidateFallbacks: Array<[RegExp, string, string]> = [
+    [/deadlines?|timeline considerations?/, 'None', 'policy_deadline_none'],
+    [/\b(?:meta|facebook)\b.*\b(?:contingent worker|contractor|vendor|worked as a)\b/, 'No', 'policy_meta_history_no'],
+    [/\bmedical\b.*\b(?:coverage|benefit|plan|offer|enrolled)\b/, 'Yes', 'policy_medical_coverage_yes'],
+    [/\b(?:professional references|references upon request|list of references|names and contact information of.*references)\b/, 'N/A', 'policy_references_na'],
+    [/\b(?:who referred you|referral name|name of the person who referred you|employee referral name|if referred, by whom)\b/, 'N/A', 'policy_referral_name_na'],
+    [/\bintersystems\b/, 'No', 'policy_intersystems_history_no'],
+  ];
+  for (const [pattern, fallback, policyId] of candidateFallbacks) {
+    if (!pattern.test(text)) continue;
+    if (fallback === 'N/A' && field.type !== 'text' && field.type !== 'textarea') continue;
+    const value = field.type === 'checkbox'
+      ? (fallback === 'Yes' ? 'true' : 'false')
+      : field.type === 'select' || field.type === 'radio'
+        ? matchChoiceOption(fallback, options)
+        : fallback;
+    if (!value) continue;
+    return {
+      value, source: 'policy', policyId, confidence: 0.95,
+      provenance: { family: intent.family, policyId, confidence: 0.95 },
+    };
+  }
+
   // 1. SMS / WhatsApp consent
   if (intent.family === 'agreement_consent' && intent.qualifier === 'sms') {
     if (field.type === 'text' || field.metadata?.inputType === 'tel') {

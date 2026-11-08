@@ -478,8 +478,10 @@ export function resolveStandardProfileAttribute(
   }
 
   // Prior Employment / Former Employee / Previous Interview History (Always "No")
+  // "employed by\b" is replaced with past-tense anchored variants to avoid matching
+  // sponsorship questions like "to be employed by [Company]".
   if (
-    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name|interviewed.*(?:before|prior|in the past|past \d+)|history with\b|employed by\b)/i.test(
+    /(previously.*employed|worked for|worked at|former employee|previously worked|employed by.*company|ever been employed|past employment|worked here before|worked with us|worked under a different name|different name|interviewed.*(?:before|prior|in the past|past \d+)|history with\b|\b(?:have you (?:been|ever been|previously been) employed by|were you (?:ever )?employed by|check if you have previously been employed by)\b)/i.test(
       combined
     )
   ) {
@@ -596,40 +598,6 @@ export function resolveStandardProfileAttribute(
       return field.options[0];
     }
     return 'LinkedIn';
-  }
-
-  // Deadlines & Timeline Considerations (Always "None")
-  if (/deadlines?|timeline considerations?/i.test(combined)) {
-    if (field.type === 'checkbox') return 'false';
-    return matchBestOption('None', field.options, field.label) || 'None';
-  }
-
-  // Meta contingent worker / contractor history (Always "No")
-  if (/\b(?:meta|facebook)\b/i.test(combined) && /\b(?:contingent worker|contractor|vendor|worked as a)\b/i.test(combined)) {
-    if (field.type === 'checkbox') return 'false';
-    return matchBestOption('No', field.options, field.label) || 'No';
-  }
-
-  // Medical coverage / comprehensive medical benefit question (Always "Yes")
-  if (/\bmedical\b/i.test(combined) && /\b(?:coverage|benefit|plan|offer|enrolled)\b/i.test(combined)) {
-    if (field.type === 'checkbox') return 'true';
-    return matchBestOption('Yes', field.options, field.label) || 'Yes';
-  }
-
-  // Professional references requests (Text/Textarea -> "N/A")
-  if (/\b(?:professional references|references upon request|list of references|names and contact information of.*references)\b/i.test(combined)) {
-    if (field.type === 'text' || field.type === 'textarea') return 'N/A';
-  }
-
-  // Referral source / person name who referred you (Text/Textarea -> "N/A" or "None")
-  if (/\b(?:who referred you|referral name|name of the person who referred you|employee referral name|if referred, by whom)\b/i.test(combined)) {
-    if (field.type === 'text' || field.type === 'textarea') return 'N/A';
-  }
-
-  // InterSystems employment / family history (Always "No")
-  if (/\bintersystems\b/i.test(combined)) {
-    if (field.type === 'checkbox') return 'false';
-    return matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Start Date / Earliest Availability (Dynamic 1 week out from resolution day)
