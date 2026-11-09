@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { getTodayIST, apiFetch } from '../hooks/useSession.js';
+import { ProofViewer } from './ProofViewer.js';
 
 export interface AnalysisSummary {
   total: number;
@@ -25,9 +26,12 @@ export interface FailureApplicationItem {
   jobUrl: string;
   companyName: string;
   jobTitle?: string;
-  ats: 'greenhouse' | 'ashby';
+  ats: 'greenhouse' | 'ashby' | string;
   errorMessage: string;
   createdAt: string;
+  hasProofFailed?: boolean;
+  proofFailedUrl?: string | null;
+  proofWebUrl?: string | null;
 }
 
 export interface FailureReasonGroup {
@@ -118,6 +122,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
   const [requeuing, setRequeuing] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [selectedProofApp, setSelectedProofApp] = useState<FailureApplicationItem | null>(null);
 
   const toggleMetric = (key: MetricKey) => {
     setSelectedMetrics((prev) => {
@@ -877,6 +882,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                               <th className="py-2 px-3">Error Snippet</th>
                               <th className="py-2 px-3">Time (IST)</th>
                               <th className="py-2 px-3">Link</th>
+                              <th className="py-2 px-3 text-center">Screenshot Proof</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[#2c2c2e]/50 font-mono text-[11px]">
@@ -922,6 +928,21 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                                     '—'
                                   )}
                                 </td>
+                                <td className="py-2 px-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedProofApp(app)}
+                                    title={app.hasProofFailed || app.proofFailedUrl ? 'Inspect failure screenshot' : 'Attempt proof resolution'}
+                                    className={`px-2 py-1 rounded text-[11px] font-medium transition-colors border inline-flex items-center gap-1 ${
+                                      app.hasProofFailed || app.proofFailedUrl
+                                        ? 'bg-[#ff453a]/15 text-[#ff453a] border-[#ff453a]/40 hover:bg-[#ff453a]/25'
+                                        : 'bg-[#2c2c2e] text-[#8e8e93] border-[#3a3a3c] hover:text-white'
+                                    }`}
+                                  >
+                                    <span>📸</span>
+                                    <span>Proof</span>
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -935,6 +956,25 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Proof Lightbox Modal */}
+      {selectedProofApp && (
+        <ProofViewer
+          isOpen={Boolean(selectedProofApp)}
+          onClose={() => setSelectedProofApp(null)}
+          applicationId={selectedProofApp.id}
+          screenshotUrl={selectedProofApp.proofFailedUrl || null}
+          kind="failed"
+          title={`Failure Screenshot Proof — ${selectedProofApp.companyName || 'Application'}`}
+          metadata={{
+            applywizzId: selectedProofApp.applywizzId,
+            companyName: selectedProofApp.companyName,
+            jobTitle: selectedProofApp.jobTitle,
+            jobUrl: selectedProofApp.jobUrl,
+            status: 'FAILED',
+          }}
+        />
+      )}
     </div>
   );
 };

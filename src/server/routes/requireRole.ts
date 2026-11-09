@@ -174,7 +174,7 @@ export function requireOperatorDashboardAccess(
   }
 
   const role = resolveRoleFromRequest(req);
-  if (role === 'dev' || role === 'operator') {
+  if (role === 'dev' || role === 'operator' || role === 'admin') {
     next();
     return;
   }
