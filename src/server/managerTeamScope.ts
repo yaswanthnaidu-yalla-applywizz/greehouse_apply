@@ -208,6 +208,11 @@ export function applicationAssignedCaAllowed(
 ): boolean {
   if (hasUnrestrictedDashboardAccess(role)) return true;
   const assigned = (assignedCaEmail || '').trim().toLowerCase();
+  // Operator dashboards are assignment-only. An unassigned row is not part of
+  // any operator's queue, even when the candidate has another assigned row.
+  if (role === 'operator') {
+    return Boolean(assigned) && Boolean(viewerEmail) && assigned === viewerEmail.trim().toLowerCase();
+  }
   if (role === 'manager' && teamOperatorEmails && teamOperatorEmails.length > 0) {
     const team = new Set(teamOperatorEmails.map((e) => e.trim().toLowerCase()));
     if (!assigned) return true;
@@ -321,7 +326,9 @@ export async function resolveDashboardCandidateAccess(
     const caEmail = userEmail;
     const dbIds = await distinctApplywizzIdsForOperatorEmails([caEmail], createdAtRange);
     let profileIds: string[] = [];
-    if (isSupabaseConfigured()) {
+    // An operator queue is assignment-driven. Profile ownership alone must not
+    // surface a candidate when that operator has no applications in this date range.
+    if (role !== 'operator' && isSupabaseConfigured()) {
       const { data } = await getDbClient()
         .from('profiles')
         .select('applywizz_id')
