@@ -19,8 +19,8 @@ export interface NotificationItem {
 }
 
 export interface DashboardHeaderProps {
-  activeTab: 'dashboard' | 'stats';
-  setActiveTab: (tab: 'dashboard' | 'stats') => void;
+  activeTab: 'dashboard' | 'stats' | 'review';
+  setActiveTab: (tab: 'dashboard' | 'stats' | 'review') => void;
   selectedDate: string;
   setSelectedDate?: (date: string) => void;
   stats: DashboardStats | null;
@@ -109,6 +109,17 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 }`}
               >
                 Stats
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('review')}
+                className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                  activeTab === 'review'
+                    ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+                    : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
+                }`}
+              >
+                Review
               </button>
             </nav>
           </div>

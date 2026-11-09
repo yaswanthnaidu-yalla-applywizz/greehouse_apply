@@ -16,7 +16,7 @@ export interface UnresolvedFieldGroup {
 export interface BatchResolvedField extends UnresolvedBatchField {
   value: string;
   source: 'ai';
-  confidence: 0.85;
+  confidence: number;
 }
 
 export interface BatchResolvedGroup {
@@ -40,11 +40,12 @@ export async function resolveBatchLlmFields(
         group.jobDescription ?? ''
       );
       const answers = batchResult.answers;
+      const confidences = batchResult.confidences;
       const fields = group.fields.map((field, index) => ({
         ...field,
         value: answers[index] || '',
         source: 'ai' as const,
-        confidence: 0.85 as const,
+        confidence: confidences?.[index] ?? 0.85,
       }));
 
       log.info(

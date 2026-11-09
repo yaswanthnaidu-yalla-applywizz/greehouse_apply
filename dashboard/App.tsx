@@ -16,6 +16,7 @@ import { DashboardHeader } from './components/Header/DashboardHeader.js';
 import { AtsBreakdown } from './components/AtsBreakdown.js';
 import { JobQueueView } from './JobQueueView.js';
 import { AuthView, type AuthUser } from './components/AuthView.js';
+import { OperatorReviewTab } from './components/OperatorReviewTab.js';
 import type {
   CandidateDetail,
   CandidateSummary,
@@ -88,7 +89,7 @@ export const App: React.FC = () => {
   }, [sessionUser]);
 
   const [selectedDate, setSelectedDate] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'review'>('dashboard');
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
@@ -946,6 +947,11 @@ export const App: React.FC = () => {
         ) : (
           <div className="p-8 text-center text-xs font-mono text-[#8e8e93]">Loading statistics...</div>
         )}
+      </div>
+
+      {/* AI Answer Review Queue View */}
+      <div className={`flex-1 overflow-y-auto custom-scrollbar ${activeTab === 'review' ? '' : 'hidden'}`}>
+        <OperatorReviewTab />
       </div>
 
       <div
