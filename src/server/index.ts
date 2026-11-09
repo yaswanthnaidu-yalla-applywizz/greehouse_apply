@@ -48,6 +48,7 @@ import { authRouter, isUserAdmin, resolveRole } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { configRouter } from './routes/config.js';
 import { managerRouter } from './routes/manager.js';
+import { reviewsRouter } from './routes/reviews.js';
 import { adminDashboardRouter } from './routes/adminDashboard.js';
 import { devDashboardRouter } from './routes/devDashboard.js';
 import { wsManager } from './ws.js';
@@ -70,6 +71,7 @@ import { getApplicationStats } from '../db/applicationStats.js';
 import {
   istDatesForWorkHistory,
   parseDashboardStatsRange,
+  resolveDefaultDashboardDate,
   serializeDateRange,
 } from './dashboardDateRange.js';
 import {
@@ -522,6 +524,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
   // Manager dashboard API
   app.use('/api/manager', ...managerApiGuard, managerRouter);
 
+  // AI Answer Reviews API (strict token-derived review session boundary)
+  app.use('/api/reviews', reviewsRouter);
+
   // Operator candidate queue + admin namespace
   app.use('/api/candidates', ...candidateListApiGuard, candidatesRouter);
   app.use('/api/users', ...usersApiGuard, usersRouter);
@@ -650,7 +655,17 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * Returns aggregated dashboard metrics.
    */
   app.get('/api/stats', ...candidateListApiGuard, async (req: Request, res: Response) => {
-    const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
+    const hasExplicitQuery =
+      req.query.range !== undefined ||
+      req.query.from !== undefined ||
+      req.query.to !== undefined ||
+      req.query.date !== undefined;
+    let queryToParse = req.query as Record<string, unknown>;
+    if (!hasExplicitQuery) {
+      const defaultDate = await resolveDefaultDashboardDate();
+      queryToParse = { ...queryToParse, from: defaultDate, to: defaultDate };
+    }
+    const parsedRange = parseDashboardStatsRange(queryToParse);
     if ('error' in parsedRange) {
       res.status(400).json({ error: parsedRange.error });
       return;

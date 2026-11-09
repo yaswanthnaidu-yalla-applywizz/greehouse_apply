@@ -102,7 +102,6 @@ export interface PipelineResult {
   scannedFields: number;
   resolvedApplications: number;
   deferredApplications?: number;
-  maxQuestionThreshold?: number;
   supabaseTaggedCount: number;
   aiTaggedCount: number;
   ingestFilterReport: IngestFilterReport;
@@ -438,7 +437,6 @@ export class V1Pipeline {
       uniqueUrls: uniqueUrls.length,
       scannedFields: totalFields,
       resolvedApplications: resolvedApplications.length,
-      maxQuestionThreshold: config.MAX_JOB_QUESTIONS,
       supabaseTaggedCount: supabaseCount,
       aiTaggedCount: aiCount,
       ingestFilterReport,
@@ -463,7 +461,7 @@ export class V1Pipeline {
       log.info(`• Duration:               ${elapsedSec}s`);
       log.info(`• Unique Candidates:      ${result.uniqueCandidates}`);
       log.info(`• Unique Job URLs:        ${result.uniqueUrls}`);
-      log.info(`• Applications Ready:     ${result.resolvedApplications} (< ${config.MAX_JOB_QUESTIONS} questions)`);
+      log.info(`• Applications Ready:     ${result.resolvedApplications}`);
       log.info(`• Total Fields Populated: ${result.scannedFields}`);
       log.info(`  - 🟢 'supabase' Tagged: ${supabaseCount} (${totalFields ? ((supabaseCount / totalFields) * 100).toFixed(1) : 0}%)`);
       log.info(`  - 🟣 'ai' Tagged:       ${aiCount} (${totalFields ? ((aiCount / totalFields) * 100).toFixed(1) : 0}%)`);

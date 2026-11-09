@@ -332,6 +332,25 @@ export interface ResolvedField {
   /** Optional hint for corporate default answer injection at Tier 5 */
   corporateDefaultHint?: string;
   provenance?: ResolutionProvenance;
+  /** Immutable Tier 5 model lineage for later answer review. */
+  tier5Provenance?: Tier5Provenance;
+}
+
+export interface Tier5ModelAttempt {
+  model: string;
+  status: 'accepted' | 'rejected' | 'error';
+  confidence?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cost?: number;
+  error?: string;
+}
+
+export interface Tier5Provenance {
+  /** Stable SHA-256(label|type) fingerprint. */
+  fieldKey: string;
+  winningModel: string;
+  attempts: Tier5ModelAttempt[];
 }
 
 /**

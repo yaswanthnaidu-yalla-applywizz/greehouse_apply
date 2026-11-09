@@ -68,4 +68,43 @@ describe('RC-ASH-2b: Ashby React synthetic change/input dispatch on custom field
     const check = await verifyRequiredFieldsCommitted(page, ['4645121d-997a-4781-bcdb-da07c00dc3f2']);
     assert.equal(check.allCommitted, true);
   });
+
+  it('commits the selected option-valued checkbox through the React event path', async () => {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <body>
+        <div data-field-path="referral_source">
+          <label><input type="checkbox" name="source" value="Referral" /> Referral</label>
+          <label><input type="checkbox" name="source" value="Website" /> Website</label>
+        </div>
+        <script>
+          window.__selectedOptions = [];
+          for (const input of document.querySelectorAll('input[type="checkbox"]')) {
+            input.addEventListener('change', () => {
+              window.__selectedOptions = input.checked ? [input.value] : [];
+            });
+          }
+        </script>
+      </body>
+      </html>
+    `;
+    await page.setContent(html);
+
+    const result = await fillAshbyForm(page, [
+      {
+        fieldId: 'referral_source',
+        name: 'referral_source',
+        label: 'How did you hear about us?',
+        value: 'Website',
+        options: ['Referral', 'Website'],
+        type: 'checkbox',
+        isRequired: true,
+      },
+    ], '');
+
+    assert.equal(result.filledCount, 1);
+    assert.deepEqual(await page.evaluate(() => (window as any).__selectedOptions), ['Website']);
+    assert.equal(await page.locator('[data-field-path="referral_source"] input[value="Website"]').isChecked(), true);
+  });
 });

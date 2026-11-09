@@ -23,9 +23,10 @@ Input CSV (greenhouse_only_applywizz_prod(in).csv)
                      - Ashby system field short-circuit (_systemfield_*) mapped directly from profile before Tier 1
                      - 5-Tier Waterfall for custom & ATS fields
                → Needs Review & Filtered-Out Routing:
-                     - applicationShouldBeFilteredOut: required AI fields > 3 OR unresolved required fields > 3
+                     - applicationShouldBeFilteredOut: unresolved required fields > 3 (required AI fields never filter out)
+                     - applicationNeedsOperatorReview: unresolved required fields, required cover letter, or negative compensation
                      - Filtered-out applications tagged FILTERED_OUT and logged to Ingest Filter CSV report
-               → upsert `candidate_applications` only after resolve (≥1 non-empty field), or SKIPPED if over cap
+               → upsert `candidate_applications` only after resolve (≥1 non-empty field); MAX_JOB_QUESTIONS retired (no skipping for field count)
                │
                ▼
          Post-Ingest Phase D Notifications & Poller
@@ -69,9 +70,13 @@ Short-circuits on first hit. Each tier feeds the next as fallback.
 | 2 | `tier2ResumeParse.ts` | `pdf-parse` on resume PDF → cached in `candidate_resume_parsed` (parse once) | Free after first parse |
 | 3 | `semanticSearch.ts` | OpenRouter `text-embedding-3-small` similarity (≥ 0.82) against candidate profile/raw-payload fact labels, then Supabase vector search against `candidate_qa_bank` | Embedding API cost |
 | 4 | `tier3FuzzyMatch.ts` | Fuse.js fuzzy match against candidate profile/raw-payload fact labels, then `candidate_qa_bank` | Free (in-memory) |
-| 5 | `tier5LLM.ts` via `llmSynthesizer.ts` | Strict Anthropic Claude prompt (`CLAUDE_API_KEY`, `ANTHROPIC_WORKSPACE_ID`, `CLAUDE_MODEL`) — answer and embedding written to `candidate_qa_bank` for reuse | LLM cost |
+| 5 | `tier5LLM.ts` via `llmSynthesizer.ts` | Dual-pass LLM with DeepSeek R1 escalation waterfall (Claude 3.5 Haiku primary → DeepSeek R1 via OpenRouter fallback). AI proposals recorded to `gh_ai_answer_reviews` for two-level review. Answers promoted to QA bank on submission or manager approval. | LLM cost |
 
-**Rule:** LLM answers and manual edits written to `candidate_qa_bank` with embeddings (`writeEmbedding`) → resolved at Tier 1/3 on next run.
+**Tier 5 Escalation Waterfall & Promotion Rules:**
+- **Primary Model**: Claude 3.5 Haiku (`CLAUDE_MODEL`). Accepted if confidence ≥ 0.80 and exact choice matches.
+- **DeepSeek R1 Escalation**: Triggers if Haiku is unresolved, confidence < 0.80, or choice does not exactly match scanned options. DeepSeek answer accepted only if confidence ≥ 0.65 and exact choice matches.
+- **Fail-Closed Policy**: If DeepSeek fails, times out, or returns confidence < 0.65, the field remains `unresolved` (never adopts low-confidence Haiku).
+- **Decoupled Persistence**: Tier 5 resolution NEVER directly writes to `candidate_qa_bank` or generates embeddings. Instead, accepted AI proposals are recorded immutably in `gh_ai_answer_reviews`. QA bank writes happen strictly via operator submission promotion or manager review approval.
 
 Tier 3 profile-fact embeddings are generated on demand and cached in process memory; they do not require a database column or migration. Profile facts are searched before QA-bank entries in both Tiers 3 and 4.
 
@@ -86,13 +91,16 @@ Resolver observability: `[Resolver Choice]` logs include the Tier 1 source, raw 
 
 **Availability date:** “Date available to start” is the UTC application date plus seven calendar days. Native/text answers use captured input/placeholder format metadata; dropdowns use a unique one-week option or the first listed option after “Immediately”, otherwise remain unresolved. Availability rules do not repurpose `desired_start_date` as a full value for month/year component fields. Education month/year fields use education-specific facts; missing component facts remain unresolved.
 
-## Filtered-Out Application Routing (`src/resolver/needsReview.ts`)
+## Filtered-Out & Auto-Queue Application Routing (`src/resolver/needsReview.ts`)
 Optional questions stay visible and blank in the operator form. They do not enter the resolver or the filtered-out counts.
 
-An application is routed to `FILTERED_OUT` when:
-1. **Required AI field count > 3** (`countRequiredAiFields(fields) > 3`), OR
-2. **Unresolved required field count > 3** (`countUnresolvedRequiredFields(fields) > 3`).
-Optional AI fields and optional unresolved fields never cause an application to be filtered out. Filtered-out applications are excluded from the operator queue and tracked in `IngestFilterReport` CSV (`filtered_out` section).
+- **Auto-Queue Eligibility**: Applications queue immediately (`READY_FOR_REVIEW` / `QUEUED`) when all required fields are satisfied, even if resolved by Tier 5 AI. Required AI answers no longer hold applications in operator review or trigger filtered-out status.
+- **Filtered-Out Condition**: An application is routed to `FILTERED_OUT` ONLY when **unresolved required field count > 3** (`countUnresolvedRequiredFields(fields) > 3`).
+- **Retired Field Cap**: `MAX_JOB_QUESTIONS` is retired. No application is skipped or filtered solely based on question or field count.
+- **Preserved Execution Guards**: Applications are held for human review if:
+  1. Any required field remains unresolved (`source === 'unresolved'`).
+  2. Mandatory cover letter is required but empty.
+  3. Negative compensation answer is detected.
 
 ## Post-Ingestion Leadership Notifications & SLA Tracking (`src/services/caNotificationEmail.ts`)
 - Triggered automatically at Phase D completion via `sendLeadershipIngestionSummary`.
@@ -117,10 +125,51 @@ READY_FOR_REVIEW → APPROVED → QUEUED → APPLYING → APPLIED
                                         → OTP_REQUIRED (renamed from CAPTCHA in migration 002)
                 → DRY_RUN_COMPLETE
                 → EXPIRED
-                → SKIPPED (field_count >= MAX_JOB_QUESTIONS; migration 014)
-                → FILTERED_OUT (required AI > 3 OR unresolved required > 3; migration 032)
+                → SKIPPED (retired; MAX_JOB_QUESTIONS no longer enforced)
+                → FILTERED_OUT (unresolved required > 3; migration 032; required AI answers do not filter)
 ```
-`EMAIL_PROOF_PENDING` remains the application status after the 10-minute automatic email-proof timeout. The timeout sets `email_proof_status=manual_review_needed` and keeps manual email screenshot capture available; it does not make the application resubmittable. `SKIPPED` (014) is written at resolve time for over-cap jobs.
+`EMAIL_PROOF_PENDING` remains the application status after the 10-minute automatic email-proof timeout. The timeout sets `email_proof_status=manual_review_needed` and keeps manual email screenshot capture available; it does not make the application resubmittable. `SKIPPED` (014) is retired.
+
+## Two-Level AI Answer Review Architecture (`gh_ai_answer_reviews`)
+
+Decouples high-velocity application execution (auto-queueing & submissions) from authoritative answer curation (two-level human review & QA bank learning).
+
+### 1. Proposal Identity & Tier 5 Lineage
+- **Proposal Key**: `(application_id, resolution_revision, field_key)`
+- AI proposals generated during Tier 5 resolution are captured immutably with full lineage: model name (`ai_model`), confidence score (`ai_confidence`), and prompt/escalation attempts (`ai_provenance`).
+- Multiple resolution runs for the same application revision are idempotent and never overwrite original proposals; a new resolution revision creates separate proposal records.
+
+### 2. Lifecycle Transitions & Review Stages
+```
+[Tier 5 Proposal] → status: pending_operator (revision: 1)
+        │
+        ├─ Operator Approve (AI value accepted) ───────┐
+        ├─ Operator Edit (edited replacement provided) ─┼→ status: pending_manager (revision: 2)
+        ├─ Operator Deny (denied without value) ────────┘
+        │
+        ▼
+[Manager Review]
+        ├─ Manager Approve ──→ status: approved (revision: 3) → upserts QA bank
+        ├─ Manager Edit ──────→ status: approved (revision: 3) → upserts replacement in QA bank
+        └─ Manager Reject ────→ status: rejected (revision: 3) → conditional QA row removal
+```
+- **Operator Denial Guard**: When an item has `operator_action === 'denied'`, the manager CANNOT directly approve the original proposal. The manager must either supply an `editedValue` (replacement) or choose `reject`. Direct approval attempts throw `400 Bad Request`.
+- **Revision Tracking & Optimistic Locking**: Every mutation increments `revision`. Review endpoints verify `expectedRevision`, returning `409 Conflict` on stale submissions.
+- **Idempotency Replay**: Client-generated `idempotencyKey` UUIDs are stored in `gh_ai_review_idempotency_keys` with cached response payloads, guaranteeing safe client retries without double-increments or duplicate mutations.
+
+### 3. Operator Submission Promotion (Execution Learning Path)
+- When an operator submits an application (`POST /api/applications/:id/submit` or live queue submit), all active AI answers in that application are promoted to `gh_candidate_qa_bank` with `source: 'manual'`, `confidence: 1.0`, and timestamp `promoted_at`.
+- **Non-Blocking Error Isolation**: QA promotion errors are logged but strictly isolated. A failure in QA bank write never blocks or rolls back the application submission.
+- **Promotion Reconciler (`reconcileAiAnswerPromotions`)**: Background recovery job detects submitted applications with unpromoted proposals, safely promotes them, and repairs pending embeddings.
+
+### 4. Conditional Manager Rejection
+- When a manager rejects an item (`action: 'reject'`), the system conditionally removes the answer from `gh_candidate_qa_bank` **ONLY IF** the current QA bank row value still matches `promoted_value`.
+- If the QA row was subsequently updated (e.g. by a newer operator edit, manager edit, or manual profile correction), the newer QA row is preserved and remains untouched.
+- If the proposal was never promoted or never in the QA bank, the QA bank is untouched.
+
+### 5. Decoupled Embeddings
+- Manager approvals and submission promotions set `embedding_status = 'pending'`.
+- Vector embeddings (`text-embedding-3-small`, 1536 dims) are computed asynchronously by `syncReviewEmbedding`, checking the expected review revision so stale embedding jobs never overwrite newer QA bank states.
 
 ## Answer Source Tags (Dashboard Badges)
 | Tag | Color | Meaning |
@@ -278,6 +327,59 @@ The codebase was decomposed from earlier monolithic files into cohesive submodul
 | `error_details` | JSONB | Structured failure diagnostics (Migration **027**) |
 | UNIQUE | | `task_id` (when present); generated legacy key when `task_id` IS NULL |
 
+
+### `gh_ai_answer_reviews` (Migration 048)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | Primary review record identifier |
+| `application_id` | UUID FK | References `gh_candidate_applications` |
+| `resolution_revision` | INTEGER | Resolution generation number |
+| `field_key` | TEXT | 16-char SHA-256 fingerprint |
+| `applywizz_id` | TEXT FK | References `profiles` |
+| `candidate_name` | TEXT | Human-readable candidate name snapshot |
+| `question_label` | TEXT | Form question label |
+| `field_type` | TEXT | Field input type |
+| `options` | JSONB | Scanned choice options |
+| `ai_value` | TEXT | Original Tier 5 synthesized value |
+| `ai_confidence` | FLOAT | Model confidence score |
+| `ai_model` | TEXT | Winning model identity |
+| `ai_provenance` | JSONB | Full escalation lineage and model attempts |
+| `revision` | INTEGER | Optimistic concurrency revision counter |
+| `status` | TEXT | `pending_operator` \| `pending_manager` \| `approved` \| `rejected` |
+| `promoted_at` | TIMESTAMPTZ | Timestamp of operator submission promotion |
+| `promoted_value` | TEXT | Value promoted to QA bank on submission |
+| `promoted_source` | TEXT | `operator_submission` |
+| `operator_action` | TEXT | `approved` \| `edited` \| `denied` |
+| `operator_value` | TEXT | Value approved/edited by operator |
+| `operator_email` | TEXT | Operator email who performed review |
+| `manager_action` | TEXT | `approved` \| `edited` \| `rejected` |
+| `manager_value` | TEXT | Final manager-confirmed/edited value |
+| `manager_email` | TEXT | Manager email who completed review |
+| `embedding_status` | TEXT | `pending` \| `completed` \| `failed` \| `not_applicable` |
+| `embedding_revision` | INTEGER | Revision counter for vector embedding sync |
+| UNIQUE | | `(application_id, resolution_revision, field_key)` |
+
+### `gh_ai_answer_review_events` (Migration 048)
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | Audit event identifier |
+| `review_id` | UUID FK | References `gh_ai_answer_reviews` |
+| `event_type` | TEXT | `promoted_submission` \| `operator_action` \| `manager_action` |
+| `actor` | TEXT | Actor email |
+| `actor_role` | TEXT | `operator` \| `manager` \| `admin` \| `dev` |
+| `action` | TEXT | Specific action taken |
+| `from_status`, `to_status` | TEXT | State transition boundaries |
+| `from_revision`, `to_revision` | INTEGER | Revision transition boundaries |
+| `payload` | JSONB | Contextual audit details |
+
+### `gh_ai_review_idempotency_keys` (Migration 048)
+| Column | Type | Notes |
+|---|---|---|
+| `key` | TEXT PK | Client idempotency UUID |
+| `review_id` | UUID FK | References `gh_ai_answer_reviews` |
+| `action_type` | TEXT | `operator_action` \| `manager_action` |
+| `response_payload` | JSONB | Cached mutation receipt for replay safety |
+
 ### Supabase Storage Buckets
 | Bucket | Path Pattern | Contents |
 |---|---|---|
@@ -327,6 +429,7 @@ The codebase was decomposed from earlier monolithic files into cohesive submodul
 - `035` application_task_id
 - `036` ats_and_ashby_schedule
 - `037` ashby_rate_limit_rpc
+- `048` ai_answer_reviews (two-level review schema, review events, idempotency keys)
 - `latest` combined
 
 ## Dashboard roles (email map — no DB)

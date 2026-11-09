@@ -14,8 +14,7 @@ export type NeedsReviewField = {
 /**
  * True when:
  * 1. Any required field is unresolved.
- * 2. Any required field was resolved using AI (source === 'ai').
- * 3. Any salary / compensation field was resolved negatively ("No", "Decline").
+ * 2. Any salary / compensation field was resolved negatively ("No", "Decline").
  *
  * Optional AI/unresolved fields do not block auto-queue.
  */
@@ -37,12 +36,7 @@ export function applicationNeedsOperatorReview(fields: NeedsReviewField[]): bool
       return true;
     }
 
-    // 2. Any required field solved by AI (auto-queue requires 100% resolved without AI)
-    if (f.isRequired && f.source === 'ai') {
-      return true;
-    }
-
-    // 3. Negative answers on salary / compensation questions
+    // 2. Negative answers on salary / compensation questions
     const label = (f.label || '').toLowerCase();
     if (/(salary|compensation|expected pay|pay requirement)/i.test(label)) {
       const val = String(f.value || '').trim().toLowerCase();
@@ -80,16 +74,13 @@ export function countUnresolvedRequiredFields(fields: NeedsReviewField[]): numbe
 }
 
 /**
- * Filtered-out routing:
- * An application is filtered out when:
- * 1. Required AI field count > 3, OR
- * 2. Unresolved required field count > 3.
+ * Filtered-out routing: applications with more than three unresolved required fields.
  *
  * Optional AI or optional unresolved fields never cause an application to be filtered out.
  */
 export function applicationShouldBeFilteredOut(fields: NeedsReviewField[]): boolean {
   if (!Array.isArray(fields) || fields.length === 0) return false;
-  return countRequiredAiFields(fields) > 3 || countUnresolvedRequiredFields(fields) > 3;
+  return countUnresolvedRequiredFields(fields) > 3;
 }
 
 

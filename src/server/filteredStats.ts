@@ -8,6 +8,83 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('FilteredStats');
 
+export interface SlimFieldDiagnostic {
+  label: string;
+  type: string;
+  source: string;
+  confidence?: number;
+  valueSnippet?: string;
+  isRequired: boolean;
+}
+
+export interface FilteredStatsItem {
+  id?: string;
+  applywizzId: string;
+  companyName: string;
+  jobUrl: string;
+  jobTitle?: string;
+  stage: 'pre_creation' | 'post_creation';
+  status: string;
+  reason: string;
+  unresolvedFields?: SlimFieldDiagnostic[];
+  aiFields?: SlimFieldDiagnostic[];
+  totalUnresolvedCount?: number;
+  totalAiCount?: number;
+}
+
+export function extractSlimFieldDiagnostics(fields: any[]): {
+  unresolvedFields: SlimFieldDiagnostic[];
+  aiFields: SlimFieldDiagnostic[];
+  totalUnresolved: number;
+  totalAi: number;
+} {
+  const unresolved: SlimFieldDiagnostic[] = [];
+  const ai: SlimFieldDiagnostic[] = [];
+  let totalUnresolved = 0;
+  let totalAi = 0;
+
+  for (const f of Array.isArray(fields) ? fields : []) {
+    const isReq = Boolean(f.isRequired);
+    const isValEmpty = f.value == null || String(f.value).trim() === '';
+    const isUnres = f.source === 'unresolved' || (!f.source && isReq) || (isReq && isValEmpty);
+
+    const label = String(f.label || f.name || f.fieldId || 'Untitled Field').trim();
+    const type = String(f.type || 'text');
+
+    // Sensitive field masking for privacy/PII
+    let valStr = f.value != null ? (typeof f.value === 'object' ? JSON.stringify(f.value) : String(f.value)) : '';
+    if (/(ssn|social.security|salary|compensation|disability|veteran)/i.test(label)) {
+      valStr = '[CONFIDENTIAL / REDACTED]';
+    }
+    const valueSnippet = valStr ? (valStr.length > 80 ? `${valStr.slice(0, 77)}...` : valStr) : undefined;
+
+    if (isUnres) {
+      totalUnresolved++;
+      if (unresolved.length < 15) {
+        unresolved.push({ label, type, source: 'unresolved', isRequired: isReq });
+      }
+    } else {
+      const isTier5 = f.resolvedByTier === 5 || f.source === 'ai';
+      const isLowConf = typeof f.confidence === 'number' && f.confidence < 0.8 && f.source !== 'unresolved';
+      if (isTier5 || isLowConf) {
+        totalAi++;
+        if (ai.length < 15) {
+          ai.push({
+            label,
+            type,
+            source: String(f.source || 'ai'),
+            confidence: typeof f.confidence === 'number' ? f.confidence : undefined,
+            valueSnippet,
+            isRequired: isReq,
+          });
+        }
+      }
+    }
+  }
+
+  return { unresolvedFields: unresolved, aiFields: ai, totalUnresolved, totalAi };
+}
+
 export async function handleFilteredStats(req: Request, res: Response): Promise<void> {
   const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
@@ -86,14 +163,7 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
       },
     };
 
-    const items: Array<{
-      applywizzId: string;
-      companyName: string;
-      jobUrl: string;
-      stage: 'pre_creation' | 'post_creation';
-      status: string;
-      reason: string;
-    }> = [];
+    const items: FilteredStatsItem[] = [];
 
     for (const drop of topFunnelDroppedDetails) {
       items.push({
@@ -110,7 +180,7 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
       const supabase = getDbClient();
       let query = supabase
         .from('gh_candidate_applications')
-        .select('id, applywizz_id, company_name, job_url, status, resolved_fields, created_at')
+        .select('id, applywizz_id, company_name, job_url, job_title, status, resolved_fields, created_at')
         .gte('created_at', parsedRange.startIso);
 
       if (parsedRange.endIso) {
@@ -179,13 +249,21 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
               bottomFunnel.reviewTriggers.low_confidence++;
             }
 
+            const diagnostics = extractSlimFieldDiagnostics(fields);
+
             items.push({
+              id: app.id,
               applywizzId: app.applywizz_id || 'UNKNOWN',
               companyName: app.company_name || 'Unknown Company',
               jobUrl: app.job_url || '',
+              jobTitle: app.job_title || undefined,
               stage: 'post_creation',
               status: 'READY_FOR_REVIEW',
               reason: mainReason,
+              unresolvedFields: diagnostics.unresolvedFields,
+              aiFields: diagnostics.aiFields,
+              totalUnresolvedCount: diagnostics.totalUnresolved,
+              totalAiCount: diagnostics.totalAi,
             });
           } else if (status === 'FILTERED_OUT' || status === 'SKIPPED') {
             bottomFunnel.filteredOut++;
@@ -201,13 +279,21 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
               filterReason = `Exceeded required AI limit (${reqAiCount} > 3)`;
             }
 
+            const diagnostics = extractSlimFieldDiagnostics(fields);
+
             items.push({
+              id: app.id,
               applywizzId: app.applywizz_id || 'UNKNOWN',
               companyName: app.company_name || 'Unknown Company',
               jobUrl: app.job_url || '',
+              jobTitle: app.job_title || undefined,
               stage: 'post_creation',
               status: status,
               reason: filterReason,
+              unresolvedFields: diagnostics.unresolvedFields,
+              aiFields: diagnostics.aiFields,
+              totalUnresolvedCount: diagnostics.totalUnresolved,
+              totalAiCount: diagnostics.totalAi,
             });
           } else {
             bottomFunnel.autoApplied++;

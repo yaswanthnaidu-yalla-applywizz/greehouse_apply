@@ -374,6 +374,18 @@ export const AdminDashboard: React.FC = () => {
   const [csvUploadedObject, setCsvUploadedObject] = useState<{ objectPath: string; fileName: string } | null>(null);
   const [csvIngestBusy, setCsvIngestBusy] = useState<boolean>(false);
   const [csvDropActive, setCsvDropActive] = useState<boolean>(false);
+  const [purgeModalOpen, setPurgeModalOpen] = useState<boolean>(false);
+  const [purgeBusy, setPurgeBusy] = useState<boolean>(false);
+  const [purgePreviewLoading, setPurgePreviewLoading] = useState<boolean>(false);
+  const [purgePreview, setPurgePreview] = useState<{
+    totalFound: number;
+    freedBytesApprox: number;
+    updatedApplications: number;
+  } | null>(null);
+  const [purgeFeedback, setPurgeFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
@@ -592,6 +604,64 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const openPurgeModal = async () => {
+    setPurgeModalOpen(true);
+    setPurgePreviewLoading(true);
+    setPurgePreview(null);
+    try {
+      const res = await apiFetch('/api/admin/purge-failed-proofs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preview: true }),
+      });
+      const data = (await res.json()) as {
+        totalFound?: number;
+        freedBytesApprox?: number;
+        updatedApplications?: number;
+        error?: string;
+      };
+      if (res.ok && typeof data.totalFound === 'number') {
+        setPurgePreview({
+          totalFound: data.totalFound,
+          freedBytesApprox: data.freedBytesApprox ?? 0,
+          updatedApplications: data.updatedApplications ?? 0,
+        });
+      }
+    } catch {
+      // preview error non-blocking
+    } finally {
+      setPurgePreviewLoading(false);
+    }
+  };
+
+  const handleConfirmPurge = async () => {
+    setPurgeBusy(true);
+    try {
+      const res = await apiFetch('/api/admin/purge-failed-proofs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const data = (await res.json()) as { message?: string; error?: string };
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to purge screenshots.');
+      }
+      setPurgeFeedback({
+        type: 'success',
+        message: data.message || 'Successfully purged failed screenshots.',
+      });
+      setPurgeModalOpen(false);
+      void refresh();
+    } catch (e) {
+      setPurgeFeedback({
+        type: 'error',
+        message: e instanceof Error ? e.message : 'Purge failed.',
+      });
+    } finally {
+      setPurgeBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (!token || !isAuthorized) return;
     let cancelled = false;
@@ -729,6 +799,16 @@ export const AdminDashboard: React.FC = () => {
 
         {tab === 'overview' && overview && (
           <>
+            {purgeFeedback && (
+              <div className={`mb-4 border rounded-xl p-3 text-xs font-semibold flex items-center justify-between ${
+                purgeFeedback.type === 'success'
+                  ? 'bg-[#30d158]/15 border-[#30d158]/40 text-[#30d158]'
+                  : 'bg-[#ff453a]/15 border-[#ff453a]/40 text-[#ff453a]'
+              }`}>
+                <span>{purgeFeedback.message}</span>
+                <button type="button" onClick={() => setPurgeFeedback(null)} className="text-xs hover:underline ml-3">Dismiss</button>
+              </div>
+            )}
             <div id="ingestStatusBar" className={`mb-6 border rounded-xl p-3 text-xs font-semibold flex flex-wrap items-center justify-between gap-3 ${
               ingestRun?.running
                 ? 'bg-[#0a84ff]/15 border-[#0a84ff]/40 text-[#5ac8fa] animate-pulse'
@@ -747,13 +827,23 @@ export const AdminDashboard: React.FC = () => {
                       ? `Last run completed at ${new Date(ingestRun.finishedAt).toLocaleString()} — ${ingestRun.processedCount ?? 0} files processed`
                       : 'Pipeline idle — awaiting CSV upload'}
               </span>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button type="button" id="ingestStartBtn" onClick={() => void handleStart()} disabled={Boolean(ingestRun?.running)} className="bg-[#30d158] text-black px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50 hover:bg-[#30d158]/90 transition-colors">
                   {ingestRun?.running ? 'Running…' : '▶ Start'}
                 </button>
                 {ingestRun?.running ? (
                   <button type="button" id="ingestStopBtn" onClick={() => void handleStop()} disabled={ingestRun?.stopEnabled === false} className="bg-[#ff453a] text-white px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50 hover:bg-[#ff453a]/90 transition-colors">⏹ Stop</button>
-                ) : null}
+                ) : (
+                  <button
+                    type="button"
+                    id="purgeFailedProofsBtn"
+                    onClick={() => void openPurgeModal()}
+                    className="bg-[#2c2c2e] border border-[#3a3a3c] text-[#8e8e93] hover:text-white hover:bg-[#3a3a3c] px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                    title="Purge diagnosed failure screenshots from storage to reclaim disk space"
+                  >
+                    <span>🗑</span> Purge Failed Screenshots
+                  </button>
+                )}
               </div>
             </div>
             <section className="mb-6 bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-5">
@@ -1160,6 +1250,67 @@ export const AdminDashboard: React.FC = () => {
                 on Microsoft Teams.
               </p>
             </section>
+          </div>
+        )}
+
+        {purgeModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="bg-[#1c1c1e] border border-[#3a3a3c] rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-center gap-2.5 text-[#ff453a]">
+                <span className="text-xl">🗑</span>
+                <h3 className="font-bold text-white text-base">Purge Failed Screenshots</h3>
+              </div>
+              
+              <p className="text-xs text-[#8e8e93] leading-relaxed">
+                Permanently deletes failure screenshots from Supabase Storage to reclaim disk space.
+              </p>
+
+              {purgePreviewLoading ? (
+                <div className="bg-[#141416] border border-[#2c2c2e] rounded-xl p-3.5 text-xs text-[#8e8e93] font-mono">
+                  Scanning storage bucket…
+                </div>
+              ) : purgePreview ? (
+                <div className="bg-[#141416] border border-[#2c2c2e] rounded-xl p-3.5 space-y-1.5 text-xs">
+                  <div className="flex justify-between text-white">
+                    <span className="text-[#8e8e93]">Screenshots found:</span>
+                    <span className="font-mono font-bold">{purgePreview.totalFound.toLocaleString()} files</span>
+                  </div>
+                  <div className="flex justify-between text-white">
+                    <span className="text-[#8e8e93]">Estimated storage to reclaim:</span>
+                    <span className="font-mono font-bold text-[#30d158]">~{(purgePreview.freedBytesApprox / (1024 * 1024)).toFixed(1)} MB</span>
+                  </div>
+                  <div className="flex justify-between text-white">
+                    <span className="text-[#8e8e93]">Failed links to clear:</span>
+                    <span className="font-mono font-bold">{purgePreview.updatedApplications.toLocaleString()} records</span>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="bg-[#2c2c2e]/40 border border-[#3a3a3c]/60 rounded-xl p-3 text-[11px] text-[#8e8e93] space-y-1">
+                <p className="font-semibold text-white">Safety Guarantees:</p>
+                <p>• Review queues, active jobs, and completed applications are completely untouched.</p>
+                <p>• All failure categories, error messages, and dashboard metrics remain intact.</p>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setPurgeModalOpen(false); }}
+                  disabled={purgeBusy}
+                  className="bg-[#2c2c2e] hover:bg-[#3a3a3c] text-white px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmPurge()}
+                  disabled={purgeBusy || purgePreviewLoading}
+                  className="bg-[#ff453a] hover:bg-[#ff453a]/90 text-white px-3.5 py-2 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {purgeBusy ? 'Purging…' : 'Confirm & Purge'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

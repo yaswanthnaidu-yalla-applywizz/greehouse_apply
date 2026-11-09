@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
+export interface SlimFieldDiagnostic {
+  label: string;
+  type: string;
+  source: string;
+  confidence?: number;
+  valueSnippet?: string;
+  isRequired: boolean;
+}
+
 export interface FilteredStatsResponse {
   hasIngestData: boolean;
   dateRange: {
@@ -34,12 +43,18 @@ export interface FilteredStatsResponse {
     };
   };
   items: Array<{
+    id?: string;
     applywizzId: string;
     companyName: string;
     jobUrl: string;
+    jobTitle?: string;
     stage: 'pre_creation' | 'post_creation';
     status: string;
     reason: string;
+    unresolvedFields?: SlimFieldDiagnostic[];
+    aiFields?: SlimFieldDiagnostic[];
+    totalUnresolvedCount?: number;
+    totalAiCount?: number;
   }>;
 }
 
@@ -70,6 +85,23 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
   const [stageFilter, setStageFilter] = useState<'ALL' | 'pre_creation' | 'post_creation'>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [page, setPage] = useState<number>(1);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (rowKey: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
+      } else {
+        next.add(rowKey);
+      }
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    setExpandedIds(new Set());
+  }, [searchQuery, stageFilter, statusFilter, date, statsRange, customFrom, customTo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,11 +246,11 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
           </div>
         </div>
 
-        {/* Card 2: Auto-Applied Rate */}
+        {/* Card 2: Auto-Queued Rate */}
         <div className="bg-[#1c1c1e] border border-[#2c2c2e] rounded-xl p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between text-xs font-semibold text-[#8e8e93] uppercase tracking-wider mb-2">
-              <span>Auto-Applied Rate</span>
+              <span>Auto-Queued Rate</span>
               <span className="text-[#30d158] font-bold">{autoApplyPct}%</span>
             </div>
             <div className="text-2xl font-bold tracking-tight text-white">
@@ -229,7 +261,7 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
             </div>
           </div>
           <div className="text-xs text-[#8e8e93] mt-3 pt-3 border-t border-[#2c2c2e]">
-            Eligible for autonomous submission
+            Auto-queued without operator review
           </div>
         </div>
 
@@ -447,6 +479,7 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
           <table className="w-full text-left text-xs min-w-[850px]">
             <thead className="bg-[#2c2c2e] text-[#8e8e93] uppercase tracking-wider text-[11px]">
               <tr>
+                <th className="py-2.5 px-3 w-8"></th>
                 <th className="py-2.5 px-3">Candidate ID</th>
                 <th className="py-2.5 px-3">Company</th>
                 <th className="py-2.5 px-3">Stage</th>
@@ -458,13 +491,20 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
             <tbody className="divide-y divide-[#2c2c2e]">
               {currentPageItems.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-[#8e8e93]">
+                  <td colSpan={7} className="py-8 text-center text-[#8e8e93]">
                     No records match the active search and filter criteria.
                   </td>
                 </tr>
               ) : (
                 currentPageItems.map((item, idx) => {
                   const isPre = item.stage === 'pre_creation';
+                  const rowKey = item.id || `${item.applywizzId}_${item.jobUrl || idx}`;
+                  const isExpanded = expandedIds.has(rowKey);
+                  const hasDiagnostics = Boolean(
+                    (item.unresolvedFields && item.unresolvedFields.length > 0) ||
+                    (item.aiFields && item.aiFields.length > 0)
+                  );
+
                   const statusUpper = item.status.toUpperCase();
                   let statusBadgeClass = 'bg-[#2c2c2e] text-[#8e8e93] border-[#3a3a3c]';
                   if (statusUpper === 'DROPPED') {
@@ -476,43 +516,173 @@ export const DevFilteredView: React.FC<DevFilteredViewProps> = ({
                   }
 
                   return (
-                    <tr key={`${item.applywizzId}-${idx}`} className="hover:bg-[#2c2c2e]/40 transition-colors">
-                      <td className="py-2.5 px-3 font-mono font-medium text-white">
-                        {item.applywizzId}
-                      </td>
-                      <td className="py-2.5 px-3 font-medium text-white max-w-[160px] truncate" title={item.companyName}>
-                        {item.companyName}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
-                          isPre ? 'bg-[#0a84ff]/15 text-[#0a84ff] border-[#0a84ff]/30' : 'bg-[#bf5af2]/15 text-[#bf5af2] border-[#bf5af2]/30'
-                        }`}>
-                          {isPre ? 'Pre-Creation' : 'Post-Creation'}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${statusBadgeClass}`}>
-                          {item.status}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 text-[#8e8e93] max-w-[320px] truncate" title={item.reason}>
-                        {item.reason}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {item.jobUrl ? (
-                          <a
-                            href={item.jobUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[#0a84ff] hover:underline inline-flex items-center gap-1 font-mono text-[11px]"
-                          >
-                            Open ↗
-                          </a>
-                        ) : (
-                          <span className="text-[#8e8e93]">—</span>
-                        )}
-                      </td>
-                    </tr>
+                    <React.Fragment key={rowKey}>
+                      <tr className="hover:bg-[#2c2c2e]/40 transition-colors">
+                        <td className="py-2.5 px-2 text-center">
+                          {!isPre ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpand(rowKey)}
+                              title={isExpanded ? 'Collapse fields' : 'Inspect unresolved & AI fields'}
+                              className="p-1 text-[#8e8e93] hover:text-white rounded transition-transform"
+                            >
+                              <span className={`inline-block transform transition-transform text-[10px] ${isExpanded ? 'rotate-90 text-[#0a84ff]' : ''}`}>
+                                ▶
+                              </span>
+                            </button>
+                          ) : (
+                            <span className="inline-block w-4" />
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-medium text-white">
+                          {item.applywizzId}
+                        </td>
+                        <td className="py-2.5 px-3 font-medium text-white max-w-[160px] truncate" title={item.companyName}>
+                          {item.companyName}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                            isPre ? 'bg-[#0a84ff]/15 text-[#0a84ff] border-[#0a84ff]/30' : 'bg-[#bf5af2]/15 text-[#bf5af2] border-[#bf5af2]/30'
+                          }`}>
+                            {isPre ? 'Pre-Creation' : 'Post-Creation'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${statusBadgeClass}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-[#8e8e93] max-w-[320px] truncate" title={item.reason}>
+                          {item.reason}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {item.jobUrl ? (
+                            <a
+                              href={item.jobUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#0a84ff] hover:underline inline-flex items-center gap-1 font-mono text-[11px]"
+                            >
+                              Open ↗
+                            </a>
+                          ) : (
+                            <span className="text-[#8e8e93]">—</span>
+                          )}
+                        </td>
+                      </tr>
+
+                      {/* Expandable Diagnostic Drawer */}
+                      {isExpanded && !isPre && (
+                        <tr className="bg-[#141416]/90 border-b border-[#2c2c2e]">
+                          <td colSpan={7} className="p-4 bg-[#18181a] border-l-4 border-[#0a84ff]">
+                            <div className="space-y-4">
+                              <div className="flex items-center justify-between pb-2 border-b border-[#2c2c2e]">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-white text-xs">Diagnostic Field Details</span>
+                                  {item.jobTitle && <span className="text-[#8e8e93] text-xs">({item.jobTitle})</span>}
+                                </div>
+                                <span className="text-[11px] font-mono text-[#8e8e93]">ID: {item.id || 'N/A'}</span>
+                              </div>
+
+                              {!hasDiagnostics ? (
+                                <p className="text-xs text-[#8e8e93] italic py-2">
+                                  No individual unresolved or Tier-5 AI fields were identified for this application (likely triggered by mandatory cover letter policy or compensation rules).
+                                </p>
+                              ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* Unresolved Fields */}
+                                  <div className="bg-[#1c1c1e] p-3 rounded-lg border border-[#2c2c2e]">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="text-xs font-bold text-[#ff453a] flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-[#ff453a]" />
+                                        Unresolved Fields ({item.unresolvedFields?.length || 0}
+                                        {item.totalUnresolvedCount && item.totalUnresolvedCount > (item.unresolvedFields?.length || 0)
+                                          ? ` of ${item.totalUnresolvedCount}`
+                                          : ''})
+                                      </span>
+                                    </div>
+                                    {!item.unresolvedFields || item.unresolvedFields.length === 0 ? (
+                                      <p className="text-[11px] text-[#8e8e93]">No unresolved fields.</p>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        {item.unresolvedFields.map((f, fIdx) => (
+                                          <div key={fIdx} className="bg-[#141416] p-2 rounded border border-[#2c2c2e] text-xs">
+                                            <div className="flex items-center justify-between">
+                                              <span className="font-medium text-white">{f.label}</span>
+                                              {f.isRequired && (
+                                                <span className="text-[10px] bg-[#ff453a]/20 text-[#ff453a] px-1.5 py-0.5 rounded font-bold uppercase">
+                                                  Required
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="flex items-center gap-2 mt-1 text-[11px] text-[#8e8e93] font-mono">
+                                              <span>Type: {f.type}</span>
+                                              <span>•</span>
+                                              <span>Source: {f.source}</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                        {item.totalUnresolvedCount && item.totalUnresolvedCount > item.unresolvedFields.length && (
+                                          <p className="text-[10px] text-[#8e8e93] italic text-center pt-1">
+                                            + {item.totalUnresolvedCount - item.unresolvedFields.length} more unresolved field(s)
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Tier-5 AI / Low Confidence Fields */}
+                                  <div className="bg-[#1c1c1e] p-3 rounded-lg border border-[#2c2c2e]">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="text-xs font-bold text-[#ff9f0a] flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full bg-[#ff9f0a]" />
+                                        Tier-5 AI / Low Confidence ({item.aiFields?.length || 0}
+                                        {item.totalAiCount && item.totalAiCount > (item.aiFields?.length || 0)
+                                          ? ` of ${item.totalAiCount}`
+                                          : ''})
+                                      </span>
+                                    </div>
+                                    {!item.aiFields || item.aiFields.length === 0 ? (
+                                      <p className="text-[11px] text-[#8e8e93]">No Tier-5 AI or low-confidence fields.</p>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        {item.aiFields.map((f, fIdx) => (
+                                          <div key={fIdx} className="bg-[#141416] p-2 rounded border border-[#2c2c2e] text-xs">
+                                            <div className="flex items-center justify-between">
+                                              <span className="font-medium text-white">{f.label}</span>
+                                              {f.confidence != null && (
+                                                <span className="text-[10px] bg-[#ff9f0a]/20 text-[#ff9f0a] px-1.5 py-0.5 rounded font-mono font-bold">
+                                                  {Math.round(f.confidence * 100)}% conf
+                                                </span>
+                                              )}
+                                            </div>
+                                            {f.valueSnippet && (
+                                              <p className="text-[11px] text-[#d1d1d6] mt-1 bg-[#2c2c2e]/40 p-1.5 rounded font-mono break-all">
+                                                Answer: {f.valueSnippet}
+                                              </p>
+                                            )}
+                                            <div className="flex items-center gap-2 mt-1 text-[11px] text-[#8e8e93] font-mono">
+                                              <span>Type: {f.type}</span>
+                                              <span>•</span>
+                                              <span>Source: {f.source}</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                        {item.totalAiCount && item.totalAiCount > item.aiFields.length && (
+                                          <p className="text-[10px] text-[#8e8e93] italic text-center pt-1">
+                                            + {item.totalAiCount - item.aiFields.length} more AI field(s)
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}

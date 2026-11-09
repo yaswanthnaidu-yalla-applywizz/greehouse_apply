@@ -5,7 +5,6 @@
 
 import {
   LLMSynthesizer,
-  LLM_MIN_CONFIDENCE,
   getEffectiveFieldOptions,
   getPersistedFieldOptions,
   isRichEeocIdentityQuestion,
@@ -13,11 +12,9 @@ import {
   type BatchQuestion,
   type JobContext,
 } from './llmSynthesizer.js';
-import { upsertAnswer } from '../db/qaBank.js';
 import { generateFingerprint } from './fingerprint.js';
-import { writeEmbedding } from './semanticSearch.js';
 import { profileRowToCandidateProfile, getCompanyEmail, type ProfileRow } from '../db/profiles.js';
-import type { ResolvedField, ScannedField } from '../types/index.js';
+import type { ResolvedField, ScannedField, Tier5ModelAttempt } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 import {
   buildQuestionRelevantEvidence,
@@ -28,6 +25,74 @@ import { getCorporateDefaultHint } from './tier1Supabase.js';
 import { recordApplicationTokenUsage } from '../db/tokenUsage.js';
 
 const log = createLogger('Tier 5 LLM');
+const PRIMARY_ACCEPT_CONFIDENCE = 0.80;
+const DEEPSEEK_ACCEPT_CONFIDENCE = 0.65;
+
+type EscalationOutcome = ResolvedField | {
+  result: ResolvedField;
+  usage?: { promptTokens?: number; completionTokens?: number; cost?: number };
+};
+
+/** Shared fail-closed validator used by Tier 5 single and batch paths. */
+export async function finalizeTier5WithEscalation(
+  field: ScannedField,
+  primary: ResolvedField | null,
+  escalate: () => Promise<EscalationOutcome | null>,
+  options: { primaryModel?: string; fieldKey?: string } = {}
+): Promise<ResolvedField | null> {
+  const fieldKey = options.fieldKey || generateFingerprint(field.label, field.type);
+  const choices = field.options?.length ? field.options : undefined;
+  const exactChoiceValid = (candidate: ResolvedField | null): candidate is ResolvedField => {
+    if (!candidate || candidate.source !== 'ai' || !candidate.value?.trim()) return false;
+    if (!choices || !['select', 'radio', 'checkbox'].includes(field.type)) return true;
+    return choices.some((option) => option.trim().toLowerCase() === candidate.value.trim().toLowerCase());
+  };
+  const attempts: Tier5ModelAttempt[] = [];
+  const primaryModel = primary?.tier5Provenance?.winningModel || options.primaryModel || 'claude-haiku-5-5';
+  const primaryValid = exactChoiceValid(primary);
+  const primaryConfidence = primaryValid ? primary.confidence : 0;
+  attempts.push({
+    model: primaryModel,
+    status: primaryValid && primaryConfidence >= PRIMARY_ACCEPT_CONFIDENCE ? 'accepted' : 'rejected',
+    confidence: primaryValid ? primaryConfidence : undefined,
+  });
+  if (primaryValid && primaryConfidence >= PRIMARY_ACCEPT_CONFIDENCE) {
+    return {
+      ...primary,
+      tier5Provenance: { fieldKey, winningModel: primaryModel, attempts },
+    };
+  }
+
+  const deepSeekModel = 'deepseek/deepseek-r1-0528';
+  try {
+    const escalated = await escalate();
+    const secondary = escalated && 'result' in escalated ? escalated.result : escalated;
+    const usage = escalated && 'result' in escalated ? escalated.usage : undefined;
+    const secondaryValid = exactChoiceValid(secondary);
+    const confidence = secondaryValid ? secondary.confidence : 0;
+    const accepted = secondaryValid && Number.isFinite(confidence) && confidence >= DEEPSEEK_ACCEPT_CONFIDENCE;
+    attempts.push({
+      model: deepSeekModel,
+      status: accepted ? 'accepted' : 'rejected',
+      confidence: secondaryValid ? confidence : undefined,
+      promptTokens: usage?.promptTokens,
+      completionTokens: usage?.completionTokens,
+      cost: usage?.cost,
+    });
+    if (!accepted || !secondary) return null;
+    return {
+      ...secondary,
+      tier5Provenance: { fieldKey, winningModel: deepSeekModel, attempts },
+    };
+  } catch (error) {
+    attempts.push({
+      model: deepSeekModel,
+      status: 'error',
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
 
 export type LlmFailureReason = 'timeout' | 'rate_limit' | 'server_error' | 'permanent';
 
@@ -211,22 +276,22 @@ export async function resolveTier5(
       resumeFacts
     );
 
-    if (rawResult && rawResult.source === 'unresolved') {
-      return null;
-    }
-
-    const confidence = rawResult?.confidence ?? 0;
-    if (rawResult && rawResult.value && rawResult.value.trim().length > 0) {
-      if (confidence < LLM_MIN_CONFIDENCE) {
-        return null;
-      }
+    const primary = rawResult?.source === 'unresolved' ? null : rawResult;
+    const finalized = await finalizeTier5WithEscalation(
+      fieldForLlm,
+      primary,
+      async () => synthesizer.synthesizeDeepSeekAnswer(fieldForLlm, adaptedProfile, resumeText, context, resumeFacts),
+      { primaryModel: synthesizer.getPrimaryModelName(), fieldKey: fingerprint }
+    );
+    if (finalized?.value?.trim()) {
+      const confidence = finalized.confidence ?? 0;
       if (isPhoneNumberField(field)) {
-        const resumePhone = resumeAnswerMatchesPhone(rawResult.value, resumeFacts, resumeText);
+        const resumePhone = resumeAnswerMatchesPhone(finalized.value, resumeFacts, resumeText);
         if (!resumePhone) {
           log.warn(`[Resolver] ❌ T5 phone answer not verified against resume for candidate ${applywizzId} (${field.label}): "${rawResult.value}"`);
           return null;
         }
-        rawResult.value = resumePhone;
+        finalized.value = resumePhone;
       }
 
       const resolvedField: ResolvedField = {
@@ -234,29 +299,14 @@ export async function resolveTier5(
         name: field.name,
         type: field.type,
         label: field.label,
-        value: rawResult.value.trim(),
+        value: finalized.value.trim(),
         source: 'ai',
         resolvedByTier: 5,
         confidence,
         isRequired: Boolean(field.isRequired),
         ...(getPersistedFieldOptions(field) ? { options: getPersistedFieldOptions(field) } : {}),
+        tier5Provenance: finalized.tier5Provenance,
       };
-
-      // Write-back to persistent candidate QA bank
-      try {
-        await upsertAnswer({
-          applywizz_id: applywizzId,
-          question_fingerprint: fingerprint,
-          question_label: field.label,
-          field_type: field.type,
-          value: resolvedField.value,
-          source: 'ai',
-          confidence: resolvedField.confidence,
-        });
-        await writeEmbedding(applywizzId, fingerprint, field.label);
-      } catch {
-        // Ignore QA bank writeback error
-      }
 
       return resolvedField;
     }
@@ -415,19 +465,25 @@ export async function resolveTier5Batch(
           : field;
       const fingerprint = generateFingerprint(field.label, field.type);
       const raw = rawAnswers[j] ?? '';
+      const rawConf = batchResult.confidences?.[j];
 
-      const finalized = synthesizer.finalizeRawAnswer(raw, fieldForLlm, adaptedProfile, context, {
-        defaultConfidenceIfMissing: 0.85,
+      const primary = synthesizer.finalizeRawAnswer(raw, fieldForLlm, adaptedProfile, context, {
+        defaultConfidenceIfMissing: rawConf,
       });
-
-      if (finalized.source === 'unresolved' || !finalized.value?.trim()) {
-        continue;
-      }
-
+      const finalized = await finalizeTier5WithEscalation(
+        fieldForLlm,
+        primary.source === 'unresolved' ? null : primary,
+        async () => synthesizer.synthesizeDeepSeekAnswer(
+          fieldForLlm,
+          adaptedProfile,
+          resumeText,
+          context,
+          candidateProfile.resume_facts
+        ),
+        { primaryModel: synthesizer.getPrimaryModelName(), fieldKey: fingerprint }
+      );
+      if (!finalized?.value?.trim()) continue;
       const confidence = finalized.confidence ?? 0;
-      if (confidence < LLM_MIN_CONFIDENCE) {
-        continue;
-      }
       const resumePhone = isPhoneNumberField(field)
         ? resumeAnswerMatchesPhone(
             finalized.value,
@@ -451,22 +507,8 @@ export async function resolveTier5Batch(
         confidence,
         isRequired: Boolean(field.isRequired),
         ...(getPersistedFieldOptions(field) ? { options: getPersistedFieldOptions(field) } : {}),
+        tier5Provenance: finalized.tier5Provenance,
       };
-
-      try {
-        await upsertAnswer({
-          applywizz_id: applywizzId,
-          question_fingerprint: fingerprint,
-          question_label: field.label,
-          field_type: field.type,
-          value: resolvedField.value,
-          source: 'ai',
-          confidence: resolvedField.confidence,
-        });
-        await writeEmbedding(applywizzId, fingerprint, field.label);
-      } catch {
-        // Ignore QA bank writeback error
-      }
 
       results[llmIndices[j]] = resolvedField;
     }

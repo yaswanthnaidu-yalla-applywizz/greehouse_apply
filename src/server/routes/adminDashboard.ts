@@ -41,6 +41,7 @@ import {
 } from '../../candidate/csvUploadValidation.js';
 
 import { cleanupExpiredFailureDiagnostics } from '../../services/failureDiagnosticsRetention.js';
+import { purgeFailedProofStorage } from '../../services/failedProofStoragePurge.js';
 import { handleFilteredStats } from '../filteredStats.js';
 import { handleAnalysisStats, handleRequeueRetryable } from '../analysisStats.js';
 
@@ -93,6 +94,35 @@ adminDashboardRouter.post('/cleanup-diagnostics', async (req: Request, res: Resp
         : 'unknown';
     log.error(`[Admin] failure diagnostics cleanup failed error_name=${name} error_code=${code}`);
     res.status(503).json({ error: 'Failure diagnostics cleanup is unavailable.' });
+  }
+});
+
+adminDashboardRouter.post('/purge-failed-proofs', async (req: Request, res: Response): Promise<void> => {
+  const authReq = req as AuthenticatedRequest;
+  if (!isUserAdmin(authReq.user || getAuthenticatedCaEmail(authReq))) {
+    res.status(403).json({ error: 'Admin access required.' });
+    return;
+  }
+
+  const preview = req.body?.preview === true;
+  const confirm = req.body?.confirm === true;
+  if (preview === confirm) {
+    res.status(400).json({ error: 'Send exactly one of preview=true or confirm=true.' });
+    return;
+  }
+
+  try {
+    const actorEmail = getAuthenticatedCaEmail(authReq) || authReq.user?.email || 'admin';
+    const result = await purgeFailedProofStorage({
+      preview,
+      actorEmail,
+      actorRole: 'admin',
+    });
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to purge failed proofs.';
+    log.error(`[Admin] purge failed proofs failed: ${message}`);
+    res.status(500).json({ error: message });
   }
 });
 

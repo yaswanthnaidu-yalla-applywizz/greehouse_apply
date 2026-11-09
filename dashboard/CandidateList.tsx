@@ -64,7 +64,7 @@ export const CandidateList: React.FC<CandidateListProps> = ({
 
         {selectedDate && (
           <div className="mb-2 px-2 py-1 bg-[#2c2c2e] border border-[#3a3a3c] rounded-md text-[10px] font-mono font-medium text-[#0a84ff] flex items-center justify-between">
-            <span>📅 Assigned: {selectedDate} (IST)</span>
+            <span>📅 Latest Batch: {selectedDate} (IST)</span>
           </div>
         )}
 

@@ -19,10 +19,10 @@ export interface NotificationItem {
 }
 
 export interface DashboardHeaderProps {
-  activeTab: 'dashboard' | 'stats';
-  setActiveTab: (tab: 'dashboard' | 'stats') => void;
+  activeTab: 'dashboard' | 'stats' | 'review';
+  setActiveTab: (tab: 'dashboard' | 'stats' | 'review') => void;
   selectedDate: string;
-  setSelectedDate: (date: string) => void;
+  setSelectedDate?: (date: string) => void;
   stats: DashboardStats | null;
   isRefreshing: boolean;
   onRefresh: () => void;
@@ -43,7 +43,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   activeTab,
   setActiveTab,
   selectedDate,
-  setSelectedDate,
+  setSelectedDate: _setSelectedDate,
   stats,
   isRefreshing,
   onRefresh,
@@ -109,6 +109,17 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 }`}
               >
                 Stats
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('review')}
+                className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                  activeTab === 'review'
+                    ? 'bg-[#2c2c2e] text-[#ffffff] border border-[#3a3a3c]'
+                    : 'text-[#8e8e93] hover:text-[#ffffff] hover:bg-[#2c2c2e]/60'
+                }`}
+              >
+                Review
               </button>
             </nav>
           </div>
@@ -293,19 +304,14 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
         >
           {/* Left in Tier 2: Date Scope Filter & Stats Totals */}
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5 bg-[#1c1c1e] border border-[#2c2c2e] px-2.5 py-1 rounded-md flex-shrink-0">
-              <span className="text-[11px] sm:text-xs font-mono font-medium text-[#8e8e93]">📅 IST:</span>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  if (e.target.value) {
-                    setSelectedDate(e.target.value);
-                  }
-                }}
-                title="Filter dashboard by assignments on this IST date"
-                className="text-[11px] sm:text-xs font-mono font-medium text-[#ffffff] bg-transparent border-none outline-none cursor-pointer"
-              />
+            <div
+              data-testid="latest-batch-badge"
+              className="flex items-center gap-1.5 bg-[#1c1c1e] border border-[#2c2c2e] px-2.5 py-1 rounded-md flex-shrink-0 text-[11px] sm:text-xs font-mono font-medium text-[#8e8e93]"
+              title="Operator queue automatically displays tasks from the latest ingestion run"
+            >
+              <span>📅 Latest Batch:</span>
+              <span className="text-[#30d158] font-semibold">{selectedDate || 'Latest'}</span>
+              <span className="text-[10px] text-[#636366]">(IST)</span>
             </div>
 
             {stats && (
