@@ -430,7 +430,10 @@ export const App: React.FC = () => {
     setIsLoadingApplication(true);
     try {
       const encodedUrl = encodeURIComponent(jobUrl);
-      const res = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}`);
+      const dateQuery = selectedDate ? `?date=${encodeURIComponent(selectedDate)}` : '';
+      const res = await apiFetch(
+        `${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}${dateQuery}`
+      );
 
       if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
         return;
@@ -458,7 +461,7 @@ export const App: React.FC = () => {
         setIsLoadingApplication(false);
       }
     }
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!selectedCandidateId || !selectedJobUrl) {

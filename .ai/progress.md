@@ -1248,3 +1248,10 @@ _Last updated: 2026-10-07_
 ### Resolver answer accuracy (2026-11-07 local implementation)
 
 - Local resolver fixes prevent invented Ashby US locations, let candidate evidence precede candidate-specific policy defaults, keep optional controls blank, and require labeled compatible QA matches in semantic search. Migration 047 is prepared but not applied to production. Production behavior remains unverified.
+
+### Operator Dashboard Date, Lookup, and Status Corrections (2026-11-09 local)
+- [x] Restored an operator application-date picker so operators can review earlier dates; candidate job detail requests now carry the selected date.
+- [x] Fixed duplicate candidate/job detail lookups by filtering operator requests to the selected date and selecting the newest matching application row. DB2 contains duplicate candidate/job pairs that made `.maybeSingle()` return no row.
+- [x] Job cards now show `Submitted` only when `submitted_at` is present. `operator_approved_at` records review approval and previously caused ready, dry-run, and queued applications to appear submitted.
+- [x] Read-only DB2 evidence: the newest completed ingest run is on 2026-11-09 IST. It created 81 application rows that IST date, including 21 `READY_FOR_REVIEW` rows during the run. All 21 are assigned, match their profile CA, have Zoho connected, and have resolved fields. A prior note misread PostgreSQL `date` serialization as UTC; this correction supersedes it. The latest seven-day diagnostics show multiple failure classes (required-field data gaps, navigation and OTP timeouts, and interactive challenges); submission safeguards and challenge handling were left fail-closed.
+- [x] Focused dashboard tests pass (16/16) and `npm run typecheck` exits 0. Changes are local and have not been deployed.

@@ -15,7 +15,7 @@ import {
   candidateDetailMatchesSelection,
   filterOperatorApplicationJobs,
   filterJobsForCandidate,
-  isOperatorApprovedApplicationJob,
+  isSubmittedApplicationJob,
   jobCardCompanyLabel,
   jobCardTitleLabel,
 } from '../src/dashboard/candidateQueueFilter.js';
@@ -185,7 +185,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                 </div>
 
                 <div className="shrink-0">
-                  {isOperatorApprovedApplicationJob(job) ? (
+                  {isSubmittedApplicationJob(job) ? (
                     <span className="text-[10px] font-mono text-[#30d158] font-semibold bg-[#30d158]/15 border border-[#30d158]/30 px-2 py-0.5 rounded-full">
                       Submitted
                     </span>

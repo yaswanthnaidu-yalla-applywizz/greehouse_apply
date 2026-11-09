@@ -7,7 +7,7 @@ import {
   operatorFormBlockedDetailMessage,
   isUnresolvedApplicationJob,
   isSkippedApplicationJob,
-  isOperatorApprovedApplicationJob,
+  isSubmittedApplicationJob,
 } from '../src/dashboard/candidateQueueFilter.js';
 
 describe('candidateQueueFilter', () => {
@@ -66,12 +66,9 @@ describe('candidateQueueFilter', () => {
     assert.equal(isSkippedApplicationJob({ status: 'PENDING' }), false);
   });
 
-  it('uses only operator approval state for the job-card status', () => {
-    assert.equal(isOperatorApprovedApplicationJob({ operator_approved_at: null }), false);
-    assert.equal(
-      isOperatorApprovedApplicationJob({ operator_approved_at: '2026-10-30T00:00:00Z' }),
-      true
-    );
+  it('uses actual submission time for the job-card status', () => {
+    assert.equal(isSubmittedApplicationJob({ operator_approved_at: '2026-10-30T00:00:00Z' }), false);
+    assert.equal(isSubmittedApplicationJob({ submitted_at: '2026-10-30T00:00:00Z' }), true);
   });
 
   it('isUnresolvedApplicationJob detects missing resolution and unresolved fields', () => {
