@@ -98,7 +98,14 @@ failed_screenshots_non_otp/
 scratch_screenshots/
 
 # Local AI agent cache, credentials & session state
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/fada/
+.agents/skills/fada/*
+!.agents/skills/fada/scripts/
+.agents/skills/fada/scripts/*
+!.agents/skills/fada/scripts/fada-engine.ts
 .codex/
 .aws/
 .superpowers/
