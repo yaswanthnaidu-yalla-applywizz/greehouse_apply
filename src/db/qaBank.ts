@@ -149,3 +149,59 @@ export async function findAnswersByCandidate(applywizzId: string): Promise<QABan
 
 export const findAnswerByFingerprint = getAnswer;
 
+/**
+ * Deletes a QA answer from gh_candidate_qa_bank ONLY IF the stored value exactly
+ * matches expectedValue. Pre-existing rows or manually modified answers remain untouched.
+ *
+ * @returns true if matching row was deleted, false otherwise.
+ */
+export async function deleteAnswerIfMatching(
+  applywizzId: string,
+  questionFingerprint: string,
+  expectedValue: string
+): Promise<boolean> {
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { data, error } = await supabase
+        .from('gh_candidate_qa_bank')
+        .delete()
+        .eq('applywizz_id', applywizzId)
+        .eq('question_fingerprint', questionFingerprint)
+        .eq('value', expectedValue)
+        .select();
+
+      if (!error && data && data.length > 0) {
+        return true;
+      }
+      return false;
+    } catch {
+      // Fall through to local fallback
+    }
+  }
+
+  // Local JSON fallback
+  const localPath = path.resolve(process.cwd(), 'cache', 'qa_bank', `${applywizzId}.json`);
+  if (fs.existsSync(localPath)) {
+    try {
+      const list = JSON.parse(fs.readFileSync(localPath, 'utf-8'));
+      if (Array.isArray(list)) {
+        const idx = list.findIndex(
+          (a) =>
+            (a.question_fingerprint === questionFingerprint ||
+              (a as any).questionFingerprint === questionFingerprint) &&
+            a.value === expectedValue
+        );
+        if (idx >= 0) {
+          list.splice(idx, 1);
+          fs.writeFileSync(localPath, JSON.stringify(list, null, 2), 'utf-8');
+          return true;
+        }
+      }
+    } catch {}
+  }
+
+  return false;
+}
+
+

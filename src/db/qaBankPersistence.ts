@@ -1,17 +1,20 @@
 import { upsertAnswer } from './qaBank.js';
 import { generateFingerprint } from '../resolver/fingerprint.js';
 import { writeEmbedding } from '../resolver/semanticSearch.js';
+import { setInMemoryQaRow, isTestReviewStoreEnabled } from './aiAnswerReviews.js';
 import type { ResolvedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('QA Bank Persistence');
 
 /**
- * Persists approved AI answers and operator manual edits into `gh_candidate_qa_bank`
- * and generates semantic embeddings so subsequent applications for this candidate
- * resolve via Tier 1 (exact match) or Tier 3 (semantic similarity) instead of Tier 5.
+ * Persists manual operator edits into `gh_candidate_qa_bank` and generates semantic embeddings.
+ *
+ * NOTE: Raw unchanged `source === 'ai'` answers are NOT written to QA bank directly here.
+ * AI answers are only promoted to QA bank via explicit submission promotion (`promoteSubmittedAiAnswers`)
+ * or manager approval.
  */
-export async function persistApprovedAiAnswersToQaBank(
+export async function persistManualFieldEditsToQaBank(
   applywizzId: string,
   resolvedFields: ResolvedField[] | null | undefined
 ): Promise<void> {
@@ -19,10 +22,10 @@ export async function persistApprovedAiAnswersToQaBank(
     return;
   }
 
+  // Preserve verified explicit manual edits only; ignore unchanged raw AI fields
   const targets = resolvedFields.filter((f) => {
     if (!f || !f.value || typeof f.value !== 'string' || !f.value.trim()) return false;
-    // Persist any AI-synthesized field or manually edited field
-    return f.source === 'ai' || f.source === 'manual' || f.isEdited === true;
+    return f.source === 'manual' || f.isEdited === true;
   });
 
   for (const field of targets) {
@@ -30,21 +33,34 @@ export async function persistApprovedAiAnswersToQaBank(
     const trimmedValue = field.value.trim();
 
     try {
-      await upsertAnswer({
-        applywizz_id: applywizzId,
-        question_fingerprint: fingerprint,
-        question_label: field.label,
-        field_type: field.type,
-        value: trimmedValue,
-        source: 'manual', // Stored as approved/authoritative answer
-        confidence: 1.0,
-      });
+      if (isTestReviewStoreEnabled()) {
+        setInMemoryQaRow({
+          applywizz_id: applywizzId,
+          question_fingerprint: fingerprint,
+          question_label: field.label,
+          field_type: field.type,
+          value: trimmedValue,
+          source: 'manual',
+          confidence: 1.0,
+          updated_at: new Date().toISOString(),
+        });
+      } else {
+        await upsertAnswer({
+          applywizz_id: applywizzId,
+          question_fingerprint: fingerprint,
+          question_label: field.label,
+          field_type: field.type,
+          value: trimmedValue,
+          source: 'manual', // Stored as approved/authoritative answer
+          confidence: 1.0,
+        });
 
-      // Best effort embedding generation for semantic search
-      try {
-        await writeEmbedding(applywizzId, fingerprint, field.label);
-      } catch (embErr: any) {
-        log.warn(`[QA Bank Persistence] writeEmbedding warning: ${embErr?.message || embErr}`);
+        // Best effort embedding generation for semantic search
+        try {
+          await writeEmbedding(applywizzId, fingerprint, field.label);
+        } catch (embErr: any) {
+          log.warn(`[QA Bank Persistence] writeEmbedding warning: ${embErr?.message || embErr}`);
+        }
       }
     } catch (err: any) {
       log.warn(
@@ -52,4 +68,15 @@ export async function persistApprovedAiAnswersToQaBank(
       );
     }
   }
+}
+
+/**
+ * Backward compatibility alias: forwards to persistManualFieldEditsToQaBank.
+ * Preserves manual edits as an authoritative learning path while disallowing raw unapproved AI promotions.
+ */
+export async function persistApprovedAiAnswersToQaBank(
+  applywizzId: string,
+  resolvedFields: ResolvedField[] | null | undefined
+): Promise<void> {
+  return persistManualFieldEditsToQaBank(applywizzId, resolvedFields);
 }

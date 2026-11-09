@@ -48,6 +48,7 @@ import { authRouter, isUserAdmin, resolveRole } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { configRouter } from './routes/config.js';
 import { managerRouter } from './routes/manager.js';
+import { reviewsRouter } from './routes/reviews.js';
 import { adminDashboardRouter } from './routes/adminDashboard.js';
 import { devDashboardRouter } from './routes/devDashboard.js';
 import { wsManager } from './ws.js';
@@ -522,6 +523,9 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
 
   // Manager dashboard API
   app.use('/api/manager', ...managerApiGuard, managerRouter);
+
+  // AI Answer Reviews API (strict token-derived review session boundary)
+  app.use('/api/reviews', reviewsRouter);
 
   // Operator candidate queue + admin namespace
   app.use('/api/candidates', ...candidateListApiGuard, candidatesRouter);

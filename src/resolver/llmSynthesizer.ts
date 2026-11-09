@@ -149,6 +149,7 @@ export interface BatchQuestion {
 
 export interface BatchSynthesizeResult {
   answers: string[];
+  confidences?: number[];
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -172,6 +173,10 @@ export interface LLMSynthesizerOptions {
   apiKey?: string;
   /** Model name override */
   modelName?: string;
+  /** OpenRouter key override for isolated escalation tests or dedicated clients. */
+  openRouterApiKey?: string;
+  /** DeepSeek model override; production configuration defaults to R1 0528. */
+  deepSeekModel?: string;
 }
 
 /**
@@ -216,6 +221,15 @@ export function isBinaryYesNoQuestion(field: ScannedField): boolean {
   const label = field.label || '';
   const combined = `${label} ${field.name || ''} ${field.fieldId || ''}`;
   const opts = field.options && field.options.length > 0 ? field.options : undefined;
+
+  // Questions explicitly asking to select a location, country, or dropdown option are NOT binary Yes/No
+  if (
+    /\b(?:select (?:the|a) (?:location|country|state|city|option)|which (?:location|country|state|city)|using the drop down list below|choose (?:the|a) (?:location|country|state|city))\b/i.test(
+      combined
+    )
+  ) {
+    return false;
+  }
 
   if (opts && opts.length > 0) {
     const normOpts = opts.map((o) => o.toLowerCase().trim());
@@ -309,6 +323,136 @@ function buildProfileDecisionContext(field: ScannedField, profile: ApplyWizzCand
 
 export const LLM_MIN_CONFIDENCE = 0.65;
 
+export interface BatchAnswerItem {
+  answer: string;
+  confidence?: number | null;
+}
+
+export interface CalibrationContext {
+  field: ScannedField;
+  profile: ApplyWizzCandidateProfile;
+  jobContext: JobContext;
+  matchedOption?: string | null;
+  effectiveOptions?: string[];
+  rawAnswer: string;
+  modelConfidence?: number | null;
+}
+
+/**
+ * Determines whether a candidate is considered a "U.S. Person" under Export Administration
+ * Regulations (EAR) and 8 U.S.C. 1324b(a)(3).
+ * Citizens and Permanent Residents (Green Card holders) are U.S. Persons.
+ * Temporary non-immigrant visa holders (F-1, H-1B, OPT, CPT, L-1, TN, etc.) and candidates
+ * requiring sponsorship are NOT U.S. Persons.
+ */
+export function isUsPersonUnderExportControl(profile: ApplyWizzCandidateProfile): boolean {
+  if (!profile) return false;
+  const auth = `${profile.workAuthorization || ''} ${(profile as any).work_authorization || ''}`.toLowerCase();
+  if (profile.requiresSponsorship === true || (profile as any).requires_sponsorship === true) return false;
+  if (/f-?1|h-?1b|opt|cpt|l-?1|tn|j-?1|o-?1|visa/i.test(auth)) return false;
+  if (/citizen|permanent resident|green card/i.test(auth)) return true;
+  return false;
+}
+
+/**
+ * Calibrates the final confidence score based on model self-assessment,
+ * structured profile grounding, legal compliance, and option match quality.
+ */
+export function calculateCalibratedConfidence(context: CalibrationContext): number {
+  const { field, profile, rawAnswer, modelConfidence, matchedOption, effectiveOptions } = context;
+  const label = (field.label || '').toLowerCase();
+  const answer = (matchedOption || rawAnswer || '').trim().toLowerCase();
+
+  // 1. Check for disqualified or banned patterns -> 0.0 (unresolved)
+  if (!answer || answer === 'none' || answer === 'null') {
+    return 0.0;
+  }
+  if (
+    /(current|most recent|last)\s*(company|employer)/i.test(label) &&
+    /^(professional experience|work experience|none|n\/a|richardson,\s*texas|software engineer|current company|developer|engineer)$/i.test(answer)
+  ) {
+    return 0.0;
+  }
+  const options = effectiveOptions || field.options;
+  if (
+    (field.type === 'select' || field.type === 'radio') &&
+    (!options || options.length === 0) &&
+    /\b(?:location|city|country|where)\b/i.test(label) &&
+    /^(yes|no)$/i.test(answer)
+  ) {
+    return 0.0;
+  }
+
+  // 2. High-certainty deterministic grounding from profile facts
+  // A. Export control (EAR)
+  if (/(export administration regulations|ear|u\.s\.\s*person)/i.test(label)) {
+    const isUsPerson = isUsPersonUnderExportControl(profile);
+    const answersUsPerson = /i am a u\.s\.\s*person/i.test(answer);
+    const answersNotUsPerson = /i am not a u\.s\.\s*person/i.test(answer);
+    if ((isUsPerson && answersUsPerson) || (!isUsPerson && answersNotUsPerson)) {
+      return 0.98;
+    }
+    // Legal contradiction!
+    return 0.0;
+  }
+
+  // B. Work Authorization & Sponsorship matching profile
+  if (/(authorized to work|work authorization|legal right to work|eligible to work)/i.test(label)) {
+    const auth = (profile.workAuthorization || '').toLowerCase();
+    const isAuth = auth && !/^(no|false|unauthorized)$/i.test(auth);
+    if (isAuth && (/^yes/i.test(answer) || /authorized/i.test(answer))) {
+      return 0.98;
+    }
+  }
+
+  if (/(sponsorship|require.*visa|future.*sponsorship)/i.test(label)) {
+    const reqSponsorship = profile.requiresSponsorship === true;
+    if ((reqSponsorship && /^yes/i.test(answer)) || (!reqSponsorship && /^no/i.test(answer))) {
+      return 0.98;
+    }
+  }
+
+  // C. Current company matching structured work experience
+  if (/(current|most recent|last)\s*(company|employer)/i.test(label)) {
+    const experiences = profile.workExperience || (profile as any).work_experience;
+    const currentCompany = experiences?.[0]?.company?.trim();
+    if (currentCompany && answer.toLowerCase() === currentCompany.toLowerCase()) {
+      return 0.98;
+    }
+  }
+
+  // D. Corporate policy matches (agreements, former employee = No, SMS = No, LinkedIn)
+  if (
+    /(terms and conditions|privacy policy|arbitration agreement|ai policy|read the arbitration|consent to receive text|previous employee|worked for us)/i.test(
+      label
+    )
+  ) {
+    return 0.95;
+  }
+
+  // 3. Model Confidence Calibration
+  if (typeof modelConfidence === 'number' && !isNaN(modelConfidence)) {
+    // If choice option matched exactly, preserve model confidence
+    if (matchedOption && effectiveOptions?.includes(matchedOption)) {
+      return Math.min(0.95, Math.max(0.1, modelConfidence));
+    }
+    return Math.min(1.0, Math.max(0.0, modelConfidence));
+  }
+
+  // 4. Default baseline when model confidence was absent:
+  // If exact choice option matched: 0.85
+  // If behavioral STAR essay: 0.85
+  // Otherwise: 0.70 (fail-closed if uncertain)
+  if (matchedOption && effectiveOptions?.includes(matchedOption)) {
+    return 0.85;
+  }
+  if (isBehavioralOrMotivationalQuestion(field)) {
+    return 0.85;
+  }
+
+  return 0.70;
+}
+
 function formatAvailableOptionsLine(options: string[]): string {
   const list = options.join(', ');
   return `\nYou MUST respond with exactly one of these options, no other text: [${list}]\n`;
@@ -340,10 +484,14 @@ function aiField(field: ScannedField, value: string, confidence: number): Resolv
   };
 }
 
-function parseLlmResponse(raw: string): { answer: string; confidence: number | null } {
+export function parseLlmResponse(raw: string): { answer: string; confidence: number | null } {
   const cleaned = cleanLLMOutput(raw);
   try {
-    const parsed = JSON.parse(cleaned) as { answer?: unknown; value?: unknown; confidence?: unknown };
+    const parsed = (extractJsonValue(cleaned) || JSON.parse(cleaned)) as {
+      answer?: unknown;
+      value?: unknown;
+      confidence?: unknown;
+    };
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const answer = String(parsed.answer ?? parsed.value ?? '').trim();
       const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : null;
@@ -395,7 +543,7 @@ function extractJsonValue(text: string): unknown | null {
   return null;
 }
 
-export function parseBatchAnswerResponse(raw: string, expectedCount: number): string[] | null {
+export function parseBatchAnswerItems(raw: string, expectedCount: number): BatchAnswerItem[] | null {
   let parsed = extractJsonValue(cleanLLMOutput(raw));
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'answers' in parsed) {
     parsed = (parsed as { answers: unknown }).answers;
@@ -409,12 +557,26 @@ export function parseBatchAnswerResponse(raw: string, expectedCount: number): st
   }
   if (!Array.isArray(parsed)) return null;
 
-  const answers = parsed.map((item) =>
-    typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'
-      ? cleanLLMOutput(String(item))
-      : ''
-  );
-  return Array.from({ length: expectedCount }, (_, index) => answers[index] || '');
+  const items: BatchAnswerItem[] = parsed.map((item) => {
+    if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+      return { answer: cleanLLMOutput(String(item)), confidence: null };
+    }
+    if (item && typeof item === 'object') {
+      const obj = item as Record<string, unknown>;
+      const ans = cleanLLMOutput(String(obj.answer ?? obj.value ?? ''));
+      const conf = typeof obj.confidence === 'number' ? obj.confidence : null;
+      return { answer: ans, confidence: conf };
+    }
+    return { answer: '', confidence: null };
+  });
+
+  return Array.from({ length: expectedCount }, (_, index) => items[index] || { answer: '', confidence: null });
+}
+
+export function parseBatchAnswerResponse(raw: string, expectedCount: number): string[] | null {
+  const items = parseBatchAnswerItems(raw, expectedCount);
+  if (!items) return null;
+  return items.map((i) => i.answer);
 }
 
 /**
@@ -509,6 +671,8 @@ export class LLMSynthesizer {
   private readonly workspaceId?: string;
   private readonly apiKey: string;
   private readonly modelName: string;
+  private readonly deepSeekModel: string;
+  private readonly openRouterApiKey: string;
 
   /**
    * Initializes the LLMSynthesizer strictly with Anthropic Claude configuration.
@@ -523,6 +687,8 @@ export class LLMSynthesizer {
     ).trim();
     this.workspaceId = (options.workspaceId ?? config.ANTHROPIC_WORKSPACE_ID ?? '').trim() || undefined;
     this.modelName = (options.modelName ?? config.CLAUDE_MODEL ?? 'claude-haiku-5-5').trim();
+    this.deepSeekModel = (options.deepSeekModel ?? config.DEEPSEEK_R1_MODEL).trim();
+    this.openRouterApiKey = (options.openRouterApiKey ?? config.OPENROUTER_API_KEY ?? '').trim();
 
     const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
     if (isSandbox && !this.apiKey) {
@@ -532,6 +698,93 @@ export class LLMSynthesizer {
 
   public getProviderDiagnostics(): { provider: string; model: string } {
     return { provider: this.provider, model: this.modelName };
+  }
+
+  public getPrimaryModelName(): string {
+    return this.modelName;
+  }
+
+  public getDeepSeekModelName(): string {
+    return this.deepSeekModel;
+  }
+
+  /** Runs the one allowed Tier 5 escalation through OpenRouter JSON mode. */
+  public async synthesizeDeepSeekAnswer(
+    field: ScannedField,
+    profile: ApplyWizzCandidateProfile,
+    resumeText = '',
+    jobContext: JobContext = { title: 'Software Engineer', company: 'Company' },
+    resumeFacts?: any
+  ): Promise<{ result: ResolvedField; usage?: BatchSynthesizeResult['usage'] }> {
+    const apiKey = this.openRouterApiKey;
+    if (!apiKey) throw new Error('No OpenRouter credentials configured for DeepSeek escalation.');
+    const options = getEffectiveFieldOptions(field);
+    const isChoice = Boolean(options?.length && CHOICE_FIELD_TYPES.has(field.type));
+    const systemMessage = `${isChoice
+      ? 'You are a factual job application assistant. Return JSON only with answer and confidence. The answer must exactly match one provided option.'
+      : 'You are a factual job application assistant. Return JSON only as {"answer":"...","confidence":0.0}. Use candidate evidence only; if unsupported, return NONE with low confidence.'}\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
+    const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': config.OPENROUTER_BASE_URL,
+        'X-Title': 'ApplyWizz Tier 5 escalation',
+      },
+      body: JSON.stringify({
+        model: this.deepSeekModel,
+        messages: [
+          { role: 'system', content: systemMessage },
+          { role: 'user', content: prompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.2,
+      }),
+      signal: AbortSignal.timeout(config.LLM_TIMEOUT_MS || 30000),
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      const error = new Error(`OpenRouter DeepSeek returned HTTP ${response.status}: ${detail}`);
+      (error as any).status = response.status;
+      (error as any).statusCode = response.status;
+      throw error;
+    }
+    const data = await response.json() as any;
+    const raw = data?.choices?.[0]?.message?.content;
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return { result: unresolvedField(field) };
+    }
+    const parsed = parseLlmResponse(raw);
+    if (
+      !parsed.answer ||
+      parsed.confidence == null ||
+      !Number.isFinite(parsed.confidence) ||
+      parsed.confidence < 0.65
+    ) {
+      return { result: unresolvedField(field) };
+    }
+    const result = this.finalizeRawAnswer(raw, field, profile, jobContext, {
+      defaultConfidenceIfMissing: parsed.confidence,
+    });
+    const usage = data?.usage;
+    const promptTokens = Number(usage?.prompt_tokens) || 0;
+    const completionTokens = Number(usage?.completion_tokens) || 0;
+    const cost = typeof usage?.cost === 'number'
+      ? usage.cost
+      : (promptTokens * 0.55 + completionTokens * 2.19) / 1_000_000;
+    return {
+      result,
+      usage: {
+        promptTokens,
+        completionTokens,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: promptTokens + completionTokens,
+        cost,
+        model: this.deepSeekModel,
+      },
+    };
   }
 
   private async callAnthropic(
@@ -783,36 +1036,99 @@ export class LLMSynthesizer {
     if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
       if (!/^https?:\/\//i.test(answer) && !/linkedin\.com|github\.com/i.test(answer)) {
         answer = this.generateFallbackAnswer(field, profile, jobContext);
-        confidence = answer ? 0.9 : null;
+        confidence = answer ? 0.95 : null;
       }
     }
 
+    // 1. Export Control & EAR Legal Guard
+    const labelCombined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`.toLowerCase();
+    if (/(export administration regulations|ear|u\.s\.\s*person)/i.test(labelCombined)) {
+      const isUsPerson = isUsPersonUnderExportControl(profile);
+      if (choiceOptions && choiceOptions.length > 0) {
+        if (!isUsPerson) {
+          const nonUsOpt = choiceOptions.find((opt) =>
+            /i am not a u\.s\.\s*person/i.test(opt)
+          );
+          if (nonUsOpt) {
+            answer = nonUsOpt;
+            confidence = 0.98;
+          }
+        } else {
+          const usOpt = choiceOptions.find((opt) =>
+            /i am a u\.s\.\s*person/i.test(opt)
+          );
+          if (usOpt) {
+            answer = usOpt;
+            confidence = 0.98;
+          }
+        }
+      }
+    }
+
+    // 2. Current Employer / Company Guard
+    if (/(?:current|most recent|last)\s*(?:company|employer)\b/i.test(field.label)) {
+      const isBannedAnswer =
+        !answer ||
+        /^(?:professional experience|work experience|none|n\/a|richardson,\s*texas|software engineer|current company|developer|engineer)$/i.test(
+          answer.trim()
+        );
+      if (isBannedAnswer) {
+        const experiences = profile.workExperience || (profile as any).work_experience;
+        const structuredCompany = experiences?.[0]?.company?.trim();
+        if (structuredCompany) {
+          answer = structuredCompany;
+          confidence = 0.98;
+        } else {
+          return unresolvedField(field);
+        }
+      }
+    }
+
+    // 3. Choice Options Alignment & Select Option Guards
+    let matched: string | null = null;
     if (choiceOptions && choiceOptions.length > 0) {
       if (/gender|race|ethnicity|hispanic|latino|veteran|disability|eeoc/i.test(field.label)) {
         log.debug(
           `[T5 EEOC] label="${field.label}" options=${JSON.stringify(choiceOptions)}`
         );
       }
-      const matched = matchChoiceOption(answer, choiceOptions);
+      matched = matchChoiceOption(answer, choiceOptions);
 
       if (!matched) {
         return unresolvedField(field);
       }
       answer = matched;
-      if (confidence == null) confidence = 0.9;
+    } else if (
+      (field.type === 'select' || field.type === 'radio') &&
+      (!choiceOptions || choiceOptions.length === 0)
+    ) {
+      // If a select/radio field had NO options scanned and asks for a location/choice,
+      // answering generic "Yes"/"No" is invalid. Fail closed.
+      if (/(?:location|city|country|state|where)/i.test(field.label) && /^(?:yes|no)$/i.test(answer.trim())) {
+        return unresolvedField(field);
+      }
     }
 
     if (!answer) {
       return unresolvedField(field);
     }
-    if (confidence == null && opts?.defaultConfidenceIfMissing != null) {
-      confidence = opts.defaultConfidenceIfMissing;
-    }
-    if (confidence == null || confidence < LLM_MIN_CONFIDENCE) {
+
+    // 4. Calibrated Confidence Calculation
+    const calibratedConfidence = calculateCalibratedConfidence({
+      field,
+      profile,
+      jobContext,
+      matchedOption: matched,
+      effectiveOptions: choiceOptions,
+      rawAnswer: answer,
+      modelConfidence: confidence ?? opts?.defaultConfidenceIfMissing ?? null,
+    });
+
+    if (calibratedConfidence < LLM_MIN_CONFIDENCE) {
       return unresolvedField(field);
     }
 
-    return aiField(field, answer, confidence);
+    return aiField(field, answer, calibratedConfidence);
   }
 
   /**
@@ -830,7 +1146,18 @@ export class LLMSynthesizer {
     if (questions.length === 0) return { answers: [] };
 
     const prompt = buildBatchPrompt(questions, jobDescription, _profile);
-    const systemMessage = `You answer job application questions. Return a JSON object with an answers array of direct answer strings, one answer per question, in order. Example: {"answers":["answer 1","answer 2"]}. NEVER return markdown or explanatory text.
+    const systemMessage = `You answer job application questions. Return a JSON object with an answers array where each element has "answer" (the concise answer string) and "confidence" (a number 0.0 to 1.0 reflecting how certainly candidate data supports the answer). Example: {"answers":[{"answer":"Yes","confidence":0.95},{"answer":"No","confidence":0.80}]}. NEVER return markdown or explanatory text.
+
+EXPORT CONTROL & EAR RULE: If asked about U.S. Export Administration Regulations (EAR), ITAR, or confirming whether the candidate is a "U.S. person" under 8 U.S.C. 1324b(a)(3):
+- Only US Citizens and Permanent Residents (Green Card holders) are "U.S. persons".
+- Candidates on temporary non-immigrant visas (F-1, H-1B, OPT, CPT, L-1, TN) or candidates who require sponsorship are NOT "U.S. persons".
+- For non-immigrant visa holders or candidates requiring sponsorship, choose the option stating "I am not a U.S. person..." (and confirm not a citizen of Cuba, Iran, North Korea, Syria). NEVER select "I am a U.S. person" for a visa holder.
+
+CURRENT EMPLOYER RULE: When asked for current company or most recent employer, provide the candidate's actual employer company name from their work experience. NEVER return resume section headers like "Professional Experience" or "Work Experience", job titles, city names, or "NONE" when work experience is present.
+
+DROPDOWN & SELECT RULE: For dropdown, select, and radio questions, you MUST select an appropriate option from the choices. Do not answer "Yes" to location, organization, or multi-option questions. If choice options are missing or incomplete and candidate data does not specify the answer, return NONE.
+
+ONSITE & RELOCATION RULE: For questions asking if the candidate is willing or excited to work in-person, onsite, hybrid, or relocate to an office location, answer Yes or select the affirmative/relocation option unless the candidate profile explicitly forbids it.
 
 PROFILE DATA RULE: The Candidate Profile section below contains factual data about the candidate. For any question whose answer exists in the profile (gender, race, ethnicity, veteran status, disability status, salary, education, experience, location, authorization), use the EXACT value from the profile. Never answer "No" or "N/A" for demographic fields — the candidate has already provided these values.
 
@@ -888,8 +1215,8 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
       throw err;
     }
 
-    const answers = parseBatchAnswerResponse(raw, questions.length);
-    if (!answers) {
+    const items = parseBatchAnswerItems(raw, questions.length);
+    if (!items) {
       await emitFailureDiagnostic({
         category: 'RESOLVE_TIER5_PARSE',
         stage: 'batch_response_parse',
@@ -903,9 +1230,13 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
           `batch_size=${questions.length} response_chars=${raw.length} stop_reason=${stopReason || 'unknown'} elapsed_ms=${Date.now() - requestStartedAt} ` +
           'expected_shape=json_array answers=0'
       );
-      return { answers: questions.map(() => ''), usage: batchUsage };
+      return { answers: questions.map(() => ''), confidences: questions.map(() => 0), usage: batchUsage };
     }
-    return { answers, usage: batchUsage };
+    return {
+      answers: items.map((i) => i.answer),
+      confidences: items.map((i) => i.confidence ?? 0),
+      usage: batchUsage,
+    };
   }
 
   /**
@@ -1143,7 +1474,9 @@ Corporate default hint for this question: ${corporateDefaultHint}
     : choiceOptions && choiceOptions.length > 0
       ? `Instructions:
 1. You MUST respond with exactly one of these options, no other text.
-2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.`
+2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.
+3. For Export Administration Regulations (EAR) / U.S. person questions: non-immigrant visa holders (F-1, H-1B, OPT) and candidates requiring sponsorship are NOT U.S. persons. Select "I am not a U.S. person...".
+4. Respond as JSON only: {"answer":"<selected exact option>","confidence":<0.0-1.0>}.`
       : isBehavioralOrMotivationalQuestion(field)
       ? `Strict Instructions (STAR Methodology):
 1. Format answer as a concise single paragraph (approximately 50 to 80 words) following the STAR methodology (Situation, Task, Action, and Result) without explicit headings or bullet labels.
@@ -1155,7 +1488,7 @@ Corporate default hint for this question: ${corporateDefaultHint}
       : `Strict Instructions:
 1. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile.
 2. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
-3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer". Always cite their ACTUAL past companies, verified project names, or specific tools found in their resume.
+3. NEVER use generic placeholder names like "xyz company", "[Company]", or "my previous employer", resume section headings (like "Professional Experience"), or city names for employer questions. Always cite their ACTUAL past companies, verified project names, or specific tools found in their resume.
 4. If the candidate's resume does not mention the exact requested tool/technology, write honestly: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
 5. For open-ended/textarea questions, provide a 2 to 3 sentence concise, tailored answer.
 6. Respond as JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. If you are not at least 0.65 confident, set confidence below 0.65.`;

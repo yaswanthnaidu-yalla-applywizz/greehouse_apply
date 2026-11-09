@@ -83,6 +83,9 @@ const envSchema = z.object({
   /** OpenRouter Model ID */
   OPENROUTER_MODEL: z.string().default('google/gemini-2.5-flash'),
 
+  /** OpenRouter model used for low-confidence Tier 5 escalation. */
+  DEEPSEEK_R1_MODEL: z.string().default('deepseek/deepseek-r1-0528'),
+
   /** Generic LLM API key fallback */
   LLM_API_KEY: z.string().optional(),
 
@@ -151,9 +154,6 @@ const envSchema = z.object({
 
   /** Local directory for cached candidate master PDF resumes */
   RESUMES_DIR: z.string().default('./resumes'),
-
-  /** Jobs with field_count >= this value are skipped (default 50 → allow 0–49 fields) */
-  MAX_JOB_QUESTIONS: z.coerce.number().int().positive().default(50),
 
   /** Supabase Project URL */
   SUPABASE_URL: z.string().optional(),
@@ -378,6 +378,7 @@ export const config = {
   OPENROUTER_MODEL: isSandboxEnv
     ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
     : rawEnv.OPENROUTER_MODEL,
+  DEEPSEEK_R1_MODEL: rawEnv.DEEPSEEK_R1_MODEL,
   /** Active LLM API key resolved from LLM_API_KEY or provider-specific keys */
   ACTIVE_LLM_API_KEY: resolveLlmApiKey(rawEnv),
   /** Active Azure / Microsoft 365 Tenant ID */

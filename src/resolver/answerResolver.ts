@@ -29,7 +29,11 @@ import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getSessionLlmMetrics, resetSessionLlmMetrics } from './tier5LLM.js';
 import { getEffectiveFieldOptions, getPersistedFieldOptions } from './llmSynthesizer.js';
-import { normalizeText } from './fingerprint.js';
+import { generateFingerprint, normalizeText } from './fingerprint.js';
+import {
+  recordAiReviewProposals,
+  type AiReviewProposalItem,
+} from '../db/aiAnswerReviews.js';
 import { isPhoneNumberField, resumeAnswerMatchesPhone } from './candidateEvidence.js';
 import { matchCorporatePolicy, enforceCorporatePolicy } from './corporatePolicies.js';
 import {
@@ -1492,6 +1496,38 @@ export class AnswerResolver {
               status: initialStatus,
               ats: app.ats ?? atsFromUrl(persistJobUrl),
             });
+
+            if (persistedApplication.id) {
+              const aiFields = (app.resolvedFields || []).filter(
+                (f) => f && f.source === 'ai' && typeof f.value === 'string' && f.value.trim().length > 0
+              );
+              if (aiFields.length > 0) {
+                try {
+                  const proposals: AiReviewProposalItem[] = aiFields.map((f) => ({
+                    fieldKey: f.tier5Provenance?.fieldKey || generateFingerprint(f.label, f.type),
+                    questionLabel: f.label,
+                    fieldType: f.type,
+                    options: f.options,
+                    aiValue: f.value.trim(),
+                    aiConfidence: f.confidence,
+                    aiModel: f.tier5Provenance?.winningModel || 'claude-3-5-haiku-20241022',
+                    tier5Provenance: f.tier5Provenance || null,
+                  }));
+
+                  await recordAiReviewProposals({
+                    applicationId: persistedApplication.id,
+                    resolutionRevision: 1,
+                    applywizzId: app.applywizzId,
+                    candidateName: app.candidateName || seg.profile?.clientName,
+                    proposals,
+                  });
+                } catch (reviewErr: any) {
+                  log.warn(
+                    `[Answer Resolver] Failed to record AI review proposals for app ${persistedApplication.id}: ${reviewErr?.message || reviewErr}`
+                  );
+                }
+              }
+            }
             if (persistedApplication.id && persistedApplication.status !== 'FILTERED_OUT') {
               wsManager.broadcast({
                 type: 'APPLICATION_UPSERTED',
