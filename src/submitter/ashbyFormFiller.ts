@@ -319,9 +319,48 @@ export async function fillAshbyForm(
 
     // 3. Checkbox
     if (controlType === 'checkbox') {
-      const cb = container.locator('input[type="checkbox"]').first();
-      if ((await cb.count()) > 0) {
-        const shouldCheck = answer === 'true' || answer.toLowerCase() === 'yes' || answer === '1';
+      const checkboxes = container.locator('input[type="checkbox"]');
+      const normalizedAnswer = answer.trim().replace(/\s+/g, ' ').toLowerCase();
+      const isBooleanAnswer = ['true', 'yes', '1', 'false', 'no', '0'].includes(normalizedAnswer);
+      const shouldCheck = ['true', 'yes', '1'].includes(normalizedAnswer);
+      const optionMatchesAnswer = field.options?.some(
+        (option) => option.trim().replace(/\s+/g, ' ').toLowerCase() === normalizedAnswer
+      ) ?? false;
+
+      if (optionMatchesAnswer) {
+        const matches: Locator[] = [];
+        for (let checkboxIndex = 0; checkboxIndex < await checkboxes.count(); checkboxIndex++) {
+          const checkbox = checkboxes.nth(checkboxIndex);
+          const matchesOption = await checkbox.evaluate((element, expected) => {
+            if (!(element instanceof HTMLInputElement)) return false;
+            const input = element;
+            const label = input.closest('label') ?? (input.id
+              ? Array.from(input.ownerDocument.querySelectorAll('label')).find((candidate) => candidate.htmlFor === input.id) ?? null
+              : null);
+            const inputValue = input.value.trim().replace(/\s+/g, ' ').toLowerCase();
+            const labelValue = (label?.textContent ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+            return inputValue === expected || labelValue === expected;
+          }, normalizedAnswer);
+          if (matchesOption) matches.push(checkbox);
+        }
+
+        if (matches.length === 1) {
+          const checkbox = matches[0];
+          if (!(await checkbox.isChecked())) await glideCursor(page, checkbox, { click: true });
+          await dispatchReactChangeEvent(checkbox);
+          await sleep(350, 650);
+
+          const currentChecked = await checkbox.isChecked().catch(() => false);
+          if (currentChecked) {
+            filledFields.push({ fieldId: fieldPath, label: questionText, value: answer, controlType: 'checkbox' });
+          } else {
+            log.warn(`[AshbyFormFiller] Checkbox option not verified on DOM for ${fieldPath}`);
+          }
+        } else {
+          log.warn(`[AshbyFormFiller] Checkbox option not uniquely matched for ${fieldPath}`);
+        }
+      } else if (isBooleanAnswer && (await checkboxes.count()) > 0) {
+        const cb = checkboxes.first();
         const isChecked = await cb.isChecked();
         if (shouldCheck !== isChecked) {
           await glideCursor(page, cb, { click: true });
