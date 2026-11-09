@@ -414,7 +414,9 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
         createdAtRange: restrictedAccess.createdAtRange,
         includeRow: (row: {
           assigned_ca_email?: string | null;
+          status?: string | null;
         }) =>
+          !['FILTERED_OUT', 'SKIPPED'].includes(String(row.status || '').trim().toUpperCase()) &&
           applicationAssignedCaAllowedForRequest(
             row.assigned_ca_email,
             restrictedAccess!.userEmail || '',
@@ -432,6 +434,13 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
     candidateSummaries,
     applicationAggregates
   );
+
+  // The operator queue represents actionable assignments for the selected date.
+  // Do not retain profile-only candidates or candidates whose only rows were
+  // filtered/skipped. QUEUED rows intentionally remain assignments.
+  if (!unrestricted && restrictedAccess?.role === 'operator') {
+    candidateSummaries = candidateSummaries.filter((candidate) => candidate.job_count > 0);
+  }
 
   if (unrestricted) {
     const nonDemoSummaries = candidateSummaries.filter(
@@ -499,6 +508,7 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
     res.json({
       candidates: [],
       message: `No candidates were assigned to you for ${parsedRange.label}.`,
+      emptyState: 'NO_ASSIGNED_APPLICATIONS',
       workHistoryUnreachable,
       dateRange: serializeDateRange(parsedRange),
     });
