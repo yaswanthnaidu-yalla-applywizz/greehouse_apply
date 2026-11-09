@@ -13,6 +13,8 @@ import {
   isFilteredOutApplicationJob,
 } from '../src/dashboard/candidateQueueFilter.js';
 import { statusMetricsForTransition } from '../src/db/applicationStats.js';
+import { alignResolvedChoice } from '../src/resolver/answerResolver.js';
+import type { ResolvedField, ScannedField } from '../src/types/index.js';
 
 describe('FILTERED_OUT routing logic', () => {
   it('countAiFields counts all AI fields regardless of isRequired', () => {
@@ -54,6 +56,22 @@ describe('FILTERED_OUT routing logic', () => {
     ];
     assert.equal(applicationShouldBeFilteredOut(fields), false);
     assert.equal(applicationNeedsOperatorReview(fields), false);
+  });
+
+  it('routes an unmatched required checkbox to operator review instead of auto-queue', () => {
+    const field: ScannedField = {
+      fieldId: 'referral_source', name: 'referral_source', type: 'checkbox',
+      label: 'How did you hear about us?', isRequired: true,
+      options: ['Referral', 'Website'], optionsComplete: true,
+    };
+    const resolved: ResolvedField = {
+      fieldId: field.fieldId, name: field.name, type: field.type, label: field.label,
+      value: 'Friend referral', source: 'supabase', resolvedByTier: 1, confidence: 1, isRequired: true,
+    };
+    const aligned = alignResolvedChoice(field, resolved);
+    const fields = [{ ...aligned, isRequired: true }];
+    assert.equal(applicationShouldBeFilteredOut(fields), false);
+    assert.equal(applicationNeedsOperatorReview(fields), true);
   });
 
   it('routes to READY_FOR_REVIEW when any required field is solved by AI (not auto-queued and not filtered out)', () => {
