@@ -1,7 +1,7 @@
 ---
 id: 34
 title: "Session-start scans must use the pinned workspace anchor"
-status: open
+status: actioned
 type: internal
 skill: [task-observer]
 proposes_skill: []
@@ -11,8 +11,8 @@ area: "Session Start Protocol after context resume"
 date: 2026-10-16
 session_context: "Failure-analysis follow-up and commit/PR workflow, and reportkaro skill update; repeated the wrong-root scan before correcting it"
 parked_until:
-resolved:
-resolution:
+resolved: 2026-11-08
+resolution: "Added structural preflight and path resolution in session-start-scan script to guard and correctly resolve pinned .ai workspace anchor."
 reference:
 commands_verified: none
 ---
