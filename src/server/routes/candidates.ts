@@ -587,7 +587,7 @@ candidatesRouter.get('/:applywizzId/profile', async (req: AuthenticatedRequest, 
 
 /**
  * GET /api/candidates/:applywizzId
- * Returns candidate full profile, resume details, and assigned job queue (< MAX_JOB_QUESTIONS).
+ * Returns candidate full profile, resume details, and assigned job queue.
  */
 candidatesRouter.get('/:applywizzId', async (req: AuthenticatedRequest, res: Response) => {
   const applywizzId = Array.isArray(req.params.applywizzId)

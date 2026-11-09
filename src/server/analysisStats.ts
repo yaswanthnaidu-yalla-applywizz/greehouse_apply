@@ -32,9 +32,12 @@ export interface FailureApplicationItem {
   jobUrl: string;
   companyName: string;
   jobTitle?: string;
-  ats: 'greenhouse' | 'ashby';
+  ats: 'greenhouse' | 'ashby' | string;
   errorMessage: string;
   createdAt: string;
+  hasProofFailed?: boolean;
+  proofFailedUrl?: string | null;
+  proofWebUrl?: string | null;
 }
 
 export interface FailureReasonGroup {
@@ -208,6 +211,8 @@ export async function handleAnalysisStats(req: Request, res: Response): Promise<
       ats?: string | null;
       created_at?: string | null;
       updated_at?: string | null;
+      proof_failed_url?: string | null;
+      proof_web_url?: string | null;
     }
 
     let rows: RawAppRow[] = [];
@@ -217,7 +222,7 @@ export async function handleAnalysisStats(req: Request, res: Response): Promise<
         const supabase = getDbClient();
         let query = supabase
           .from('gh_candidate_applications')
-          .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, ats, created_at, updated_at')
+          .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, ats, created_at, updated_at, proof_failed_url, proof_web_url')
           .gte('created_at', startIso)
           .lt('created_at', endIso);
 
@@ -322,6 +327,9 @@ export async function handleAnalysisStats(req: Request, res: Response): Promise<
             ats: isAshby ? 'ashby' : 'greenhouse',
             errorMessage: (row.error_message || '').trim() || norm.reason,
             createdAt: row.created_at || row.updated_at || new Date().toISOString(),
+            hasProofFailed: Boolean(row.proof_failed_url),
+            proofFailedUrl: row.proof_failed_url || null,
+            proofWebUrl: row.proof_web_url || null,
           });
         }
       }

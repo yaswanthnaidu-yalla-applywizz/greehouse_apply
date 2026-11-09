@@ -74,16 +74,16 @@ describe('FILTERED_OUT routing logic', () => {
     assert.equal(applicationNeedsOperatorReview(fields), true);
   });
 
-  it('routes to READY_FOR_REVIEW when any required field is solved by AI (not auto-queued and not filtered out)', () => {
+  it('routes required AI fields to auto-queue when no other review condition applies', () => {
     const fields = [
       { isRequired: true, source: 'ai', confidence: 0.9, label: 'Custom Question', value: 'Answer' },
       { isRequired: true, source: 'supabase', label: 'First Name', value: 'John' },
     ];
     assert.equal(applicationShouldBeFilteredOut(fields), false);
-    assert.equal(applicationNeedsOperatorReview(fields), true); // true = requires operator review (READY_FOR_REVIEW)
+    assert.equal(applicationNeedsOperatorReview(fields), false);
   });
 
-  it('FILTERS OUT when required AI > 3, even if unresolved required is 0', () => {
+  it('does not filter out when required AI > 3 and unresolved required is 0', () => {
     const fields = [
       { isRequired: true, source: 'ai', confidence: 0.9 },
       { isRequired: true, source: 'ai', confidence: 0.9 },
@@ -91,7 +91,7 @@ describe('FILTERED_OUT routing logic', () => {
       { isRequired: true, source: 'ai', confidence: 0.9 }, // 4 required AI (> 3)
       { isRequired: true, source: 'supabase' },
     ];
-    assert.equal(applicationShouldBeFilteredOut(fields), true);
+    assert.equal(applicationShouldBeFilteredOut(fields), false);
   });
 
   it('FILTERS OUT when unresolved required > 3, even if required AI is 0', () => {
