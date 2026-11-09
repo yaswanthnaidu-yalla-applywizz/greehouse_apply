@@ -1,7 +1,16 @@
 import { getISTDateRangeUtc } from '../db/applications.js';
 import { getISTDateString } from '../services/workHistoryClient.js';
+import { getLatestIngestRunDate } from '../db/ingestRuns.js';
 
 export { getISTDateRangeUtc };
+
+/**
+ * Resolves the default dashboard date in IST (YYYY-MM-DD),
+ * authoritatively driven by the most recent ingest_run.
+ */
+export async function resolveDefaultDashboardDate(): Promise<string> {
+  return getLatestIngestRunDate();
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
