@@ -87,17 +87,7 @@ export const App: React.FC = () => {
     }
   }, [sessionUser]);
 
-  const getTodayIST = (): string => {
-    const now = new Date();
-    const istOffset = 5.5 * 60 * 60 * 1000;
-    const istDate = new Date(now.getTime() + istOffset);
-    const yyyy = istDate.getUTCFullYear();
-    const mm = String(istDate.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(istDate.getUTCDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  const [selectedDate, setSelectedDate] = useState<string>(getTodayIST);
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stats'>('dashboard');
   const [candidates, setCandidates] = useState<CandidateSummary[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -244,13 +234,25 @@ export const App: React.FC = () => {
   const fetchInitialData = useCallback(async (isPolling = false, dateStr = selectedDate) => {
     if (!isPolling) setIsLoadingCandidates(true);
     try {
+      const candidatesUrl = dateStr
+        ? `${API_BASE_URL}/api/candidates?date=${encodeURIComponent(dateStr)}`
+        : `${API_BASE_URL}/api/candidates`;
+      const statsUrl = dateStr
+        ? `${API_BASE_URL}/api/stats?date=${encodeURIComponent(dateStr)}`
+        : `${API_BASE_URL}/api/stats`;
       const [candidatesRes, statsRes] = await Promise.all([
-        apiFetch(`${API_BASE_URL}/api/candidates?date=${encodeURIComponent(dateStr)}`),
-        apiFetch(`${API_BASE_URL}/api/stats?date=${encodeURIComponent(dateStr)}`),
+        apiFetch(candidatesUrl),
+        apiFetch(statsUrl),
       ]);
 
       if (candidatesRes.ok) {
+        const latestHeader = candidatesRes.headers.get('x-dashboard-latest-date');
         const raw = await candidatesRes.json();
+        const resolvedDate = latestHeader || raw.dateRange?.from || raw.dateRange?.to;
+        if (resolvedDate && (!dateStr || dateStr !== resolvedDate)) {
+          setSelectedDate(resolvedDate);
+        }
+
         const candidateData = Array.isArray(raw) ? raw : (raw.candidates || []);
         const unreachable = !Array.isArray(raw)
           ? Boolean(raw.workHistoryUnreachable)
@@ -281,7 +283,10 @@ export const App: React.FC = () => {
 
   const fetchNotifications = useCallback(async (dateStr = selectedDate) => {
     try {
-      const res = await apiFetch(`${API_BASE_URL}/api/notifications?date=${encodeURIComponent(dateStr)}`);
+      const notifsUrl = dateStr
+        ? `${API_BASE_URL}/api/notifications?date=${encodeURIComponent(dateStr)}`
+        : `${API_BASE_URL}/api/notifications`;
+      const res = await apiFetch(notifsUrl);
       if (res.ok) {
         const serverNotifs = await res.json();
         if (Array.isArray(serverNotifs)) {
@@ -344,7 +349,10 @@ export const App: React.FC = () => {
     const requestedId = normalizeApplywizzId(applywizzId);
     console.log(`[Dashboard] Selected ${requestedId} → fetching jobs assigned to this candidate only`);
     try {
-      const jobsRes = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`);
+      const jobsUrl = selectedDate
+        ? `${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs?date=${encodeURIComponent(selectedDate)}`
+        : `${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs`;
+      const jobsRes = await apiFetch(jobsUrl);
 
       if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
         return;
