@@ -638,16 +638,84 @@ function resolveRecipient(caEmail: string): string {
   return override || caEmail;
 }
 
+export interface FetchReadyForReviewOptions {
+  targetDate?: string;
+  runStartedAt?: string | Date;
+  excludeKeys?: Set<string>;
+}
+
+/**
+ * Fetches all READY_FOR_REVIEW applications across pages (up to 1,000 per page).
+ * Breaks PostgREST's default 1,000-row ceiling.
+ */
+export async function fetchLatestReadyForReviewApplications(
+  options?: FetchReadyForReviewOptions
+): Promise<ReviewAppRow[]> {
+  if (!isSupabaseConfigured()) return [];
+  const supabase = getDbClient();
+  const PAGE_SIZE = 1000;
+  const allRows: ReviewAppRow[] = [];
+
+  let startIso: string;
+  let endIso: string | undefined;
+
+  if (options?.targetDate) {
+    const { getISTDateRangeUtc } = await import('../server/dashboardDateRange.js');
+    const range = getISTDateRangeUtc(options.targetDate);
+    startIso = range.startIso;
+    endIso = range.endIso;
+  } else if (options?.runStartedAt) {
+    startIso = options.runStartedAt instanceof Date ? options.runStartedAt.toISOString() : String(options.runStartedAt);
+  } else {
+    try {
+      const { getLatestIngestRunDate } = await import('../db/ingestRuns.js');
+      const targetDate = await getLatestIngestRunDate();
+      const { getISTDateRangeUtc } = await import('../server/dashboardDateRange.js');
+      const range = getISTDateRangeUtc(targetDate);
+      startIso = range.startIso;
+      endIso = range.endIso;
+    } catch {
+      startIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    }
+  }
+
+  try {
+    for (let from = 0; ; from += PAGE_SIZE) {
+      let query = supabase
+        .from('gh_candidate_applications')
+        .select('id, applywizz_id, assigned_ca_email, job_url')
+        .eq('status', 'READY_FOR_REVIEW')
+        .gte('created_at', startIso);
+
+      if (endIso) {
+        query = query.lte('created_at', endIso);
+      }
+
+      const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
+      if (error) {
+        log.warn(`[ReadyForReview Fetch] Query failed at offset ${from}: ${error.message}`);
+        break;
+      }
+      if (!data || data.length === 0) break;
+      allRows.push(...(data as ReviewAppRow[]));
+      if (data.length < PAGE_SIZE) break;
+    }
+  } catch (err: any) {
+    log.warn(`[ReadyForReview Fetch] Exception: ${err?.message || err}`);
+  }
+
+  return allRows;
+}
+
 /**
  * After Phase D: email each CA with new READY_FOR_REVIEW apps created this run.
  * Failures are logged; this never throws to the pipeline.
  */
 export async function sendCaNotificationEmails(
   runStartedAt: string | Date,
-  options?: { excludeKeys?: Set<string> }
+  options?: { excludeKeys?: Set<string>; targetDate?: string }
 ): Promise<CaNotificationSendResult> {
   const empty: CaNotificationSendResult = { summaries: [], sent: 0, skipped: 0, failed: 0 };
-  const runStartedAtIso = runStartedAt instanceof Date ? runStartedAt.toISOString() : String(runStartedAt);
 
   if (!isSupabaseConfigured()) {
     log.info('[CA Notification] Supabase not configured — skipping CA emails');
@@ -659,24 +727,11 @@ export async function sendCaNotificationEmails(
     return empty;
   }
 
-  let rows: ReviewAppRow[] = [];
-  try {
-    const supabase = getDbClient();
-    const { data, error } = await supabase
-      .from('gh_candidate_applications')
-      .select('applywizz_id, assigned_ca_email, job_url')
-      .eq('status', 'READY_FOR_REVIEW')
-      .gte('created_at', runStartedAtIso);
-
-    if (error) {
-      log.warn(`[CA Notification] Query failed: ${error.message}`);
-      return empty;
-    }
-    rows = (data || []) as ReviewAppRow[];
-  } catch (err: any) {
-    log.warn(`[CA Notification] Query exception: ${err?.message || err}`);
-    return empty;
-  }
+  const rows = await fetchLatestReadyForReviewApplications({
+    runStartedAt,
+    targetDate: options?.targetDate,
+    excludeKeys: options?.excludeKeys,
+  });
 
   const summaries = groupReadyForReviewByCa(rows, options);
   if (summaries.length === 0) {
@@ -719,6 +774,7 @@ export async function sendCaNotificationEmails(
 
 export interface LeadershipIngestionSummaryOptions {
   excludeKeys?: Set<string>;
+  targetDate?: string;
   followupOptions?: FollowupPollOptions;
   sendEmailFn?: (options: any) => Promise<any>;
   caToManagerMap?: Map<string, string>;
@@ -733,8 +789,6 @@ export async function sendLeadershipIngestionSummary(
   runStartedAt: string | Date,
   options?: LeadershipIngestionSummaryOptions
 ): Promise<void> {
-  const runStartedAtIso = runStartedAt instanceof Date ? runStartedAt.toISOString() : String(runStartedAt);
-
   if (!isSupabaseConfigured()) {
     log.info('[Leadership Summary] Supabase not configured — skipping summary');
     return;
@@ -748,19 +802,12 @@ export async function sendLeadershipIngestionSummary(
   const sendEmailImpl = options?.sendEmailFn ?? sendEmail;
 
   try {
-    const supabase = getDbClient();
-    const { data, error } = await supabase
-      .from('gh_candidate_applications')
-      .select('id, applywizz_id, assigned_ca_email, job_url')
-      .eq('status', 'READY_FOR_REVIEW')
-      .gte('created_at', runStartedAtIso);
+    const rows = await fetchLatestReadyForReviewApplications({
+      runStartedAt,
+      targetDate: options?.targetDate,
+      excludeKeys: options?.excludeKeys,
+    });
 
-    if (error) {
-      log.warn(`[Leadership Summary] Query failed: ${error.message}`);
-      return;
-    }
-
-    const rows = (data || []) as ReviewAppRow[];
     const filteredRows = rows.filter((r) => {
       if (options?.excludeKeys && options.excludeKeys.size > 0 && r.applywizz_id && r.job_url) {
         const key = `${String(r.applywizz_id).trim().toUpperCase()}::${r.job_url}`;
