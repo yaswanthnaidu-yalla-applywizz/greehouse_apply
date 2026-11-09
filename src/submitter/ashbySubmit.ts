@@ -23,6 +23,7 @@ import { buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
 import { toAshbyApplicationUrl } from '../scanner/atsDetector.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 import { isAshbySubmissionRetryAllowed } from './submissionRetry.js';
+import { classifyRequiredFieldFailure } from '../utils/failureDiagnostics.js';
 import {
   captureAndSaveEmailProof,
   startEmailProofPolling,
@@ -56,6 +57,8 @@ export function capTelemetryMetadata(
   }
   metadata = {
     stage: telemetry.stage,
+    proxyOutcome: telemetry.proxyOutcome,
+    failureCategory: telemetry.failureCategory,
     deployedCommit: telemetry.deployedCommit,
     exitIpHash: telemetry.exitIpHash,
     proxyRegion: telemetry.proxyRegion,
@@ -72,6 +75,8 @@ export function capTelemetryMetadata(
   }
   return {
     stage: telemetry.stage,
+    proxyOutcome: telemetry.proxyOutcome,
+    failureCategory: telemetry.failureCategory,
     capturedAt: telemetry.capturedAt,
     submitClickedAt: telemetry.submitClickedAt,
     submitClicked: telemetry.submitClicked,
@@ -223,6 +228,7 @@ export async function submitAshbyApplication(
   let committedFieldCount: number | undefined;
   let challengeType: 'none' | 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown' = 'none';
   let submitResponseStatus: number | undefined;
+  let proxyOutcome: AshbySubmissionTelemetry['proxyOutcome'];
   let submitClickedAt: string | null = null;
   let submitClicked = false;
 
@@ -318,6 +324,7 @@ export async function submitAshbyApplication(
     stage = 'PREFLIGHT';
     log.info(`[AshbySubmit] Probing proxy preflight for ${applicationId} (${countryCode})...`);
     let preflight = await verifyProxyPreflight(page, countryCode);
+    proxyOutcome = preflight.outcome;
     if (!preflight.success) {
       log.warn(`[AshbySubmit] ⚠️ Proxy preflight initial attempt failed for ${applicationId}: ${preflight.error}.`);
 
@@ -357,12 +364,14 @@ export async function submitAshbyApplication(
           page = await fallbackContext.newPage();
           attachResponseListener(page);
           preflight = await verifyProxyPreflight(page, countryCode);
+          proxyOutcome = preflight.outcome;
         } catch (fallbackErr: any) {
           log.warn(`[AshbySubmit] ⚠️ Preflight country fallback re-acquisition error: ${fallbackErr.message}`);
         }
       } else {
         await sleep(1000, 2000);
         preflight = await verifyProxyPreflight(page, countryCode);
+        proxyOutcome = preflight.outcome;
       }
     }
     if (!preflight.success) {
@@ -409,6 +418,10 @@ export async function submitAshbyApplication(
       );
       preSubmitErr.stage = 'PRE_SUBMIT';
       preSubmitErr.classification = 'DATA_FAULT:MISSING_REQUIRED_FIELD';
+      preSubmitErr.failureCategory = classifyRequiredFieldFailure(
+        application.resolved_fields || [],
+        domVerification.missingFields
+      );
       throw preSubmitErr;
     }
 
@@ -538,6 +551,10 @@ export async function submitAshbyApplication(
       stage = err.stage;
     }
     const classification = err.classification;
+    const failureCategory = err.failureCategory
+      || (stage === 'PREFLIGHT' && proxyOutcome && proxyOutcome !== 'success' ? 'PROXY_PREFLIGHT'
+        : stage === 'DOM_SCAN' && /readiness timed out/i.test(errorMsg) ? 'NAVIGATION_READINESS'
+        : undefined);
     if (err.challengeType) {
       challengeType = err.challengeType;
     }
@@ -566,6 +583,8 @@ export async function submitAshbyApplication(
       capturedAt: new Date().toISOString(),
       submitClickedAt,
       submitClicked,
+      proxyOutcome,
+      failureCategory,
     };
 
     if (targetAppId) {
@@ -573,6 +592,7 @@ export async function submitAshbyApplication(
         error_message: errorMsg,
         error_details: {
           ...telemetry,
+          failureCategory,
           submitClickedAt,
           submitClicked,
         },
@@ -605,7 +625,7 @@ export async function submitAshbyApplication(
         await getDbClient().from('gh_failure_diagnostics').insert({
           phase: 'SUBMIT',
           stage,
-          category: classification || (stage === 'FORM_FILL' ? 'SUBMIT_FORM_FILL_ERROR' : stage === 'WAIT_CONFIRMATION' ? 'SUBMIT_CONFIRMATION_TIMEOUT' : 'SUBMIT_PLAYWRIGHT_NAVIGATE'),
+          category: failureCategory || classification || (stage === 'FORM_FILL' ? 'SUBMIT_FORM_FILL_ERROR' : stage === 'WAIT_CONFIRMATION' ? 'SUBMIT_CONFIRMATION_TIMEOUT' : 'SUBMIT_PLAYWRIGHT_NAVIGATE'),
           reason: errorMsg.slice(0, 500),
           error_name: err?.name ? String(err.name).slice(0, 80) : null,
           error_code: submitResponseStatus ? String(submitResponseStatus) : null,

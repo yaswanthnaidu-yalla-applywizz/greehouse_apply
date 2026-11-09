@@ -3,10 +3,20 @@ import assert from 'node:assert/strict';
 import { chromium, type Browser, type Page } from 'playwright';
 import { fillAshbyForm, verifyRequiredFieldsCommitted } from '../src/submitter/ashbyFormFiller.js';
 import type { ResolvedField } from '../src/types/index.js';
+import { classifyRequiredFieldFailure } from '../src/utils/failureDiagnostics.js';
 
 process.env.NODE_ENV = 'test';
 
 describe('Ashby Form Fill Accounting & Pre-Submit Validation Gate', () => {
+  it('classifies unresolved choices separately from controls that failed to commit', () => {
+    assert.equal(classifyRequiredFieldFailure([
+      { fieldId: 'country', source: 'unresolved', resolvedByTier: null },
+    ], ['country']), 'RESOLUTION_CHOICE_MISMATCH');
+    assert.equal(classifyRequiredFieldFailure([
+      { fieldId: 'country', source: 'api', resolvedByTier: 4 },
+    ], ['country']), 'CONTROL_NOT_COMMITTED');
+  });
+
   let browser: Browser;
   let page: Page;
 

@@ -11,6 +11,8 @@ import {
   PAUSED_SESSIONS,
   prepareSubmissionPreflight,
 } from '../src/submitter/liveSubmit.js';
+import { classifyRequiredFieldFailure } from '../src/utils/failureDiagnostics.js';
+import { isAshbySubmissionRetryAllowed } from '../src/submitter/submissionRetry.js';
 
 describe('LiveSubmit Pipeline & Unified OTP Session Registry (PR 7)', () => {
   it('unifies PAUSED_SESSIONS and activeSubmissions on the same Map instance (Remedy 7A)', () => {
@@ -53,5 +55,45 @@ describe('LiveSubmit Pipeline & Unified OTP Session Registry (PR 7)', () => {
     await expect(
       prepareSubmissionPreflight({ id: 'app-no-url', applywizz_id: 'AWL-001' } as any)
     ).rejects.toThrow(/no job_url/i);
+  });
+
+  it('keeps required-choice and DOM-commit failures permanent while preserving transient retry policy', () => {
+    expect(classifyRequiredFieldFailure([{ fieldId: 'country', source: 'unresolved', resolvedByTier: null }], ['country']))
+      .toBe('RESOLUTION_CHOICE_MISMATCH');
+    expect(classifyRequiredFieldFailure([{ fieldId: 'country', source: 'api', resolvedByTier: 4 }], ['country']))
+      .toBe('CONTROL_NOT_COMMITTED');
+
+    expect(isAshbySubmissionRetryAllowed({
+      success: false,
+      status: 'FAILED',
+      applicationId: 'app-1',
+      errorMessage: 'Pre-submit validation failed: required field uncommitted',
+      submitClicked: false,
+      telemetry: { stage: 'PRE_SUBMIT', capturedAt: new Date().toISOString() },
+    } as any)).toBe(false);
+    expect(isAshbySubmissionRetryAllowed({
+      success: false,
+      status: 'FAILED',
+      applicationId: 'app-1',
+      errorMessage: 'proxy preflight failed',
+      submitClicked: false,
+      telemetry: { stage: 'PREFLIGHT', capturedAt: new Date().toISOString() },
+    } as any)).toBe(true);
+    expect(isAshbySubmissionRetryAllowed({
+      success: false,
+      status: 'FAILED',
+      applicationId: 'app-1',
+      errorMessage: 'navigation readiness timed out',
+      submitClicked: false,
+      telemetry: { stage: 'DOM_SCAN', capturedAt: new Date().toISOString() },
+    } as any)).toBe(true);
+    expect(isAshbySubmissionRetryAllowed({
+      success: false,
+      status: 'FAILED',
+      applicationId: 'app-1',
+      errorMessage: 'captcha detected',
+      submitClicked: false,
+      telemetry: { stage: 'DOM_SCAN', challengeType: 'turnstile', capturedAt: new Date().toISOString() },
+    } as any)).toBe(false);
   });
 });
