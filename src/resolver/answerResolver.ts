@@ -58,7 +58,7 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import { wsManager } from '../server/ws.js';
-import { matchChoiceOption } from '../utils/choiceOptions.js';
+import { matchChoiceOption, matchSingleCheckboxOption } from '../utils/choiceOptions.js';
 import { classifyFieldIntent } from './fieldIntent.js';
 import { resolveDeterministicPolicy } from './deterministicPolicies.js';
 import {
@@ -196,7 +196,25 @@ export function alignResolvedChoice(
       confidence: 0,
     };
   }
-  if (field.type === 'checkbox') return baseWithOptions;
+  if (field.type === 'checkbox') {
+    if (
+      !field.isRequired ||
+      field.optionsComplete === false ||
+      !options?.length ||
+      /^(?:true|false)$/i.test(resolved.value.trim())
+    ) {
+      return baseWithOptions;
+    }
+    const matchedCheckbox = matchSingleCheckboxOption(resolved.value, options);
+    if (matchedCheckbox) return { ...baseWithOptions, value: matchedCheckbox };
+    return {
+      ...baseWithOptions,
+      value: '',
+      source: 'unresolved',
+      resolvedByTier: null,
+      confidence: 0,
+    };
+  }
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
 
   // System fields with no scanned options (e.g. Ashby _systemfield_location autocomplete select)
