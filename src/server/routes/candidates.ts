@@ -1020,21 +1020,33 @@ candidatesRouter.get('/:applywizzId/jobs/*', async (req: AuthenticatedRequest, r
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const { data, error } = await supabase
+      let applicationQuery = supabase
         .from('gh_candidate_applications')
         .select('*')
         .eq('applywizz_id', applywizzId)
-        .eq('job_url', decodedUrl)
+        .eq('job_url', decodedUrl);
+      if (!unrestricted) {
+        applicationQuery = applyCreatedAtRangeFilter(applicationQuery, access.createdAtRange);
+      }
+      const { data, error } = await applicationQuery
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (!error && data) {
         supabaseRecord = data;
       } else if (rawJobUrl !== decodedUrl) {
-        const { data: altData } = await supabase
+        let altQuery = supabase
           .from('gh_candidate_applications')
           .select('*')
           .eq('applywizz_id', applywizzId)
-          .eq('job_url', rawJobUrl)
+          .eq('job_url', rawJobUrl);
+        if (!unrestricted) {
+          altQuery = applyCreatedAtRangeFilter(altQuery, access.createdAtRange);
+        }
+        const { data: altData } = await altQuery
+          .order('created_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
         if (altData) supabaseRecord = altData;
       }

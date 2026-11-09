@@ -1,38 +1,38 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isOperatorApprovedApplicationJob } from '../src/dashboard/candidateQueueFilter.js';
+import { isSubmittedApplicationJob } from '../src/dashboard/candidateQueueFilter.js';
 
 describe('operator job-card status', () => {
   it('does not treat execution status as operator approval', () => {
-    assert.equal(isOperatorApprovedApplicationJob({ status: 'APPLIED' }), false);
-    assert.equal(isOperatorApprovedApplicationJob({ status: 'APPLYING' }), false);
-    assert.equal(isOperatorApprovedApplicationJob({ status: 'FAILED' }), false);
+    assert.equal(isSubmittedApplicationJob({ status: 'APPLIED' }), false);
+    assert.equal(isSubmittedApplicationJob({ status: 'APPLYING' }), false);
+    assert.equal(isSubmittedApplicationJob({ status: 'FAILED' }), false);
   });
 
-  it('treats explicit submitted_at or approval timestamp as submitted', () => {
+  it('requires a persisted submission timestamp and ignores operator approval', () => {
     assert.equal(
-      isOperatorApprovedApplicationJob({
+      isSubmittedApplicationJob({
         status: 'READY_FOR_REVIEW',
         operator_approved_at: '2026-10-30T02:00:00.000Z',
       }),
-      true
+      false
     );
     assert.equal(
-      isOperatorApprovedApplicationJob({
+      isSubmittedApplicationJob({
         status: 'READY_FOR_REVIEW',
         submitted_at: '2026-11-05T02:00:00.000Z',
       }),
       true
     );
     assert.equal(
-      isOperatorApprovedApplicationJob({
+      isSubmittedApplicationJob({
         status: 'APPLIED',
         submittedAt: '2026-11-05T02:00:00.000Z',
       }),
       true
     );
     assert.equal(
-      isOperatorApprovedApplicationJob({
+      isSubmittedApplicationJob({
         status: 'APPLIED',
         operator_approved_at: null,
         submitted_at: null,
