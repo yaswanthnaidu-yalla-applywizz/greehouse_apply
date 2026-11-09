@@ -21,7 +21,7 @@ import http from 'http';
 import { URL } from 'url';
 import pg from 'pg';
 import dotenv from 'dotenv';
-import { getFadaDatabaseConnectionString } from './fada-config.ts';
+import { getFadaDatabaseConnectionString } from '../../../../src/utils/fadaDatabaseConnectionString.ts';
 import { getPersistedRequiredness } from '../../../../src/utils/fadaFieldRequiredness.ts';
 
 dotenv.config();

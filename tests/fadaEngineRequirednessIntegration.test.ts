@@ -7,6 +7,10 @@ const enginePath = '.agents/skills/fada/scripts/fada-engine.ts';
 const configPath = '.agents/skills/fada/scripts/fada-config.ts';
 const engine = readFileSync(enginePath, 'utf8');
 
+assert.match(engine, /from ['"]\.\.\/\.\.\/\.\.\/\.\.\/src\/utils\/fadaDatabaseConnectionString\.ts['"]/);
+assert.match(engine, /getFadaDatabaseConnectionString\(process\.env\)/);
+assert.ok(existsSync('src/utils/fadaDatabaseConnectionString.ts'));
+assert.doesNotMatch(engine, /from ['"]\.\/fada-config\.ts['"]/);
 assert.match(engine, /from ['"]\.\.\/\.\.\/\.\.\/\.\.\/src\/utils\/fadaFieldRequiredness\.ts['"]/);
 assert.match(engine, /const isReq = getPersistedRequiredness\(f\);/);
 assert.doesNotMatch(engine, /Boolean\(f\.required\)/);
