@@ -28,10 +28,10 @@ const html = `<!doctype html>
   document.querySelector('[role="option"]').addEventListener('click', () => { menu.style.display = 'none'; });
 </script>`;
 
-async function withMockPage(run: (url: string) => Promise<void>): Promise<void> {
+async function withMockPage(run: (url: string) => Promise<void>, content = html): Promise<void> {
   const server = http.createServer((_request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/html' });
-    response.end(html);
+    response.end(content);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -44,6 +44,105 @@ async function withMockPage(run: (url: string) => Promise<void>): Promise<void> 
 }
 
 const application = { id: 'app', applywizz_id: 'AWL-TEST', resolved_fields: [] } as any;
+
+const demographicCommitmentHtml = (dispatchesFrameworkEvent: boolean) => `<!doctype html>
+<form>
+  <div class="field-wrapper">
+    <label>Race</label>
+    <div id="race" class="select__control" role="combobox" aria-expanded="false">
+      <div class="select__single-value"></div>
+      <input class="select__input" type="text" aria-label="Race">
+    </div>
+    <div class="select__menu" style="display:none"><div class="select__option" role="option">Option One</div></div>
+    <input class="requiredInput" type="text" required value="" style="display:none">
+  </div>
+</form>
+<script>
+  const control = document.querySelector('#race');
+  const input = control.querySelector('input');
+  const menu = document.querySelector('.select__menu');
+  const selected = control.querySelector('.select__single-value');
+  control.addEventListener('click', () => { menu.style.display = 'block'; });
+  input.addEventListener('input', () => { menu.style.display = 'block'; });
+  document.querySelector('[role="option"]').addEventListener('click', () => {
+    selected.textContent = 'Option One';
+    menu.style.display = 'none';
+  });
+  ${dispatchesFrameworkEvent ? `input.addEventListener('change', () => {
+    document.querySelector('.requiredInput').value = selected.textContent;
+  });` : ''}
+</script>`;
+
+const educationCountryCommitmentHtml = (dispatchesFrameworkEvent: boolean) => `<!doctype html>
+<form>
+  <div class="select-shell">
+    <label>Country of education</label>
+    <div id="education-country" class="select__control" role="combobox" aria-expanded="false">
+      <div class="select__single-value"></div>
+      <input class="select__input" type="text" aria-label="Country of education">
+    </div>
+    <div class="select__menu" style="display:none"><div class="select__option" role="option">Option One</div></div>
+    <input type="hidden" name="education_country" required value="">
+  </div>
+</form>
+<script>
+  const control = document.querySelector('#education-country');
+  const input = control.querySelector('input');
+  const menu = document.querySelector('.select__menu');
+  const selected = control.querySelector('.select__single-value');
+  control.addEventListener('click', () => { menu.style.display = 'block'; });
+  input.addEventListener('input', () => { menu.style.display = 'block'; });
+  document.querySelector('[role="option"]').addEventListener('click', () => {
+    selected.textContent = 'Option One';
+    menu.style.display = 'none';
+  });
+  ${dispatchesFrameworkEvent ? `input.addEventListener('change', () => {
+    document.querySelector('[name="education_country"]').value = selected.textContent;
+  });` : ''}
+</script>`;
+
+for (const fixture of [
+  { label: 'demographic select', selector: '#race', content: demographicCommitmentHtml },
+  { label: 'education country combobox', selector: '#education-country', content: educationCountryCommitmentHtml },
+]) {
+  for (const dispatchesFrameworkEvent of [false, true]) {
+    const content = fixture.content(dispatchesFrameworkEvent);
+    await withMockPage(async (url) => {
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.goto(url);
+        const result = await fillSingleField(page, {
+          fieldId: fixture.selector.slice(1),
+          name: fixture.selector.slice(1),
+          type: 'select',
+          label: fixture.label,
+          value: 'Option One',
+          options: ['Option One'],
+          isRequired: true,
+          metadata: { selector: fixture.selector },
+        } as any, 'TEST', []);
+
+        assert.equal(result.success, dispatchesFrameworkEvent, `${fixture.label}: only committed framework state succeeds`);
+        assert.equal(result.domCommitted, dispatchesFrameworkEvent, `${fixture.label}: displayed-only selection is not committed`);
+        const requiredValue = fixture.selector === '#race'
+          ? page.locator('.requiredInput')
+          : page.locator('[name="education_country"]');
+        assert.equal(await requiredValue.inputValue(), dispatchesFrameworkEvent ? 'Option One' : '', `${fixture.label}: hidden required value reflects framework state`);
+        if (!dispatchesFrameworkEvent) {
+          const gate = await validateGreenhouseSubmission(page, application, {
+            applicationId: 'app', jobUrl: url, totalFields: 1, filledFields: 0, failedFields: 1,
+            results: [result],
+          } as any);
+          assert.equal(gate.ok, false, `${fixture.label}: required hidden/native value blocks submission`);
+        }
+        await page.close();
+      } finally {
+        await browser.close();
+      }
+    }, content);
+  }
+}
 
 await withMockPage(async (url) => {
   const browser = await chromium.launch({ headless: true });
