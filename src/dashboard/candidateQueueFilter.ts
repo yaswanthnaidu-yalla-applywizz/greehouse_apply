@@ -92,16 +92,12 @@ export function isSkippedApplicationJob(row: { status?: string | null }): boolea
   return (row.status || '').trim().toUpperCase() === 'SKIPPED';
 }
 
-/** The job card shows submitted if submitted_at or operator_approved_at is present. */
-export function isOperatorApprovedApplicationJob(row: {
-  operator_approved_at?: string | null;
-  operatorApprovedAt?: string | null;
+/** Approval records operator review; only submission time makes a job submitted. */
+export function isSubmittedApplicationJob(row: {
   submitted_at?: string | null;
   submittedAt?: string | null;
 }): boolean {
-  return Boolean(
-    row.submitted_at || row.submittedAt || row.operator_approved_at || row.operatorApprovedAt
-  );
+  return Boolean(row.submitted_at || row.submittedAt);
 }
 
 type ResolvedFieldLike = {

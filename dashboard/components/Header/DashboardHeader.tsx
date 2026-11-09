@@ -22,7 +22,7 @@ export interface DashboardHeaderProps {
   activeTab: 'dashboard' | 'stats' | 'review';
   setActiveTab: (tab: 'dashboard' | 'stats' | 'review') => void;
   selectedDate: string;
-  setSelectedDate?: (date: string) => void;
+  setSelectedDate: (date: string) => void;
   stats: DashboardStats | null;
   isRefreshing: boolean;
   onRefresh: () => void;
@@ -43,7 +43,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   activeTab,
   setActiveTab,
   selectedDate,
-  setSelectedDate: _setSelectedDate,
+  setSelectedDate,
   stats,
   isRefreshing,
   onRefresh,
@@ -309,10 +309,23 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               className="flex items-center gap-1.5 bg-[#1c1c1e] border border-[#2c2c2e] px-2.5 py-1 rounded-md flex-shrink-0 text-[11px] sm:text-xs font-mono font-medium text-[#8e8e93]"
               title="Operator queue automatically displays tasks from the latest ingestion run"
             >
-              <span>📅 Latest Batch:</span>
+              <span>📅 Application Date:</span>
               <span className="text-[#30d158] font-semibold">{selectedDate || 'Latest'}</span>
               <span className="text-[10px] text-[#636366]">(IST)</span>
             </div>
+
+            <label className="flex items-center gap-2 text-[11px] font-mono text-[#8e8e93]">
+              <span>Application date</span>
+              <input
+                aria-label="Application date"
+                data-testid="application-date-picker"
+                type="date"
+                value={selectedDate}
+                max={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())}
+                onChange={(event) => setSelectedDate(event.currentTarget.value)}
+                className="rounded-md border border-[#3a3a3c] bg-[#1c1c1e] px-2 py-1 text-[#ffffff]"
+              />
+            </label>
 
             {stats && (
               <div className="hidden sm:flex items-center gap-2">
