@@ -9,7 +9,7 @@
 import { Router, Request, Response } from 'express';
 import { getRecentNotifications } from '../../db/applications.js';
 import { isUserAdmin } from './auth.js';
-import { parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
+import { parseDashboardCreatedAtRange, resolveDefaultDashboardDate } from '../dashboardDateRange.js';
 import { getAuthenticatedCaEmail } from '../workHistoryAuth.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import {
@@ -30,7 +30,17 @@ export const notificationsRouter = Router();
 notificationsRouter.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '50'), 10) || 50));
-    const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+    const hasExplicitDateRange =
+      req.query.from !== undefined ||
+      req.query.to !== undefined ||
+      req.query.date !== undefined ||
+      req.query.range !== undefined;
+    let queryToParse = req.query as Record<string, unknown>;
+    if (!hasExplicitDateRange) {
+      const defaultDate = await resolveDefaultDashboardDate();
+      queryToParse = { ...queryToParse, from: defaultDate, to: defaultDate };
+    }
+    const parsedRange = parseDashboardCreatedAtRange(queryToParse);
     if ('error' in parsedRange) {
       res.status(400).json({ error: parsedRange.error });
       return;

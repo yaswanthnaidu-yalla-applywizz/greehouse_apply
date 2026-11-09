@@ -70,6 +70,7 @@ import { getApplicationStats } from '../db/applicationStats.js';
 import {
   istDatesForWorkHistory,
   parseDashboardStatsRange,
+  resolveDefaultDashboardDate,
   serializeDateRange,
 } from './dashboardDateRange.js';
 import {
@@ -650,7 +651,17 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
    * Returns aggregated dashboard metrics.
    */
   app.get('/api/stats', ...candidateListApiGuard, async (req: Request, res: Response) => {
-    const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
+    const hasExplicitQuery =
+      req.query.range !== undefined ||
+      req.query.from !== undefined ||
+      req.query.to !== undefined ||
+      req.query.date !== undefined;
+    let queryToParse = req.query as Record<string, unknown>;
+    if (!hasExplicitQuery) {
+      const defaultDate = await resolveDefaultDashboardDate();
+      queryToParse = { ...queryToParse, from: defaultDate, to: defaultDate };
+    }
+    const parsedRange = parseDashboardStatsRange(queryToParse);
     if ('error' in parsedRange) {
       res.status(400).json({ error: parsedRange.error });
       return;
