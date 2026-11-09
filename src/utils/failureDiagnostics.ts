@@ -80,21 +80,23 @@ const SAFE_METADATA_KEYS = new Set([
 export type SubmissionFailureCategory =
   | 'RESOLUTION_CHOICE_MISMATCH'
   | 'CONTROL_NOT_COMMITTED'
+  | 'SUBMIT_REQUIRED_FIELD_EMPTY'
   | 'PROXY_PREFLIGHT'
   | 'NAVIGATION_READINESS';
 
 export function classifyRequiredFieldFailure(
-  fields: Array<{ fieldId?: string; name?: string; source?: string; resolvedByTier?: number | null }>,
+  fields: Array<{ fieldId?: string; name?: string; type?: string; source?: string; resolvedByTier?: number | null }>,
   missingFieldIds: string[]
 ): SubmissionFailureCategory {
-  const unresolved = new Set(
-    fields
-      .filter((field) => field.source === 'unresolved' || field.resolvedByTier === null)
-      .flatMap((field) => [field.fieldId, field.name].filter((id): id is string => Boolean(id)))
+  const missing = new Set(missingFieldIds);
+  const unresolved = fields.filter(
+    (field) => (field.source === 'unresolved' || field.resolvedByTier === null)
+      && [field.fieldId, field.name].some((id) => Boolean(id && missing.has(id)))
   );
-  return missingFieldIds.some((fieldId) => unresolved.has(fieldId))
-    ? 'RESOLUTION_CHOICE_MISMATCH'
-    : 'CONTROL_NOT_COMMITTED';
+  if (unresolved.some((field) => ['select', 'radio', 'checkbox'].includes(field.type?.toLowerCase() || ''))) {
+    return 'RESOLUTION_CHOICE_MISMATCH';
+  }
+  return unresolved.length > 0 ? 'SUBMIT_REQUIRED_FIELD_EMPTY' : 'CONTROL_NOT_COMMITTED';
 }
 
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;

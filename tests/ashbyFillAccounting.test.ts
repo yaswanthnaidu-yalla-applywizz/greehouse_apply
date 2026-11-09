@@ -10,7 +10,7 @@ process.env.NODE_ENV = 'test';
 describe('Ashby Form Fill Accounting & Pre-Submit Validation Gate', () => {
   it('classifies unresolved choices separately from controls that failed to commit', () => {
     assert.equal(classifyRequiredFieldFailure([
-      { fieldId: 'country', source: 'unresolved', resolvedByTier: null },
+      { fieldId: 'country', type: 'select', source: 'unresolved', resolvedByTier: null },
     ], ['country']), 'RESOLUTION_CHOICE_MISMATCH');
     assert.equal(classifyRequiredFieldFailure([
       { fieldId: 'country', source: 'api', resolvedByTier: 4 },
