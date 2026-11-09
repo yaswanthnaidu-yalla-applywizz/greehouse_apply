@@ -115,7 +115,7 @@ The scanner navigates to Greenhouse job postings to extract form structure:
 - Handles custom React-Select autocomplete controls.
 - Generates a deterministic question fingerprint using a SHA-256 hash of the question label and type: `SHA-256(label + "|" + type)[0:16]`.
 - Implements random timing jitter between requests to respect target rate limits.
-- Enforces the `MAX_JOB_QUESTIONS=35` limit. If the total field count is 35 or higher, the job is marked `SKIPPED`.
+- Large forms are processed without a field-count skip; required-field resolution and submission safeguards still apply.
 
 #### 2. Five-Tier Waterfall Resolver (`src/resolver/`)
 

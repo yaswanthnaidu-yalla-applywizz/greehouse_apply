@@ -345,19 +345,20 @@ export async function writeEmbedding(
   applywizzId: string,
   questionFingerprint: string,
   questionLabel: string
-): Promise<void> {
+): Promise<boolean> {
   const embedding = await embedText(questionLabel);
   if (!embedding) {
-    return;
+    return false;
   }
 
   try {
-    await supabase
+    const { error } = await supabase
       .from('gh_candidate_qa_bank')
       .update({ embedding })
       .eq('applywizz_id', applywizzId)
       .eq('question_fingerprint', questionFingerprint);
+    return !error;
   } catch {
-    // Ignore write-back embedding errors
+    return false;
   }
 }

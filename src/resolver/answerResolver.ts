@@ -29,7 +29,11 @@ import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getSessionLlmMetrics, resetSessionLlmMetrics } from './tier5LLM.js';
 import { getEffectiveFieldOptions, getPersistedFieldOptions } from './llmSynthesizer.js';
-import { normalizeText } from './fingerprint.js';
+import { generateFingerprint, normalizeText } from './fingerprint.js';
+import {
+  recordAiReviewProposals,
+  type AiReviewProposalItem,
+} from '../db/aiAnswerReviews.js';
 import { isPhoneNumberField, resumeAnswerMatchesPhone } from './candidateEvidence.js';
 import { matchCorporatePolicy, enforceCorporatePolicy } from './corporatePolicies.js';
 import {
@@ -58,7 +62,7 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { hasAnyNonEmptyResolvedField } from '../utils/resolvedFields.js';
 import { wsManager } from '../server/ws.js';
-import { matchChoiceOption } from '../utils/choiceOptions.js';
+import { matchChoiceOption, matchSingleCheckboxOption } from '../utils/choiceOptions.js';
 import { classifyFieldIntent } from './fieldIntent.js';
 import { resolveDeterministicPolicy } from './deterministicPolicies.js';
 import {
@@ -196,7 +200,25 @@ export function alignResolvedChoice(
       confidence: 0,
     };
   }
-  if (field.type === 'checkbox') return baseWithOptions;
+  if (field.type === 'checkbox') {
+    if (
+      !field.isRequired ||
+      field.optionsComplete === false ||
+      !options?.length ||
+      /^(?:true|false)$/i.test(resolved.value.trim())
+    ) {
+      return baseWithOptions;
+    }
+    const matchedCheckbox = matchSingleCheckboxOption(resolved.value, options);
+    if (matchedCheckbox) return { ...baseWithOptions, value: matchedCheckbox };
+    return {
+      ...baseWithOptions,
+      value: '',
+      source: 'unresolved',
+      resolvedByTier: null,
+      confidence: 0,
+    };
+  }
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
 
   // System fields with no scanned options (e.g. Ashby _systemfield_location autocomplete select)
@@ -1474,6 +1496,38 @@ export class AnswerResolver {
               status: initialStatus,
               ats: app.ats ?? atsFromUrl(persistJobUrl),
             });
+
+            if (persistedApplication.id) {
+              const aiFields = (app.resolvedFields || []).filter(
+                (f) => f && f.source === 'ai' && typeof f.value === 'string' && f.value.trim().length > 0
+              );
+              if (aiFields.length > 0) {
+                try {
+                  const proposals: AiReviewProposalItem[] = aiFields.map((f) => ({
+                    fieldKey: f.tier5Provenance?.fieldKey || generateFingerprint(f.label, f.type),
+                    questionLabel: f.label,
+                    fieldType: f.type,
+                    options: f.options,
+                    aiValue: f.value.trim(),
+                    aiConfidence: f.confidence,
+                    aiModel: f.tier5Provenance?.winningModel || 'claude-3-5-haiku-20241022',
+                    tier5Provenance: f.tier5Provenance || null,
+                  }));
+
+                  await recordAiReviewProposals({
+                    applicationId: persistedApplication.id,
+                    resolutionRevision: 1,
+                    applywizzId: app.applywizzId,
+                    candidateName: app.candidateName || seg.profile?.clientName,
+                    proposals,
+                  });
+                } catch (reviewErr: any) {
+                  log.warn(
+                    `[Answer Resolver] Failed to record AI review proposals for app ${persistedApplication.id}: ${reviewErr?.message || reviewErr}`
+                  );
+                }
+              }
+            }
             if (persistedApplication.id && persistedApplication.status !== 'FILTERED_OUT') {
               wsManager.broadcast({
                 type: 'APPLICATION_UPSERTED',

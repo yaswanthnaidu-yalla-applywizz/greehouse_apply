@@ -129,6 +129,12 @@ export interface AshbySubmissionTelemetry {
   capturedAt: string;
   submitClickedAt?: string | null;
   submitClicked?: boolean;
+  proxyOutcome?: 'success' | 'http_status' | 'timeout' | 'invalid_ip' | 'country_mismatch' | 'network_error';
+  failureCategory?:
+    | 'RESOLUTION_CHOICE_MISMATCH'
+    | 'CONTROL_NOT_COMMITTED'
+    | 'PROXY_PREFLIGHT'
+    | 'NAVIGATION_READINESS';
 }
 
 export interface ApplicationRow {

@@ -45,6 +45,7 @@ import {
 } from '../../db/applications.js';
 import {
   parseDashboardCreatedAtRange,
+  resolveDefaultDashboardDate,
   serializeDateRange,
 } from '../dashboardDateRange.js';
 import {
@@ -271,6 +272,22 @@ function enrichResolvedFieldsWithTemplateOptions(
 
 export const candidatesRouter = Router({ mergeParams: true });
 
+async function resolveCandidateRouteRange(query: Record<string, unknown>) {
+  const hasExplicitDateRange =
+    query.from !== undefined ||
+    query.to !== undefined ||
+    query.date !== undefined ||
+    query.range !== undefined;
+  const defaultDate = hasExplicitDateRange ? undefined : await resolveDefaultDashboardDate();
+  const rangeQuery = hasExplicitDateRange
+    ? query
+    : { ...query, from: defaultDate, to: defaultDate };
+  return {
+    parsedRange: parseDashboardCreatedAtRange(rangeQuery),
+    defaultDate,
+  };
+}
+
 /**
  * GET /api/candidates
  * Returns summary list of all segregated candidates with job counts and status for the selected IST date.
@@ -281,20 +298,14 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
   const viewAsManagerEmail = resolveViewAsOperatorManagerEmail(req);
   const unrestricted = hasUnrestrictedDashboardAccess(role) && !viewAsManagerEmail;
 
-  const query = req.query as Record<string, unknown>;
-  const hasExplicitDateRange =
-    query.from !== undefined ||
-    query.to !== undefined ||
-    query.date !== undefined ||
-    query.range !== undefined;
-  const rangeQuery = hasExplicitDateRange
-    ? query
-    : { ...query, from: getISTDateString(1), to: getISTDateString(1) };
-  const parsedRange = parseDashboardCreatedAtRange(rangeQuery);
+  const { parsedRange, defaultDate } = await resolveCandidateRouteRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;
   }
+
+  const effectiveLatestDate = defaultDate || parsedRange.fromDate || parsedRange.toDate || getISTDateString(0);
+  res.setHeader('X-Dashboard-Latest-Date', effectiveLatestDate);
 
   let allowedIds: Set<string> | null = null;
   let workHistoryRecords: WorkHistoryCandidateRecord[] = [];
@@ -513,7 +524,7 @@ candidatesRouter.get('/:applywizzId/profile', async (req: AuthenticatedRequest, 
   const applywizzId = Array.isArray(req.params.applywizzId)
     ? req.params.applywizzId[0]
     : String(req.params.applywizzId || '');
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const { parsedRange } = await resolveCandidateRouteRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;
@@ -576,13 +587,13 @@ candidatesRouter.get('/:applywizzId/profile', async (req: AuthenticatedRequest, 
 
 /**
  * GET /api/candidates/:applywizzId
- * Returns candidate full profile, resume details, and assigned job queue (< MAX_JOB_QUESTIONS).
+ * Returns candidate full profile, resume details, and assigned job queue.
  */
 candidatesRouter.get('/:applywizzId', async (req: AuthenticatedRequest, res: Response) => {
   const applywizzId = Array.isArray(req.params.applywizzId)
     ? req.params.applywizzId[0]
     : String(req.params.applywizzId || '');
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const { parsedRange } = await resolveCandidateRouteRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;
@@ -754,7 +765,7 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
   const applywizzId = Array.isArray(req.params.applywizzId)
     ? req.params.applywizzId[0]
     : String(req.params.applywizzId || '');
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const { parsedRange } = await resolveCandidateRouteRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;
@@ -910,7 +921,7 @@ candidatesRouter.get('/:applywizzId/resume', async (req: AuthenticatedRequest, r
   const applywizzId = Array.isArray(req.params.applywizzId)
     ? req.params.applywizzId[0]
     : String(req.params.applywizzId || '');
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const { parsedRange } = await resolveCandidateRouteRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;
@@ -965,7 +976,7 @@ candidatesRouter.get('/:applywizzId/jobs/*', async (req: AuthenticatedRequest, r
   const applywizzId = Array.isArray(req.params.applywizzId)
     ? req.params.applywizzId[0]
     : String(req.params.applywizzId || '');
-  const parsedRange = parseDashboardCreatedAtRange(req.query as Record<string, unknown>);
+  const { parsedRange } = await resolveCandidateRouteRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
     res.status(400).json({ error: parsedRange.error });
     return;

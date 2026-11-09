@@ -19,7 +19,7 @@ Research order: **Lever, SmartRecruiters, ApplyToJob, JazzHR, Rippling, Workable
 ## Hard Constraints
 - ATS submission uses **Playwright only**. API-based scanning is allowed; API-based submission is not.
 - Preserve resolver safeguards, cached resume behavior, SHA-256 question fingerprinting, idempotent upserts, and headful/headless compatibility.
-- `MAX_JOB_QUESTIONS` is explicitly capped at **35**; jobs with `field_count >= 35` are skipped. Do not raise the cap without explicit instruction.
+- Jobs are not skipped solely because of field count. Required-field resolution and submission safeguards still apply to large forms.
 - Candidate identity source: ApplyWizz API (`https://www.apply-wizz.me/api/get-client-details?applywizz_id=AWL-****`).
 - Deployment: Railway (single service, Docker).
 
@@ -27,7 +27,6 @@ Research order: **Lever, SmartRecruiters, ApplyToJob, JazzHR, Rippling, Workable
 - CAPTCHA bypass services or automated challenge solving.
 - ATS expansion implementation before a platform-specific plan is approved and completed.
 - Multi-tenant Supabase RLS on core tables (app-level role dashboards are shipped; event tables use service-role-only RLS).
-- Raising the 35-question cap without explicit instruction.
 
 ## Input / Output
 | Input | Output |

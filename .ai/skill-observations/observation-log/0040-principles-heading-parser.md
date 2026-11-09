@@ -1,7 +1,7 @@
 ---
 id: 40
 title: "Active principle scan expects a different Markdown heading level"
-status: open
+status: actioned
 type: open-source
 skill: [task-observer]
 proposes_skill: []
@@ -11,8 +11,8 @@ area: "Session-start active-principles parsing"
 date: 2026-10-30
 session_context: "The session-start scan reported that the principles file had no Active Principles heading, although the heading exists and its principle entries use level-two headings."
 parked_until:
-resolved:
-resolution:
+resolved: 2026-11-08
+resolution: "Updated session-start scan parser to support both ## and ### heading levels under Active Principles without false unparsed alerts."
 reference: ".ai/skill-observations/cross-cutting-principles.md"
 commands_verified: none
 ---

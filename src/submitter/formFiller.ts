@@ -425,7 +425,7 @@ async function resolveComboboxControls(
   const className = (await control.getAttribute('class').catch(() => '')) || '';
 
   const nestedInput = control.locator('input[type="text"], input:not([type="hidden"]), .select__input').first();
-  if (tagName === 'INPUT' || className.includes('select__input') || role === 'combobox') {
+  if (tagName === 'INPUT' || className.includes('select__input')) {
     const parentContainer = control
       .locator('xpath=ancestor::*[contains(@class,"select__control") or contains(@class,"select-shell")][1]')
       .first();
@@ -435,6 +435,7 @@ async function resolveComboboxControls(
   if ((await nestedInput.count()) > 0) {
     return { searchInput: nestedInput, openTrigger: control };
   }
+  if (role === 'combobox') return { searchInput: control, openTrigger: control };
 
   const container = control.locator(
     'xpath=ancestor-or-self::*[contains(@class,"select_input-container") or contains(@class,"select__control") or contains(@class,"select-shell") or contains(@class,"css-control")][1]'
@@ -507,6 +508,63 @@ async function hiddenRequiredInputDisplaysAnswer(
     if (value && (matchOption(value, answerText) || choiceOptionTextMatches(value, answerText))) return true;
   }
   return false;
+}
+
+async function hasRequiredHiddenInput(control: Locator): Promise<boolean> {
+  const shell = control
+    .locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"field-wrapper") or contains(@class,"select_input-container")][1]')
+    .first();
+  if ((await shell.count().catch(() => 0)) === 0) return false;
+  return shell.locator('input').evaluateAll((inputs) =>
+    inputs.some((input) => {
+      const candidate = input as HTMLInputElement;
+      return candidate.required && (candidate.type === 'hidden' || candidate.classList.contains('requiredInput'));
+    })
+  ).catch(() => false);
+}
+
+async function logRequiredControlCommitmentFailure(
+  control: Locator,
+  clickedOption: boolean,
+  answerText: string,
+): Promise<void> {
+  const tagName = await control.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
+  const controlKind = tagName === 'SELECT'
+    ? 'native-select'
+    : (await hasRequiredHiddenInput(control))
+    ? 'hidden-required-input'
+    : (await isInteractiveSelectControl(control))
+    ? 'combobox'
+    : 'unknown';
+  const displayedText = (await control.innerText().catch(() => '')).trim();
+  const displayedTextState = !displayedText
+    ? 'empty'
+    : choiceOptionTextMatches(displayedText, answerText)
+      ? 'matched'
+      : 'unmatched';
+  const hiddenOrNativeValueState = tagName === 'SELECT'
+    ? (await control.inputValue().catch(() => '')).trim() ? 'present' : 'empty'
+    : await control
+      .locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"field-wrapper") or contains(@class,"select_input-container")][1]')
+      .locator('input')
+      .evaluateAll((inputs) => inputs
+          .filter((input) => {
+            const candidate = input as HTMLInputElement;
+            return candidate.required && (candidate.type === 'hidden' || candidate.classList.contains('requiredInput'));
+          })
+          .map((input) => (input as HTMLInputElement).value.trim()))
+      .then((values) => values.length === 0
+        ? 'not-present'
+        : values.some((value) => choiceOptionTextMatches(value, answerText))
+          ? 'matched'
+          : values.some(Boolean) ? 'present-unmatched' : 'empty')
+      .catch(() => 'unknown');
+  log.warn('[Greenhouse commitment]', {
+    controlKind,
+    clickedOption,
+    displayedTextState,
+    hiddenOrNativeValueState,
+  });
 }
 
 async function resolveSelectOptionScope(control: Locator): Promise<Locator | null> {
@@ -610,7 +668,8 @@ async function fillInteractiveSelectDropdown(
   control: Locator,
   answerText: string,
   matchOption: OptionTextMatcher = exactOptionTextMatch,
-  retryCount = 0
+  retryCount = 0,
+  diagnoseRequiredFailure = false
 ): Promise<boolean> {
   await control.scrollIntoViewIfNeeded().catch(() => {});
   const { searchInput, openTrigger } = await resolveComboboxControls(control);
@@ -683,17 +742,23 @@ async function fillInteractiveSelectDropdown(
     await searchInput?.blur().catch(() => {});
     await page.waitForTimeout(250);
     const committedMatch = choiceOptionTextMatches;
-    verified =
-      (await comboboxDisplaysAnswer(searchInput || control, answerText, committedMatch)) ||
-      (await hiddenRequiredInputDisplaysAnswer(searchInput || control, answerText, committedMatch));
+    const requiredHiddenInput = await hasRequiredHiddenInput(searchInput || control);
+    verified = requiredHiddenInput
+      ? await hiddenRequiredInputDisplaysAnswer(searchInput || control, answerText, committedMatch)
+      : (await comboboxDisplaysAnswer(searchInput || control, answerText, committedMatch)) ||
+        (await hiddenRequiredInputDisplaysAnswer(searchInput || control, answerText, committedMatch));
     if (!verified && retryCount === 0) {
-      return fillInteractiveSelectDropdown(page, control, answerText, matchOption, 1);
+      return fillInteractiveSelectDropdown(page, control, answerText, matchOption, 1, diagnoseRequiredFailure);
     }
   } else {
     // If no option could be clicked, press Escape to dismiss the open dropdown menu
     // so it doesn't float over and block pointer events for downstream inputs
     await page.keyboard.press('Escape').catch(() => {});
     await searchInput?.blur().catch(() => {});
+  }
+
+  if (!verified && diagnoseRequiredFailure) {
+    await logRequiredControlCommitmentFailure(control, clicked, answerText);
   }
 
   return verified;
@@ -704,9 +769,10 @@ async function fillSearchableSelectInput(
   control: Locator,
   selector: string,
   answerText: string,
-  matchOption: OptionTextMatcher = exactOptionTextMatch
+  matchOption: OptionTextMatcher = exactOptionTextMatch,
+  diagnoseRequiredFailure = false
 ): Promise<boolean> {
-  const selected = await fillInteractiveSelectDropdown(page, control, answerText, matchOption);
+  const selected = await fillInteractiveSelectDropdown(page, control, answerText, matchOption, 0, diagnoseRequiredFailure);
   if (selected) {
     log.info(
       `[Submitter] Populated via searchable select input → selector: ${selector} → value: ${answerText}`
@@ -1767,7 +1833,8 @@ export async function fillSingleField(
                 ? (optText) => matchesPhoneCountry(optText)
                 : isSponsorship || booleanValue || isReferralSource || isEeoField || isSchool
                 ? fuzzyOptionTextMatch
-                : exactOptionTextMatch
+                : exactOptionTextMatch,
+              field.isRequired === true
             );
             if (selected) break;
           }
@@ -1779,7 +1846,8 @@ export async function fillSingleField(
               found.locator,
               found.selector,
               'Other',
-              fuzzyOptionTextMatch
+              fuzzyOptionTextMatch,
+              field.isRequired === true
             );
           }
 
@@ -1791,7 +1859,8 @@ export async function fillSingleField(
               found.locator,
               found.selector,
               'Other',
-              fuzzyOptionTextMatch
+              fuzzyOptionTextMatch,
+              field.isRequired === true
             );
           }
 
@@ -1930,6 +1999,9 @@ export async function fillSingleField(
               );
             }
           } else {
+            if (field.isRequired === true) {
+              await logRequiredControlCommitmentFailure(found.locator, false, val);
+            }
             throw new Error(`Could not select option "${val}" in ${found.selector}`);
           }
         }
@@ -1959,7 +2031,8 @@ export async function fillSingleField(
               searchable.locator,
               searchable.selector,
               attempt,
-              isReferralSource ? fuzzyOptionTextMatch : exactOptionTextMatch
+              isReferralSource ? fuzzyOptionTextMatch : exactOptionTextMatch,
+              field.isRequired === true
             );
             if (selected) break;
           }
@@ -1988,7 +2061,8 @@ export async function fillSingleField(
               select2Trigger,
               'combobox-fallback',
               attempt,
-              isReferralSource ? fuzzyOptionTextMatch : exactOptionTextMatch
+              isReferralSource ? fuzzyOptionTextMatch : exactOptionTextMatch,
+              field.isRequired === true
             );
             if (selected) break;
           }

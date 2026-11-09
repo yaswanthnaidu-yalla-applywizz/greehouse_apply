@@ -49,6 +49,7 @@ import { insertAuditEvent, SUBMIT_CLICK_AUDIT_ACTION } from '../../db/events.js'
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { resolveRole } from './auth.js';
 import { persistApprovedAiAnswersToQaBank } from '../../db/qaBankPersistence.js';
+import { promoteSubmittedAiAnswers } from '../../db/aiAnswerReviews.js';
 
 const log = createLogger('Submissions');
 
@@ -290,7 +291,19 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         `[API] Status → QUEUED (application ${application.id || appId}, submission_order=${submissionOrder})`
       );
 
-      // Persist any AI or edited answers to candidate_qa_bank so future applications don't need operator review
+      const targetAppId = application.id || appId;
+      try {
+        await promoteSubmittedAiAnswers({
+          applicationId: targetAppId,
+          actor: userEmail,
+        });
+      } catch (promErr: any) {
+        log.warn(
+          `[Submissions Router] Non-blocking AI answer promotion failed for app ${targetAppId}: ${promErr?.message || promErr}`
+        );
+      }
+
+      // Persist any manual or edited answers to candidate_qa_bank
       void persistApprovedAiAnswersToQaBank(
         application.applywizz_id || (application as any).applywizzId,
         application.resolved_fields || (application as any).resolvedFields
@@ -336,6 +349,18 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         job_url: req.body?.jobUrl,
       }).catch(() => {});
 
+      const targetAppId = result.applicationId || appId;
+      try {
+        await promoteSubmittedAiAnswers({
+          applicationId: targetAppId,
+          actor: userEmail,
+        });
+      } catch (promErr: any) {
+        log.warn(
+          `[Submissions Router] Non-blocking AI answer promotion failed for app ${targetAppId}: ${promErr?.message || promErr}`
+        );
+      }
+
       if (appRow) {
         void persistApprovedAiAnswersToQaBank(
           appRow.applywizz_id || (appRow as any).applywizzId,
@@ -352,6 +377,25 @@ submissionsRouter.post('/:id/submit', async (req: Request, res: Response): Promi
         summary: result.summary,
       });
     } else if (result.status === 'EMAIL_PROOF_PENDING') {
+      const targetAppId = result.applicationId || appId;
+      try {
+        await promoteSubmittedAiAnswers({
+          applicationId: targetAppId,
+          actor: userEmail,
+        });
+      } catch (promErr: any) {
+        log.warn(
+          `[Submissions Router] Non-blocking AI answer promotion failed for app ${targetAppId}: ${promErr?.message || promErr}`
+        );
+      }
+
+      if (appRow) {
+        void persistApprovedAiAnswersToQaBank(
+          appRow.applywizz_id || (appRow as any).applywizzId,
+          appRow.resolved_fields || (appRow as any).resolvedFields
+        );
+      }
+
       res.status(200).json({
         success: true,
         status: 'EMAIL_PROOF_PENDING',
@@ -458,6 +502,18 @@ submissionsRouter.post('/:id/submit-otp', async (req: Request, res: Response): P
         proof_captured_at: result.proofCapturedAt,
         job_url: req.body?.jobUrl,
       }).catch(() => {});
+
+      const targetAppId = result.applicationId || appId;
+      try {
+        await promoteSubmittedAiAnswers({
+          applicationId: targetAppId,
+          actor: (req as any).user?.email || 'operator_otp',
+        });
+      } catch (promErr: any) {
+        log.warn(
+          `[Submissions Router] Non-blocking AI answer promotion failed for app ${targetAppId}: ${promErr?.message || promErr}`
+        );
+      }
 
       res.status(200).json({
         status: result.status,

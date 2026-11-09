@@ -5,6 +5,7 @@ import { AtsBreakdown } from './AtsBreakdown.js';
 import { HeaderSignOut } from './HeaderSignOut.js';
 import { useApplicationStatsInvalidation } from '../hooks/useApplicationStatsInvalidation.js';
 import { TetrominoLoader } from './TetrominoLoader.js';
+import { ManagerReviewTab } from './ManagerReviewTab.js';
 
 interface EmailProofData {
   subject?: string;
@@ -357,7 +358,7 @@ const SearchableDropdown: React.FC<{
 export const ManagerDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['manager']);
 
-  const [tab, setTab] = useState<'home' | 'operators' | 'activity' | 'reports' | 'guide'>('home');
+  const [tab, setTab] = useState<'home' | 'operators' | 'activity' | 'reports' | 'guide' | 'review'>('home');
   const [dateFilterMode, setDateFilterMode] = useState<'day' | 'week' | 'month' | 'lifetime' | 'custom'>('day');
   const [customFrom, setCustomFrom] = useState<string>(() => {
     const today = getTodayIST();
@@ -608,12 +609,13 @@ export const ManagerDashboard: React.FC = () => {
     );
   }
 
-  const tabs: Array<{ id: 'home' | 'operators' | 'activity' | 'reports' | 'guide'; label: string }> = [
+  const tabs: Array<{ id: 'home' | 'operators' | 'activity' | 'reports' | 'guide' | 'review'; label: string }> = [
     { id: 'home', label: 'Home' },
     { id: 'operators', label: 'Operators' },
     { id: 'activity', label: 'Activity' },
     { id: 'reports', label: 'Reports' },
     { id: 'guide', label: 'Guide' },
+    { id: 'review', label: 'Review' },
   ];
 
   return (
@@ -917,6 +919,8 @@ export const ManagerDashboard: React.FC = () => {
             </section>
           </div>
         )}
+
+        {tab === 'review' && <ManagerReviewTab />}
       </div>
     </main>
   );

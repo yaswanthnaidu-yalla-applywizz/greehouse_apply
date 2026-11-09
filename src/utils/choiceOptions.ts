@@ -106,6 +106,7 @@ function optionPolarity(option: string): 'affirmative' | 'negative' | null {
   if (
     negativeTokens.some((token) => normalized === token) ||
     /^(no|not|false|decline)\b/.test(normalized) ||
+    /\bnever\b/.test(normalized) ||
     /^(i do not|i am not)\b/.test(normalized)
   ) {
     return 'negative';
@@ -255,6 +256,14 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
 
 export function choiceOptionTextMatches(optionText: string, answerText: string): boolean {
   return matchChoiceOption(answerText, [optionText]) === optionText;
+}
+
+export function matchSingleCheckboxOption(answer: string, options?: string[]): string | null {
+  if (answer.includes(',')) {
+    const exact = options?.filter((option) => normalize(option) === normalize(answer));
+    return exact?.length === 1 ? exact[0] : null;
+  }
+  return matchChoiceOption(answer, options);
 }
 
 interface NumericInterval {

@@ -3,10 +3,20 @@ import assert from 'node:assert/strict';
 import { chromium, type Browser, type Page } from 'playwright';
 import { fillAshbyForm, verifyRequiredFieldsCommitted } from '../src/submitter/ashbyFormFiller.js';
 import type { ResolvedField } from '../src/types/index.js';
+import { classifyRequiredFieldFailure } from '../src/utils/failureDiagnostics.js';
 
 process.env.NODE_ENV = 'test';
 
 describe('Ashby Form Fill Accounting & Pre-Submit Validation Gate', () => {
+  it('classifies unresolved choices separately from controls that failed to commit', () => {
+    assert.equal(classifyRequiredFieldFailure([
+      { fieldId: 'country', type: 'select', source: 'unresolved', resolvedByTier: null },
+    ], ['country']), 'RESOLUTION_CHOICE_MISMATCH');
+    assert.equal(classifyRequiredFieldFailure([
+      { fieldId: 'country', source: 'api', resolvedByTier: 4 },
+    ], ['country']), 'CONTROL_NOT_COMMITTED');
+  });
+
   let browser: Browser;
   let page: Page;
 
@@ -212,6 +222,56 @@ describe('Ashby Form Fill Accounting & Pre-Submit Validation Gate', () => {
 
     const check = await verifyRequiredFieldsCommitted(page, ['consent_cb']);
     assert.equal(check.allCommitted, true);
+  });
+
+  it('fills only the exact option-valued checkbox and leaves unmatched values uncommitted', async () => {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <body>
+        <div data-field-path="referral_source">
+          <label><input type="checkbox" name="source" value="Referral" /> Referral</label>
+          <label><input type="checkbox" name="source" value="Website" /> Website</label>
+        </div>
+        <div data-field-path="location_preferences">
+          <label><input type="checkbox" name="location" value="Remote US" /> Remote US</label>
+          <label><input type="checkbox" name="location" value="New York City Office" /> New York City Office</label>
+        </div>
+      </body>
+      </html>
+    `;
+    await page.setContent(html);
+
+    const result = await fillAshbyForm(page, [
+      {
+        fieldId: 'referral_source',
+        name: 'referral_source',
+        label: 'How did you hear about us?',
+        value: 'Website',
+        options: ['Referral', 'Website'],
+        type: 'checkbox',
+        isRequired: true,
+      },
+      {
+        fieldId: 'location_preferences',
+        name: 'location_preferences',
+        label: 'Preferred locations',
+        value: 'Florida, California',
+        options: ['Remote US', 'New York City Office'],
+        type: 'checkbox',
+        isRequired: true,
+      },
+    ], '');
+
+    assert.equal(await page.locator('[data-field-path="referral_source"] input[value="Website"]').isChecked(), true);
+    assert.equal(await page.locator('[data-field-path="referral_source"] input[value="Referral"]').isChecked(), false);
+    assert.equal(await page.locator('[data-field-path="location_preferences"] input:checked').count(), 0);
+    assert.deepEqual(result.filledFields.map((field) => field.fieldId), ['referral_source']);
+    assert.equal(result.filledCount, 1);
+
+    const check = await verifyRequiredFieldsCommitted(page, ['referral_source', 'location_preferences']);
+    assert.equal(check.allCommitted, false);
+    assert.deepEqual(check.missingFields, ['location_preferences']);
   });
 
   it('Test 5: Live DOM state verification for standard text fields', async () => {

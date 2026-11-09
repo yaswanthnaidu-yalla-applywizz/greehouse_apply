@@ -1,3 +1,97 @@
+# Current Session Update (2026-11-09 - AI Auto-Queue & Two-Level Review Architecture, Tasks 1-7 COMPLETE)
+
+- **Completed Implementation of Tasks 1-7**:
+  - **Task 1 (Execution Routing & Field-Count Retirement)**: Removed `MAX_JOB_QUESTIONS` gating; applications are no longer skipped solely for field count. Relaxed routing in `needsReview.ts` so that applications with required AI-resolved fields auto-queue into `READY_FOR_REVIEW` / `QUEUED` as long as all required fields are satisfied. Unresolved required fields (>3) still route to `FILTERED_OUT`.
+  - **Task 2 (Shared Tier 5 DeepSeek R1 Escalation & Provenance)**: Unified single and batch resolution through shared escalation finalization (`tier5LLM.ts`, `llmSynthesizer.ts`). Haiku confidence < 0.80, unresolved, or invalid exact choice escalates to DeepSeek R1 via OpenRouter. DeepSeek accepted only at confidence >= 0.65. Failed escalation fails closed to `unresolved`. Direct QA bank and embedding writes removed from resolver.
+  - **Task 3 (Review Schema & Transactional QA Operations)**: Created Migration `048_ai_answer_reviews.sql` and data-layer service `src/db/aiAnswerReviews.ts`. Managed immutable review proposals `(application_id, resolution_revision, field_key)`, two-level review transitions (`pending_operator` -> `pending_manager` -> `approved`/`rejected`), optimistic concurrency locking (`revision` / 409 Conflict), idempotency key caching, and conditional QA deletion on manager rejection (leaves modified or pre-existing QA rows intact).
+  - **Task 4 (Submission AI Promotion & Recovery Reconciler)**: Wired operator submission flow (`submissions.ts`, `qaBankPersistence.ts`) to promote active AI answers to `gh_candidate_qa_bank` with source `manual` and confidence 1.0. Implemented non-blocking error isolation so promotion errors never abort application submission. Implemented promotion reconciler (`reconcileAiAnswerPromotions`) and embedding repair.
+  - **Task 5 (Secured Review API)**: Mounted authenticated review endpoints (`src/server/routes/reviews.ts`) with bearer token validation, server-side role and CA candidate/application assignment scoping, and strict operator-denial guard (manager cannot approve operator-denied item without providing an edited replacement).
+  - **Task 6 (Operator & Manager Review Tabs)**: Built `OperatorReviewTab.tsx` and `ManagerReviewTab.tsx` in React frontend, wired with `ReviewCard`, action controls, count badges, and optimistic revision handling.
+  - **Task 7 (End-to-End Integration Proof & Documentation)**: Created comprehensive integration test `tests/aiReviewE2EIntegration.test.ts` verifying all 10 core capability areas across the full lifecycle. Updated system documentation.
+- **Verification Status**:
+  - Full suite of 104 Node tests pass green (`tests/aiAutoQueueRouting.test.ts`, `tests/deepseekR1Escalation.test.ts`, `tests/aiAnswerReviews.test.ts`, `tests/submissionAiPromotion.test.ts`, `tests/reviewRoutes.test.ts`, `tests/reviewTabs.test.ts`, `tests/aiReviewE2EIntegration.test.ts`).
+  - 110/110 Vitest tests pass green.
+  - Typecheck (`npm run typecheck`) exits 0 with zero errors across server, shared types, and dashboard.
+  - Production frontend build (`npm run build:dashboard`) compiles cleanly without errors.
+- **Deployment & Migration Notice**:
+  - Per instructions, production migration application (`048_ai_answer_reviews.sql`) and production Railway deployment are held pending user authorization.
+
+# Current Session Update (2026-11-09 - Required-Field Failure Taxonomy, Task 6)
+
+- Added stable `RESOLUTION_CHOICE_MISMATCH`, `CONTROL_NOT_COMMITTED`, `PROXY_PREFLIGHT`, and `NAVIGATION_READINESS` categories to structured submission diagnostics.
+- Ashby failure telemetry now retains the sanitized proxy `outcome` through metadata size capping. Existing retry, status, OTP, and CAPTCHA behavior is unchanged.
+- Focused LiveSubmit and Ashby tests pass. Typecheck remains blocked by an existing `src/resolver/batchLlmResolver.ts:35` confidence literal mismatch.
+- Read-only DB2 audit covered 8,616 applications created in the prior 7 days. It found zero unresolved required-choice fields among `APPLIED` applications; 29 Greenhouse APPLIED choice values were non-exact against captured options, so this audit does not establish that all historical success values are exact. No data was changed.
+
+# Current Session Update (2026-11-09 - Calibrated AI Confidence & Accuracy Engine)
+
+- **Root Causes Diagnosed**:
+  1. **Static Default Confidences**: Single-field choice options defaulted to `0.90` (`src/resolver/llmSynthesizer.ts:802`), and batch LLM resolution hardcoded `0.85` (`src/resolver/batchLlmResolver.ts:47`, `src/resolver/tier5LLM.ts:420`), completely bypassing calibrated probability metrics.
+  2. **EAR Export Control Legal Inversion**: Under EAR and 8 U.S.C. 1324b(a)(3), non-immigrant visa holders (F-1, H-1B, OPT) are non-U.S. persons. The LLM saw US location and falsely attested them as "U.S. persons" (19 applications).
+  3. **Select Without Options Hallucinating "Yes"**: When select fields were scanned with empty options (e.g. Thumbtack remote location), `isBinaryYesNoQuestion` misclassified them as Yes/No questions and answered "Yes".
+  4. **Current Employer Extraction**: Extracted resume section headers (`"Professional Experience"`), city names (`"Richardson, Texas"`), or `"NONE"` instead of structured company names.
+- **Implemented Architecture**:
+  - `src/resolver/llmSynthesizer.ts`:
+    - `isUsPersonUnderExportControl()`: Accurately checks visa status and sponsorship to prevent false EAR declarations.
+    - `calculateCalibratedConfidence()`: Multi-factor confidence calibration engine based on model self-assessment, structured profile fact grounding, and option match quality.
+    - Updated single & batch prompts with strict EAR, Current Employer, Dropdown Option, and Onsite rules.
+    - `parseBatchAnswerItems()`: Parses structured `{"answers": [{"answer": "...", "confidence": 0.95}]}` to pass model-returned confidences.
+  - `src/resolver/tier5LLM.ts`: Passes batch model confidences directly through into `finalizeRawAnswer`.
+  - `src/resolver/batchLlmResolver.ts`: Removed hardcoded `0.85` literal type and value; preserves calibrated confidences.
+- **Verification**:
+  - `tests/calibratedConfidenceAndAccuracy.test.ts`: 15/15 tests passing.
+  - Full unit test suite (`npm run test:unit`): 110/110 tests passing, zero regressions.
+  - Typecheck (`npm run typecheck`): Clean exit with code 0 across app and dashboard.
+
+# Current Session Update (2026-11-09 - Admin Failed Proofs Storage Purge)
+
+- **Requirements & EGM Review**:
+  - Explored DB 2 data footprints: `proofs_failed` storage bucket had 4,436–4,569 objects (~1.91 GB).
+  - Addressed user request for an admin cleanup button while preserving application counts, metrics, review queues, and job templates.
+  - Multi-agent EGM review unanimously confirmed: NEVER delete `gh_candidate_applications` rows (preserves stats/KPIs), never delete `resolved_fields` (protects 1,357 manual operator edits and active queues), and never delete `gh_scanned_job_templates` (needed by hydration).
+  - Selected minimal safe design: Purge orphaned/obsolete failure screenshot files from Supabase Storage `proofs_failed` and reset `proof_failed_url = NULL` on corresponding `FAILED` applications.
+- **Implemented Architecture**:
+  - `src/services/failedProofStoragePurge.ts`: Central cleanup engine with concurrency guards (blocks during active ingest or active submissions), index-shift-safe storage pagination loop (`offset: 0`), batch deletion, batch application pointer reset, and audit logging.
+  - `src/server/routes/adminDashboard.ts`: `POST /api/admin/purge-failed-proofs` endpoint with admin authorization, supporting preview and confirmed execution.
+  - `dashboard/components/AdminDashboard.tsx`: Added `🗑 Purge Failed Screenshots` action in the ingest status header, confirmation modal with live impact preview, and status feedback banner.
+- **Verification**:
+  - Unit tests (`tests/failedProofStoragePurge.test.ts`): 4/4 passing.
+  - Full suite: 77/77 node unit tests pass, 110/110 vitest tests pass.
+  - Frontend production build (`npm run build:dashboard`): Succeeded with zero errors.
+
+# Current Session Update (2026-11-09 - Operator Queue Latest Date & Email Count Pagination)
+
+- **Root Causes Diagnosed**:
+  1. **PostgREST 1,000-row truncation bug**: `src/services/caNotificationEmail.ts` executed unpaginated PostgREST queries for `READY_FOR_REVIEW` applications. Ingestion on 2026-11-08 yielded 2,045 applications across 100 candidates and 47 CAs; exactly 1,000 were returned. 1,045 rows were silently truncated, causing leadership emails to report 1,000 instead of 2,045, leaving 20 CAs with 0 notification emails and 27 CAs underreported.
+  2. **Operator queue empty default**: `dashboard/App.tsx` defaulted `selectedDate` to `getTodayIST()` (`2026-11-09`). Ingestion ran on `2026-11-08`. Since 0 applications existed for today, operators saw empty queues until manually changing the date picker.
+- **Implemented Fixes (Commits `d0d9eef`..`af52853`)**:
+  - `src/services/caNotificationEmail.ts`: Chunked pagination `.range(from, from + 999)` in `fetchLatestReadyForReviewApplications`. All 2,045 applications are fetched and grouped without row loss.
+  - `src/db/ingestRuns.ts`: Added `getLatestIngestRunDate()` querying `ingest_runs(started_at DESC)` with 60s in-memory cache and automatic invalidation on upsert. Fallback to `gh_candidate_applications` and current IST date.
+  - `src/server/dashboardDateRange.ts` & `src/server/routes/candidates.ts`: `GET /api/candidates`, `GET /api/candidates/:applywizzId/jobs`, `GET /api/candidates/:applywizzId/profile`, `GET /api/candidates/:applywizzId`, and `GET /api/candidates/:applywizzId/resume` default omitted date query to `getLatestIngestRunDate()` and set `X-Dashboard-Latest-Date` header.
+  - `src/server/index.ts` (`/api/stats`) & `src/server/routes/notifications.ts` (`/api/notifications`): Default omitted date query to `getLatestIngestRunDate()`.
+  - `dashboard/components/Header/DashboardHeader.tsx`: Removed `<input type="date">` for operators; replaced with `📅 Latest Batch: {selectedDate || 'Latest'} (IST)` badge (`data-testid="latest-batch-badge"`). Retained `header-tier-1` and `header-tier-2`. Manager and Admin dashboards retain full date-scoping capability.
+  - `dashboard/App.tsx`: Reads `x-dashboard-latest-date` header from `/api/candidates` to dynamically populate `selectedDate` for badge display without defaulting to clock date.
+- **Verification**:
+  - 100% test pass: `tests/caNotificationPagination.test.ts` (2/2), `tests/latestDateCandidatesRoute.test.ts` (2/2), `tests/latestDateStatsRoute.test.ts` (1/1), `tests/dashboardHeaderDateRemoval.test.ts` (2/2), `tests/mobileHeaderLayout.test.ts` (1/1), `tests/latestDateOperatorQueueAndEmailCounts.test.ts` (4/4).
+  - Full suite: 73/73 Node.js unit tests pass, 110/110 Vitest tests pass, and `npm run typecheck` passes with zero errors.
+
+# Current Session Update (2026-11-09 - QA Bank Sanitization & 100% Embedding Coverage on DB2)
+
+- Audited and sanitized DB2 `gh_candidate_qa_bank` across two surgical cleanup phases.
+- Purged a total of 182 confirmed inaccurate, contradictory, glitched, and auto-disqualifying records (sponsorship inversions, work authorization rejections, basic qualification 'No's, country month/school leaks, DoorDash/Deloitte hallucinations, invalid test candidate rows, corrupted demographic strings, and 'NA' refusals in descriptive essay questions).
+- Full JSON backup of all 182 purged records is safely persisted in `output/inaccurate_qa_bank_backup_20261109.json`.
+- Preserved all valid "N/A" values in URL/social and file fields per explicit user guidance.
+- Verified every un-embedded row for strict factual accuracy, then generated 1536-dim OpenRouter `text-embedding-3-small` vectors for all verified accurate rows.
+- Current live DB2 table status: 23,513 total active answers (20,605 AI, 2,908 manual) with **100% embedding coverage** (`embedding IS NULL` = 0) and zero remaining inversions or test artifacts.
+
+# Current Session Update (2026-11-09 - FADA November 8-9 diagnosis, read-only)
+
+- Ran the complete FADA audit for November 8-9 IST against the supplied Ashby and Greenhouse CSVs. Downloaded and reviewed all 721 available failure screenshots; no submissions, retries, or database writes were performed. Detailed evidence is in `.ai/diagnostics/fada-report-2026-11-08-to-09.md`.
+- Found a FADA engine correctness bug: it reads `resolved_fields[].required`, while production records use `isRequired`. Its optional-field conclusion was therefore invalid. Direct DB audit found 10,592 truly optional unresolved fields, but also 626 required empty/unresolved fields across 376 applications. Fix the diagnostic before using it for filter policy decisions.
+- Current failure diagnosis: 210 Greenhouse required-field-empty records are form-fill/commit code faults; 40 OTP timeouts are retryable mailbox delays. Ashby has 180 proxy-preflight HTTP-400 failures (probe design), 47 `networkidle` navigation timeouts (wait strategy), 3 tunnel failures (proxy infrastructure), 45 mixed pre-submit failures including an option-valued checkbox filler defect, and 131 reCAPTCHA blocks (human/CAPTCHA handoff only).
+- No production fix was applied. The next implementation pass must preserve fail-closed behavior and begin with regression tests for FADA requiredness, Ashby checkbox option matching, and proxy/navigation readiness checks.
+- A no-write implementation plan is ready at `docs/superpowers/plans/2026-11-09-required-field-integrity-ashby-reliability.md`. It sequences FADA schema correction, choice-safe resolution containment, Greenhouse commitment reproduction, Ashby checkbox/proxy/navigation fixes, and a shadow release gate. It explicitly excludes historic requeues, CAPTCHA changes, and production data mutation.
+
 # Current Session Update (2026-11-07 - Resolver Answer Accuracy Plan)
 
 - Implemented four resolver accuracy fixes locally: removed invented Ashby US location; moved unsupported candidate-specific defaults after candidate evidence; preserved blank optional fields through policy post-processing; and added compatible semantic QA selection with question-label provenance. Migration `047_semantic_qa_question_provenance.sql` is prepared but not applied to production. No production rows were re-resolved or submitted. Plan: `docs/superpowers/plans/2026-11-07-resolver-answer-accuracy.md`.
