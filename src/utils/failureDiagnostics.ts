@@ -37,6 +37,10 @@ const CATEGORY_PHASE: Record<FailureDiagnosticCategory, FailureDiagnosticPhase> 
   SUBMIT_RESUME_MISSING: 'SUBMIT',
   SUBMIT_FORM_FILL_ERROR: 'SUBMIT',
   SUBMIT_REQUIRED_FIELD_EMPTY: 'SUBMIT',
+  RESOLUTION_CHOICE_MISMATCH: 'SUBMIT',
+  CONTROL_NOT_COMMITTED: 'SUBMIT',
+  PROXY_PREFLIGHT: 'SUBMIT',
+  NAVIGATION_READINESS: 'SUBMIT',
   SUBMIT_OTP_TIMEOUT: 'SUBMIT',
   SUBMIT_OTP_FETCH: 'SUBMIT',
   SUBMIT_CONFIRMATION_TIMEOUT: 'SUBMIT',
@@ -69,7 +73,29 @@ const SAFE_METADATA_KEYS = new Set([
   'fieldFingerprint',
   'fieldType',
   'fieldLabel',
+  'proxyOutcome',
+  'failureCategory',
 ]);
+
+export type SubmissionFailureCategory =
+  | 'RESOLUTION_CHOICE_MISMATCH'
+  | 'CONTROL_NOT_COMMITTED'
+  | 'PROXY_PREFLIGHT'
+  | 'NAVIGATION_READINESS';
+
+export function classifyRequiredFieldFailure(
+  fields: Array<{ fieldId?: string; name?: string; source?: string; resolvedByTier?: number | null }>,
+  missingFieldIds: string[]
+): SubmissionFailureCategory {
+  const unresolved = new Set(
+    fields
+      .filter((field) => field.source === 'unresolved' || field.resolvedByTier === null)
+      .flatMap((field) => [field.fieldId, field.name].filter((id): id is string => Boolean(id)))
+  );
+  return missingFieldIds.some((fieldId) => unresolved.has(fieldId))
+    ? 'RESOLUTION_CHOICE_MISMATCH'
+    : 'CONTROL_NOT_COMMITTED';
+}
 
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const bearerPattern = /\bBearer\s+\S+/gi;

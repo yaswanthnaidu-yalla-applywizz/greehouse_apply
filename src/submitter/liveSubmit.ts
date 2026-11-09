@@ -76,7 +76,7 @@ import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
 import { createLogger } from '../utils/logger.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
-import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
+import { classifyRequiredFieldFailure, emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { captureFailureDiagnostics } from './domFailureCapture.js';
 import { browserManager, type ManagedBrowser } from './browserManager.js';
 import { validateGreenhouseSubmission } from './greenhouseValidation.js';
@@ -1601,22 +1601,28 @@ export async function runLiveSubmit(
 
       const submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
       if (!submissionGate.ok) {
+        const failureCategory = classifyRequiredFieldFailure(
+          application.resolved_fields || [],
+          submissionGate.failure.fields.map((field) => field.fieldId)
+        );
         const requiredFieldsError = `Required fields not committed: ${submissionGate.failure.fields
           .map((field) => `${field.label} (${field.message})`)
           .join(', ')}`;
         log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
         await emitFailureDiagnostic({
-          category: 'SUBMIT_REQUIRED_FIELD_EMPTY',
+          category: failureCategory,
           stage: 'form_validation',
           reason: requiredFieldsError,
           isTerminal: false,
           isRetryable: false,
           applicationId: application.id || applicationId,
           jobUrl: targetUrl,
+          metadata: { failureCategory },
         });
         if (application.id) {
           await updateStatus(application.id, 'FAILED', {
             error_message: requiredFieldsError,
+            error_details: { failureCategory },
             job_url: application.job_url,
           }).catch(() => {});
         }
@@ -1631,10 +1637,14 @@ export async function runLiveSubmit(
       }
 
       if (fillResult.unfilledRequiredLabels.length > 0) {
+        const failedFieldIds = fillSummary.results
+          .filter((result) => fillResult.unfilledRequiredLabels.includes(result.label))
+          .map((result) => result.fieldId);
+        const failureCategory = classifyRequiredFieldFailure(application.resolved_fields || [], failedFieldIds);
         const requiredFieldsError = `Required fields not filled: ${fillResult.unfilledRequiredLabels.join(', ')}`;
         log.error(`[Live Submit] ❌ ${requiredFieldsError} for application ${applicationId}`);
         await emitFailureDiagnostic({
-          category: 'SUBMIT_REQUIRED_FIELD_EMPTY',
+          category: failureCategory,
           stage: 'form_validation',
           reason: requiredFieldsError,
           applicationId: application.id || applicationId,
@@ -1642,10 +1652,12 @@ export async function runLiveSubmit(
           jobUrl: targetUrl,
           isTerminal: false,
           isRetryable: true,
+          metadata: { failureCategory },
         }).catch(() => {});
         if (application.id) {
           await updateStatus(application.id, 'FAILED', {
             error_message: requiredFieldsError,
+            error_details: { failureCategory },
             job_url: application.job_url,
           }).catch(() => {});
         }
