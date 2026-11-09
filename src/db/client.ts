@@ -197,6 +197,9 @@ export async function assertSupabaseReady(): Promise<void> {
 
 /** Checks whether Supabase URL and Service Key are properly configured. */
 export function isSupabaseConfigured(): boolean {
+  if (supabaseClientInstance) {
+    return true;
+  }
   if (process.env.SANDBOX === 'true' || process.env.SANDBOX === '1') {
     return true;
   }
