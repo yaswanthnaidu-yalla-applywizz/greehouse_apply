@@ -649,23 +649,26 @@ export interface FetchReadyForReviewOptions {
  * Breaks PostgREST's default 1,000-row ceiling.
  */
 export async function fetchLatestReadyForReviewApplications(
-  options?: FetchReadyForReviewOptions
+  options?: FetchReadyForReviewOptions | string,
+  clientOverride?: any
 ): Promise<ReviewAppRow[]> {
-  if (!isSupabaseConfigured()) return [];
-  const supabase = getDbClient();
+  const supabase = clientOverride || (isSupabaseConfigured() ? getDbClient() : null);
+  if (!supabase) return [];
   const PAGE_SIZE = 1000;
   const allRows: ReviewAppRow[] = [];
+  const opts: FetchReadyForReviewOptions =
+    typeof options === 'string' ? { targetDate: options } : options || {};
 
   let startIso: string;
   let endIso: string | undefined;
 
-  if (options?.targetDate) {
+  if (opts.targetDate) {
     const { getISTDateRangeUtc } = await import('../server/dashboardDateRange.js');
-    const range = getISTDateRangeUtc(options.targetDate);
+    const range = getISTDateRangeUtc(opts.targetDate);
     startIso = range.startIso;
     endIso = range.endIso;
-  } else if (options?.runStartedAt) {
-    startIso = options.runStartedAt instanceof Date ? options.runStartedAt.toISOString() : String(options.runStartedAt);
+  } else if (opts.runStartedAt) {
+    startIso = opts.runStartedAt instanceof Date ? opts.runStartedAt.toISOString() : String(opts.runStartedAt);
   } else {
     try {
       const { getLatestIngestRunDate } = await import('../db/ingestRuns.js');
