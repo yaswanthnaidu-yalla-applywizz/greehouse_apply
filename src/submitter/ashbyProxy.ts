@@ -3,6 +3,7 @@
  */
 
 import crypto, { randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import type { Page } from 'playwright';
 import type { ProfileRow } from '../db/profiles.js';
 
@@ -336,6 +337,7 @@ export interface ProxyPreflightResult {
   success: boolean;
   exitIpHash?: string;
   error?: string;
+  outcome?: 'success' | 'http_status' | 'timeout' | 'invalid_ip' | 'country_mismatch' | 'network_error';
 }
 
 /**
@@ -353,10 +355,11 @@ export async function verifyProxyPreflight(
   options: { timeoutMs?: number; endpointUrl?: string } = {}
 ): Promise<ProxyPreflightResult> {
   const timeoutMs = options.timeoutMs ?? 3000;
-  const primaryUrl = options.endpointUrl || 'https://api.ipify.org?format=json';
-  // Fallback probe URLs tried on HTTP 400 from the primary (proxy gateway rejection of query params).
-  const fallbackUrls = ['https://api64.ipify.org?format=json', 'https://ipapi.co/json/'];
+  const primaryUrl = options.endpointUrl || 'https://ipapi.co/json/';
+  // Retry HTTP 400 with another JSON IP endpoint that does not need query parameters.
+  const fallbackUrls = ['https://ipwho.is/'];
   const probeUrls = [primaryUrl, ...fallbackUrls.filter((u) => u !== primaryUrl)];
+  let outcome: ProxyPreflightResult['outcome'];
 
   let timer: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -376,11 +379,13 @@ export async function verifyProxyPreflight(
           if (lastStatus === 400 && url !== probeUrls[probeUrls.length - 1]) {
             continue;
           }
+          outcome = 'http_status';
           throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
         }
         const data = await response.json();
         const ip = data?.ip || data?.query;
-        if (!ip || typeof ip !== 'string') {
+        if (!ip || typeof ip !== 'string' || !isIP(ip.trim())) {
+          outcome = 'invalid_ip';
           throw new Error('Preflight probe did not return a valid IP');
         }
 
@@ -390,6 +395,7 @@ export async function verifyProxyPreflight(
             .trim()
             .toLowerCase();
           if (respCountry && respCountry !== expectedCountryCode.trim().toLowerCase()) {
+            outcome = 'country_mismatch';
             throw new Error(
               `Proxy exit country mismatch: expected ${expectedCountryCode}, got ${respCountry}`
             );
@@ -405,6 +411,7 @@ export async function verifyProxyPreflight(
         return {
           success: true,
           exitIpHash,
+          outcome: 'success',
         };
       }
       throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
@@ -412,9 +419,11 @@ export async function verifyProxyPreflight(
 
     return await Promise.race([probePromise, timeoutPromise]);
   } catch (err: any) {
+    outcome ??= /timed out/i.test(err?.message || '') ? 'timeout' : 'network_error';
     return {
       success: false,
       error: err?.message || 'Preflight probe failed',
+      outcome,
     };
   } finally {
     if (timer) {

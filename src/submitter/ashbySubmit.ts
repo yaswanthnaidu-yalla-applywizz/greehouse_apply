@@ -30,6 +30,14 @@ import {
 
 const log = createLogger('AshbySubmit');
 
+export async function waitForAshbyApplicationReady(page: Page, timeoutMs = 15000): Promise<void> {
+  try {
+    await page.waitForSelector('[data-field-path]', { timeout: timeoutMs });
+  } catch {
+    throw new Error(`Ashby application form readiness timed out after ${timeoutMs}ms`);
+  }
+}
+
 export function capTelemetryMetadata(
   telemetry: AshbySubmissionTelemetry,
   maxBytes = 1024
@@ -368,10 +376,10 @@ export async function submitAshbyApplication(
 
     stage = 'NAVIGATION';
     log.info(`[AshbySubmit] Navigating to ${targetUrl}...`);
-    await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     stage = 'DOM_SCAN';
-    await page.waitForSelector('[data-field-path]', { timeout: 15000 }).catch(() => {});
+    await waitForAshbyApplicationReady(page, 15000);
     await sleep(1500, 2500);
 
     // 3. Fill form fields
