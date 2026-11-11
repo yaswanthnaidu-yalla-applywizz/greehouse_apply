@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { isActionableCarouselField } from '../dashboard/utils/fieldFilters.js';
+import { countRequiredUnresolved, isActionableCarouselField } from '../dashboard/utils/fieldFilters.js';
 import type { ResolvedField } from '../dashboard/types.js';
+
+it('counts only required unresolved questions for submission', () => {
+  const field = { fieldId: 'q', name: 'q', label: 'Question', type: 'text', value: '', source: 'unresolved', confidence: 0 } as ResolvedField;
+  assert.equal(countRequiredUnresolved([{ ...field, isRequired: true }, { ...field, isRequired: false }]), 1);
+});
 
 describe('FormRenderer Carousel Filtering Rules', () => {
   const sampleFields: ResolvedField[] = [

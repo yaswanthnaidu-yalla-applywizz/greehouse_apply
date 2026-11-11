@@ -18,6 +18,7 @@ export interface SourceBadgeProps {
   confidence?: number;
   isEdited?: boolean;
   provenance?: ResolutionProvenance;
+  isUnrequired?: boolean;
 }
 
 export function getControlledProvenanceLabel(provenance?: ResolutionProvenance): string | null {
@@ -57,7 +58,16 @@ export const SourceBadge: React.FC<SourceBadgeProps> = ({
   confidence,
   isEdited = false,
   provenance,
+  isUnrequired = false,
 }) => {
+  if (isUnrequired) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold font-mono bg-[#8e8e93]/15 text-[#8e8e93] border border-[#8e8e93]/30">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#8e8e93]"></span>
+        <span>Unrequired</span>
+      </span>
+    );
+  }
   // If the field has been manually edited by operator, always display the manual badge
   const activeSource: SourceTag = isEdited ? 'manual' : source;
 
