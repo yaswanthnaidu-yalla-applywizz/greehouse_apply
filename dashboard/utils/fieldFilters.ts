@@ -4,6 +4,12 @@
 
 import type { ResolvedField } from '../types.js';
 
+export function countRequiredUnresolved(fields: ResolvedField[]): number {
+  return fields.filter((field) =>
+    (field.isRequired || (field as any).required) && field.source === 'unresolved'
+  ).length;
+}
+
 /**
  * Returns true if a question should be included in the Operator Card Carousel review mode:
  * 1. Required Unresolved: isRequired === true && (source === 'unresolved' || resolvedByTier == null)
