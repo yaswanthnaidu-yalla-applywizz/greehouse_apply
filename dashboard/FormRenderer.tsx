@@ -24,6 +24,12 @@ import { isActionableCarouselField } from './utils/fieldFilters.js';
 
 export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
 
+export function formatAllQuestions(fields: Array<{ label?: string | null }>): string {
+  return fields
+    .map((f, i) => `Q${i + 1}. ${f.label || '(no label)'}`)
+    .join('\n');
+}
+
 export interface FormRendererProps {
   /** Resolved candidate job application payload */
   application: any | null;
@@ -33,8 +39,10 @@ export interface FormRendererProps {
   candidateName?: string;
   /** API Base URL */
   apiBaseUrl?: string;
+  /** Initial view mode (default: 'list') */
+  initialViewMode?: 'carousel' | 'list';
   /** Return to the mobile application queue */
-  onBack: () => void;
+  onBack?: () => void;
   /** Callback fired when an operator manually modifies a field */
   onFieldUpdate?: (updatedField: ResolvedField) => void;
   /** Callback fired when status transitions (e.g. from polling or submission) */
@@ -50,6 +58,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   isLoading = false,
   candidateName,
   apiBaseUrl = '',
+  initialViewMode = 'list',
   onBack,
   onFieldUpdate,
   onStatusChange,
@@ -78,7 +87,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
   const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(() => getStoredApprovals(storageKey));
-  const [viewMode, setViewMode] = useState<'carousel' | 'list'>('carousel');
+  const [viewMode, setViewMode] = useState<'carousel' | 'list'>(initialViewMode);
 
   useEffect(() => {
     setCarouselIndex(0);
@@ -151,11 +160,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
   const currentField = displayFields[boundedIndex];
-  const mobileBackButton = (
+  const mobileBackButton = onBack ? (
     <button type="button" onClick={onBack} className="mobile-screen-back">
       <span aria-hidden="true">←</span> Applications
     </button>
-  );
+  ) : null;
 
   const handleApproveAndNext = () => {
     if (currentField) {
@@ -519,6 +528,23 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Copy All Questions Button */}
+      {fields.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            data-testid="copy-all-questions"
+            type="button"
+            onClick={() => {
+              const text = formatAllQuestions(fields);
+              navigator.clipboard?.writeText(text).catch(() => {});
+            }}
+            className="text-[11px] text-[#0a84ff] hover:text-[#409cff] font-mono flex items-center gap-1 mb-2 ml-auto"
+          >
+            📋 Copy All Questions
+          </button>
+        </div>
+      )}
 
       {/* Form Fields Section (Card Carousel or Full List) */}
       <div className="space-y-4">
