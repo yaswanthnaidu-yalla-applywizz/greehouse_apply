@@ -532,6 +532,14 @@ export async function updateStatus(
   const cleanApplywizz = id.includes('_') ? id.split('_')[0] : id;
   const targetJobUrl = (extra && typeof extra === 'object' && extra.job_url) || mem?.job_url;
   let previousStatus: ApplicationStatus | undefined = mem?.status;
+  const isForce = typeof extra === 'object' && extra?.force === true;
+
+  if (status === 'FAILED' && !isForce) {
+    if (previousStatus === 'APPLIED' || previousStatus === 'EMAIL_PROOF_PENDING') {
+      log.warn(`[DB] Refusing illegal status downgrade for ${id}: ${previousStatus} → FAILED`);
+      return false;
+    }
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -547,11 +555,20 @@ export async function updateStatus(
         }
         const { data: current } = await statusQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
         previousStatus = current?.status as ApplicationStatus | undefined;
+        if (status === 'FAILED' && !isForce) {
+          if (previousStatus === 'APPLIED' || previousStatus === 'EMAIL_PROOF_PENDING') {
+            log.warn(`[DB] Refusing illegal status downgrade in Supabase for ${id}: ${previousStatus} → FAILED`);
+            return false;
+          }
+        }
       }
-      const query = supabase
+      let query = supabase
         .from('gh_candidate_applications')
         .update(updatePayload)
         .select('id');
+      if (status === 'FAILED' && !isForce) {
+        query = query.neq('status', 'APPLIED').neq('status', 'EMAIL_PROOF_PENDING');
+      }
       let updateRes;
       if (isUuid) {
         let guardedQuery = query.eq('id', id);
@@ -617,6 +634,10 @@ export async function updateStatus(
   }
 
   const existing = memoryApplications.get(id);
+  if (status === 'FAILED' && !isForce && (existing?.status === 'APPLIED' || existing?.status === 'EMAIL_PROOF_PENDING')) {
+    log.warn(`[DB] Refusing illegal status downgrade in memory for ${id}: ${existing.status} → FAILED`);
+    return false;
+  }
   if (expectedStatus && existing?.status !== expectedStatus) {
     throw new Error(`Application ${id} is no longer ${expectedStatus}; refusing the ${status} transition.`);
   }

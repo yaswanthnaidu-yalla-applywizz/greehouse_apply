@@ -341,11 +341,11 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
     let effectiveStatus = status as ApplicationStatus;
     const currentStatus = (application?.status || '') as ApplicationStatus;
     if (status === 'QUEUED' || status === 'APPLYING') {
-      if (IN_FLIGHT_STATUSES.includes(currentStatus)) {
+      if (currentStatus === 'APPLIED' || IN_FLIGHT_STATUSES.includes(currentStatus)) {
         // The dashboard echoes the status it polled, which would otherwise requeue a
         // submission a worker is still running (duplicate submissions).
         log.info(
-          `[API] Skipping requeue for ${targetAppId} — already in flight (${currentStatus})`
+          `[API] Skipping requeue for ${targetAppId} — already completed or in flight (${currentStatus})`
         );
         effectiveStatus = currentStatus;
       } else if (status === 'APPLYING') {
@@ -512,6 +512,10 @@ applicationsRouter.post('/:id/approve', async (req: Request, res: Response): Pro
     }
 
     if (application) {
+      if (application.status === 'APPLIED' || application.status === 'EMAIL_PROOF_PENDING') {
+        res.status(400).json({ error: `Application has already been submitted (${application.status}).` });
+        return;
+      }
       const isAdmin = ['admin', 'dev'].includes((req as any).user?.role);
       if (
         !isAdmin &&

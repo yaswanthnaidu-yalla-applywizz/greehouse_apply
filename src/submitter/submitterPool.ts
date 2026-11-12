@@ -400,6 +400,7 @@ export class SubmitterPool {
               error_message: failureMessage,
               job_url: application.job_url,
               proof_failed_url: result.proofFailedUrl,
+              expected_status: 'APPLYING',
             });
           }
           await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
@@ -436,12 +437,14 @@ export class SubmitterPool {
             await this.updateStatusFn(applicationId, 'FAILED', {
               error_message: message,
               job_url: application.job_url,
+              expected_status: 'APPLYING',
             });
           }
         } else {
           await this.updateStatusFn(applicationId, 'FAILED', {
             error_message: message,
             job_url: application.job_url,
+            expected_status: 'APPLYING',
           });
         }
         await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
