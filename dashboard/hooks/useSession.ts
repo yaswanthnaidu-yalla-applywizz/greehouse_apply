@@ -27,6 +27,7 @@ export const DEV_OPERATOR_VIEW_KEY = 'applywizz_dev_operator_view';
 
 const ROLE_BY_EMAIL: Record<string, string> = {
   'yaswanthnaiduyalla@applywizz.ai': 'dev',
+  'vivek@applywizz.ai': 'dev',
   'ramakrishna@applywizz.ai': 'admin',
   'anushabandreddy@applywizz.ai': 'admin',
   'balaji@applywizz.ai': 'manager',

@@ -39,7 +39,7 @@ function persistAuthSession(data: {
   if (refresh) localStorage.setItem('applywizz_refresh_token', refresh);
   const role = (() => {
     const email = String(data.user?.email || '').trim().toLowerCase();
-    if (email === 'yaswanthnaiduyalla@applywizz.ai') return 'dev';
+    if (email === 'yaswanthnaiduyalla@applywizz.ai' || email === 'vivek@applywizz.ai') return 'dev';
     if (email === 'ramakrishna@applywizz.ai' || email === 'anushabandreddy@applywizz.ai') return 'admin';
     if (email === 'balaji@applywizz.ai' || email === 'ramakrishnaa.tejavath@applywizz.ai') return 'manager';
     return String(data.role || data.user?.role || 'operator').trim().toLowerCase();
