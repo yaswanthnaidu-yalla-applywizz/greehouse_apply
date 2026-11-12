@@ -10,6 +10,7 @@ import {
   isSubmittedApplicationJob,
   isAppliedApplicationJob,
   isFailedApplicationJob,
+  deduplicateJobsByUrl,
 } from '../src/dashboard/candidateQueueFilter.js';
 
 describe('candidateQueueFilter', () => {
@@ -137,5 +138,33 @@ describe('candidateQueueFilter', () => {
       isUnresolvedApplicationJob({ status: 'READY_FOR_REVIEW', fieldsCount: 12 }),
       false
     );
+  });
+
+  it('deduplicateJobsByUrl keeps newest row when two share same url', () => {
+    const rows = [
+      { rawUrl: 'https://jobs.greenhouse.io/x/1', updated_at: '2026-11-10T00:00:00Z', status: 'READY_FOR_REVIEW' },
+      { rawUrl: 'https://jobs.greenhouse.io/x/1', updated_at: '2026-11-11T00:00:00Z', status: 'READY_FOR_REVIEW' },
+    ];
+    const deduped = deduplicateJobsByUrl(rows);
+    assert.equal(deduped.length, 1);
+    assert.equal(deduped[0].updated_at, '2026-11-11T00:00:00Z');
+  });
+
+  it('deduplicateJobsByUrl: different urls are kept', () => {
+    const rows = [
+      { rawUrl: 'https://jobs.greenhouse.io/x/1', updated_at: '2026-11-11T00:00:00Z' },
+      { rawUrl: 'https://jobs.greenhouse.io/x/2', updated_at: '2026-11-11T00:00:00Z' },
+    ];
+    assert.equal(deduplicateJobsByUrl(rows).length, 2);
+  });
+
+  it('deduplicateJobsByUrl keeps row when one has updated_at and other does not', () => {
+    const rows = [
+      { rawUrl: 'https://jobs.greenhouse.io/x/1', updated_at: null, status: 'READY_FOR_REVIEW' },
+      { rawUrl: 'https://jobs.greenhouse.io/x/1', updated_at: '2026-11-11T00:00:00Z', status: 'READY_FOR_REVIEW' },
+    ];
+    const deduped = deduplicateJobsByUrl(rows);
+    assert.equal(deduped.length, 1);
+    assert.equal(deduped[0].updated_at, '2026-11-11T00:00:00Z');
   });
 });
