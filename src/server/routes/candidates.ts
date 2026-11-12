@@ -20,6 +20,7 @@ import {
 } from '../managerTeamScope.js';
 import {
   applicationRowHasPersistedResolution,
+  deduplicateJobsByUrl,
   filterOperatorApplicationJobs,
 } from '../../dashboard/candidateQueueFilter.js';
 import { fetchProfileListingFieldsByApplywizzIds, getProfile } from '../../db/profiles.js';
@@ -902,6 +903,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
       });
     }
   }
+
+  jobs = deduplicateJobsByUrl(jobs);
 
   const afterCaFilter = jobs.length;
   const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);

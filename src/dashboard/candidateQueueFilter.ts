@@ -206,3 +206,24 @@ export function jobCardTitleLabel(job: JobCardTemplateFields): string {
   if (fromTemplate) return fromTemplate;
   return job.jobTitle || job.job_title || 'Job Application';
 }
+
+export function deduplicateJobsByUrl<T extends { rawUrl?: unknown; updated_at?: unknown }>(
+  jobs: T[]
+): T[] {
+  const seen = new Map<string, T>();
+  for (const job of jobs) {
+    const url = String(job.rawUrl || '').trim();
+    if (!url) continue;
+    const existing = seen.get(url);
+    if (!existing) {
+      seen.set(url, job);
+      continue;
+    }
+    const existingTs = String(existing.updated_at || '');
+    const jobTs = String(job.updated_at || '');
+    if (jobTs > existingTs) {
+      seen.set(url, job);
+    }
+  }
+  return Array.from(seen.values());
+}
