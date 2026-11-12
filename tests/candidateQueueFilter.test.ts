@@ -8,6 +8,8 @@ import {
   isUnresolvedApplicationJob,
   isSkippedApplicationJob,
   isSubmittedApplicationJob,
+  isAppliedApplicationJob,
+  isFailedApplicationJob,
 } from '../src/dashboard/candidateQueueFilter.js';
 
 describe('candidateQueueFilter', () => {
@@ -17,7 +19,7 @@ describe('candidateQueueFilter', () => {
       { status: 'READY_FOR_REVIEW', resolved_fields: [] },
       { status: 'APPLIED', resolved_fields: [{ source: 'supabase', resolvedByTier: 1 }] },
     ];
-    assert.equal(filterOperatorApplicationJobs(jobs).length, 2);
+    assert.equal(filterOperatorApplicationJobs(jobs).length, 1);
   });
 
   it('filterOperatorApplicationJobs excludes QUEUED and SKIPPED jobs while retaining other statuses', () => {
@@ -32,10 +34,52 @@ describe('candidateQueueFilter', () => {
       { status: 'RETRY', resolved_fields: [] },
     ];
     const filtered = filterOperatorApplicationJobs(jobs);
-    assert.equal(filtered.length, 5);
+    assert.equal(filtered.length, 3);
     assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'QUEUED'), false);
     assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'SKIPPED'), false);
+    assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'APPLIED'), false);
+    assert.equal(filtered.some((j) => (j.status || '').toUpperCase() === 'FAILED'), false);
     assert.equal(filtered.some((j) => j.status === 'READY_FOR_REVIEW'), true);
+  });
+
+  it('excludes APPLIED jobs from operator queue', () => {
+    const jobs = [
+      { status: 'APPLIED', resolved_fields: [{ source: 'supabase' }] },
+      { status: 'READY_FOR_REVIEW', resolved_fields: [{ source: 'supabase' }] },
+    ];
+    const filtered = filterOperatorApplicationJobs(jobs as any);
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].status, 'READY_FOR_REVIEW');
+  });
+
+  it('excludes FAILED jobs from operator queue', () => {
+    const jobs = [
+      { status: 'FAILED', resolved_fields: [{ source: 'supabase' }] },
+      { status: 'READY_FOR_REVIEW', resolved_fields: [{ source: 'supabase' }] },
+    ];
+    const filtered = filterOperatorApplicationJobs(jobs as any);
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].status, 'READY_FOR_REVIEW');
+  });
+
+  it('isAppliedApplicationJob returns true for APPLIED and EMAIL_PROOF_PENDING', () => {
+    assert.equal(isAppliedApplicationJob({ status: 'applied' }), true);
+    assert.equal(isAppliedApplicationJob({ status: 'EMAIL_PROOF_PENDING' }), true);
+    assert.equal(isAppliedApplicationJob({ status: 'READY_FOR_REVIEW' }), false);
+  });
+
+  it('isFailedApplicationJob returns true for FAILED', () => {
+    assert.equal(isFailedApplicationJob({ status: 'FAILED' }), true);
+    assert.equal(isFailedApplicationJob({ status: 'failed' }), true);
+    assert.equal(isFailedApplicationJob({ status: null }), false);
+    assert.equal(isFailedApplicationJob({ status: 'READY_FOR_REVIEW' }), false);
+  });
+
+  it('demo fixture APPLIED jobs not hidden when unrestricted', () => {
+    // filterOperatorApplicationJobs is called after demo merge;
+    // demo rows with status APPLIED should NOT appear in queue
+    const demo = [{ status: 'APPLIED', resolved_fields: [{}] }];
+    assert.equal(filterOperatorApplicationJobs(demo as any).length, 0);
   });
 
   it('isOperatorFormPanelBlocked follows submittable status whitelist', () => {
