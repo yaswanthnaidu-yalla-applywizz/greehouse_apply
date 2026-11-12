@@ -438,7 +438,7 @@ The codebase was decomposed from earlier monolithic files into cohesive submodul
 
 | Role | Emails | Home | Can open |
 |---|---|---|---|
-| `dev` | `yaswanthnaiduyalla@applywizz.ai` | `/dev` | `/`, `/admin`, `/manager`, `/dev` (header switcher) |
+| `dev` | `yaswanthnaiduyalla@applywizz.ai`, `vivek@applywizz.ai` | `/dev` | `/`, `/admin`, `/manager`, `/dev` (header switcher) |
 | `admin` | `ramakrishna@applywizz.ai`, `anushabandreddy@applywizz.ai` | `/admin` | `/admin` only |
 | `manager` | `balaji@applywizz.ai`, `ramakrishnaa.tejavath@applywizz.ai` | `/manager` | `/manager` only |
 | `operator` | any other signed-up email | `/` | `/` only |
