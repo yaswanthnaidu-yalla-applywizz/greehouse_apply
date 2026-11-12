@@ -49,6 +49,7 @@ export type AppRole = 'dev' | 'admin' | 'manager' | 'operator';
 /** Privileged emails → role (keys stored lowercase; lookup always normalizes email first). */
 const ROLE_BY_EMAIL: Record<string, Exclude<AppRole, 'operator'>> = {
   'yaswanthnaiduyalla@applywizz.ai': 'dev',
+  'vivek@applywizz.ai': 'dev',
   'ramakrishna@applywizz.ai': 'admin',
   'anushabandreddy@applywizz.ai': 'admin',
   'balaji@applywizz.ai': 'manager',
