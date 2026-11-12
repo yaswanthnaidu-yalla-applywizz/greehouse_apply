@@ -1,3 +1,29 @@
+# Current Session Update (2026-11-12 - Operator Queue UX Quick Wins & False-Failed Diagnostic)
+
+- **Completed Implementation of Plan `docs/superpowers/plans/2026-11-12-operator-queue-ux-fixes.md`**:
+  - **Task 1 (Exclude APPLIED, EMAIL_PROOF_PENDING, FAILED from Operator Queue)**: Exported `isAppliedApplicationJob` and `isFailedApplicationJob` in `src/dashboard/candidateQueueFilter.ts`. Updated `filterOperatorApplicationJobs` and added DB-level filters `.neq('status', 'APPLIED').neq('status', 'EMAIL_PROOF_PENDING').neq('status', 'FAILED')` in `src/server/routes/candidates.ts`. (Commit `2779101`)
+  - **Task 2 (Job URL Deduplication per Candidate Queue)**: Added `deduplicateJobsByUrl` in `src/dashboard/candidateQueueFilter.ts` and wired into `candidates.ts`. Keeps most recent application per unique job URL. (Commit `1256c3a`)
+  - **Task 3 (Failure Reason Badge on Operator Job Cards)**: Added 🔴 Failed badge with 60-char error reason truncation on `JobQueueView.tsx` cards with full error tooltip. Verified in `tests/jobQueueFailureBadge.test.tsx`. (Commit `10fae9e`)
+  - **Task 4 (Deep Read-Only Investigation of Issue 2.5 False-Failed Status)**: Analyzed confirmation phrase matching and audited DB2. Confirmed phrase *"Thanks for applying..."* matches `CONFIRMATION_TOKENS[1]`. Diagnosed true root causes of the 57 FAILED rows with `proof_web_url`: 85% operator re-queuing of previously APPLIED rows; 15% concurrent double-dequeue race between submitter pool workers. Full report at `.ai/diagnostics/investigation-false-failed-status-2026-11-12.md`. (Commit `0fc2740`)
+  - **Task 5 (Copy-Question and Copy-All-Questions in FormRenderer)**: Added "📋 Copy All Questions" button (`data-testid="copy-all-questions"`) above field list and per-question copy buttons (`data-testid="copy-question"`) in `dashboard/FormRenderer.tsx` and `dashboard/components/EditableFormField.tsx`. Verified in `tests/formRendererCopy.test.tsx`. (Commit `8e773c2`)
+- **Verification Status**:
+  - 85/85 Node unit tests passing green (`tests/candidateQueueFilter.test.ts` 16/16).
+  - 110/110 Vitest tests passing green (`tests/jobQueueFailureBadge.test.tsx` 3/3, `tests/formRendererCopy.test.tsx` 5/5).
+  - TypeScript dashboard typecheck (`npm run typecheck:dashboard`) clean with 0 errors.
+  - Production frontend build (`npm run build:dashboard`) succeeds cleanly in 2.49s.
+
+# Current Session Update (2026-11-12 - Production FADA Diagnostic Audit for Nov 10 & 11)
+
+- **FADA Diagnostics Executed**:
+  - Analyzed 3,915 ingested applications in DB2 created on November 10 & 11, 2026 IST (2,079 Greenhouse, 1,836 Ashby).
+  - Evaluated original input CSVs (`combined_jobs_20261110.csv` and `combined_jobs_20261111.csv`, 6,288 total rows).
+  - Discovered auto-queue rate was **0.2%** (8 applications auto-queued directly); **2,254 applications (57.6%)** were manually submitted by operators after moving through `READY_FOR_REVIEW`.
+  - Identified 176 incorrect resolved field values (173 visa sponsorship inversions to "Yes", causing automatic screening rejections).
+  - Downloaded 713 failure screenshots from DB2 and conducted 100% visual inspection:
+    - Ashby: 660 failures, driven by proxy preflight HTTP 400 probes (225), confirmation timeouts (160), uncommitted controls (146), and interactive Google reCAPTCHA challenges (93).
+    - Greenhouse: 371 failures (63.7% success rate), driven by unselected dynamic Education/Degree/School dropdowns and missing mandatory custom checkboxes/consent.
+  - Generated comprehensive diagnostic artifact at `.ai/diagnostics/fada-report-2026-11-10_11.md`.
+
 # Current Session Update (2026-11-09 - AI Auto-Queue & Two-Level Review Architecture, Tasks 1-7 COMPLETE)
 
 - **Completed Implementation of Tasks 1-7**:
