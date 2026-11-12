@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @fileoverview Right Pane Top: Horizontal Job Queue Navigation Tabs (Phase V2-UI).
  *
  * Displays candidate-specific job assignments with company names, job titles,
@@ -22,23 +22,46 @@ import {
 
 export interface JobQueueViewProps {
   /** Candidate details with assigned job records */
-  candidate: CandidateDetail;
+  candidate?: CandidateDetail;
+  /** Direct jobs list (used in unit tests and standalone views) */
+  jobs?: Array<{
+    id?: string;
+    rawUrl?: string;
+    canonicalUrl?: string;
+    companyName?: string;
+    jobTitle?: string;
+    status?: string;
+    operator_approved_at?: string | null;
+    submitted_at?: string | null;
+    submittedAt?: string | null;
+    updated_at?: string | null;
+    fieldsCount?: number;
+    hasManualEdits?: boolean;
+    error_message?: string | null;
+    applywizz_id?: string;
+    applywizzId?: string;
+    resolved_fields?: unknown[];
+  }>;
   /** Selected directory applywizz_id — queue must match this exactly */
-  selectedApplywizzId: string | null;
+  selectedApplywizzId?: string | null;
   /** Currently selected job canonical or raw URL */
-  selectedJobUrl: string | null;
+  selectedJobUrl?: string | null;
   /** Return to the mobile candidate list */
-  onBack: () => void;
+  onBack?: () => void;
   /** Expand/collapse job for review only — never starts submit/dry-run */
-  onSelectJob: (jobUrl: string | null) => void;
+  onSelectJob?: (jobUrl: string | null) => void;
   /** Open candidate client info drawer */
   onOpenClientInfo?: () => void;
+  selectedJob?: unknown;
+  onJobSelect?: unknown;
+  apiBaseUrl?: string;
 }
 
 type CandidateJob = CandidateDetail['jobs'][number];
 
 export const JobQueueView: React.FC<JobQueueViewProps> = ({
   candidate,
+  jobs,
   selectedApplywizzId,
   selectedJobUrl,
   onBack,
@@ -46,19 +69,24 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
   onOpenClientInfo,
 }) => {
   const queueJobs = useMemo(() => {
+    if (jobs) {
+      return jobs;
+    }
     if (!selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
       return [];
     }
-    const owned = filterJobsForCandidate(candidate.jobs || [], selectedApplywizzId);
+    const owned = filterJobsForCandidate(candidate?.jobs || [], selectedApplywizzId);
     return filterOperatorApplicationJobs(owned);
-  }, [candidate, selectedApplywizzId]);
-  const backButton = (
+  }, [candidate, selectedApplywizzId, jobs]);
+
+  const backButton = onBack ? (
     <button type="button" onClick={onBack} className="mobile-screen-back">
       <span aria-hidden="true">←</span> Candidates
     </button>
-  );
-  const handleJobCardClick = (job: CandidateJob) => {
-    const jobKey = job.canonicalUrl || job.rawUrl;
+  ) : null;
+
+  const handleJobCardClick = (job: CandidateJob | any) => {
+    const jobKey = job.canonicalUrl || job.rawUrl || job.id;
     const currentStatus = job.status || 'READY_FOR_REVIEW';
     const alreadyExpanded =
       selectedJobUrl === jobKey ||
@@ -66,22 +94,22 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
       selectedJobUrl === job.canonicalUrl;
 
     const isMobile =
-      typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+      typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
     if (alreadyExpanded && !isMobile) {
       console.log(
         `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → collapse (no submit)`
       );
-      onSelectJob(null);
+      onSelectJob?.(null);
       return;
     }
 
     console.log(
       `[Dashboard] Card clicked: ${job.jobTitle || jobKey} status=${currentStatus} → expand for review (no submit)`
     );
-    onSelectJob(jobKey);
+    onSelectJob?.(jobKey);
   };
 
-  if (!candidate || !selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId)) {
+  if (!jobs && (!candidate || !selectedApplywizzId || !candidateDetailMatchesSelection(candidate, selectedApplywizzId))) {
     return (
       <div className="operator-job-queue mobile-job-queue mobile-job-queue-message p-4 bg-[#FFF5EB] border-b-2 border-[#1A1A2E] text-xs font-mono text-[#64748B]">
         {backButton}
@@ -129,7 +157,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             </button>
           )}
 
-          {candidate.resumeUrl && (
+          {candidate?.resumeUrl && (
             <a
               href={candidate.resumeUrl}
               target="_blank"
@@ -152,15 +180,16 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
             return aEdited - bEdited;
           })
           .map((job, idx) => {
-          const jobKey = job.canonicalUrl || job.rawUrl;
+          const jobKey = job.canonicalUrl || job.rawUrl || (job as any).id || `job-${idx}`;
           const isSelected =
             selectedJobUrl === jobKey ||
             selectedJobUrl === job.rawUrl ||
             selectedJobUrl === job.canonicalUrl;
 
-          const cardCompany = jobCardCompanyLabel(job);
-          const cardTitle = jobCardTitleLabel(job);
+          const cardCompany = jobCardCompanyLabel(job as any);
+          const cardTitle = jobCardTitleLabel(job as any);
           const initial = cardCompany ? cardCompany[0].toUpperCase() : 'G';
+          const currentStatus = ((job as any).status || '').trim().toUpperCase();
 
           return (
             <button
@@ -185,7 +214,7 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                 </div>
 
                 <div className="shrink-0">
-                  {isSubmittedApplicationJob(job) ? (
+                  {isSubmittedApplicationJob(job as any) ? (
                     <span className="text-[10px] font-mono text-[#30d158] font-semibold bg-[#30d158]/15 border border-[#30d158]/30 px-2 py-0.5 rounded-full">
                       Submitted
                     </span>
@@ -196,6 +225,16 @@ export const JobQueueView: React.FC<JobQueueViewProps> = ({
                   )}
                 </div>
               </div>
+
+              {currentStatus === 'FAILED' && (
+                <span
+                  data-testid="failure-badge"
+                  className="text-[9px] font-mono text-[#ff453a] bg-[#ff453a]/15 border border-[#ff453a]/30 px-1.5 py-0.5 rounded-full block mt-1 truncate max-w-[200px]"
+                  title={(job as any).error_message || 'Submission failed'}
+                >
+                  🔴 Failed{(job as any).error_message ? ` — ${((job as any).error_message as string).slice(0, 60)}${((job as any).error_message as string).length > 60 ? '…' : ''}` : ''}
+                </span>
+              )}
 
               {/* Bottom Row: Job Title */}
               <div className="text-xs text-[#8e8e93] font-medium truncate">
