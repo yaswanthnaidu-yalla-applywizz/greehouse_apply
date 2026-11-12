@@ -415,8 +415,29 @@ export const App: React.FC = () => {
         jobs: candidateJobs,
       });
 
-      setSelectedJobUrl(null);
-      setApplication(null);
+      // Preserve active job selection if still present in candidateJobs; otherwise auto-select first available job
+      const currentJobUrl = selectedJobRef.current;
+      const matchingJob = currentJobUrl
+        ? candidateJobs.find(
+            (j) => (j.canonicalUrl || j.rawUrl || (j as any).id) === currentJobUrl
+          )
+        : null;
+
+      if (matchingJob) {
+        const matchingKey = matchingJob.canonicalUrl || matchingJob.rawUrl || (matchingJob as any).id;
+        setSelectedJobUrl(matchingKey);
+        fetchJobApplication(requestedId, matchingKey);
+      } else if (candidateJobs.length > 0) {
+        const firstJob = candidateJobs[0];
+        const firstJobKey = firstJob.canonicalUrl || firstJob.rawUrl || (firstJob as any).id;
+        setSelectedJobUrl(firstJobKey);
+        if (firstJobKey) {
+          fetchJobApplication(requestedId, firstJobKey);
+        }
+      } else {
+        setSelectedJobUrl(null);
+        setApplication(null);
+      }
     } catch (err: any) {
       console.error(`Failed to fetch candidate ${applywizzId}:`, err);
     }
@@ -1064,6 +1085,8 @@ export const App: React.FC = () => {
                     isLoading={isLoadingApplication}
                     candidateName={candidateDetail.clientName}
                     apiBaseUrl={API_BASE_URL}
+                    totalQueueJobs={candidateDetail.jobs.length}
+                    hasSelectedJob={Boolean(selectedJobUrl)}
                     onBack={() => setMobileScreen('jobs')}
                     onFieldUpdate={handleFieldUpdate}
                     onStatusChange={handleStatusChange}
