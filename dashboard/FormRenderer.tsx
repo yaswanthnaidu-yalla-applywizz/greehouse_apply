@@ -39,6 +39,10 @@ export interface FormRendererProps {
   candidateName?: string;
   /** API Base URL */
   apiBaseUrl?: string;
+  /** Total queue jobs assigned to this candidate */
+  totalQueueJobs?: number;
+  /** Whether a job card is currently selected in the queue */
+  hasSelectedJob?: boolean;
   /** Initial view mode (default: 'list') */
   initialViewMode?: 'carousel' | 'list';
   /** Return to the mobile application queue */
@@ -58,6 +62,8 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   isLoading = false,
   candidateName,
   apiBaseUrl = '',
+  totalQueueJobs,
+  hasSelectedJob,
   initialViewMode = 'list',
   onBack,
   onFieldUpdate,
@@ -208,13 +214,39 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   }
 
   if (!application) {
+    if (totalQueueJobs === 0) {
+      return (
+        <div data-testid="queue-complete-state" className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+          {mobileBackButton}
+          <div className="text-4xl mb-3">✅</div>
+          <p className="text-sm font-bold text-[#ffffff]">Queue Complete</p>
+          <p className="text-xs text-[#8e8e93] mt-1 font-medium text-center max-w-sm">
+            All assigned applications for this candidate have been processed. Select another candidate from the sidebar.
+          </p>
+        </div>
+      );
+    }
+
+    if (hasSelectedJob) {
+      return (
+        <div data-testid="resolution-pending-state" className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+          {mobileBackButton}
+          <div className="text-4xl mb-3">⏳</div>
+          <p className="text-sm font-bold text-[#ffffff]">Resolution in Progress</p>
+          <p className="text-xs text-[#8e8e93] mt-1 font-medium text-center max-w-sm">
+            Field answers are currently being generated for this job. Please check back shortly or choose another card above.
+          </p>
+        </div>
+      );
+    }
+
     return (
-      <div className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+      <div data-testid="no-job-selected-state" className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
         {mobileBackButton}
         <div className="text-4xl mb-3">📋</div>
-        <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
-        <p className="text-xs text-[#64748B] mt-1 font-medium">
-          Select a candidate from the left directory and click a job tab above to review and submit.
+        <p className="text-sm font-bold text-[#ffffff]">Select an Application</p>
+        <p className="text-xs text-[#8e8e93] mt-1 font-medium text-center">
+          Choose a job card from the queue above to review and submit.
         </p>
       </div>
     );
