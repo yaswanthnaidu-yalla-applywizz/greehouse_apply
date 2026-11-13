@@ -10,6 +10,8 @@ const BEHAVIORAL_PATTERNS = [
   /\bdescribe (?:a|an|your|the)\b/i,
   /\btell (?:us|me) about\b/i,
   /\bhow have you (?:handled|solved|approached|worked|built|scaled)\b/i,
+  /\bhow would you (?:handle|respond to|deal with|approach|resolve|manage)\b/i,
+  /\bwhat would you do if\b/i,
   /\bgive (?:an? )?example of\b/i,
   /\bwalk us through\b/i,
   /\bwhat was your role in\b/i,

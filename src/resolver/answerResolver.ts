@@ -138,8 +138,8 @@ export function isUnsupportedUuidAnswer(field: ScannedField, answer: string): bo
  * them as optional alternatives, such as "LinkedIn Profile or Resume".
  * Ordinary optional questions must continue to bypass the resolver waterfall.
  */
-export function isAttachmentObligation(field: ScannedField): boolean {
-  const combined = `${field.fieldId} ${field.name} ${field.label}`;
+export function isAttachmentObligation(field: ScannedField | ResolvedField): boolean {
+  const combined = `${field.fieldId || ''} ${field.name || ''} ${field.label || ''}`;
   return field.type === 'file' && /resume|curriculum vitae|\bcv\b/i.test(combined) && !/cover\s*letter|cover_letter/i.test(combined);
 }
 
@@ -548,9 +548,12 @@ export function formatResolutionSource(resolved: ResolvedField): string {
  * Returns a short resolution source key for batch summary logs.
  */
 export function isResolvedApplicationSuccessful(app: CandidateJobApplication): boolean {
-  if (app.status === 'EXPIRED') return false;
   if (app.status !== 'READY_FOR_REVIEW') return false;
-  return !app.resolvedFields.some((f) => f.source === 'unresolved' || f.resolvedByTier === null);
+  return !app.resolvedFields.some(
+    (field) =>
+      (field.isRequired || isAttachmentObligation(field)) &&
+      (!field.value.trim() || field.source === 'unresolved' || field.resolvedByTier === null)
+  );
 }
 
 export function resolutionSourceKey(resolved: ResolvedField): 'supabase' | 'resume' | 'semantic' | 'fuzzy' | 'llm' | 'unresolved' | 'other' {
