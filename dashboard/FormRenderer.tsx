@@ -20,7 +20,7 @@ import { EmailProofModal } from './components/EmailProofModal.js';
 import type { EmailProofJson } from './components/EmailProofRenderer.js';
 import type { ResolvedField, ApplicationStatus } from './types.js';
 import { isOperatorFormPanelBlocked } from '../src/dashboard/candidateQueueFilter.js';
-import { isActionableCarouselField } from './utils/fieldFilters.js';
+import { countRequiredUnresolved, isActionableCarouselField } from './utils/fieldFilters.js';
 
 export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
 
@@ -139,7 +139,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   const manualCount = fields.filter((f) => f.isEdited || f.source === 'manual').length;
   const supabaseCount = fields.filter((f) => f.source === 'supabase' && !f.isEdited).length;
   const aiCount = fields.filter((f) => f.source === 'ai' && !f.isEdited).length;
-  const unresCount = fields.filter((f) => f.source === 'unresolved').length;
+  const unresCount = countRequiredUnresolved(fields);
 
   const currentStatus: ApplicationStatus = application?.status || 'READY_FOR_REVIEW';
   const submitFlowActive =
