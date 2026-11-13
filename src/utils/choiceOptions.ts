@@ -154,25 +154,25 @@ function canonicalAlias(value: string): string | null {
     return 'decline';
   }
   // Degree levels
-  if (/\b(?:master of science|m\.s\.|ms)\b/.test(normalized)) {
+  if (/\b(?:master of science|m\s*s|ms|m\s*sc)\b/.test(normalized)) {
     return 'ms';
   }
-  if (/\b(?:master of arts|m\.a\.|ma)\b/.test(normalized)) {
+  if (/\b(?:master of arts|m\s*a|ma)\b/.test(normalized)) {
     return 'ma';
   }
-  if (/\b(?:master(?:s|\x27s)?|master of engineering)\b/.test(normalized)) {
+  if (/\b(?:master(?:s|\x27s)?|master of engineering|m\s*e|m\s*tech|mtech)\b/.test(normalized)) {
     return 'masters';
   }
-  if (/\b(?:bachelor of science|b\.s\.|bs|bachelor of technology|b\.tech|btech)\b/.test(normalized)) {
+  if (/\b(?:bachelor of science|b\s*s|bs|bachelor of technology|b\s*tech|btech|b\s*e|bachelor of engineering)\b/.test(normalized)) {
     return 'bs';
   }
-  if (/\b(?:bachelor of arts|b\.a\.|ba)\b/.test(normalized)) {
+  if (/\b(?:bachelor of arts|b\s*a|ba)\b/.test(normalized)) {
     return 'ba';
   }
   if (/\b(?:bachelor(?:s|\x27s)?|undergraduate)\b/.test(normalized)) {
     return 'bachelors';
   }
-  if (/\b(?:doctorate|doctoral|phd|ph\.d\.|doctor of philosophy)\b/.test(normalized)) {
+  if (/\b(?:doctorate|doctoral|phd|ph\s*d|doctor of philosophy)\b/.test(normalized)) {
     return 'doctorate';
   }
   return null;

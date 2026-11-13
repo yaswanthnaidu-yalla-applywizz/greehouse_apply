@@ -102,4 +102,14 @@ describe('Form Filler Precision (Phase 3)', () => {
       expect(label).toBe('Please identify your race *');
     });
   });
+
+  describe('3f: sanitizeMetadataSelector with numeric IDs', () => {
+    it('converts #<digit> to [id="..."] avoiding invalid CSS selector errors', async () => {
+      const { sanitizeMetadataSelector } = await import('../src/submitter/formFiller.js');
+      expect(sanitizeMetadataSelector('#864')).toBe('[id="864"]');
+      expect(sanitizeMetadataSelector('#1333')).toBe('[id="1333"]');
+      expect(sanitizeMetadataSelector('#question_123')).toBe('#question_123');
+      expect(sanitizeMetadataSelector('#first_name')).toBe('#first_name');
+    });
+  });
 });
