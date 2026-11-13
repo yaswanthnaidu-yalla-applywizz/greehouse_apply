@@ -282,7 +282,7 @@ export interface IngestFilterReport {
  * - 'unresolved': Could not be resolved by any tier.
  */
 export interface ResolutionExecution {
-  mode?: 'live' | 'dry-run' | 'shadow';
+  mode?: 'live' | 'dry-run' | 'shadow' | 'evaluation';
   recordDecision?: (decision: any) => void;
 }
 

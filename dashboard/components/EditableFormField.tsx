@@ -157,7 +157,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions && !isIncompleteChoice;
   const isCheckbox = fieldType === 'checkbox';
   const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
-  const isUnresolved = field.source === 'unresolved';
+  const isRequired = Boolean(field.isRequired || (field as any).required);
+  const isUnrequired = !isRequired && !field.value?.trim();
+  const isUnresolved = !isUnrequired && field.source === 'unresolved';
 
   return (
     <div
@@ -181,7 +183,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             >
               📋
             </button>
-            {field.isRequired && <span className="text-[#ff453a] font-bold">*</span>}
+            {isRequired && <span className="text-[#ff453a] font-bold">*</span>}
             <span className="text-[10px] font-mono text-[#8e8e93] font-normal">({field.type})</span>
           </label>
           {expectedDateFormat && (
@@ -195,6 +197,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             confidence={field.confidence}
             isEdited={field.isEdited}
             provenance={field.provenance}
+            isUnrequired={isUnrequired}
           />
 
           {!isEditing && (
@@ -386,7 +389,11 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
           {field.value && field.value.trim().length > 0 ? (
             <span className="text-[#ffffff] font-medium">{field.value}</span>
           ) : (
-            <span className="text-[#ff453a] font-semibold italic">⚠️ Unresolved field (click to provide answer)</span>
+            isUnrequired ? (
+              <span className="text-[#8e8e93] font-semibold italic">Unrequired (click to provide answer)</span>
+            ) : (
+              <span className="text-[#ff453a] font-semibold italic">⚠️ Unresolved field (click to provide answer)</span>
+            )
           )}
         </div>
       )}
