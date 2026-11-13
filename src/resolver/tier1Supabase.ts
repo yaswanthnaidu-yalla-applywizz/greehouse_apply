@@ -7,7 +7,7 @@ import Fuse from 'fuse.js';
 import { getProfile, type ProfileRow, getCompanyEmail } from '../db/profiles.js';
 import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
-import type { ResolvedField, ScannedField } from '../types/index.js';
+import type { ResolutionExecution, ResolvedField, ScannedField } from '../types/index.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { isPhoneNumberField } from './candidateEvidence.js';
 import { formatLocationCityStateCountry } from '../submitter/formFiller.js';
@@ -503,6 +503,73 @@ export function resolveStandardProfileAttribute(
     return matchBestOption('No', field.options, field.label);
   }
 
+  // Degree / Highest Education / Education Level
+  if (
+    /(?:^|\b)(?:degree|highest (?:level of )?education|highest degree|education level)\b/i.test(combined) &&
+    !/\b(?:discipline|major|field of study|gpa|school|university|month|year|date)\b/i.test(combined)
+  ) {
+    const eduList = Array.isArray(profile.education) ? profile.education : [];
+    if (eduList.length > 0) {
+      if (field.options && field.options.length > 0) {
+        for (const edu of eduList) {
+          if (edu && typeof edu === 'object' && (edu as any).degree) {
+            const matched = matchBestOption(String((edu as any).degree), field.options, field.label);
+            if (matched) return matched;
+          }
+        }
+      } else {
+        const first = eduList[0];
+        if (first && typeof first === 'object' && (first as any).degree) {
+          return String((first as any).degree);
+        }
+      }
+    }
+    if ((profile as any)?.resume_facts?.education && Array.isArray((profile as any).resume_facts.education)) {
+      const rfEdu = (profile as any).resume_facts.education;
+      for (const edu of rfEdu) {
+        if (edu && typeof edu === 'object' && edu.degree) {
+          const matched = matchBestOption(String(edu.degree), field.options, field.label);
+          if (matched) return matched;
+        }
+      }
+    }
+    const addDeg = profile.raw_api_payload?.additional_information?.highest_education;
+    if (addDeg) {
+      const matched = matchBestOption(String(addDeg), field.options, field.label);
+      if (matched) return matched;
+    }
+  }
+
+  // School / University / Institution / Alma Mater
+  if (
+    /^school$|\b(?:school|university|college|institution|alma mater)\b/i.test(combined) &&
+    !/\b(?:degree|discipline|major|field of study|gpa|month|year|email|date|high school)\b/i.test(combined)
+  ) {
+    const eduList = Array.isArray(profile.education) ? profile.education : [];
+    if (eduList.length > 0) {
+      const first = eduList[0];
+      const schoolName = first && typeof first === 'object' ? ((first as any).institution || (first as any).school) : null;
+      if (schoolName) {
+        const matched = matchBestOption(String(schoolName), field.options, field.label);
+        if (matched) return matched;
+      }
+    }
+    if ((profile as any)?.resume_facts?.education && Array.isArray((profile as any).resume_facts.education)) {
+      const rfEdu = (profile as any).resume_facts.education;
+      const first = rfEdu[0];
+      const schoolName = first && typeof first === 'object' ? (first.institution || first.school) : null;
+      if (schoolName) {
+        const matched = matchBestOption(String(schoolName), field.options, field.label);
+        if (matched) return matched;
+      }
+    }
+    const addUni = profile.raw_api_payload?.additional_information?.university_name;
+    if (addUni) {
+      const matched = matchBestOption(String(addUni), field.options, field.label);
+      if (matched) return matched;
+    }
+  }
+
   // Discipline / Field of Study / Major
   if (
     /^discipline$|\b(?:discipline|field of study|major|area of study)\b/i.test(combined) &&
@@ -702,14 +769,14 @@ export function resolveStandardProfileAttribute(
     if (/salary|compensation|expected pay/i.test(combined) && demo.salaryRange) {
       return matchBestOption(demo.salaryRange, field.options, field.label);
     }
-    if (/transgender/i.test(combined)) {
-      return matchBestOption('No', field.options, field.label);
+    if (/transgender/i.test(combined) && demo.transgender) {
+      return matchBestOption(String(demo.transgender), field.options, field.label);
     }
-    if (/sexual orientation/i.test(combined)) {
-      return matchBestOption("I don't wish to answer", field.options, field.label);
+    if (/sexual orientation/i.test(combined) && demo.sexualOrientation) {
+      return matchBestOption(String(demo.sexualOrientation), field.options, field.label);
     }
-    if (/hispanic|latino/i.test(combined)) {
-      return matchBestOption(demo.isHispanicLatino || 'No', field.options, field.label);
+    if (/hispanic|latino/i.test(combined) && demo.isHispanicLatino) {
+      return matchBestOption(String(demo.isHispanicLatino), field.options, field.label);
     }
     if (/gender/i.test(combined) && !/transgender/i.test(combined) && demo.gender) {
       return matchBestOption(demo.gender, field.options, field.label);
@@ -941,6 +1008,14 @@ export function resolveFromPayloadStructured(
   const client = payload.client || {};
   const additional = { ...(payload.demographics || {}), ...(payload.additional_information || {}) };
   const educationRecords = education.length > 0 ? education : payload.education || [];
+  const firstEdu = (Array.isArray(educationRecords) && educationRecords.length > 0 && typeof educationRecords[0] === 'object'
+    ? educationRecords[0] as Record<string, unknown>
+    : null);
+
+  const candidateDegree = (additional.highest_education ?? firstEdu?.degree) as string | undefined;
+  const candidateSchool = (additional.university_name ?? firstEdu?.institution ?? firstEdu?.school) as string | undefined;
+  const candidateMajor = (additional.main_subject ?? firstEdu?.fieldOfStudy ?? firstEdu?.field_of_study ?? firstEdu?.major) as string | undefined;
+  const candidateGradYear = (additional.graduation_year ?? firstEdu?.graduationYear ?? firstEdu?.graduation_year) as string | undefined;
   const match = (
     pattern: RegExp,
     value: unknown,
@@ -971,13 +1046,13 @@ export function resolveFromPayloadStructured(
     (match(/years of experience|total experience|how many years|experience level/, additional.experience) !== null
       ? `${formatPayloadValue(additional.experience, fieldType)} years`
       : null) ??
-    match(/highest (level of )?education|highest degree|education level|^degree$|degree (earned|obtained|completed|type)/, additional.highest_education) ??
+    match(/highest (level of )?education|highest degree|education level|^degree$|degree (earned|obtained|completed|type)/, candidateDegree) ??
     (!/\b(?:opt|stem|extension|sponsorship|eligible|authorization)\b/i.test(normalizedLabel)
-      ? match(/university|college|institution|^school$|school name|where did you (attend|study)/, additional.university_name)
+      ? match(/university|college|institution|^school$|school name|where did you (attend|study)/, candidateSchool)
       : null) ??
-    match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa) ??
-    match(/graduation year|year of graduation|when did you graduate|expected graduation/, additional.graduation_year) ??
-    match(/^discipline$|field of study|major|area of study|degree (in|subject)|main subject/, additional.main_subject) ??
+    match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa ?? firstEdu?.gpa) ??
+    match(/graduation year|year of graduation|when did you graduate|expected graduation/, candidateGradYear) ??
+    match(/^discipline$|field of study|major|area of study|degree (in|subject)|main subject/, candidateMajor) ??
     (!/\b(?:month|year)\b/.test(normalizedLabel)
       ? match(
           /start date|available to start|when can you start|earliest start|desired start/,
@@ -1027,13 +1102,16 @@ export function resolveFromPayloadStructured(
 export async function resolveTier1(
   applywizzId: string,
   field: ScannedField,
-  profile?: ProfileRow | null
+  profile?: ProfileRow | null,
+  execution?: ResolutionExecution
 ): Promise<ResolvedField | null> {
   const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
   const isAkshitha = applywizzId.trim().toUpperCase() === 'AWL-31428' || applywizzId.trim().toLowerCase().includes('akshitha');
 
   // 1. Check profiles columns directly & standard attributes
-  const candidateProfile = profile || (await getProfile(applywizzId));
+  const candidateProfile = execution?.mode === 'evaluation'
+    ? profile!
+    : profile || (await getProfile(applywizzId));
   if (candidateProfile && isYaswanth) {
     if (!candidateProfile.location) candidateProfile.location = 'Hyderabad, Telangana, India';
   } else if (candidateProfile && isAkshitha) {
