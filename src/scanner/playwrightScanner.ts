@@ -32,6 +32,7 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { enrichMissingChoiceOptions } from './liveChoiceOptions.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
+import type { FailureDiagnosticInput } from '../types/failureDiagnostics.js';
 
 const log = createLogger('Playwright Scanner');
 
@@ -80,6 +81,12 @@ export interface PlaywrightScannerOptions {
    * Optional progress callback invoked as URLs finish scanning.
    */
   onJobScanned?: (job: ScannedJobTemplate, index: number, total: number) => void;
+
+  /** Override diagnostic persistence when running behind an isolated boundary. */
+  onFailureDiagnostic?: (input: FailureDiagnosticInput) => Promise<void>;
+
+  /** Override process termination when a caller must surface scanner launch failures. */
+  onFatal?: (module: string, message: string, error?: unknown) => never;
 }
 
 /**
@@ -317,6 +324,8 @@ export class PlaywrightScanner {
   private readonly maxJitterMs: number;
   private readonly headless: boolean;
   private readonly onJobScanned?: (job: ScannedJobTemplate, index: number, total: number) => void;
+  private readonly onFailureDiagnostic: (input: FailureDiagnosticInput) => Promise<void>;
+  private readonly onFatal: (module: string, message: string, error?: unknown) => never;
 
   /**
    * Initializes the scanner with runtime options.
@@ -330,6 +339,8 @@ export class PlaywrightScanner {
     this.maxJitterMs = options.maxJitterMs ?? config.SCANNER_JITTER_MAX_MS;
     this.headless = process.env.RAILWAY_ENV === 'true' ? true : (options.headless ?? true);
     this.onJobScanned = options.onJobScanned;
+    this.onFailureDiagnostic = options.onFailureDiagnostic ?? emitFailureDiagnostic;
+    this.onFatal = options.onFatal ?? haltWithDevAlert;
   }
 
   /**
@@ -373,7 +384,7 @@ export class PlaywrightScanner {
           ],
         });
       } catch (launchErr: any) {
-        await emitFailureDiagnostic({
+        await this.onFailureDiagnostic({
           category: 'SCAN_PLAYWRIGHT_LAUNCH',
           stage: 'browser_launch',
           reason: `Playwright browser launch failed: ${launchErr?.message || String(launchErr)}`,
@@ -381,7 +392,7 @@ export class PlaywrightScanner {
           isTerminal: true,
           isRetryable: false,
         }).catch(() => {});
-        haltWithDevAlert(
+        this.onFatal(
           'Scanner',
           'Playwright failed to launch — check RAILWAY_ENV and browser binary',
           launchErr
@@ -511,10 +522,32 @@ export class PlaywrightScanner {
       const currentEmbeddedUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
       const pageHostname = new URL(page.url()).hostname.toLowerCase();
       const isGreenhousePage = pageHostname === 'greenhouse.io' || pageHostname.endsWith('.greenhouse.io');
-      const parentForm = !isGreenhousePage ? await page.$('form').catch(() => null) : null;
-      const embeddedApplicationUrl = currentEmbeddedUrl || (parentForm
-        ? await waitForEmbeddedGreenhouseApplicationUrl(page, EMBEDDED_GREENHOUSE_FRAME_WAIT_MS)
-        : null);
+      
+      let embeddedApplicationUrl = currentEmbeddedUrl;
+      if (!embeddedApplicationUrl && !isGreenhousePage) {
+        const currentParsed = new URL(page.url());
+        const hasGhJid = currentParsed.searchParams.has('gh_jid');
+        const hasIframe = await page.$('iframe').catch(() => null);
+        const parentForm = await page.$('form').catch(() => null);
+
+        if (hasGhJid || !!hasIframe || !!parentForm) {
+          embeddedApplicationUrl = await waitForEmbeddedGreenhouseApplicationUrl(
+            page,
+            EMBEDDED_GREENHOUSE_FRAME_WAIT_MS
+          );
+        }
+
+        if (!embeddedApplicationUrl) {
+          const directIframeSrc = await page.evaluate(() => {
+            const el = document.querySelector('iframe[src*="greenhouse.io"], iframe[src*="grnh.se"]');
+            return el ? el.getAttribute('src') : null;
+          }).catch(() => null);
+          if (directIframeSrc && directIframeSrc.startsWith('http')) {
+            embeddedApplicationUrl = directIframeSrc;
+          }
+        }
+      }
+
       if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
         await page.goto(embeddedApplicationUrl, {
           waitUntil: 'domcontentloaded',
@@ -526,10 +559,24 @@ export class PlaywrightScanner {
       // Check if redirected to generic index page without job path
       const currentUrl = page.url();
       if (!currentUrl.includes('/jobs/') && !currentUrl.includes('/embed/job_app') && !currentUrl.includes('job_app')) {
-        const formCheck = await page.$('form#application_form, form#app_form, form');
+        let formCheck = await page.$('form#application_form, form#app_form, form');
+        if (!formCheck) {
+          // Allow client-side React/Next.js hydration settling on custom career domains
+          formCheck = await page.waitForSelector('form#application_form, form#app_form, form, iframe[src*="greenhouse"]', { timeout: 3500 }).catch(() => null);
+        }
         if (!formCheck) {
           template.isExpired = true;
           return template;
+        } else if (!isGreenhousePage) {
+          // Re-check if an embedded Greenhouse iframe mounted during hydration
+          const lateEmbeddedUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+          if (lateEmbeddedUrl && lateEmbeddedUrl !== page.url()) {
+            await page.goto(lateEmbeddedUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: this.timeoutMs,
+            });
+            template.jobUrl = lateEmbeddedUrl;
+          }
         }
       }
 
@@ -800,7 +847,7 @@ export class PlaywrightScanner {
           ? 'SCAN_PLAYWRIGHT_NAVIGATE'
           : 'SCAN_FIELD_EXTRACTION';
 
-      await emitFailureDiagnostic({
+      await this.onFailureDiagnostic({
         category,
         stage: 'url_scan',
         reason: error?.message || 'Error scanning job posting URL',
@@ -934,7 +981,7 @@ export class PlaywrightScanner {
             log.warn(
               `[Playwright Scanner] ⚠️ Cascade probe restore failed for ${parentField.fieldId} (${optVal}). Discarding probe.`
             );
-            await emitFailureDiagnostic({
+            await this.onFailureDiagnostic({
               category: 'SCAN_FIELD_EXTRACTION',
               stage: 'cascade_probing',
               reason: `Cascade probe restoration failed for ${parentField.fieldId}`,

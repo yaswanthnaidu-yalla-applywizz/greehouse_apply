@@ -50,6 +50,21 @@ assertEqual(
   'negative answer maps to a uniquely matching complete option'
 );
 assertEqual(
+  matchChoiceOption('B.Tech', ["Bachelor's Degree", "Master's Degree", "Doctorate"]),
+  "Bachelor's Degree",
+  'B.Tech degree alias maps to Bachelor\'s Degree'
+);
+assertEqual(
+  matchChoiceOption('B.Tech in Computer Science', ["Bachelor's Degree", "Master's Degree", "Doctorate"]),
+  "Bachelor's Degree",
+  'B.Tech in CS degree alias maps to Bachelor\'s Degree'
+);
+assertEqual(
+  matchChoiceOption('Bachelor of Engineering', ["Bachelor's Degree", "Master's Degree", "Doctorate"]),
+  "Bachelor's Degree",
+  'Bachelor of Engineering degree alias maps to Bachelor\'s Degree'
+);
+assertEqual(
   matchSingleCheckboxOption('Website', ['Referral', 'Website']),
   'Website',
   'single checkbox choice matches exactly'

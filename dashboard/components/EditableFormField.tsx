@@ -174,6 +174,15 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
         <div className="flex-1">
           <label className="text-xs font-semibold text-[#ffffff] flex items-center gap-1.5">
             <span>{field.label}</span>
+            <button
+              data-testid="copy-question"
+              type="button"
+              onClick={() => navigator.clipboard?.writeText(field.label || '').catch(() => {})}
+              className="ml-1 text-[#8e8e93] hover:text-[#0a84ff] text-[10px] leading-none"
+              title="Copy question"
+            >
+              📋
+            </button>
             {isRequired && <span className="text-[#ff453a] font-bold">*</span>}
             <span className="text-[10px] font-mono text-[#8e8e93] font-normal">({field.type})</span>
           </label>

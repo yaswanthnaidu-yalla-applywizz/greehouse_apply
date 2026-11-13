@@ -210,6 +210,7 @@ export type UpdateStatusExtra =
       error_details?: any | null;
       expected_status?: ApplicationStatus;
       expected_retry_count?: number;
+      force?: boolean;
     };
 
 export const OPERATOR_WORKLOAD_STATUSES: ApplicationStatus[] = ['READY_FOR_REVIEW', 'APPROVED'];

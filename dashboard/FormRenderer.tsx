@@ -24,6 +24,12 @@ import { countRequiredUnresolved, isActionableCarouselField } from './utils/fiel
 
 export { SourceBadge, ApplicationStatusBadge, DifficultyBadge, SubmissionControls, ProofViewer };
 
+export function formatAllQuestions(fields: Array<{ label?: string | null }>): string {
+  return fields
+    .map((f, i) => `Q${i + 1}. ${f.label || '(no label)'}`)
+    .join('\n');
+}
+
 export interface FormRendererProps {
   /** Resolved candidate job application payload */
   application: any | null;
@@ -33,8 +39,14 @@ export interface FormRendererProps {
   candidateName?: string;
   /** API Base URL */
   apiBaseUrl?: string;
+  /** Total queue jobs assigned to this candidate */
+  totalQueueJobs?: number;
+  /** Whether a job card is currently selected in the queue */
+  hasSelectedJob?: boolean;
+  /** Initial view mode (default: 'list') */
+  initialViewMode?: 'carousel' | 'list';
   /** Return to the mobile application queue */
-  onBack: () => void;
+  onBack?: () => void;
   /** Callback fired when an operator manually modifies a field */
   onFieldUpdate?: (updatedField: ResolvedField) => void;
   /** Callback fired when status transitions (e.g. from polling or submission) */
@@ -50,6 +62,9 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   isLoading = false,
   candidateName,
   apiBaseUrl = '',
+  totalQueueJobs,
+  hasSelectedJob,
+  initialViewMode = 'list',
   onBack,
   onFieldUpdate,
   onStatusChange,
@@ -78,7 +93,7 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   const [carouselIndex, setCarouselIndex] = useState<number>(0);
   const [approvedFieldIds, setApprovedFieldIds] = useState<Set<string>>(() => getStoredApprovals(storageKey));
-  const [viewMode, setViewMode] = useState<'carousel' | 'list'>('carousel');
+  const [viewMode, setViewMode] = useState<'carousel' | 'list'>(initialViewMode);
 
   useEffect(() => {
     setCarouselIndex(0);
@@ -151,11 +166,11 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
 
   const boundedIndex = Math.min(Math.max(0, carouselIndex), Math.max(0, displayFields.length - 1));
   const currentField = displayFields[boundedIndex];
-  const mobileBackButton = (
+  const mobileBackButton = onBack ? (
     <button type="button" onClick={onBack} className="mobile-screen-back">
       <span aria-hidden="true">←</span> Applications
     </button>
-  );
+  ) : null;
 
   const handleApproveAndNext = () => {
     if (currentField) {
@@ -199,13 +214,39 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
   }
 
   if (!application) {
+    if (totalQueueJobs === 0) {
+      return (
+        <div data-testid="queue-complete-state" className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+          {mobileBackButton}
+          <div className="text-4xl mb-3">✅</div>
+          <p className="text-sm font-bold text-[#ffffff]">Queue Complete</p>
+          <p className="text-xs text-[#8e8e93] mt-1 font-medium text-center max-w-sm">
+            All assigned applications for this candidate have been processed. Select another candidate from the sidebar.
+          </p>
+        </div>
+      );
+    }
+
+    if (hasSelectedJob) {
+      return (
+        <div data-testid="resolution-pending-state" className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+          {mobileBackButton}
+          <div className="text-4xl mb-3">⏳</div>
+          <p className="text-sm font-bold text-[#ffffff]">Resolution in Progress</p>
+          <p className="text-xs text-[#8e8e93] mt-1 font-medium text-center max-w-sm">
+            Field answers are currently being generated for this job. Please check back shortly or choose another card above.
+          </p>
+        </div>
+      );
+    }
+
     return (
-      <div className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
+      <div data-testid="no-job-selected-state" className="mobile-form-state flex-1 p-12 flex flex-col items-center justify-center text-[#64748B]">
         {mobileBackButton}
         <div className="text-4xl mb-3">📋</div>
-        <p className="text-sm font-bold text-[#1A1A2E]">No Job Selected</p>
-        <p className="text-xs text-[#64748B] mt-1 font-medium">
-          Select a candidate from the left directory and click a job tab above to review and submit.
+        <p className="text-sm font-bold text-[#ffffff]">Select an Application</p>
+        <p className="text-xs text-[#8e8e93] mt-1 font-medium text-center">
+          Choose a job card from the queue above to review and submit.
         </p>
       </div>
     );
@@ -519,6 +560,23 @@ export const FormRenderer: React.FC<FormRendererProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Copy All Questions Button */}
+      {fields.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            data-testid="copy-all-questions"
+            type="button"
+            onClick={() => {
+              const text = formatAllQuestions(fields);
+              navigator.clipboard?.writeText(text).catch(() => {});
+            }}
+            className="text-[11px] text-[#0a84ff] hover:text-[#409cff] font-mono flex items-center gap-1 mb-2 ml-auto"
+          >
+            📋 Copy All Questions
+          </button>
+        </div>
+      )}
 
       {/* Form Fields Section (Card Carousel or Full List) */}
       <div className="space-y-4">

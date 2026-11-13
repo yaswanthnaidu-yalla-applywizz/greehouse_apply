@@ -38,7 +38,7 @@ describe('Form Filler Precision (Phase 3)', () => {
   });
 
   describe('3c: Mandatory Education Degree Fallback', () => {
-    it('defaults degree to Bachelor\'s Degree when DOM requires education and candidate degree is blank', async () => {
+    it('does NOT default degree to synthetic Bachelor\'s Degree when candidate degree is blank', async () => {
       const { applyEducationDegreeFallback } = await import('../src/submitter/formFiller.js');
       const fields = [
         { fieldId: 'school--0', name: 'school--0', label: 'School', value: 'Georgia Tech', isRequired: true },
@@ -48,7 +48,7 @@ describe('Form Filler Precision (Phase 3)', () => {
 
       const adjusted = applyEducationDegreeFallback(fields as any, true);
       const degreeField = adjusted.find((f: any) => f.fieldId.includes('degree'));
-      expect(degreeField?.value).toBe("Bachelor's Degree");
+      expect(degreeField?.value).toBe('');
     });
 
     it('does NOT default degree when education section is optional on DOM', async () => {
@@ -100,6 +100,16 @@ describe('Form Filler Precision (Phase 3)', () => {
 
       const label = resolveInvalidFieldLabel(mockElement as any, mockDocument as any);
       expect(label).toBe('Please identify your race *');
+    });
+  });
+
+  describe('3f: sanitizeMetadataSelector with numeric IDs', () => {
+    it('converts #<digit> to [id="..."] avoiding invalid CSS selector errors', async () => {
+      const { sanitizeMetadataSelector } = await import('../src/submitter/formFiller.js');
+      expect(sanitizeMetadataSelector('#864')).toBe('[id="864"]');
+      expect(sanitizeMetadataSelector('#1333')).toBe('[id="1333"]');
+      expect(sanitizeMetadataSelector('#question_123')).toBe('#question_123');
+      expect(sanitizeMetadataSelector('#first_name')).toBe('#first_name');
     });
   });
 });

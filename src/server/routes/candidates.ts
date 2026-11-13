@@ -20,6 +20,7 @@ import {
 } from '../managerTeamScope.js';
 import {
   applicationRowHasPersistedResolution,
+  deduplicateJobsByUrl,
   filterOperatorApplicationJobs,
 } from '../../dashboard/candidateQueueFilter.js';
 import { fetchProfileListingFieldsByApplywizzIds, getProfile } from '../../db/profiles.js';
@@ -826,7 +827,10 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
       .select('*')
       .eq('applywizz_id', applywizzId)
       .neq('status', 'FILTERED_OUT')
-      .neq('status', 'SKIPPED');
+      .neq('status', 'SKIPPED')
+      .neq('status', 'APPLIED')
+      .neq('status', 'EMAIL_PROOF_PENDING')
+      .neq('status', 'FAILED');
 
     if (!unrestricted) {
       appQuery = applyCreatedAtRangeFilter(appQuery, createdAtRange);
@@ -899,6 +903,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
       });
     }
   }
+
+  jobs = deduplicateJobsByUrl(jobs);
 
   const afterCaFilter = jobs.length;
   const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);

@@ -1,3 +1,30 @@
+# Current Session Update (2026-11-12 - Operator Queue UX Quick Wins & False-Failed Diagnostic)
+
+- **Completed Implementation of Plan `docs/superpowers/plans/2026-11-12-operator-queue-ux-fixes.md` & Follow-up Fixes**:
+  - **Issue 2.1 (Job URL Deduplication per Candidate Queue)**: Added `deduplicateJobsByUrl` in `src/dashboard/candidateQueueFilter.ts` and wired into `candidates.ts`. Keeps most recent application per unique job URL. (Commit `1256c3a`)
+  - **Issue 2.3 (Exclude APPLIED, EMAIL_PROOF_PENDING, FAILED from Operator Queue)**: Exported `isAppliedApplicationJob` and `isFailedApplicationJob` in `src/dashboard/candidateQueueFilter.ts`. Updated `filterOperatorApplicationJobs` and added DB-level filters `.neq('status', 'APPLIED').neq('status', 'EMAIL_PROOF_PENDING').neq('status', 'FAILED')` in `src/server/routes/candidates.ts`. (Commit `2779101`)
+  - **Issue 2.4 (Fix Automatic "No Job Selected" Error)**: In `dashboard/App.tsx`, auto-selects first available job card on candidate load, preserves active job selection across WebSocket / background refreshes (`fetchCandidateDetail`). In `dashboard/FormRenderer.tsx`, differentiated 3 empty states: "Queue Complete ✅" (0 queue jobs), "Resolution in Progress ⏳" (selected job resolving), and "Select an Application 📋". Verified in `tests/noJobSelectedFix.test.tsx` (3/3 passing). (Commit `78863ec`)
+  - **Issue 2.5 (Prevent False-Failed Status Downgrades & Double-Dequeue Protection)**: In `src/db/applications/crud.ts`, added atomic status downgrade guard in `updateStatus` refusing transition from `APPLIED` or `EMAIL_PROOF_PENDING` to `FAILED` (unless `force: true`). In `src/submitter/submitterPool.ts`, passed `expected_status: 'APPLYING'` on worker failure reporting so trailing workers in race conditions cannot clobber completed `APPLIED` status. In `src/server/routes/applications.ts`, rejected `/submit` attempts on already submitted applications. Verified in `tests/statusDowngradeGuard.test.ts` (4/4 passing). (Commit `3c12ed8`)
+  - **Issue 2.6 (Failure Reason Badge on Operator Job Cards)**: Added 🔴 Failed badge with 60-char error reason truncation on `JobQueueView.tsx` cards with full error tooltip. Verified in `tests/jobQueueFailureBadge.test.tsx`. (Commit `10fae9e`)
+  - **Issue 2.7 (Copy-Question and Copy-All-Questions in FormRenderer)**: Added "📋 Copy All Questions" button (`data-testid="copy-all-questions"`) above field list and per-question copy buttons (`data-testid="copy-question"`) in `dashboard/FormRenderer.tsx` and `dashboard/components/EditableFormField.tsx`. Verified in `tests/formRendererCopy.test.tsx`. (Commit `8e773c2`)
+- **Verification Status**:
+  - 89/89 Node unit tests passing green (`tests/candidateQueueFilter.test.ts` 16/16, `tests/statusDowngradeGuard.test.ts` 4/4).
+  - 113/113 Vitest tests passing green (`tests/jobQueueFailureBadge.test.tsx` 3/3, `tests/formRendererCopy.test.tsx` 5/5, `tests/noJobSelectedFix.test.tsx` 3/3).
+  - TypeScript dashboard typecheck (`npm run typecheck:dashboard`) clean with 0 errors.
+  - Production frontend build (`npm run build:dashboard`) succeeds cleanly in 2.56s.
+
+# Current Session Update (2026-11-12 - Production FADA Diagnostic Audit for Nov 10 & 11)
+
+- **FADA Diagnostics Executed**:
+  - Analyzed 3,915 ingested applications in DB2 created on November 10 & 11, 2026 IST (2,079 Greenhouse, 1,836 Ashby).
+  - Evaluated original input CSVs (`combined_jobs_20261110.csv` and `combined_jobs_20261111.csv`, 6,288 total rows).
+  - Discovered auto-queue rate was **0.2%** (8 applications auto-queued directly); **2,254 applications (57.6%)** were manually submitted by operators after moving through `READY_FOR_REVIEW`.
+  - Identified 176 incorrect resolved field values (173 visa sponsorship inversions to "Yes", causing automatic screening rejections).
+  - Downloaded 713 failure screenshots from DB2 and conducted 100% visual inspection:
+    - Ashby: 660 failures, driven by proxy preflight HTTP 400 probes (225), confirmation timeouts (160), uncommitted controls (146), and interactive Google reCAPTCHA challenges (93).
+    - Greenhouse: 371 failures (63.7% success rate), driven by unselected dynamic Education/Degree/School dropdowns and missing mandatory custom checkboxes/consent.
+  - Generated comprehensive diagnostic artifact at `.ai/diagnostics/fada-report-2026-11-10_11.md`.
+
 # Current Session Update (2026-11-09 - AI Auto-Queue & Two-Level Review Architecture, Tasks 1-7 COMPLETE)
 
 - **Completed Implementation of Tasks 1-7**:
