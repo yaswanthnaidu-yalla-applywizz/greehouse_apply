@@ -958,34 +958,6 @@ export function applyEducationFieldFallbacks<T extends { fieldId: string; name?:
       return f;
     }
 
-    if (!isExplicitEducationField(f as any)) {
-      return f;
-    }
-
-    if (/\bdegree\b/.test(combined)) {
-      log.info(`[Form Filler] Education degree defaulted to "Bachelor's Degree" — field blank`);
-      return { ...f, value: "Bachelor's Degree" };
-    }
-    if (/\bdiscipline\b|major|field of study/.test(combined)) {
-      log.info(`[Form Filler] Education discipline defaulted to "Computer Science" — field blank`);
-      return { ...f, value: 'Computer Science' };
-    }
-    if (/\b(start_date|start-date).*(month)\b|start.*month/i.test(combined)) {
-      log.info(`[Form Filler] Education start month defaulted to "08" — field blank`);
-      return { ...f, value: '08' };
-    }
-    if (/\b(end_date|end-date).*(month)\b|end.*month/i.test(combined)) {
-      log.info(`[Form Filler] Education end month defaulted to "05" — field blank`);
-      return { ...f, value: '05' };
-    }
-    if (/\b(start_date|start-year)\b|start year|start date/.test(combined)) {
-      log.info(`[Form Filler] Education start date defaulted to "2018" — field blank`);
-      return { ...f, value: '2018' };
-    }
-    if (/\b(end_date|end-year)\b|end year|end date|graduation/.test(combined)) {
-      log.info(`[Form Filler] Education end date defaulted to "2022" — field blank`);
-      return { ...f, value: '2022' };
-    }
     return f;
   });
 }
@@ -1866,43 +1838,6 @@ export async function fillSingleField(
             );
           }
 
-          const isDisciplineOrDegree = /discipline|major|field of study|degree/i.test(`${fieldId} ${name} ${label}`);
-          if (!selected && isDisciplineOrDegree) {
-            log.info(`[Submitter] Education option for "${val}" not matched directly — attempting "Other" or first catalog match`);
-            selected = await fillSearchableSelectInput(
-              page,
-              found.locator,
-              found.selector,
-              'Other',
-              fuzzyOptionTextMatch,
-              field.isRequired === true
-            );
-            if (!selected && /degree/i.test(`${fieldId} ${name} ${label}`)) {
-              selected = await fillSearchableSelectInput(
-                page,
-                found.locator,
-                found.selector,
-                "Bachelor's Degree",
-                fuzzyOptionTextMatch,
-                field.isRequired === true
-              );
-            }
-          }
-
-          if (!selected && isEeoField) {
-            for (const declineAttempt of ['Decline to self-identify', 'Decline to state', 'Prefer not to say', "I don't wish to answer", 'Decline']) {
-              selected = await fillSearchableSelectInput(
-                page,
-                found.locator,
-                found.selector,
-                declineAttempt,
-                fuzzyOptionTextMatch,
-                field.isRequired === true
-              );
-              if (selected) break;
-            }
-          }
-
           if (!selected && isReferralSource) {
             for (const referralAttempt of ['LinkedIn', 'Other', 'Online', 'Job Board', 'Corporate Website', 'Company Website']) {
               selected = await fillSearchableSelectInput(
@@ -2019,27 +1954,13 @@ export async function fillSingleField(
                 const cleanedOptions = optionsList.map((o) => o.trim()).filter((o) => Boolean(o) && !/select|choose/i.test(o));
                 if (cleanedOptions.length > 0) {
                   const match = matchDropdownOption(cleanedOptions, val);
-                  const fallbackOpt = match.matchedOption || cleanedOptions.find((o) => /bachelor|other/i.test(o)) || cleanedOptions[0];
-                  await found.locator.selectOption({ label: fallbackOpt }, { force: true, timeout: 2000 });
-                  selected = true;
-                  log.info(`[Submitter] Education fallback selected "${fallbackOpt}" in ${found.selector}`);
+                  if (match.matchedOption) {
+                    await found.locator.selectOption({ label: match.matchedOption }, { force: true, timeout: 2000 });
+                    selected = true;
+                  }
                 }
               } catch {}
             }
-          }
-
-          if (!selected && isEeoField) {
-            try {
-              const optionsList = await found.locator.locator('option').allInnerTexts();
-              const cleanedOptions = optionsList.map((o) => o.trim()).filter((o) => Boolean(o) && !/select|choose/i.test(o));
-              const declineOpt = cleanedOptions.find((o) => /decline|prefer not|not wish|choose not/i.test(o));
-              const fallbackOpt = declineOpt || cleanedOptions[0];
-              if (fallbackOpt) {
-                await found.locator.selectOption({ label: fallbackOpt }, { force: true, timeout: 2000 });
-                selected = true;
-                log.info(`[Submitter] EEO native fallback selected "${fallbackOpt}" in ${found.selector}`);
-              }
-            } catch {}
           }
 
           if (!selected && isReferralSource) {

@@ -38,7 +38,7 @@ describe('Form Filler Precision (Phase 3)', () => {
   });
 
   describe('3c: Mandatory Education Degree Fallback', () => {
-    it('defaults degree to Bachelor\'s Degree when DOM requires education and candidate degree is blank', async () => {
+    it('does NOT default degree to synthetic Bachelor\'s Degree when candidate degree is blank', async () => {
       const { applyEducationDegreeFallback } = await import('../src/submitter/formFiller.js');
       const fields = [
         { fieldId: 'school--0', name: 'school--0', label: 'School', value: 'Georgia Tech', isRequired: true },
@@ -48,7 +48,7 @@ describe('Form Filler Precision (Phase 3)', () => {
 
       const adjusted = applyEducationDegreeFallback(fields as any, true);
       const degreeField = adjusted.find((f: any) => f.fieldId.includes('degree'));
-      expect(degreeField?.value).toBe("Bachelor's Degree");
+      expect(degreeField?.value).toBe('');
     });
 
     it('does NOT default degree when education section is optional on DOM', async () => {
