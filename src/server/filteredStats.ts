@@ -85,6 +85,78 @@ export function extractSlimFieldDiagnostics(fields: any[]): {
   return { unresolvedFields: unresolved, aiFields: ai, totalUnresolved, totalAi };
 }
 
+export interface BottomFunnelCounts {
+  totalTasks: number;
+  autoApplied: number;
+  readyForReview: number;
+  filteredOut: number;
+  failed: number;
+  queued: number;
+}
+
+export function categorizeBottomFunnelCounts(
+  apps: Array<{ status?: string | null }>
+): BottomFunnelCounts {
+  let autoApplied = 0;
+  let readyForReview = 0;
+  let filteredOut = 0;
+  let failed = 0;
+  let queued = 0;
+
+  for (const app of apps) {
+    const status = (app.status || '').toUpperCase();
+    if (status === 'APPLIED' || status === 'EMAIL_PROOF_PENDING') {
+      autoApplied++;
+    } else if (status === 'READY_FOR_REVIEW') {
+      readyForReview++;
+    } else if (status === 'FILTERED_OUT' || status === 'SKIPPED') {
+      filteredOut++;
+    } else if (status === 'FAILED') {
+      failed++;
+    } else {
+      queued++;
+    }
+  }
+
+  return {
+    totalTasks: apps.length,
+    autoApplied,
+    readyForReview,
+    filteredOut,
+    failed,
+    queued,
+  };
+}
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+class TtlCache<T> {
+  private store = new Map<string, CacheEntry<T>>();
+
+  get(key: string): T | null {
+    const entry = this.store.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      return null;
+    }
+    return entry.data;
+  }
+
+  set(key: string, data: T, ttlMs = 30000): void {
+    this.store.set(key, { data, expiresAt: Date.now() + ttlMs });
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+}
+
+export const filteredStatsCache = new TtlCache<any>();
+
 export async function handleFilteredStats(req: Request, res: Response): Promise<void> {
   const parsedRange = parseDashboardStatsRange(req.query as Record<string, unknown>);
   if ('error' in parsedRange) {
@@ -93,6 +165,13 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
   }
 
   try {
+    const cacheKey = `filtered:${parsedRange.preset}:${parsedRange.fromDate}:${parsedRange.toDate}`;
+    const cached = filteredStatsCache.get(cacheKey);
+    if (cached) {
+      res.json(cached);
+      return;
+    }
+
     const dates = parsedRange.fromDate && parsedRange.toDate
       ? listIstDatesInclusive(parsedRange.fromDate, parsedRange.toDate)
       : [getISTDateString()];
@@ -133,11 +212,15 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
           topFunnel.totalCsvRows += stats.totalCsvRows || 0;
           topFunnel.tasksCreated += stats.tasksCreated || 0;
           topFunnel.droppedRows += stats.droppedRows || 0;
-          if (stats.dropReasons) {
-            for (const [rKey, rVal] of Object.entries(stats.dropReasons)) {
-              topFunnel.dropReasons[rKey] = (topFunnel.dropReasons[rKey] || 0) + (Number(rVal) || 0);
-            }
-          }
+        topFunnel.dropReasons.zoho_disconnected = (topFunnel.dropReasons.zoho_disconnected || 0) + (Number(stats.dropReasons.zoho_disconnected) || 0);
+        topFunnel.dropReasons.job_expired = (topFunnel.dropReasons.job_expired || 0) + (Number(stats.dropReasons.job_expired) || 0);
+        topFunnel.dropReasons.no_scan_template = (topFunnel.dropReasons.no_scan_template || 0) + (Number(stats.dropReasons.no_scan_template) || 0);
+        topFunnel.dropReasons.security_clearance = (topFunnel.dropReasons.security_clearance || 0) + (Number((stats.dropReasons as any).security_clearance) || 0);
+        topFunnel.dropReasons.excluded_company = (topFunnel.dropReasons.excluded_company || 0) + (Number((stats.dropReasons as any).excluded_company) || 0);
+        topFunnel.dropReasons.latest_employer = (topFunnel.dropReasons.latest_employer || 0) + (Number((stats.dropReasons as any).latest_employer) || 0);
+        topFunnel.dropReasons.already_applied = (topFunnel.dropReasons.already_applied || 0) + (Number(stats.dropReasons.already_applied) || 0);
+        topFunnel.dropReasons.exclusions_or_other = (topFunnel.dropReasons.exclusions_or_other || 0) + (Number((stats.dropReasons as any).exclusions_or_other || stats.dropReasons.other) || 0);
+        topFunnel.dropReasons.other = topFunnel.dropReasons.exclusions_or_other;
           if (Array.isArray(stats.droppedDetails)) {
             topFunnelDroppedDetails.push(...stats.droppedDetails);
           }
@@ -178,28 +261,47 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
 
     if (isSupabaseConfigured()) {
       const supabase = getDbClient();
-      let query = supabase
-        .from('gh_candidate_applications')
-        .select('id, applywizz_id, company_name, job_url, job_title, status, resolved_fields, created_at')
-        .gte('created_at', parsedRange.startIso);
+      let allApps: any[] = [];
+      let offset = 0;
+      const pageSize = 1000;
+      const maxRows = 25000;
 
-      if (parsedRange.endIso) {
-        query = query.lte('created_at', parsedRange.endIso);
+      while (offset < maxRows) {
+        let pageQuery = supabase
+          .from('gh_candidate_applications')
+          .select('id, applywizz_id, company_name, job_url, job_title, status, resolved_fields, created_at')
+          .gte('created_at', parsedRange.startIso);
+
+        if (parsedRange.endIso) {
+          pageQuery = pageQuery.lte('created_at', parsedRange.endIso);
+        }
+
+        const { data: pageData, error: pageError } = await pageQuery
+          .order('created_at', { ascending: false })
+          .range(offset, offset + pageSize - 1);
+
+        if (pageError) {
+          log.error('Error fetching candidate applications page for filtered stats:', pageError.message);
+          break;
+        }
+        if (!pageData || pageData.length === 0) break;
+        allApps.push(...pageData);
+        if (pageData.length < pageSize) break;
+        offset += pageSize;
       }
 
-      const { data: apps, error: appsError } = await query.order('created_at', { ascending: false });
+      if (allApps.length > 0) {
+        const counts = categorizeBottomFunnelCounts(allApps);
+        bottomFunnel.totalTasks = counts.totalTasks;
+        bottomFunnel.autoApplied = counts.autoApplied;
+        bottomFunnel.readyForReview = counts.readyForReview;
+        bottomFunnel.filteredOut = counts.filteredOut;
 
-      if (appsError) {
-        log.error('Error fetching candidate applications for filtered stats:', appsError.message);
-      } else if (apps) {
-        bottomFunnel.totalTasks = apps.length;
-
-        for (const app of apps) {
+        for (const app of allApps) {
           const status = (app.status || '').toUpperCase();
           const fields = Array.isArray(app.resolved_fields) ? app.resolved_fields : [];
 
           if (status === 'READY_FOR_REVIEW') {
-            bottomFunnel.readyForReview++;
             let mainReason = 'Operator review required';
 
             const hasReqCoverLetter = fields.some((f: any) => {
@@ -266,7 +368,6 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
               totalAiCount: diagnostics.totalAi,
             });
           } else if (status === 'FILTERED_OUT' || status === 'SKIPPED') {
-            bottomFunnel.filteredOut++;
             const reqAiCount = countRequiredAiFields(fields);
             const reqUnresolvedCount = countUnresolvedRequiredFields(fields);
             let filterReason = 'Exceeded unresolved or AI field thresholds';
@@ -295,24 +396,37 @@ export async function handleFilteredStats(req: Request, res: Response): Promise<
               totalUnresolvedCount: diagnostics.totalUnresolved,
               totalAiCount: diagnostics.totalAi,
             });
-          } else {
-            bottomFunnel.autoApplied++;
           }
         }
       }
+    }
+
+    for (const drop of topFunnelDroppedDetails) {
+      items.push({
+        id: `pre_${drop.applywizzId}_${drop.jobUrl}`,
+        applywizzId: drop.applywizzId || 'UNKNOWN',
+        companyName: drop.companyName || 'Unknown Company',
+        jobUrl: drop.jobUrl || '',
+        stage: 'pre_creation',
+        status: 'DROPPED_PRE_CREATION',
+        reason: drop.reason || 'Dropped during CSV ingestion',
+      });
     }
 
     if (!bottomFunnel.totalTasks && topFunnel.tasksCreated) {
       bottomFunnel.totalTasks = topFunnel.tasksCreated;
     }
 
-    res.json({
+    const responsePayload = {
       hasIngestData,
       dateRange: serializeDateRange(parsedRange),
       topFunnel,
       bottomFunnel,
-      items: items.slice(0, 1000),
-    });
+      items: items.slice(0, 2000),
+    };
+
+    filteredStatsCache.set(cacheKey, responsePayload, 30000);
+    res.json(responsePayload);
   } catch (error: any) {
     log.error('filtered-stats failed:', error);
     res.status(500).json({ error: 'Unable to load filtered stats.' });
