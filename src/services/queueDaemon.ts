@@ -1,6 +1,7 @@
 import { listApplications, updateStatus, type ApplicationRow } from '../db/applications.js';
 import { runLiveSubmit } from '../submitter/liveSubmit.js';
 import { createLogger } from '../utils/logger.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 
 const log = createLogger('Queue Daemon');
 
@@ -41,6 +42,8 @@ export class QueueDaemon {
   }
 
   public async runOnce(): Promise<QueueWorker[]> {
+    if (isSandboxTestMode()) return [];
+
     const applications = (await listApplications({ status: 'QUEUED' }))
       .filter((application) => !this.assignedApplicationIds.has(this.applicationKey(application)))
       .sort((a, b) => {
@@ -94,6 +97,7 @@ export class QueueDaemon {
   }
 
   public start(): void {
+    if (isSandboxTestMode()) return;
     if (this.running) return;
     this.running = true;
     void this.poll();

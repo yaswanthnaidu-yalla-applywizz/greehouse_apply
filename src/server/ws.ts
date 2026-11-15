@@ -14,6 +14,7 @@ import { createLogger } from '../utils/logger.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { resolveEffectiveAppRole } from './routes/auth.js';
 import { resolveTeamCandidateIdsForManager } from './managerTeamScope.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 
 const log = createLogger('Ws');
 
@@ -294,7 +295,7 @@ class WebSocketManager {
         ? process.env.WORKER_SERVICE_URL.replace('worker', 'main').replace('worker', 'greehouse_apply')
         : undefined);
 
-    if ((process.env.ENABLE_QUEUE_WORKER === 'true' || process.env.INGEST_ONLY === 'true') && webServiceUrl) {
+    if (!isSandboxTestMode() && (process.env.ENABLE_QUEUE_WORKER === 'true' || process.env.INGEST_ONLY === 'true') && webServiceUrl) {
       const headers: Record<string, string> = {};
       if (process.env.INTERNAL_API_SECRET) {
         headers['x-internal-secret'] = process.env.INTERNAL_API_SECRET;

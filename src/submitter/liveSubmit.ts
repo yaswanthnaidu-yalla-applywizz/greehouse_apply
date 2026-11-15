@@ -75,6 +75,7 @@ import { uploadResume } from '../db/storage.js';
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
 import { createLogger } from '../utils/logger.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
 import { classifyRequiredFieldFailure, emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { captureFailureDiagnostics } from './domFailureCapture.js';
@@ -1419,6 +1420,10 @@ export async function runLiveSubmit(
   applicationOrId: string | ApplicationRow,
   options: LiveSubmitOptions = {}
 ): Promise<LiveSubmitResult> {
+  if (isSandboxTestMode()) {
+    throw new Error('Live submissions are disabled in sandbox test mode.');
+  }
+
   const preflight = await prepareSubmissionPreflight(applicationOrId, options);
   let { application } = preflight;
   const { applicationId, targetUrl, isHeadless, timeoutMs, confirmationTimeoutMs } = preflight;

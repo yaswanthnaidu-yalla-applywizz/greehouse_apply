@@ -17,7 +17,7 @@ import * as fastCsv from 'fast-csv';
 import { config } from '../config/env.js';
 import { normalizeGreenhouseUrl } from '../scanner/csvDeduplicator.js';
 import { ApplyWizzClient } from './applywizzClient.js';
-import { profileRowToCandidateProfile, type ProfileRow } from '../db/profiles.js';
+import { getProfileFromDatabase, profileRowToCandidateProfile, type ProfileRow } from '../db/profiles.js';
 import { ensureSupabaseProfile } from './ensureSupabaseProfile.js';
 import { isCandidateEligibleForZohoGate } from '../db/zohoConnected.js';
 import { checkZohoConnectionForProfiles } from '../services/zohoConnectionCheck.js';
@@ -25,6 +25,7 @@ import type { CandidateSegment } from '../types/index.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 
 const log = createLogger('Segregator');
 
@@ -237,6 +238,7 @@ export interface SegregatorOptions {
    * Progress update callback.
    */
   onProgress?: (stats: { processedCandidates: number; totalCandidates: number; totalJobs: number }) => void;
+  onFatal?: (message: string, error?: unknown) => never;
 
 }
 
@@ -262,10 +264,12 @@ export async function segregateCandidatesByApplyWizzId(
     syncProfiles = true,
     downloadResumes = true,
     allowOutboundApi = false,
-    client = new ApplyWizzClient(),
+    client: suppliedClient,
     candidateId,
     onProgress,
   } = options;
+  const client = suppliedClient ?? (isSandboxTestMode() ? undefined : new ApplyWizzClient());
+  const fail = options.onFatal ?? ((message: string, error?: unknown): never => haltWithDevAlert('CSV', message, error));
 
   if (!fs.existsSync(csvPath)) {
     throw new Error(`Input CSV file not found at: "${csvPath}"`);
@@ -281,13 +285,17 @@ export async function segregateCandidatesByApplyWizzId(
   let skippedInvalidRows = 0;
   let droppedScoreRows = 0;
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const stream = fs.createReadStream(csvPath);
 
     fastCsv
       .parseStream(stream, { headers: true, trim: true, ignoreEmpty: true })
       .on('error', (err) => {
-        haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed', err);
+        try {
+          fail('CSV parse failure — malformed CSV or zero valid rows parsed', err);
+        } catch (failure) {
+          reject(failure);
+        }
       })
       .on('data', (row: Record<string, string>) => {
         rowCount++;
@@ -368,7 +376,7 @@ export async function segregateCandidatesByApplyWizzId(
   });
 
   if (rowCount === 0 || csvFormat === 'UNKNOWN') {
-    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+    fail('CSV parse failure — malformed CSV or zero valid rows parsed');
   }
   if (
     segmentsMap.size === 0 &&
@@ -376,7 +384,7 @@ export async function segregateCandidatesByApplyWizzId(
     droppedScoreRows === 0 &&
     !candidateId
   ) {
-    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+    fail('CSV parse failure — malformed CSV or zero valid rows parsed');
   }
 
   if (compact) {
@@ -433,11 +441,15 @@ export async function segregateCandidatesByApplyWizzId(
         if (!segment) continue;
 
         try {
-          const ensured = await ensureSupabaseProfile(id, {
-            allowOutboundApi,
-            downloadResumes,
-            client,
-          });
+          const ensured = isSandboxTestMode()
+            ? await getProfileFromDatabase(id).then((profile) => profile
+                ? { status: 'exists' as const, profile }
+                : { status: 'skipped' as const, profile: null, reason: 'profile missing from local snapshot' })
+            : await ensureSupabaseProfile(id, {
+                allowOutboundApi,
+                downloadResumes,
+                client: client!,
+              });
 
           if (ensured.status === 'skipped' || ensured.status === 'failed' || !ensured.profile) {
             segmentsMap.delete(id);
@@ -498,7 +510,17 @@ export async function segregateCandidatesByApplyWizzId(
     await Promise.all(workers);
 
     if (syncedProfiles.size > 0) {
-      const zohoResult = await checkZohoConnectionForProfiles(Array.from(syncedProfiles.values()));
+      const zohoResult = isSandboxTestMode()
+        ? {
+            connectedByApplywizzId: new Map(
+              Array.from(syncedProfiles.values(), (profile) => [
+                profile.applywizz_id.toUpperCase(),
+                isCandidateEligibleForZohoGate(profile).eligible,
+              ])
+            ),
+            fallbackUsed: true,
+          }
+        : await checkZohoConnectionForProfiles(Array.from(syncedProfiles.values()));
       const connectedCount = Array.from(zohoResult.connectedByApplywizzId.values()).filter(Boolean).length;
       let disconnectedCount = 0;
       for (const [id, segment] of Array.from(segmentsMap.entries())) {

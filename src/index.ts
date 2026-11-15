@@ -17,7 +17,9 @@
 
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { config } from './config/env.js';
+import { assertSandboxTestModeConfiguration, isSandboxTestMode } from './config/sandboxTestMode.js';
 import { ensureBucketsExist } from './db/storage.js';
 import { assertSupabaseReady } from './db/client.js';
 import { migrate } from './db/migrate.js';
@@ -112,11 +114,18 @@ export function parseCliArgs(args: string[]): CliOptions {
  */
 export async function main(): Promise<void> {
   const options = parseCliArgs(process.argv.slice(2));
+  assertSandboxTestModeConfiguration();
   if (String(process.env.SANDBOX).trim() === 'true' || String(process.env.SANDBOX).trim() === '1') {
-    options.skipScan = true;
-    options.skipResolve = true;
-    options.skipSync = true;
-    options.skipMigrate = true;
+    if (isSandboxTestMode()) {
+      options.skipDashboard = true;
+      options.skipMigrate = true;
+      process.env.ENABLE_QUEUE_WORKER = 'false';
+    } else {
+      options.skipScan = true;
+      options.skipResolve = true;
+      options.skipSync = true;
+      options.skipMigrate = true;
+    }
   }
   const startTime = Date.now();
 
@@ -193,6 +202,24 @@ export async function main(): Promise<void> {
     }
 
     // -------------------------------------------------------------------------
+    if (isSandboxTestMode()) {
+      const inputCsv = process.env.SANDBOX_INPUT_CSV?.trim();
+      if (!inputCsv || ['none', 'false', 'disabled'].includes(inputCsv.toLowerCase())) {
+        log.info('[Sandbox test] No CSV selected. Set SANDBOX_INPUT_CSV to an explicit local CSV path to run scan and resolution.');
+        return;
+      }
+
+      const csvPath = path.resolve(process.cwd(), inputCsv);
+      if (!fs.existsSync(csvPath)) {
+        throw new Error('SANDBOX_INPUT_CSV does not point to an existing local file.');
+      }
+
+      const { V1Pipeline } = await import('./orchestrator/pipeline.js');
+      const outputDir = path.join(os.tmpdir(), `applywizz-batch-answer-evaluation-${process.pid}`);
+      await new V1Pipeline().runFullPipeline(csvPath, outputDir);
+      return;
+    }
+
     // Step 3: Branch 1 & Branch 2 Ingestion
     // -------------------------------------------------------------------------
     const resolvedCsv = path.resolve(process.cwd(), options.inputCsv);

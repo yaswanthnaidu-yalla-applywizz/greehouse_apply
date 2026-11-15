@@ -46,6 +46,11 @@ export interface DeduplicatorOptions {
    * Optional logger callback for progress updates.
    */
   onProgress?: (stats: { parsedRows: number; uniqueUrls: number; resolvedShortlinks: number }) => void;
+  onFatal?: (message: string, error?: unknown) => never;
+  resolveShortlinksBatch?: (
+    shortlinks: string[],
+    concurrency?: number,
+  ) => Promise<Map<string, string>>;
 }
 
 /**
@@ -236,7 +241,9 @@ export async function readAndDeduplicateUrls(
     resolveShortlinks = true,
     limit,
     onProgress,
+    resolveShortlinksBatch: resolveShortlinksBatchAdapter,
   } = options;
+  const fail = options.onFatal ?? ((message: string, error?: unknown): never => haltWithDevAlert('CSV', message, error));
 
   if (!fs.existsSync(csvPath)) {
     throw new Error(`Input CSV file not found at path: "${csvPath}"`);
@@ -248,17 +255,17 @@ export async function readAndDeduplicateUrls(
 
   const compact = isPipelineCompactLogging();
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const stream = fs.createReadStream(csvPath);
 
     fastCsv
       .parseStream(stream, { headers: true, trim: true, ignoreEmpty: true })
       .on('error', (error) => {
-        haltWithDevAlert(
-          'CSV',
-          'CSV parse failure — malformed CSV or zero valid rows parsed',
-          error
-        );
+        try {
+          fail('CSV parse failure — malformed CSV or zero valid rows parsed', error);
+        } catch (failure) {
+          reject(failure);
+        }
       })
       .on('data', (row: Record<string, string>) => {
         parsedRows++;
@@ -295,14 +302,14 @@ export async function readAndDeduplicateUrls(
   });
 
   if (parsedRows === 0) {
-    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+    fail('CSV parse failure — malformed CSV or zero valid rows parsed');
   }
 
   const finalUrlsSet = new Set<string>();
 
   if (resolveShortlinks && shortlinkSet.size > 0) {
     const shortlinkList = Array.from(shortlinkSet);
-    const resolvedMap = await resolveShortlinksBatch(shortlinkList, concurrency);
+    const resolvedMap = await (resolveShortlinksBatchAdapter || resolveShortlinksBatch)(shortlinkList, concurrency);
 
     for (const url of rawUrlsSet) {
       if (resolvedMap.has(url)) {
@@ -320,7 +327,7 @@ export async function readAndDeduplicateUrls(
 
   const uniqueCanonicalUrls = Array.from(finalUrlsSet).filter(Boolean);
   if (uniqueCanonicalUrls.length === 0) {
-    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+    fail('CSV parse failure — malformed CSV or zero valid rows parsed');
   }
   if (compact) {
     log.info(
