@@ -7,6 +7,8 @@ import fs from 'fs';
 // @ts-ignore
 import _pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { getProfile, updateParsedResume } from '../db/profiles.js';
+import { getProfileFromDatabase } from '../db/profiles.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
 import { normalizeText } from './fingerprint.js';
 import { extractResumePhone, isPhoneNumberField } from './candidateEvidence.js';
@@ -164,18 +166,31 @@ function extractStructuredSections(rawText: string): ParsedResumeStructured {
  */
 export async function getOrParseResume(applywizzId: string): Promise<ResumeParsedRow | null> {
   // 1. Check candidate profile in DB
+  let cachedProfile: Awaited<ReturnType<typeof getProfile>> = null;
   try {
-    const profile = await getProfile(applywizzId);
-    if (profile?.resume_text && profile.resume_text.trim().length > 0) {
+    cachedProfile = isSandboxTestMode()
+      ? await getProfileFromDatabase(applywizzId)
+      : await getProfile(applywizzId);
+    if (cachedProfile?.resume_text && cachedProfile.resume_text.trim().length > 0) {
       return {
         applywizz_id: applywizzId,
-        raw_text: profile.resume_text,
-        structured: profile.resume_facts || { skills: [], experience: [], education: [], rawSections: {} },
+        raw_text: cachedProfile.resume_text,
+        structured: cachedProfile.resume_facts || { skills: [], experience: [], education: [], rawSections: {} },
         parse_failed: false,
       };
     }
   } catch (err: any) {
     log.warn(`[Tier 2] Profile resume lookup failed for ${applywizzId}: ${err.message}`);
+  }
+
+  if (isSandboxTestMode()) {
+    if (!cachedProfile?.resume_facts) return null;
+    return {
+      applywizz_id: applywizzId,
+      raw_text: cachedProfile.resume_text || '',
+      structured: cachedProfile.resume_facts,
+      parse_failed: false,
+    };
   }
 
   // 2. Download from profile.resume_url and parse
