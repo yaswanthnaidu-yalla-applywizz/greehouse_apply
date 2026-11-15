@@ -191,6 +191,35 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
   if (exact.length === 1) return exact[0];
   if (exact.length > 1) return null;
 
+
+
+
+  // Support single-letter matching (e.g. "A", "A.", "Option A") to options like "A. I have built..."
+  const letterAnswerMatch = answer.trim().match(/^(?:option\s+)?([a-zA-Z])[.)]?$/i);
+  if (letterAnswerMatch) {
+    const targetLetter = letterAnswerMatch[1].toUpperCase();
+    const letterPrefixedMatches = options.filter((option) => {
+      const m = option.trim().match(/^([a-zA-Z])[.)\s]/);
+      return m && m[1].toUpperCase() === targetLetter;
+    });
+    if (letterPrefixedMatches.length === 1) return letterPrefixedMatches[0];
+  }
+
+  // Strip letter prefix from options (e.g. "A. ") to match full body answers
+  const strippedPrefixMatches = options.filter((option) => {
+    const stripped = option.trim().replace(/^[a-zA-Z][.)]\s+/, '');
+    const normalizedStripped = normalize(stripped);
+    return (
+      normalizedStripped === normalizedAnswer ||
+      (normalizedAnswer.length >= 3 &&
+        (normalizedStripped.startsWith(normalizedAnswer) ||
+          normalizedAnswer.startsWith(normalizedStripped)))
+    );
+  });
+  if (strippedPrefixMatches.length === 1) return strippedPrefixMatches[0];
+
+
+
   const alias = canonicalAlias(answer);
   if (alias) {
     const isDegreeAlias = ['ms', 'ma', 'masters', 'bs', 'ba', 'bachelors', 'doctorate'].includes(alias);
