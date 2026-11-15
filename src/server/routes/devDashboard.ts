@@ -32,6 +32,7 @@ import { emailProofWorkerPool } from '../../submitter/emailProofWorkerPool.js';
 
 import { handleFilteredStats } from '../filteredStats.js';
 import { handleAnalysisStats, handleRequeueRetryable } from '../analysisStats.js';
+import { handleCandidateVolume, handleCandidateSubmittedApplications } from '../candidateVolume.js';
 
 const log = createLogger('Dev Dashboard');
 
@@ -563,5 +564,7 @@ devDashboardRouter.get('/email-proofs/status', async (_req: Request, res: Respon
 devDashboardRouter.get('/filtered-stats', handleFilteredStats);
 devDashboardRouter.get('/analysis', handleAnalysisStats);
 devDashboardRouter.post('/analysis/requeue', handleRequeueRetryable);
+devDashboardRouter.get('/candidate-volume', handleCandidateVolume);
+devDashboardRouter.get('/candidate-volume/:applywizzId/applications', handleCandidateSubmittedApplications);
 
 
