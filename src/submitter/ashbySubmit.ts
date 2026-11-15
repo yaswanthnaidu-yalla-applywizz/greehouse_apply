@@ -19,6 +19,7 @@ import { fillAshbyForm, glideCursor, sleep, verifyRequiredFieldsCommitted } from
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 import { buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
 import { toAshbyApplicationUrl } from '../scanner/atsDetector.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
@@ -214,6 +215,10 @@ export async function submitAshbyApplication(
     updateStatusFn?: (id: string, status: any, extra?: any) => Promise<any>;
   } = {}
 ): Promise<LiveSubmitResult & { telemetry?: AshbySubmissionTelemetry }> {
+  if (isSandboxTestMode()) {
+    throw new Error('Live submissions are disabled in sandbox test mode.');
+  }
+
   const applicationId = application.id || application.applywizz_id;
   const targetAppId = application.id || applicationId;
   const isHeadless = options.headless ?? (process.env.RAILWAY_ENV === 'true' || process.env.HEADLESS !== 'false');

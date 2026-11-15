@@ -608,6 +608,16 @@ export async function getProfile(applywizzId: string): Promise<ProfileRow | null
   return null;
 }
 
+export async function getProfileFromDatabase(applywizzId: string): Promise<ProfileRow | null> {
+  const { data, error } = await getDbClient()
+    .from('profiles')
+    .select('*')
+    .eq('applywizz_id', applywizzId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as ProfileRow | null) ?? null;
+}
+
 export const getProfileByApplywizzId = getProfile;
 
 /**

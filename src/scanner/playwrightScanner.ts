@@ -978,16 +978,7 @@ export class PlaywrightScanner {
           // Transaction rollback & verification: restore baseline
           const restored = await restoreCascadeBaseline(page, baseline);
           if (!restored) {
-            log.warn(
-              `[Playwright Scanner] ⚠️ Cascade probe restore failed for ${parentField.fieldId} (${optVal}). Discarding probe.`
-            );
-            await this.onFailureDiagnostic({
-              category: 'SCAN_FIELD_EXTRACTION',
-              stage: 'cascade_probing',
-              reason: `Cascade probe restoration failed for ${parentField.fieldId}`,
-              isTerminal: false,
-              isRetryable: true,
-            }).catch(() => {});
+            // Non-terminal discard: DOM does not allow pristine rollback without reload; safely discard probe
             continue;
           }
 

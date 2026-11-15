@@ -12,6 +12,7 @@ import { cacheApplicationLocally, getApplication } from "./crud.js";
 import { countApplicationsByStatus } from "./statsQueries.js";
 import { memoryApplications } from "./memoryStore.js";
 import type { ApplicationRow, ApplicationStatus } from "./types.js";
+import { isSandboxTestMode } from "../../config/sandboxTestMode.js";
 
 const log = createLogger("ApplicationsQueue");
 
@@ -20,6 +21,10 @@ export const MAX_SUBMISSION_RETRIES = 3;
 export async function retryFailedApplication(
   application: ApplicationRow
 ): Promise<boolean> {
+  if (isSandboxTestMode()) {
+    throw new Error('Application queueing is disabled in sandbox test mode.');
+  }
+
   const nextRetryCount = 0;
   const payload = {
     status: 'QUEUED' as const,
@@ -188,6 +193,10 @@ export async function enqueueApplication(
     errorMessage?: string;
   } = {}
 ): Promise<{ submissionOrder: number; application: ApplicationRow }> {
+  if (isSandboxTestMode()) {
+    throw new Error('Application queueing is disabled in sandbox test mode.');
+  }
+
   const app = await getApplication(applicationIdOrApplywizzId, options.jobUrl);
   if (!app) {
     throw new Error(`Application '${applicationIdOrApplywizzId}' not found to queue.`);

@@ -45,6 +45,7 @@ import {
   isApplicationUuid,
 } from '../../db/storage.js';
 import { createLogger } from '../../utils/logger.js';
+import { isSandboxTestMode } from '../../config/sandboxTestMode.js';
 import { insertAuditEvent, SUBMIT_CLICK_AUDIT_ACTION } from '../../db/events.js';
 import { getDbClient, isSupabaseConfigured } from '../../db/client.js';
 import { resolveRole } from './auth.js';
@@ -54,6 +55,14 @@ import { promoteSubmittedAiAnswers } from '../../db/aiAnswerReviews.js';
 const log = createLogger('Submissions');
 
 export const submissionsRouter = Router();
+
+submissionsRouter.use((req, res, next) => {
+  if (isSandboxTestMode() && req.method !== 'GET' && req.method !== 'HEAD') {
+    res.status(403).json({ success: false, error: 'Submission actions are disabled in sandbox test mode.' });
+    return;
+  }
+  next();
+});
 
 async function ensureZohoConnectedForApplication(
   req: Request,

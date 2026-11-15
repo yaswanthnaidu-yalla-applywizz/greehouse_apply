@@ -20,7 +20,7 @@ import { config } from '../config/env.js';
 import { readAndDeduplicateUrls, resolveShortlink, atsFromUrl } from '../scanner/csvDeduplicator.js';
 import { PlaywrightScanner } from '../scanner/playwrightScanner.js';
 import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
-import { scanAshbyJob } from '../scanner/ashbyScanner.js';
+import { AshbyScanner } from '../scanner/ashbyScanner.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
 import { syncCaCandidateAssignments } from '../services/caAssignmentSync.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
@@ -38,6 +38,7 @@ import { hasSecurityClearanceQuestion } from '../scanner/securityClearance.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { isPipelineAbortedError, resetPipelineAbort, throwIfPipelineAborted } from './pipelineAbort.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 
 const log = createLogger('Pipeline');
 
@@ -234,7 +235,7 @@ export class V1Pipeline {
       const reportScanProgress = (): void => {
         if (scannedCount === uniqueUrls.length || scannedCount % 25 === 0) {
           log.info(
-            `[Pipeline Phase B] Progress: ${scannedCount}/${uniqueUrls.length} scanned | Success: ${scannedCount - scanFailures}, Failed: ${scanFailures}`
+            `[Pipeline Phase B] Progress: ${scannedCount}/${uniqueUrls.length} scanned | Active: ${scannedCount - scanFailures}, Expired: ${scanFailures}`
           );
         }
       };
@@ -244,28 +245,33 @@ export class V1Pipeline {
           timeoutMs: config.PLAYWRIGHT_TIMEOUT,
           minJitterMs: config.SCANNER_JITTER_MIN_MS,
           maxJitterMs: config.SCANNER_JITTER_MAX_MS,
-          onJobScanned: () => {
+          onJobScanned: (job) => {
             scannedCount++;
+            if (job.isExpired) scanFailures++;
             reportScanProgress();
           },
         });
 
         const ashbyUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'ashby');
         const greenhouseUrls = uniqueUrls.filter((u) => atsFromUrl(u) !== 'ashby');
-        const ghTemplates = greenhouseUrls.length > 0 ? await scanner.scanUniqueUrls(greenhouseUrls) : [];
-        const ashbyTemplates: ScannedJobTemplate[] = [];
-        for (const aUrl of ashbyUrls) {
-          try {
-            const tmpl = await scanAshbyJob(aUrl);
-            ashbyTemplates.push(tmpl);
-          } catch (e: any) {
-            scanFailures++;
-            log.warn(`[Pipeline] Ashby scan failed for ${aUrl}: ${e.message}`);
-          } finally {
+
+        const ashbyScanner = new AshbyScanner({
+          workerPoolSize: scanWorkers,
+          timeoutMs: config.PLAYWRIGHT_TIMEOUT,
+          minJitterMs: config.SCANNER_JITTER_MIN_MS,
+          maxJitterMs: config.SCANNER_JITTER_MAX_MS,
+          onJobScanned: (job) => {
             scannedCount++;
+            if (job.isExpired) scanFailures++;
             reportScanProgress();
-          }
-        }
+          },
+        });
+
+        const [ghTemplates, ashbyTemplates] = await Promise.all([
+          greenhouseUrls.length > 0 ? scanner.scanUniqueUrls(greenhouseUrls) : Promise.resolve([]),
+          ashbyUrls.length > 0 ? ashbyScanner.scanUniqueUrls(ashbyUrls) : Promise.resolve([]),
+        ]);
+
         scannedTemplates = [...ghTemplates, ...ashbyTemplates];
         scanCompleted = true;
       } catch (err: any) {
@@ -280,7 +286,7 @@ export class V1Pipeline {
         const greenhouseCount = scannedTemplates.filter((template) => atsFromUrl(template.jobUrl) === 'greenhouse').length;
         const ashbyCount = scannedTemplates.length - greenhouseCount;
         try {
-          await sendEmail({
+          if (!isSandboxTestMode()) await sendEmail({
             to: 'yaswanthnaiduyalla@applywizz.ai',
             subject: 'ApplyWizz job scanning complete',
             text: `Scanned ${scannedCount}/${uniqueUrls.length} job URLs. Greenhouse: ${greenhouseCount}. Ashby: ${ashbyCount}. Failed: ${scanFailures}.`,
@@ -314,9 +320,9 @@ export class V1Pipeline {
         limit: options.limit,
         concurrency: 10,
         syncProfiles: true,
-        downloadResumes: true,
+        downloadResumes: !isSandboxTestMode(),
         // CSV IDs are an explicit ingest request — fetch missing profiles so application upserts can satisfy the FK.
-        allowOutboundApi: true,
+        allowOutboundApi: !isSandboxTestMode(),
       });
 
       // Filter candidate segment jobs to only those present in scanned uniqueUrls
@@ -343,7 +349,9 @@ export class V1Pipeline {
     try {
       const allApplywizzIds = candidateSegments.map((c) => c.applywizzId);
       const sandboxCaEmail = getSandboxCaEmail();
-      const syncResult = await syncCaCandidateAssignments({ applywizzIds: allApplywizzIds });
+      const syncResult = isSandboxTestMode()
+        ? { mappingMap: new Map<string, string>(), source: 'local snapshot' }
+        : await syncCaCandidateAssignments({ applywizzIds: allApplywizzIds });
       const caEmailMap = syncResult.mappingMap;
 
       let mappedCount = 0;
@@ -404,11 +412,13 @@ export class V1Pipeline {
     throwIfPipelineAborted('Phase D');
 
     try {
+      if (!isSandboxTestMode()) {
       const runStartedAt = new Date(startTime).toISOString();
       const pendingAutoQueue = this.resolver.getPendingAutoQueue();
       const excludeKeys = new Set(pendingAutoQueue.map((p) => `${p.applywizzId.trim().toUpperCase()}::${p.jobUrl}`));
       await sendCaNotificationEmails(runStartedAt, { excludeKeys });
       await sendLeadershipIngestionSummary(runStartedAt, { excludeKeys });
+      }
     } catch (caEmailErr: any) {
       log.warn(`[Pipeline Phase D] ⚠️ CA/Leadership notification email error: ${caEmailErr?.message || caEmailErr}`);
     }
@@ -476,7 +486,7 @@ export class V1Pipeline {
     // -------------------------------------------------------------
     // Post-Ingest Auto-Queue Flush
     // -------------------------------------------------------------
-    if (this.resolver.getPendingAutoQueueCount() > 0) {
+    if (!isSandboxTestMode() && this.resolver.getPendingAutoQueueCount() > 0) {
       const count = this.resolver.getPendingAutoQueueCount();
       log.info(`[Pipeline] Ingest run complete — flushing ${count} auto-queued applications...`);
       const enqueued = await this.resolver.flushPendingAutoQueue();

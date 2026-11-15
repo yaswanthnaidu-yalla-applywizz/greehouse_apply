@@ -45,6 +45,7 @@ import {
 import { APPLICATION_SUMMARY_COLUMNS } from '../types/applicationDtos.js';
 import { requireAuth } from '../middleware/auth.js';
 import axios from 'axios';
+import { isSandboxTestMode } from '../../config/sandboxTestMode.js';
 
 const log = createLogger('Applications');
 
@@ -72,7 +73,7 @@ export async function broadcastApplicationStatusChange(event: {
       ? process.env.WORKER_SERVICE_URL.replace('worker', 'main').replace('worker', 'greehouse_apply')
       : undefined);
 
-  if (targetServiceUrl && process.env.ENABLE_QUEUE_WORKER === 'true') {
+  if (!isSandboxTestMode() && targetServiceUrl && process.env.ENABLE_QUEUE_WORKER === 'true') {
     try {
       await axios.post(`${targetServiceUrl}/api/internal/ws-broadcast`, message, { timeout: 5000 });
       return;
@@ -431,7 +432,7 @@ applicationsRouter.patch('/:id/status', async (req: Request, res: Response): Pro
           ? process.env.WORKER_SERVICE_URL.replace('worker', 'main').replace('worker', 'greehouse_apply')
           : undefined);
 
-      if (targetServiceUrl && process.env.ENABLE_QUEUE_WORKER === 'true') {
+      if (!isSandboxTestMode() && targetServiceUrl && process.env.ENABLE_QUEUE_WORKER === 'true') {
         axios.post(`${targetServiceUrl}/api/internal/ws-broadcast`, failEvent, { timeout: 5000 }).catch((err: any) => {
           log.warn(`[Applications Router] ⚠️ Failed to forward failure event to ${targetServiceUrl}: ${err.message}`);
         });
