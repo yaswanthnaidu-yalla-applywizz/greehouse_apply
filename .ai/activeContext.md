@@ -1,3 +1,97 @@
+# Current Session Update (2026-11-15 - Ingest Drop Reporting & Candidate Volume View)
+
+- **Completed Ingest Drop Reporting & Dedicated Candidate Volume Tab in Dev Dashboard**:
+  - Implemented granular pre-creation drop taxonomy in `src/scanner/storageCsvIngestion.ts` (`computeIngestFunnelStats`): captures `security_clearance`, `excluded_company`, `latest_employer`, `already_applied`, `job_expired`, `zoho_disconnected`, `no_scan_template`.
+  - Merged pre-creation dropped rows (`topFunnelDroppedDetails`) into the `items` drill-down table in `src/server/filteredStats.ts` so users can inspect which specific URLs/candidates were dropped and why.
+  - Added dedicated backend candidate volume aggregation engine (`src/server/candidateVolume.ts`) with high-performance indexed queries (`created_at`, `status`), bulk profile lookups, and 30s TTL in-memory caching.
+  - Added dedicated frontend `DevCandidateVolumeView.tsx` with 4 KPI summary cards, search by AWL ID/candidate/email, sortable columns, and expandable row drill-down with `ProofViewer` (web proof) and `EmailProofModal` (confirmation email proof) modals.
+  - Added `'candidates'` tab to `DevDashboard.tsx` integrated with the existing cohort date controls (defaults to Today, supports custom range).
+  - Verified with 4/4 new tests, 12/12 dateRange tests, 16/16 candidateQueue tests, clean server typecheck, and clean dashboard typecheck.
+
+Resolver investigation docs-only status (2026-11-13): findings register [docs/resolver-answer-findings-2026-11-13.md](../docs/resolver-answer-findings-2026-11-13.md), investigation master plan [docs/superpowers/plans/2026-11-13-resolver-answer-investigation-master-plan.md](../docs/superpowers/plans/2026-11-13-resolver-answer-investigation-master-plan.md), and evidence-based proposed remediation plan [docs/superpowers/plans/2026-11-13-resolver-answer-causes-and-remediation.md](../docs/superpowers/plans/2026-11-13-resolver-answer-causes-and-remediation.md). The latter records confirmed evidence/measurement defects and unresolved cause investigations; no implementation is authorized.
+Local implementation in progress: the 2026-11-13 resolver-answer plan has focused changes for phone evidence, creative fallback, relocation preference, private answer auditing and task-aware funnel measurement. No deployment, production data changes, actual queuing or paid refreshed evaluation has been performed. Historical answer support and the 80% ingest-created target remain unverified; see the plan and `docs/resolver-answer-investigation/`.
+
+# Current Session Update (2026-11-13 - DB 2 Authoritative Profiles Backfill from Resumes)
+
+- **Completed Authoritative Profiles Backfill from Resumes in Production DB 2**:
+  - Parsed candidate resumes using parallel Gemini Flash subagents across 8 chunks covering all 380 candidates with resume text.
+  - Generated and committed 16 transactional SQL batches with `SET LOCAL app.profile_authoritative_override = 'on'` to satisfy `protect_profile_facts()`.
+  - **Work Experience**:
+    - Synthetic `"Professional Experience"` placeholder company entries dropped from 385 down to **0** in all candidates with resumes.
+    - All 380 resumed candidates now have authentic company names, titles, start/end dates, and descriptions parsed directly from their resumes.
+    - Only 19 unresumed profiles (no resume uploaded) retain the initial placeholder.
+  - **Education**:
+    - Empty education entries dropped from 124 down to **0** in all candidates with resumes.
+    - Standardized `degree`, `institution`, and `fieldOfStudy` across all resumed profiles.
+  - **Names**:
+    - Backfilled `first_name` and `last_name` from resumes where missing.
+  - **Zero User Approvals**:
+    - 100% of SQL executions routed through `postgres-db2` MCP server, requiring zero manual sandbox prompt approvals.
+
+# Current Session Update (2026-11-13 - DB 2 Profiles Table Audit & Data Integrity Verification)
+
+- **Comprehensive Audit of DB 2 `profiles` Table (418 total rows)**:
+  - 412 real candidate profiles and 6 test fixture records (`AWL-E2E-TEST`, `CASCADE-TEST-1`, `AWL-MERGE-TEST-*`, `AWL-TEST-OVERWRITE`).
+  - **Education (`education` JSONB)**:
+    - 381 candidate profiles (92.5%) have 1 valid structured education entry with camelCase keys (`institution`, `degree`, `fieldOfStudy`, `graduationYear`).
+    - 31 candidate profiles (7.5%) have an empty education array `[]` (ingested without CRM education metadata).
+    - 3 profiles have degree or honors text bleeding into the `institution` field (`AWL-39819`, `AWL-29927`, `AWL-32601`).
+  - **Work Experience (`work_experience` JSONB)**:
+    - 385 candidate profiles (93.4%) have 1 entry; 27 candidate profiles (6.6%) have an empty array `[]`.
+    - **100% of populated work experience entries (385/385) use the generic onboarding placeholder company `"Professional Experience"`** with `startDate: "01/2020"` and `endDate: "Present"`, created during ApplyWizz CRM onboarding.
+  - **Contact & Essential Fields**:
+    - `email` and `company_email`: 100% populated for all 412 real candidate profiles (the only missing entries belong to test fixtures).
+    - `phone`: 9 real candidates missing phone (2.2%).
+    - `first_name` / `last_name`: 20 missing first_name (4.9%), 28 missing last_name (6.8%) (mostly single-word names).
+    - `resume_url` / `resume_text`: 9 missing resume_url (2.2%), 32 missing resume_text (7.8%).
+
+# Current Session Update (2026-11-13 - Root Causes & Fixes for 376 Greenhouse Failures)
+
+- **Systematic Root Cause Investigation & Fixes for 376 Greenhouse Failures**:
+  - Investigated 406 Greenhouse failures from November 10 & 11 IST in DB 2 (48 Zoho/OTP email lookup timeouts, 358 form submission gate / validation failures).
+  - Categorized the exact root causes via `gh_failure_diagnostics` telemetry, DOM inspections on live Greenhouse URLs, and visual failure screenshot analyses:
+    1. **Education Dropdowns Uncommitted (116 apps, 32.4%)**:
+       - Root Cause 1A: In `src/utils/choiceOptions.ts`, `canonicalAlias` degree regexes had literal dots (`b\\.tech`, `b\\.s\\.`, `m\\.s\\.`, `ph\\.d\\.`). Because `normalize()` stripped all non-alphanumeric punctuation to spaces, `"B.Tech"` became `"b tech"` and never matched the regex, returning null and wiping out candidate degrees.
+       - Root Cause 1B: In `src/submitter/formFiller.ts`, when degree/school did not match, fallback attempted `"Other"`. Standard Greenhouse degree dropdowns only contain `Bachelor's Degree`, `Master's Degree`, etc., and lack an `"Other"` option.
+       - Root Cause 1C: Native `<select>` fallback omitted `school`.
+    2. **Demographic / EEOC Numeric ID Selector Syntax Error & Unmatched Dropdowns (69-79 apps, 19.3%)**:
+       - Root Cause 2A: On modern Greenhouse boards, EEOC inputs have numeric IDs (e.g. `864`, `1333`, `1336`, `1337`). `formFiller.ts` explicitly filtered out numeric IDs via `!/^\\d+$/.test(id)`.
+       - Root Cause 2B: Metadata selector generated `#864`, which fails in CSS `querySelectorAll` with a syntax error because CSS selectors cannot start with `#` followed by a digit.
+       - Root Cause 2C: Demographic fields had no decline fallback when options did not match.
+    3. **Country Dropdown & Referral Source False-Positive DOM Commitment Check (46-70 apps Country, 40-51 apps Referral)**:
+       - Root Cause 3A: In `comboboxDisplaysAnswer`, control container checked only `.select__control`, missing modern Greenhouse Emotion CSS class hashes (`[class*="-singleValue"]`).
+       - Root Cause 3B: In `hiddenRequiredInputDisplaysAnswer`, commitment checked `matchOption(value, answerText)`. Greenhouse stores internal numeric option IDs (e.g. `10384729`) or country codes in the hidden input, never matching display label text `"LinkedIn"` or `"United States"`, causing false-positive uncommitted DOM aborts.
+    4. **Mandatory Non-Resume Document Uploads (12-21 apps, 3.4%)**:
+       - Non-resume file uploads (e.g. South African ID, college transcripts, video prompts) required by job forms.
+  - **Implemented Minimal Surgical Fixes**:
+    - `src/utils/choiceOptions.ts`: Updated degree regexes to handle normalized space-separated tokens (`b\\s*tech`, `b\\s*s`, `m\\s*s`, `ph\\s*d`, `b\\s*e`, `bachelor of engineering`).
+    - `src/submitter/formFiller.ts`:
+      - `sanitizeMetadataSelector`: Rewrites `#<digit>` to `[id="<digit>"]`.
+      - `selectSelectors`: Generates `[id="..."]`, `select[id="..."]`, and `[name="..."]` for numeric IDs.
+      - `comboboxDisplaysAnswer` & `hiddenRequiredInputDisplaysAnswer`: Broadened container match to `[class*="-control"]` and `[class*="-singleValue"]`. Accepted non-empty values in required hidden inputs following successful dropdown option click.
+      - Education, EEO, and Referral fallbacks added to searchable and native selects.
+      - `isEducationSectionRequiredOnDom`: Broadened beyond `#school--0` to include `#degree--0`, `#discipline--0`, and label asterisks.
+  - **Verification**:
+    - Created failing unit tests in `tests/choiceOptions.test.ts` and `tests/formFillerPrecision.test.ts` reproducing the bugs.
+    - Verified all 111 unit tests pass (`npm run test:unit`).
+    - Verified full TypeScript compilation clean with 0 errors (`npm run typecheck`).
+
+# Current Session Update (2026-11-12 - Parallel Multi-ATS Ashby & Greenhouse Scanning)
+
+- **Completed Parallel Ashby Scanning (`src/scanner/ashbyScanner.ts`, `src/orchestrator/pipeline.ts`)**:
+  - Implemented `AshbyScanner` class matching `PlaywrightScanner` architecture:
+    - Launches single Chromium browser instance and shares it across `workerPoolSize` contexts (default 4).
+    - Concurrently processes URLs via atomic indexing (`currentIndex++`) with randomized jitter delay (`minJitterMs` to `maxJitterMs`).
+    - Handles per-URL lifecycle with context-isolated pages, abort signal handling (`throwIfPipelineAborted('Ashby scan')`), and `onJobScanned` milestone progress callbacks.
+    - Captures expired/closed jobs (`isExpired: true`) without terminating the pool.
+    - Preserved 100% backward compatibility for existing `scanAshbyDom` and `scanAshbyJob` consumers.
+  - Updated `src/orchestrator/pipeline.ts`:
+    - Replaced serial sequential `for (const aUrl of ashbyUrls)` loop.
+    - Runs Greenhouse scanning (`scanner.scanUniqueUrls`) and Ashby scanning (`ashbyScanner.scanUniqueUrls`) **concurrently** via `Promise.all`.
+    - Both pools feed into unified progress reporting (`scannedCount`, `scanFailures`, `reportScanProgress()`).
+  - Added unit and integration tests in `tests/ashbyScanner.test.ts` (5/5 tests passing).
+  - TypeScript typecheck (`npm run typecheck`) and unit tests (`npm run test:unit`) 100% clean and passing.
+
 # Current Session Update (2026-11-12 - Operator Queue UX Quick Wins & False-Failed Diagnostic)
 
 - **Completed Implementation of Plan `docs/superpowers/plans/2026-11-12-operator-queue-ux-fixes.md` & Follow-up Fixes**:
