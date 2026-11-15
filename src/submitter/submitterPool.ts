@@ -115,7 +115,7 @@ export class SubmitterPool {
       const delayMs = index * 1500;
       setTimeout(() => {
         if (this.isRunning) {
-          void this.runWorker(index);
+          void this.startWorkerSupervisor(index);
         }
       }, delayMs);
     }
@@ -330,6 +330,21 @@ export class SubmitterPool {
     }
   }
 
+  private async startWorkerSupervisor(workerIndex: number): Promise<void> {
+    const workerNumber = workerIndex + 1;
+    while (this.isRunning) {
+      try {
+        await this.runWorker(workerIndex);
+      } catch (err: any) {
+        log.error(
+          `[Submitter] Worker ${workerNumber} loop exited unexpectedly: ${err?.message || err}. Respawning in 1000ms...`
+        );
+      }
+      if (!this.isRunning) break;
+      await this.sleep(1000);
+    }
+  }
+
   private async runWorker(workerIndex: number): Promise<void> {
     const workerNumber = workerIndex + 1;
     while (this.isRunning || this.lanes[workerIndex].length > 0) {
@@ -396,12 +411,17 @@ export class SubmitterPool {
             );
             finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
           } else {
-            await this.updateStatusFn(applicationId, 'FAILED', {
-              error_message: failureMessage,
-              job_url: application.job_url,
-              proof_failed_url: result.proofFailedUrl,
-              expected_status: 'APPLYING',
-            });
+            try {
+              await this.updateStatusFn(applicationId, 'FAILED', {
+                error_message: failureMessage,
+                job_url: application.job_url,
+                proof_failed_url: result.proofFailedUrl,
+              });
+            } catch (statusError) {
+              log.warn(
+                `[Submitter] Worker ${workerNumber} status update failed for app-${applicationId}: ${(statusError as Error).message}`
+              );
+            }
           }
           await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
           this.emitFailure(application, failureMessage, result);
@@ -434,18 +454,24 @@ export class SubmitterPool {
             finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
           } catch (statusError) {
             log.error(`[Submitter] Worker ${workerNumber} retry requeue failed: ${(statusError as Error).message}`);
+            try {
+              await this.updateStatusFn(applicationId, 'FAILED', {
+                error_message: message,
+                job_url: application.job_url,
+              });
+            } catch (fallbackError) {
+              log.error(`[Submitter] Worker ${workerNumber} fallback status update failed: ${(fallbackError as Error).message}`);
+            }
+          }
+        } else {
+          try {
             await this.updateStatusFn(applicationId, 'FAILED', {
               error_message: message,
               job_url: application.job_url,
-              expected_status: 'APPLYING',
             });
+          } catch (statusError) {
+            log.error(`[Submitter] Worker ${workerNumber} status update failed: ${(statusError as Error).message}`);
           }
-        } else {
-          await this.updateStatusFn(applicationId, 'FAILED', {
-            error_message: message,
-            job_url: application.job_url,
-            expected_status: 'APPLYING',
-          });
         }
         await logQueueStatusChange(applicationId, 'APPLYING', finalStatus);
         this.emitFailure(application, message);
