@@ -59,6 +59,10 @@ export interface AnalysisResponse {
 export interface AnalysisViewProps {
   loadJson: <T>(url: string) => Promise<T>;
   apiEndpoint?: string; // defaults to '/api/dev/analysis'
+  date?: string;
+  statsRange?: 'day' | 'week' | 'month' | 'lifetime' | 'custom';
+  customFrom?: string;
+  customTo?: string;
 }
 
 type MetricKey = 'total' | 'applied' | 'failed' | 'clients';
@@ -100,13 +104,37 @@ const METRIC_CONFIG: Record<
 export const AnalysisView: React.FC<AnalysisViewProps> = ({
   loadJson,
   apiEndpoint = '/api/dev/analysis',
+  date,
+  statsRange,
+  customFrom: propCustomFrom,
+  customTo: propCustomTo,
 }) => {
   const [ats, setAts] = useState<'all' | 'greenhouse' | 'ashby'>('all');
-  const [mode, setMode] = useState<'period' | 'date'>('period');
-  const [periodPreset, setPeriodPreset] = useState<'7d' | '14d' | '30d' | 'custom'>('7d');
-  const [customFrom, setCustomFrom] = useState<string>(getTodayIST);
-  const [customTo, setCustomTo] = useState<string>(getTodayIST);
-  const [singleDate, setSingleDate] = useState<string>(getTodayIST);
+  const [mode, setMode] = useState<'period' | 'date'>(statsRange === 'day' ? 'date' : 'period');
+  const [periodPreset, setPeriodPreset] = useState<'7d' | '14d' | '30d' | 'custom'>(
+    statsRange === 'month' ? '30d' : statsRange === 'custom' ? 'custom' : '7d'
+  );
+  const [customFrom, setCustomFrom] = useState<string>(propCustomFrom || getTodayIST);
+  const [customTo, setCustomTo] = useState<string>(propCustomTo || getTodayIST);
+  const [singleDate, setSingleDate] = useState<string>(date || getTodayIST);
+
+  useEffect(() => {
+    if (statsRange === 'day') {
+      setMode('date');
+      if (date) setSingleDate(date);
+    } else if (statsRange === 'week') {
+      setMode('period');
+      setPeriodPreset('7d');
+    } else if (statsRange === 'month') {
+      setMode('period');
+      setPeriodPreset('30d');
+    } else if (statsRange === 'custom') {
+      setMode('period');
+      setPeriodPreset('custom');
+      if (propCustomFrom) setCustomFrom(propCustomFrom);
+      if (propCustomTo) setCustomTo(propCustomTo);
+    }
+  }, [statsRange, date, propCustomFrom, propCustomTo]);
 
   const [selectedMetrics, setSelectedMetrics] = useState<Record<MetricKey, boolean>>({
     total: true,
