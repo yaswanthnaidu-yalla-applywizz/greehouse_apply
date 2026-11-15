@@ -284,6 +284,22 @@ export interface IngestFilterReport {
 export interface ResolutionExecution {
   mode?: 'live' | 'dry-run' | 'shadow' | 'evaluation';
   recordDecision?: (decision: any) => void;
+  readExactQaAnswer?: (applywizzId: string, fingerprint: string) => Promise<{ value: string; confidence?: number } | null>;
+  semanticSearchAdapters?: SemanticSearchAdapters;
+}
+
+export interface SemanticSearchAdapters {
+  embedTexts: (texts: string[]) => Promise<Array<number[] | null>>;
+  // Evaluation callers must bind this query to the same read-only evidence session.
+  matchCandidateQa: (args: {
+    queryVector: number[];
+    matchApplywizzId: string;
+    matchThreshold: number;
+    matchCount: number;
+  }) => Promise<{
+    data: Array<{ question_label?: unknown; value?: unknown; similarity?: unknown }> | null;
+    error?: { message?: string } | null;
+  }>;
 }
 
 export type SourceTag =

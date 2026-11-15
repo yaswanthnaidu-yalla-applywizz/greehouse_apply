@@ -1,4 +1,5 @@
 import type { ScannedField, ResolvedField } from '../types/index.js';
+import type { ProfileRow } from '../db/profiles.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 
 export const CORPORATE_POLICY_PROMPT_GUIDELINES = `
@@ -13,7 +14,7 @@ CORPORATE POLICIES & MANDATORY ANSWER GUIDELINES:
  * Checks whether a scanned field matches a non-negotiable corporate policy.
  * Returns the resolved string value, or null if the field is not a corporate policy question.
  */
-export function matchCorporatePolicy(field: ScannedField): string | null {
+export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow | null): string | null {
   const label = (field.label || '').trim();
   const name = (field.name || '').trim();
   const combined = `${name} ${label}`.trim();
@@ -32,7 +33,16 @@ export function matchCorporatePolicy(field: ScannedField): string | null {
     return matchChoiceOption('No', field.options) || 'No';
   }
 
-  // 2. Communication / SMS / WhatsApp Consent -> Always "No"
+  // 2. Communication / SMS / WhatsApp Consent
+  // On ATS forms with explicit affirmative SMS consent radio options (e.g. Ashby), choose affirmative SMS consent.
+  if (
+    Array.isArray(field.options) &&
+    field.options.some((opt) => /receiving (?:sms|text messages)/i.test(opt))
+  ) {
+    const smsConsent = field.options.find((opt) => /yes.*consent.*sms/i.test(opt));
+    if (smsConsent) return smsConsent;
+  }
+
   if (
     /\b(?:sms|text message|text messages|whatsapp|mobile messaging)\b/i.test(combined) &&
     /\b(?:receive|consent|opt-in|opt in|updates|notifications|contact you|reach you)\b/i.test(combined)
@@ -86,6 +96,142 @@ export function matchCorporatePolicy(field: ScannedField): string | null {
       return field.options[0];
     }
     return 'LinkedIn';
+  }
+
+  // 5. Sanctioned Countries & Export Controls
+  if (
+    /\b(?:cuba|iran|north korea|syria|crimea|donetsk|luhansk|sanctioned countr|export control)\b/i.test(
+      combined
+    )
+  ) {
+    const sanctionedTokens = [
+      'cuba',
+      'iran',
+      'north korea',
+      'syria',
+      'russia',
+      'crimea',
+      'donetsk',
+      'luhansk',
+      'belarus',
+    ];
+    const questionSanctioned = sanctionedTokens.filter((token) =>
+      combined.toLowerCase().includes(token)
+    );
+    if (questionSanctioned.length > 0) {
+      const candidateCountry = (profile?.country || '').toLowerCase().trim();
+      const candidateLocation = (profile?.location || '').toLowerCase().trim();
+      const isCandidateSanctioned = questionSanctioned.some(
+        (s) => candidateCountry.includes(s) || candidateLocation.includes(s)
+      );
+
+      if (field.type === 'checkbox') {
+        return isCandidateSanctioned ? 'true' : 'false';
+      }
+      const target = isCandidateSanctioned ? 'Yes' : 'No';
+      return matchChoiceOption(target, field.options) || target;
+    }
+  }
+
+  // 6. Work Authorization Status Dropdown (e.g. Similarweb)
+  if (
+    /\b(?:work authorization status|current (?:visa|work) status|immigration status|visa status|current work authorization)\b/i.test(
+      combined
+    ) &&
+    Array.isArray(field.options) &&
+    field.options.length > 0
+  ) {
+    if (profile) {
+      if (
+        profile.requires_sponsorship === false &&
+        (profile as any).us_work_authorized !== false &&
+        profile.work_authorization !== 'No'
+      ) {
+        const citizenMatch =
+          matchChoiceOption('US Citizen', field.options) ||
+          matchChoiceOption('Green Card', field.options);
+        if (citizenMatch) return citizenMatch;
+      } else if (profile.requires_sponsorship === true) {
+        const visaType =
+          (profile as any)?.visa_type ||
+          profile.raw_api_payload?.visa_type ||
+          'H-1B';
+        const visaMatch =
+          matchChoiceOption(String(visaType), field.options) ||
+          matchChoiceOption('H-1B', field.options) ||
+          matchChoiceOption('Other', field.options);
+        if (visaMatch) return visaMatch;
+      }
+    }
+  }
+
+  // 7. Commute & Office Attendance Schedule (e.g. 3 days a week)
+  if (
+    /\b(?:comfortable commuting|able to commute|willing to commute|commute to.*office|days a week.*office|office.*(?:three|\d+)\s*days a week|(?:three|\d+)\s*days a week.*office)\b/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') return 'true';
+    return matchChoiceOption('Yes', field.options) || 'Yes';
+  }
+
+  // 8. Numbered Work Experience (1)-(3) (e.g. employer (1), job title (2))
+  const numberedMatch = combined.match(
+    /\(([1-3])\)|#([1-3])|\bemployer\s*([1-3])\b|\bcompany\s*([1-3])\b|\btitle\s*([1-3])\b|\bjob title\s*\(([1-3])\)/i
+  );
+  if (numberedMatch && profile) {
+    const numStr =
+      numberedMatch[1] ||
+      numberedMatch[2] ||
+      numberedMatch[3] ||
+      numberedMatch[4] ||
+      numberedMatch[5] ||
+      numberedMatch[6];
+    const idx = parseInt(numStr, 10) - 1;
+    const expList = Array.isArray(profile.work_experience)
+      ? profile.work_experience
+      : [];
+    const exp = expList[idx] as any;
+    if (exp) {
+      if (/\b(?:employer|company|organization|name of.*employer)\b/i.test(combined)) {
+        return exp.company || exp.employer || null;
+      }
+      if (/\b(?:title|job title|role|position)\b/i.test(combined)) {
+        return exp.title || exp.job_title || exp.role || null;
+      }
+      if (/\b(?:duration|dates?|employment dates?)\b/i.test(combined)) {
+        return exp.duration || exp.dates || null;
+      }
+    }
+  }
+
+  // 9. Compliance Defaults: Military Service, Overtime, Travel
+  if (
+    /\b(?:served in the (?:u\.?s\.?\s*)?armed forces|military service|armed forces|veteran status.*list duties)\b/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'textarea' || field.type === 'text') {
+      return 'N/A';
+    }
+  }
+
+  if (
+    /\b(?:willing to work overtime|work overtime if necessary|work overtime)\b/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') return 'true';
+    return matchChoiceOption('Yes', field.options) || 'Yes';
+  }
+
+  if (
+    /\b(?:willing to travel|open to travel|ability to travel)\b/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') return 'true';
+    return matchChoiceOption('Yes', field.options) || 'Yes';
   }
 
   return null;

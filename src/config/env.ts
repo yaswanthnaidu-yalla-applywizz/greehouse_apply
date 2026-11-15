@@ -46,6 +46,7 @@ const envSchema = z.object({
 
   /** Claude Model ID for Tier 5 resolution */
   CLAUDE_MODEL: z.string().default('claude-haiku-5-5'),
+  CLAUDE_SONNET_MODEL: z.string().default('claude-sonnet-5-5'),
 
   /** AWS Region for Bedrock */
   AWS_REGION: z.string().default('us-east-1'),
@@ -85,6 +86,7 @@ const envSchema = z.object({
 
   /** OpenRouter model used for low-confidence Tier 5 escalation. */
   DEEPSEEK_R1_MODEL: z.string().default('deepseek/deepseek-r1-0528'),
+  DEEPSEEK_FLASH_MODEL: z.string().default('deepseek/deepseek-v4.1-flash-1017'),
 
   /** Generic LLM API key fallback */
   LLM_API_KEY: z.string().optional(),
@@ -351,16 +353,38 @@ const resolvedClaudeWorkspaceId = (
   ''
 ).trim();
 
-const resolvedLlmProvider = 'anthropic' as const;
+const resolvedGeminiApiKey = (
+  rawEnv.GEMINI_API_KEY ||
+  getEnvValue('GEMINI_API_KEY') ||
+  ''
+).trim();
+
+const envLlmProvider = (getEnvValue('LLM_PROVIDER') || rawEnv.LLM_PROVIDER || 'anthropic').toLowerCase();
+const resolvedLlmProvider: 'anthropic' | 'gemini' | 'ollama' | 'openrouter' =
+  envLlmProvider === 'gemini'
+    ? 'gemini'
+    : envLlmProvider === 'ollama'
+      ? 'ollama'
+      : envLlmProvider === 'openrouter'
+        ? 'openrouter'
+        : 'anthropic';
 
 /**
  * Resolves the active LLM API key based on the configured LLM_PROVIDER and available keys.
- * Strictly enforces Anthropic Claude API key for Tier 5 LLM resolution.
  *
  * @param _env - Parsed environment data
  * @returns The active LLM API key string, or empty string if not configured
  */
 function resolveLlmApiKey(_env: typeof rawEnv): string {
+  if (resolvedLlmProvider === 'gemini') {
+    return resolvedGeminiApiKey || resolvedClaudeApiKey;
+  }
+  if (resolvedLlmProvider === 'ollama') {
+    return 'ollama-local';
+  }
+  if (resolvedLlmProvider === 'openrouter') {
+    return rawEnv.OPENROUTER_API_KEY || getEnvValue('OPENROUTER_API_KEY') || resolvedClaudeApiKey;
+  }
   return resolvedClaudeApiKey;
 }
 
@@ -375,10 +399,19 @@ export const config = {
   CLAUDE_API_KEY: resolvedClaudeApiKey || undefined,
   ANTHROPIC_WORKSPACE_ID: resolvedClaudeWorkspaceId || undefined,
   CLAUDE_MODEL: (getEnvValue('CLAUDE_MODEL') || rawEnv.CLAUDE_MODEL || 'claude-haiku-5-5').trim(),
+  CLAUDE_SONNET_MODEL: (getEnvValue('CLAUDE_SONNET_MODEL') || rawEnv.CLAUDE_SONNET_MODEL || 'claude-sonnet-5-5').trim(),
+  GEMINI_API_KEY: resolvedGeminiApiKey || undefined,
+  GEMINI_MODEL: (getEnvValue('GEMINI_MODEL') || 'gemini-3.5-flash-lite').trim(),
+  GEMINI_DEEP_MODEL: (getEnvValue('GEMINI_DEEP_MODEL') || 'gemini-3.5-flash-lite').trim(),
+  GEMINI_FALLBACK_MODEL: (getEnvValue('GEMINI_FALLBACK_MODEL') || 'gemini-flash-lite-latest').trim(),
+  OLLAMA_ENDPOINT: (getEnvValue('OLLAMA_ENDPOINT') || 'http://localhost:11434').trim(),
+  OLLAMA_MODEL: (getEnvValue('OLLAMA_MODEL') || 'llama3.1:latest').trim(),
+  OLLAMA_SONNET_MODEL: (getEnvValue('OLLAMA_SONNET_MODEL') || 'qwen3:latest').trim(),
   OPENROUTER_MODEL: isSandboxEnv
     ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
     : rawEnv.OPENROUTER_MODEL,
   DEEPSEEK_R1_MODEL: rawEnv.DEEPSEEK_R1_MODEL,
+  DEEPSEEK_FLASH_MODEL: rawEnv.DEEPSEEK_FLASH_MODEL,
   /** Active LLM API key resolved from LLM_API_KEY or provider-specific keys */
   ACTIVE_LLM_API_KEY: resolveLlmApiKey(rawEnv),
   /** Active Azure / Microsoft 365 Tenant ID */

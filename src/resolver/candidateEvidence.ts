@@ -13,6 +13,7 @@ const STOP_WORDS = new Set([
 ]);
 
 type EvidenceFact = { path: string; value: string };
+type ProfilePhone = { nationalNumber: string; callingCode: string };
 
 function phoneNumberFromText(value: string): string | null {
   const candidates = value.match(/(?:\+\s*)?(?:\(?\d{2,4}\)?[\s.-]*){2,4}\d{3,4}/g) || [];
@@ -32,6 +33,25 @@ function phoneNumberFromText(value: string): string | null {
     .filter((candidate): candidate is string => Boolean(candidate));
 
   return normalized.length === 1 ? normalized[0] : null;
+}
+
+function validatedProfilePhone(profile: Record<string, unknown>): ProfilePhone | null {
+  const phone = typeof profile.phone === 'string' ? profile.phone.trim() : '';
+  if (!phone) return null;
+
+  const callingCodeValue = profile.country_code ?? profile.countryCode;
+  const callingCode = typeof callingCodeValue === 'string'
+    ? callingCodeValue.trim().replace(/^\+/, '')
+    : '';
+  const parsed = phone.startsWith('+')
+    ? parsePhoneNumberFromString(phone, { extract: false })
+    : /^\d{1,3}$/.test(callingCode)
+      ? parsePhoneNumberFromString(phone, { defaultCallingCode: callingCode, extract: false })
+      : undefined;
+
+  return parsed?.isValid()
+    ? { nationalNumber: parsed.nationalNumber, callingCode: parsed.countryCallingCode }
+    : null;
 }
 
 function isContactLine(line: string): boolean {
@@ -67,6 +87,21 @@ export function extractResumePhone(resumeFacts: unknown, resumeText = ''): strin
   return null;
 }
 
+function extractResumePhoneCallingCode(resumeFacts: unknown, resumeText: string, nationalNumber: string): string | null | undefined {
+  const explicitNumbers = firstResumeHeaderLines(resumeFacts, resumeText)
+    .filter(isContactLine)
+    .flatMap((line) => line.match(/(?:\+\s*)?(?:\(?\d{2,4}\)?[\s.-]*){2,4}\d{3,4}/g) || [])
+    .filter((candidate) => candidate.trim().startsWith('+'))
+    .flatMap((candidate) => {
+      const parsed = parsePhoneNumberFromString(candidate.trim(), { extract: false });
+      return parsed?.isPossible() && parsed.nationalNumber === nationalNumber ? [parsed] : [];
+    });
+  const unique = new Map(explicitNumbers.map((parsed) => [parsed.number, parsed]));
+  if (unique.size === 0) return undefined;
+  if (unique.size > 1) return null;
+  return unique.values().next().value?.countryCallingCode || null;
+}
+
 export function resumeAnswerMatchesPhone(
   answer: string,
   resumeFacts: unknown,
@@ -75,6 +110,28 @@ export function resumeAnswerMatchesPhone(
   const resumePhone = extractResumePhone(resumeFacts, resumeText);
   const answerPhone = phoneNumberFromText(answer);
   return resumePhone && answerPhone === resumePhone ? resumePhone : null;
+}
+
+/** Accept a phone only when it matches one unambiguous, validated candidate source. */
+export function supportedCandidatePhoneAnswer(
+  answer: string,
+  profile: unknown,
+  resumeFacts: unknown,
+  resumeText = ''
+): string | null {
+  const profilePhone = profile && typeof profile === 'object'
+    ? validatedProfilePhone(profile as Record<string, unknown>)
+    : null;
+  const resumePhone = extractResumePhone(resumeFacts, resumeText);
+  if (profilePhone && resumePhone) {
+    const resumeCallingCode = extractResumePhoneCallingCode(resumeFacts, resumeText, resumePhone);
+    if (resumeCallingCode === null) return null;
+    if (profilePhone.nationalNumber !== resumePhone ||
+        (resumeCallingCode !== undefined && profilePhone.callingCode !== resumeCallingCode)) return null;
+  }
+
+  const supportedPhone = resumePhone || profilePhone?.nationalNumber || null;
+  return supportedPhone && phoneNumberFromText(answer) === supportedPhone ? supportedPhone : null;
 }
 
 function collectFacts(value: unknown, path: string, facts: EvidenceFact[], depth = 0): void {
@@ -154,8 +211,13 @@ export function buildQuestionRelevantEvidence(
   const facts: EvidenceFact[] = [];
 
   if (phoneField) {
-    const phone = extractResumePhone(resumeFacts, resumeText);
-    return phone ? `Resume contact phone: ${phone}` : '';
+    const resumePhone = extractResumePhone(resumeFacts, resumeText);
+    const profilePhone = validatedProfilePhone(candidate);
+    const lines = [
+      resumePhone ? `Resume contact phone: ${resumePhone}` : null,
+      profilePhone ? `Profile phone (candidate-provided): ${profilePhone.nationalNumber}` : null,
+    ];
+    return lines.filter((line): line is string => line !== null).join('\n');
   }
 
   for (const key of [

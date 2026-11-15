@@ -22,6 +22,18 @@ import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { buildQuestionRelevantEvidence } from './candidateEvidence.js';
 import { isBehavioralOrMotivationalQuestion } from './starClassifier.js';
 import { CORPORATE_POLICY_PROMPT_GUIDELINES } from './corporatePolicies.js';
+import { isPipelineAbortRequested } from '../orchestrator/pipelineAbort.js';
+import { callGemini } from './geminiProvider.js';
+import { callOllama } from './ollamaProvider.js';
+import {
+  AnthropicHttpBatchProvider,
+  executeAnthropicBatchWithRetry,
+  JsonBatchRunStateStore,
+  type AnthropicBatchProvider,
+  type AnthropicBatchRequest,
+  type AnthropicBatchStatus,
+  type BatchRunStateStore,
+} from './anthropicMessageBatch.js';
 
 const log = createLogger('LLM Synthesizer');
 
@@ -150,6 +162,7 @@ export interface BatchQuestion {
 export interface BatchSynthesizeResult {
   answers: string[];
   confidences?: number[];
+  supportQuotes?: string[];
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -161,12 +174,28 @@ export interface BatchSynthesizeResult {
   };
 }
 
+const answerSupportQuotes = new WeakMap<ResolvedField, string>();
+
+export function getAnswerSupportQuote(answer: ResolvedField | null | undefined): string | undefined {
+  return answer ? answerSupportQuotes.get(answer) : undefined;
+}
+
 /**
  * Options configuring the LLMSynthesizer.
  */
 export interface LLMSynthesizerOptions {
-  /** Active LLM provider (strictly 'anthropic') */
-  provider?: 'anthropic';
+  /** Active LLM provider ('anthropic', 'gemini', or 'ollama') */
+  provider?: 'anthropic' | 'gemini' | 'ollama';
+  /** Gemini API key override */
+  geminiApiKey?: string;
+  /** Gemini model override */
+  geminiModel?: string;
+  /** Ollama endpoint override */
+  ollamaEndpoint?: string;
+  /** Ollama model override */
+  ollamaModel?: string;
+  /** Ollama Sonnet review model override */
+  ollamaSonnetModel?: string;
   /** Anthropic workspace ID override */
   workspaceId?: string;
   /** LLM API Key override */
@@ -177,6 +206,11 @@ export interface LLMSynthesizerOptions {
   openRouterApiKey?: string;
   /** DeepSeek model override; production configuration defaults to R1 0528. */
   deepSeekModel?: string;
+  /** Provider and state-store seams for offline Message Batch protocol tests. */
+  batchProvider?: AnthropicBatchProvider;
+  batchStateStore?: BatchRunStateStore;
+  batchPollIntervalMs?: number;
+  batchPollSleep?: (milliseconds: number) => Promise<void>;
 }
 
 /**
@@ -323,9 +357,352 @@ function buildProfileDecisionContext(field: ScannedField, profile: ApplyWizzCand
 
 export const LLM_MIN_CONFIDENCE = 0.65;
 
+export type Tier5QuestionKind = 'factual' | 'creative' | 'experience';
+
+export interface Tier5AnswerDecision {
+  kind: Tier5QuestionKind;
+  evidence: string;
+  supportQuote: string;
+  stage: 'haiku' | 'sonnet' | 'deepseek-flash' | 'deepseek-r1';
+  answer: string;
+  confidence: number | null;
+  accepted: boolean;
+  reason: 'supported' | 'missing_evidence' | 'irrelevant_evidence' | 'unsupported_evidence' | 'contradictory_evidence' | 'low_confidence' | 'empty_answer' | 'review_required';
+}
+
+const GROUNDING_STOP_WORDS = new Set(['a', 'an', 'and', 'are', 'as', 'at', 'do', 'does', 'for', 'from', 'have', 'how', 'i', 'in', 'is', 'it', 'me', 'my', 'of', 'on', 'or', 'the', 'this', 'to', 'was', 'were', 'what', 'when', 'where', 'which', 'who', 'why', 'with', 'you', 'your', 'worked', 'work', 'experience']);
+
+function groundingTokens(text: string): string[] {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter((token) => token.length > 2 && !GROUNDING_STOP_WORDS.has(token));
+}
+
+function hasQuestionRelevantEvidence(field: ScannedField, key: string): boolean {
+  const questionTokens = new Set(groundingTokens(`${field.label} ${field.name} ${field.fieldId}`));
+  const keyText = key.toLowerCase().replace(/[_-]+/g, ' ');
+  const question = `${field.label} ${field.name} ${field.fieldId}`.toLowerCase();
+  if (/authorized to work|work authorization|legal right to work|eligible to work/.test(question) && /work authorization|work eligibility|visa status/.test(keyText)) return true;
+  if (/veteran|military/.test(question) && /veteran|military/.test(keyText)) return true;
+  if (/sponsorship|require.{0,20}visa/.test(question) && /requires sponsorship|sponsorship required/.test(keyText)) return true;
+  if (/\b(?:college|university|associate|bachelor|master|doctorate|ph\.?d|degree)\b/.test(question) &&
+      /(?:^|[\s.])(?:profile[.\s]+)?(?:education|resume[.\s]+facts[.\s]+education)(?=[\s\[.]|$)/i.test(keyText)) return true;
+  return groundingTokens(keyText).some((token) => questionTokens.has(token));
+}
+
+type EvidencePolarity = 'affirmative' | 'negative' | 'uncertain';
+
+function workAuthorizationPolarity(text: string, answer = false): EvidencePolarity {
+  const normalized = text.toLowerCase().replace(/\b(u\.s\.|us)\b/g, 'united states');
+  if (answer && /^\s*(?:yes|y|true)\b/i.test(normalized)) return 'affirmative';
+  if (answer && /^\s*(?:no|n|false)\b/i.test(normalized)) return 'negative';
+  const concept = String.raw`(?:(?:authorized|eligible|permitted|have the legal right)\s+to\s+work|work\s+authorization|authorized|eligible|permitted)`;
+  // Keep negation attached to its clause so sponsorship negation cannot flip authorization.
+  const clauses = normalized.split(/[.!?;,:]|\b(?:but|however|although|whereas)\b/).map((clause) => clause.trim()).filter(Boolean);
+  const polarities = clauses.map((clause): EvidencePolarity | null => {
+    const hasAuthorization = new RegExp(String.raw`\b(?:${concept}|u\.s\.?\s+citizen|united states citizen)\b`, 'i').test(clause);
+    if (!hasAuthorization) return null;
+    // Do not infer polarity through a double negative or unresolved status.
+    if (/\b(?:not|never|no)\b.{0,32}\b(?:without|lack(?:s|ed)?|absence)\b|\b(?:without|lack(?:s|ed)?|absence)\b.{0,32}\b(?:not|never|no)\b|\b(?:pending|uncertain|unknown|unclear|undetermined|not sure|unsure|do not know|don't know)\b/i.test(clause)) return 'uncertain';
+    if (new RegExp(String.raw`\bno\s+(?:(?:current|valid|existing)\s+){0,2}(?:${concept})\b`, 'i').test(clause) ||
+        new RegExp(String.raw`\b(?:lack(?:s|ed)?\s+(?:of\s+)?|absence\s+of\s+)(?:(?:current|valid|existing)\s+){0,2}(?:${concept})\b`, 'i').test(clause) ||
+        new RegExp(String.raw`\b(?:without|does not|do not|doesn't|don't)\s+(?:(?:currently|current|valid|existing)\s+){0,2}(?:have\s+)?(?:${concept})\b`, 'i').test(clause) ||
+        new RegExp(String.raw`\b(?:not|never|cannot|can't|unable|ineligible)\b(?:\s+\w+){0,3}\s+(?:${concept})`, 'i').test(clause) ||
+        new RegExp(String.raw`\b(?:not|never|cannot|can't|unable|ineligible)\b.{0,28}\b(?:authorized|eligible|permitted|right to work)\b`, 'i').test(clause)) return 'negative';
+    if (/\b(?:u\.s\.?\s+citizen|united states citizen)\b/i.test(clause) || new RegExp(String.raw`\b(?:${concept})\b`, 'i').test(clause)) return 'affirmative';
+    return 'uncertain';
+  });
+  const authorizationPolarities = polarities.filter((polarity): polarity is EvidencePolarity => polarity !== null);
+  const known = new Set(authorizationPolarities.filter((polarity) => polarity !== 'uncertain'));
+  if (!authorizationPolarities.length || known.size > 1 || authorizationPolarities.includes('uncertain')) return 'uncertain';
+  return known.values().next().value || 'uncertain';
+}
+
+function yesNoPolarity(text: string, answer = false): EvidencePolarity {
+  if (/^\s*(?:yes|y|true|1)\s*$/i.test(text)) return 'affirmative';
+  if (/^\s*(?:no|n|false|0)\s*$/i.test(text)) return 'negative';
+  const clauses = text.toLowerCase().split(/[.!?;,:]|\b(?:but|however|although|whereas)\b/).map((part) => part.trim()).filter(Boolean);
+  const polarities = clauses.map((clause): EvidencePolarity | null => {
+    if (/\b(?:veteran|military service|served in (?:the )?(?:military|armed forces))\b/.test(clause)) {
+      if (/\b(?:not|never|no|non)\b.{0,18}\b(?:veteran|military service|served)\b|\bnon[- ]veteran\b/.test(clause)) return 'negative';
+      if (/\b(?:unknown|uncertain|unclear|pending|not sure)\b/.test(clause)) return 'uncertain';
+      return 'affirmative';
+    }
+    return null;
+  });
+  const known = new Set(polarities.filter((value): value is EvidencePolarity => value !== null && value !== 'uncertain'));
+  if (answer && !polarities.some((value) => value !== null)) return 'uncertain';
+  if (!polarities.some((value) => value !== null) || known.size > 1 || polarities.includes('uncertain')) return 'uncertain';
+  return known.values().next().value || 'uncertain';
+}
+
+function sponsorshipPolarity(text: string, answer = false): EvidencePolarity {
+  const direct = yesNoPolarity(text, answer);
+  if (direct !== 'uncertain' || answer) return direct;
+  const clauses = text.toLowerCase().split(/[.!?;,:]|\b(?:but|however|although|whereas)\b/).map((part) => part.trim()).filter(Boolean);
+  const polarities = clauses.flatMap((clause): EvidencePolarity[] => {
+    if (!/\b(?:sponsorship|visa)\b/.test(clause)) return [];
+    if (/\b(?:not|never|no|without|cannot|can't|don't|doesn't|didn't|isn't|aren't)\b.{0,32}\b(?:require|need|sponsorship|visa)\b|\bno\s+(?:visa\s+)?sponsorship\b/.test(clause)) return ['negative'];
+    if (/\b(?:require|requires|requiring|need|needs|will need|must obtain)\b.{0,32}\b(?:sponsorship|visa)\b|\b(?:sponsorship|visa)\b.{0,24}\b(?:required|needed)\b/.test(clause)) return ['affirmative'];
+    return ['uncertain'];
+  });
+  const known = new Set(polarities.filter((polarity) => polarity !== 'uncertain'));
+  if (!polarities.length || known.size > 1 || polarities.includes('uncertain')) return 'uncertain';
+  return known.values().next().value || 'uncertain';
+}
+
+function genericYesNoPolarity(field: ScannedField, text: string, answer = false): EvidencePolarity {
+  const question = `${field.label} ${field.name}`.toLowerCase();
+  if (/\b(?:not|never|without|cannot|can't|ineligible|unable)\b/.test(question)) return 'uncertain';
+  const direct = yesNoPolarity(text, answer);
+  if (direct !== 'uncertain' || answer) return direct;
+  const concepts = groundingTokens(question).filter((token) => !['yes', 'yeah', 'true', 'no', 'false', 'eligible', 'legally'].includes(token));
+  if (!concepts.length) return 'uncertain';
+  const clauses = text.toLowerCase().split(/[.!?;,:]|\b(?:but|however|although|whereas)\b/).map((part) => part.trim()).filter(Boolean);
+  const polarities = clauses.flatMap((clause): EvidencePolarity[] => {
+    const clauseTokens = new Set(groundingTokens(clause));
+    const matched = concepts.filter((concept) => clauseTokens.has(concept));
+    if (!matched.length) return [];
+    if (/\b(?:unknown|uncertain|unclear|pending|not sure|unsure|undetermined)\b/.test(clause)) return ['uncertain'];
+    const pattern = matched.join('|');
+    if (new RegExp(String.raw`\b(?:not|never|no|without|cannot|can't|don't|doesn't|didn't|isn't|aren't)\b.{0,24}\b(?:${pattern})\b`, 'i').test(clause)) return ['negative'];
+    return ['affirmative'];
+  });
+  const known = new Set(polarities.filter((polarity) => polarity !== 'uncertain'));
+  if (!polarities.length || known.size > 1 || polarities.includes('uncertain')) return 'uncertain';
+  return known.values().next().value || 'uncertain';
+}
+
+function questionEvidencePolarity(field: ScannedField, evidenceKey: string, value: string, answer = false): EvidencePolarity | null {
+  const question = `${field.label} ${field.name} ${field.fieldId}`.toLowerCase();
+  const key = evidenceKey.toLowerCase().replace(/[_-]+/g, ' ');
+  if (/authorized to work|work authorization|legal right to work|eligible to work/.test(question) || /work authorization|work eligibility/.test(key)) {
+    return workAuthorizationPolarity(value, answer);
+  }
+  if (/veteran|military/.test(question) && /veteran|military/.test(key)) return yesNoPolarity(value, answer);
+  if (/sponsorship|require.{0,20}visa/.test(question) && /(?:requires sponsorship|sponsorship required|visa sponsorship|sponsorship)/.test(key)) {
+    return sponsorshipPolarity(value, answer);
+  }
+  const degreeQuestion = /\b(?:college|university|associate|bachelor|master|doctorate|ph\.?d|degree)\b/.test(question);
+  const structuredEducation = /(?:^|[\s.])(?:profile[.\s]+)?(?:education|resume[.\s]+facts[.\s]+education)(?=[\s\[.]|$)/i.test(key);
+  const structuredDegree = /(?:^|[\s.])(?:profile[.\s]+)?degree(?=[\s\[.]|$)/i.test(key);
+  if (degreeQuestion && (structuredEducation || structuredDegree)) {
+    if (answer && /^\s*(?:yes|y|true|1)\s*$/i.test(value)) return 'affirmative';
+    if (answer && /^\s*(?:no|n|false|0)\s*$/i.test(value)) return 'negative';
+    if (/\b(?:currently|still|actively)\s+(?:pursuing|working toward|studying)|\b(?:in progress|expected to graduate|candidate for)\b/i.test(value)) return 'uncertain';
+    if (/\b(?:no|never earned|never completed|without)\s+(?:a\s+|any\s+)?(?:college\s+|university\s+)?degree\b/i.test(value)) return 'negative';
+    if (/\b(?:associate|bachelor|master|doctorate|doctor of philosophy|ph\.?d|b\.?s\.?|m\.?s\.?|a\.?a\.?|a\.?s\.?)\b/i.test(value)) return 'affirmative';
+    return 'uncertain';
+  }
+  if (field.options?.some((option) => /^(?:yes|no|true|false)$/i.test(option.trim()))) {
+    return genericYesNoPolarity(field, value, answer);
+  }
+  return null;
+}
+
+function explicitExperiencePolarity(field: ScannedField, value: string, evidenceKey = ''): EvidencePolarity | null {
+  if (classifyTier5Question(field) !== 'experience') return null;
+  const topics = groundingTokens(`${field.label} ${field.name} ${field.fieldId}`)
+    .filter((token) => !['describe', 'tell', 'example', 'experience', 'experienced', 'worked', 'using', 'used', 'have', 'time'].includes(token));
+  const clauses = value.toLowerCase().split(/[.!?;,:]|\b(?:but|however|although|whereas)\b/).map((part) => part.trim()).filter(Boolean);
+  const polarities = clauses.flatMap((clause): EvidencePolarity[] => {
+    const topic = topics.find((token) => new RegExp(`\\b${token.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i').test(clause));
+    if (!topic) return [];
+    const escapedTopic = topic.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
+    if (/\b(?:may|might|possibly|perhaps|unclear|unknown|uncertain|not sure|somewhat)\b/i.test(clause)) return ['uncertain'];
+    if (new RegExp(String.raw`\b(?:no|not|never|without|lack(?:s|ed)?)\b.{0,32}\b(?:experience|experienced|exposure|familiarity|knowledge|worked|used)\b.{0,32}\b${escapedTopic}\b|\b(?:no|not|never|without|lack(?:s|ed)?)\b.{0,20}\b${escapedTopic}\b.{0,20}\b(?:experience|experienced|exposure|familiarity|knowledge|worked|used)\b`, 'i').test(clause)) return ['negative'];
+    if (/\b(?:experience|experienced|exposure|familiarity|knowledge|worked|used|proficient|hands[- ]on)\b/i.test(clause)) return ['affirmative'];
+    const normalizedKey = evidenceKey.toLowerCase().replace(/[_-]+/g, ' ');
+    if (/(?:^|[\s.])(?:profile[.\s]+)?(?:work experience|experience|resume[.\s]+facts[.\s]+experience)(?=[\s\[.]|$)/i.test(normalizedKey)) return ['affirmative'];
+    return [];
+  });
+  const known = new Set(polarities);
+  return known.size === 1 ? known.values().next().value || null : null;
+}
+
+function evidenceSupport(field: ScannedField, answer: string, evidence: string, supportQuote: string): 'supported' | 'missing_evidence' | 'irrelevant_evidence' | 'unsupported_evidence' | 'contradictory_evidence' {
+  const lines = evidence.split(/\r?\n/).map((line) => {
+    const separator = line.indexOf(':');
+    return separator < 0 ? { key: '', value: line.trim() } : { key: line.slice(0, separator).trim(), value: line.slice(separator + 1).trim() };
+  }).filter((line) => line.value);
+  if (!lines.length) return 'missing_evidence';
+  const relevant = lines.filter((line) => hasQuestionRelevantEvidence(field, `${line.key} ${line.value}`));
+  if (!relevant.length) return 'irrelevant_evidence';
+
+  if (classifyTier5Question(field) === 'experience') {
+    const polarities = relevant.map((line) => explicitExperiencePolarity(field, line.value, line.key)).filter((value): value is EvidencePolarity => value !== null);
+    if (new Set(polarities).size > 1) return 'contradictory_evidence';
+    if (polarities.includes('uncertain')) return 'unsupported_evidence';
+    const answerPolarity = explicitExperiencePolarity(field, answer);
+    if (answerPolarity === 'uncertain') return 'unsupported_evidence';
+    if (answerPolarity && polarities.some((polarity) => polarity !== answerPolarity)) return 'contradictory_evidence';
+    if (answerPolarity === 'affirmative' && !polarities.includes('affirmative')) return 'unsupported_evidence';
+  }
+
+  const quote = supportQuote.trim();
+  if (!quote) return 'missing_evidence';
+  const normalizeQuote = (value: string) => value.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  const citedLine = relevant.find((line) => normalizeQuote(line.value).includes(normalizeQuote(quote)));
+  if (!citedLine) return 'unsupported_evidence';
+
+  // A cited source can support the answer while another relevant source directly
+  // contradicts it. Aggregate explicit polarity across each question's relevant
+  // evidence family before accepting any one citation.
+  const explicitPolarities = relevant
+    .map((line) => questionEvidencePolarity(field, line.key, line.value))
+    .filter((value): value is EvidencePolarity => value === 'affirmative' || value === 'negative');
+  if (new Set(explicitPolarities).size > 1) return 'contradictory_evidence';
+
+  const polarity = questionEvidencePolarity(field, citedLine.key, citedLine.value);
+  if (polarity) {
+    const evidencePolarity = polarity === 'uncertain' && /^\s*(?:true|false|yes|no|1|0)\s*$/i.test(citedLine.value)
+      ? yesNoPolarity(citedLine.value)
+      : polarity;
+    const answerPolarity = questionEvidencePolarity(field, citedLine.key, answer, true) || yesNoPolarity(answer, true);
+    if (evidencePolarity === 'uncertain' || answerPolarity === 'uncertain') return 'unsupported_evidence';
+    if (evidencePolarity !== answerPolarity) return 'contradictory_evidence';
+    const veteranOptionMapping = /veteran|military/.test(`${field.label} ${field.name} ${field.fieldId}`.toLowerCase()) &&
+      /veteran|military/.test(citedLine.key.toLowerCase()) &&
+      field.options?.some((option) => option.trim().toLowerCase() === answer.trim().toLowerCase()) &&
+      /\b(?:veteran|military)\b/i.test(answer);
+    if (veteranOptionMapping) return 'supported';
+  }
+
+  // Require every substantive answer term to be grounded in the cited fact. A quote
+  // establishes provenance; this conservative lexical check cannot prove semantics.
+  const claimTokens = groundingTokens(answer).filter((token) => !['yes', 'yeah', 'true', 'no', 'false'].includes(token)).map((token) => ({
+    token: token === 'five' ? '5' : token,
+  })).map(({ token }) => token);
+  const evidenceTokens = new Set(groundingTokens(citedLine.value).map((token) => token === 'five' ? '5' : token));
+  const paraphraseAliases: Record<string, string[]> = {
+    eligible: ['authorized'],
+    legally: ['authorized'],
+    authorized: ['eligible'],
+  };
+  if (claimTokens.some((token) => !evidenceTokens.has(token) && !(paraphraseAliases[token] || []).some((alias) => evidenceTokens.has(alias)))) {
+    return 'unsupported_evidence';
+  }
+
+  const normalizedAnswer = answer.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const escapedAnswer = normalizedAnswer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  const answerPattern = new RegExp(`\\b${escapedAnswer}\\b`, 'i');
+  const directlyContradicted = relevant.some((line) => {
+    const matchIndex = line.value.toLowerCase().search(answerPattern);
+    if (matchIndex < 0) return false;
+    const prefix = line.value.slice(Math.max(0, matchIndex - 32), matchIndex);
+    return /(?:\bnot|\bnever|\bno|\bwithout|\bcannot|\bcan't|\bdoesn't|\bdidn't)\s+(?:\w+\s+){0,2}$/i.test(prefix);
+  });
+  if (directlyContradicted) return 'contradictory_evidence';
+  return 'supported';
+}
+
+// This is deliberately independent of isBehavioralOrMotivationalQuestion: the
+// STAR classifier labels both past examples and hypothetical prompts as behavioral.
+const PAST_EXPERIENCE_PATTERNS = [
+  /\b(?:tell|describe|give) (?:us |me )?(?:about )?(?:a time|an example|one example)\b/i,
+  /\b(?:describe|tell (?:us |me )?about) (?:a|the) .{0,80}\byou (?:faced|experienced|encountered|handled|resolved|navigated|overcame|built|led|improved|delivered)\b/i,
+  /\b(?:how|what) have you\b/i,
+  /\bhave you (?:ever )?(?:worked|used|built|led|managed|handled|resolved|navigated|overcome|improved|delivered|created|implemented|experienced|encountered|faced)\b/i,
+  /\b(?:how|when) did you\b/i,
+  /\btell (?:us |me )?how you (?:handled|resolved|navigated|overcame|managed|addressed|responded to|dealt with|improved|built|led|delivered)\b/i,
+  /\bexample of (?:a time|when you|how you|your)\b/i,
+  /\btime when you\b/i,
+  /\bproject (?:where|in which) you\b/i,
+  /\bproject you (?:led|built|delivered|worked on|improved)\b/i,
+  /\b(?:what|which) (?:relevant )?experience do you have\b/i,
+  /\bdescribe (?:your|the candidate's) experience\b/i,
+  /\btell (?:us|me) about your experience\b/i,
+  /\bexperience (?:with|in|using)\b/i,
+  /\b(?:situation|challenge|conflict|project) (?:that|where|in which) you\b/i,
+];
+
+const MOTIVATION_PATTERNS = [
+  /\bwhy (?:do you want to work|do you want to join|choose|join|are you interested in)\b/i,
+  /\bwhy (?:this role|our company|applywizz|us|this team)\b/i,
+  /\bwhat (?:excites|interests|attracts|draws) you\b/i,
+  /\bwhat makes you a good fit\b/i,
+  /\bwhy should we hire you\b/i,
+];
+
+const HYPOTHETICAL_PATTERNS = [
+  /\bhow would you\b/i,
+  /\bwhat would you do\b/i,
+  /\bwhat would you\b/i,
+  /\bif you (?:were|had|encountered|faced)\b/i,
+  /\bimagine (?:that|you)\b/i,
+  /\bsuppose (?:that|you)\b/i,
+];
+
+export function classifyTier5Question(field: ScannedField): Tier5QuestionKind {
+  if (['select', 'radio', 'checkbox'].includes(field.type) && field.options?.length) return 'factual';
+  const label = field.label || '';
+  if (PAST_EXPERIENCE_PATTERNS.some((pattern) => pattern.test(label))) return 'experience';
+  if (MOTIVATION_PATTERNS.some((pattern) => pattern.test(label)) || HYPOTHETICAL_PATTERNS.some((pattern) => pattern.test(label))) return 'creative';
+  return 'factual';
+}
+
+function hasUnsupportedCreativePastClaim(answer: string, evidence: string): boolean {
+  const actions = 'built|created|designed|developed|delivered|deployed|drove|implemented|improved|launched|led|managed|migrated|owned|shipped|used|worked';
+  const actionVariants: Record<string, string> = {
+    built: 'build|built', created: 'create|created', designed: 'design|designed',
+    developed: 'develop|developed', delivered: 'deliver|delivered', deployed: 'deploy|deployed',
+    drove: 'drive|drove', implemented: 'implement|implemented', improved: 'improve|improved',
+    launched: 'launch|launched', led: 'lead|led', managed: 'manage|managed',
+    migrated: 'migrate|migrated', owned: 'own|owned', shipped: 'ship|shipped',
+    used: 'use|used', worked: 'work|worked',
+  };
+  const claims = [...answer.matchAll(new RegExp(String.raw`\bI\s+(?:have\s+)?(${actions})\b([^.!?;]*)`, 'gi'))];
+  if (!claims.length) return false;
+  const genericClaimWords = new Set(['company', 'experience', 'project', 'result', 'role', 'team', 'work']);
+  return claims.some((claim) => {
+    const action = claim[1].toLowerCase();
+    const objectTokens = groundingTokens(claim[2]).filter((token) => !genericClaimWords.has(token));
+    const actionPattern = actionVariants[action] || action;
+    // Allow scoped negation with common modifiers ("did not personally lead").
+    const negatedAction = new RegExp(String.raw`\b(?:did\s+not|didn't|have\s+not|has\s+not|never|not|no,?\s+i\s+(?:did\s+not|didn't))\s+(?:(?:personally|directly|actually|ever)\s+){0,3}(?:have\s+)?(?:${actionPattern})\b`, 'i');
+    const evidenceClauses = evidence.split(/[.!?;\n]+/);
+    const matchingEvidence = evidenceClauses.filter((clause) => {
+      const clauseTokens = new Set(groundingTokens(clause));
+      const matching = objectTokens.filter((token) => clauseTokens.has(token)).length;
+      return objectTokens.length > 0 && matching / objectTokens.length >= 0.75;
+    });
+    if (matchingEvidence.some((clause) => negatedAction.test(clause))) return true;
+    // Matching the project/tool is not enough: the evidence must support the
+    // action being claimed, so "worked on" cannot substantiate "led".
+    const supportedAction = new RegExp(String.raw`\b(?:I\s+)?(?:have\s+)?(?:${actionPattern})\b`, 'i');
+    return !matchingEvidence.some((clause) => supportedAction.test(clause));
+  });
+}
+
+export function decideTier5Answer(input: {
+  field: ScannedField;
+  answer: string;
+  evidence: string;
+  supportQuote?: string | null;
+  confidence: number | null | undefined;
+  stage: Tier5AnswerDecision['stage'];
+  reviewed?: boolean;
+}): Tier5AnswerDecision {
+  const kind = classifyTier5Question(input.field);
+  const answer = input.answer.trim();
+  let reason: Tier5AnswerDecision['reason'] = 'supported';
+  let accepted = Boolean(answer);
+  if (!answer) { accepted = false; reason = 'empty_answer'; }
+  else if (kind === 'creative') {
+    if (hasUnsupportedCreativePastClaim(answer, input.evidence)) { accepted = false; reason = 'unsupported_evidence'; }
+    if (input.field.isRequired && !input.reviewed) { accepted = false; reason = 'review_required'; }
+  } else {
+    const support = evidenceSupport(input.field, answer, input.evidence, input.supportQuote || '');
+    if (support !== 'supported') { accepted = false; reason = support; }
+    else if (typeof input.confidence !== 'number' || !Number.isFinite(input.confidence) || input.confidence < 0.70) {
+      accepted = false; reason = 'low_confidence';
+    }
+  }
+  return { kind, evidence: input.evidence, supportQuote: input.supportQuote || '', stage: input.stage, answer, confidence: input.confidence ?? null, accepted, reason };
+}
+
 export interface BatchAnswerItem {
   answer: string;
   confidence?: number | null;
+  supportQuote?: string | null;
 }
 
 export interface CalibrationContext {
@@ -484,23 +861,24 @@ function aiField(field: ScannedField, value: string, confidence: number): Resolv
   };
 }
 
-export function parseLlmResponse(raw: string): { answer: string; confidence: number | null } {
+export function parseLlmResponse(raw: string): { answer: string; confidence: number | null; supportQuote: string | null } {
   const cleaned = cleanLLMOutput(raw);
   try {
     const parsed = (extractJsonValue(cleaned) || JSON.parse(cleaned)) as {
       answer?: unknown;
       value?: unknown;
       confidence?: unknown;
+      supportQuote?: unknown;
     };
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const answer = String(parsed.answer ?? parsed.value ?? '').trim();
       const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : null;
-      return { answer, confidence };
+      return { answer, confidence, supportQuote: typeof parsed.supportQuote === 'string' ? parsed.supportQuote : null };
     }
   } catch {
     // plain-text answer
   }
-  return { answer: cleaned, confidence: null };
+  return { answer: cleaned, confidence: null, supportQuote: null };
 }
 
 function extractJsonValue(text: string): unknown | null {
@@ -559,18 +937,19 @@ export function parseBatchAnswerItems(raw: string, expectedCount: number): Batch
 
   const items: BatchAnswerItem[] = parsed.map((item) => {
     if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
-      return { answer: cleanLLMOutput(String(item)), confidence: null };
+      return { answer: cleanLLMOutput(String(item)), confidence: null, supportQuote: null };
     }
     if (item && typeof item === 'object') {
       const obj = item as Record<string, unknown>;
       const ans = cleanLLMOutput(String(obj.answer ?? obj.value ?? ''));
       const conf = typeof obj.confidence === 'number' ? obj.confidence : null;
-      return { answer: ans, confidence: conf };
+      const supportQuote = typeof obj.supportQuote === 'string' ? cleanLLMOutput(obj.supportQuote) : null;
+      return { answer: ans, confidence: conf, supportQuote };
     }
-    return { answer: '', confidence: null };
+    return { answer: '', confidence: null, supportQuote: null };
   });
 
-  return Array.from({ length: expectedCount }, (_, index) => items[index] || { answer: '', confidence: null });
+  return Array.from({ length: expectedCount }, (_, index) => items[index] || { answer: '', confidence: null, supportQuote: null });
 }
 
 export function parseBatchAnswerResponse(raw: string, expectedCount: number): string[] | null {
@@ -667,19 +1046,39 @@ export function matchFuzzyOption(text: string, options?: string[]): string | nul
  * Tier 5 Answer Synthesizer invoking Anthropic Claude API.
  */
 export class LLMSynthesizer {
-  private readonly provider = 'anthropic' as const;
+  private readonly provider: 'anthropic' | 'gemini' | 'ollama';
   private readonly workspaceId?: string;
   private readonly apiKey: string;
+  private readonly geminiApiKey: string;
   private readonly modelName: string;
+  private readonly geminiModel: string;
+  private readonly ollamaEndpoint: string;
+  private readonly ollamaModel: string;
+  private readonly ollamaSonnetModel: string;
   private readonly deepSeekModel: string;
   private readonly openRouterApiKey: string;
+  private readonly batchProvider?: AnthropicBatchProvider;
+  private readonly batchStateStore: BatchRunStateStore;
+  private readonly batchPollIntervalMs?: number;
+  private readonly batchPollSleep?: (milliseconds: number) => Promise<void>;
 
   /**
-   * Initializes the LLMSynthesizer strictly with Anthropic Claude configuration.
+   * Initializes the LLMSynthesizer with Anthropic, Gemini, or Ollama configuration.
    *
    * @param options - Configuration overrides.
    */
   constructor(options: LLMSynthesizerOptions = {}) {
+    this.geminiApiKey = (
+      options.geminiApiKey !== undefined
+        ? options.geminiApiKey
+        : (config.GEMINI_API_KEY ?? '')
+    ).trim();
+    this.geminiModel = (options.geminiModel ?? config.GEMINI_MODEL ?? 'gemini-3.5-flash-lite').trim();
+    this.ollamaEndpoint = (options.ollamaEndpoint ?? config.OLLAMA_ENDPOINT ?? 'http://localhost:11434').trim();
+    this.ollamaModel = (options.ollamaModel ?? config.OLLAMA_MODEL ?? 'llama3.1:latest').trim();
+    this.ollamaSonnetModel = (options.ollamaSonnetModel ?? config.OLLAMA_SONNET_MODEL ?? 'qwen3:latest').trim();
+    this.provider = options.provider ?? (config.LLM_PROVIDER as 'anthropic' | 'gemini' | 'ollama') ?? 'anthropic';
+
     this.apiKey = (
       options.apiKey !== undefined
         ? options.apiKey
@@ -689,15 +1088,31 @@ export class LLMSynthesizer {
     this.modelName = (options.modelName ?? config.CLAUDE_MODEL ?? 'claude-haiku-5-5').trim();
     this.deepSeekModel = (options.deepSeekModel ?? config.DEEPSEEK_R1_MODEL).trim();
     this.openRouterApiKey = (options.openRouterApiKey ?? config.OPENROUTER_API_KEY ?? '').trim();
+    this.batchProvider = options.batchProvider ?? (this.apiKey
+      ? new AnthropicHttpBatchProvider(this.apiKey, this.workspaceId)
+      : undefined);
+    this.batchStateStore = options.batchStateStore ?? new JsonBatchRunStateStore(
+      '.ai/anthropic-message-batch-runs.json'
+    );
+    this.batchPollIntervalMs = options.batchPollIntervalMs;
+    this.batchPollSleep = options.batchPollSleep;
 
     const isSandbox = process.env.SANDBOX === 'true' || process.env.SANDBOX === '1';
-    if (isSandbox && !this.apiKey) {
-      log.warn('⚠️ Sandbox mode: CLAUDE_API_KEY is not configured for LLM synthesis.');
+    if (isSandbox && !this.apiKey && !this.geminiApiKey && this.provider !== 'ollama') {
+      log.warn('⚠️ Sandbox mode: No API key configured for LLM synthesis.');
     }
   }
 
   public getProviderDiagnostics(): { provider: string; model: string } {
-    return { provider: this.provider, model: this.modelName };
+    return {
+      provider: this.provider,
+      model:
+        this.provider === 'ollama'
+          ? this.ollamaModel
+          : this.provider === 'gemini'
+          ? this.geminiModel
+          : this.modelName,
+    };
   }
 
   public getPrimaryModelName(): string {
@@ -708,22 +1123,278 @@ export class LLMSynthesizer {
     return this.deepSeekModel;
   }
 
+  /** Creates or resumes a real Message Batch, retrying item-level provider errors once. */
+  public async runAnthropicMessageBatch(
+    runKey: string,
+    requests: AnthropicBatchRequest[],
+  ) {
+    if (!this.batchProvider) throw new Error('No Anthropic credentials configured for Message Batches.');
+    const result = await executeAnthropicBatchWithRetry(
+      runKey,
+      requests,
+      this.batchProvider,
+      this.batchStateStore,
+      (event) => log.info(
+        `[LLM Provider] event=message_batch_${event.event} batch_id=${event.batchId} elapsed_ms=${event.elapsedMs}` +
+        (event.usage ? ` input_tokens=${event.usage.inputTokens} output_tokens=${event.usage.outputTokens}` : '')
+      ),
+      { waitForCompletion: true, intervalMs: this.batchPollIntervalMs, sleep: this.batchPollSleep, shouldAbort: isPipelineAbortRequested },
+    );
+    return result;
+  }
+
+  public async runGeminiPromptBatch(
+    runKey: string,
+    prompts: readonly { customId: string; prompt: string; system: string }[],
+    model = this.geminiModel
+  ): Promise<{
+    status: AnthropicBatchStatus;
+    batchIds: string[];
+    responses: Map<string, string>;
+    failedIds: Set<string>;
+    usage?: { promptTokens: number; completionTokens: number };
+  }> {
+    const responses = new Map<string, string>();
+    const failedIds = new Set<string>();
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
+
+    if (prompts.length === 1) {
+      const { customId, prompt, system } = prompts[0];
+      try {
+        const res = await callGemini({
+          prompt,
+          systemMessage: system,
+          maxTokens: 1200,
+          modelName: model,
+          apiKey: this.geminiApiKey,
+        });
+        if (res.text?.trim()) {
+          responses.set(customId, res.text);
+        } else {
+          failedIds.add(customId);
+        }
+        if (res.usage) {
+          totalPromptTokens += res.usage.promptTokens;
+          totalCompletionTokens += res.usage.completionTokens;
+        }
+      } catch (err: any) {
+        log.warn(`[Gemini Prompt Batch] Error processing ${customId}: ${err.message}`);
+        failedIds.add(customId);
+      }
+      return {
+        status: 'ended' as const,
+        batchIds: [`gemini-batch-${runKey}`],
+        responses,
+        failedIds,
+        usage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens },
+      };
+    }
+
+    const BUNDLE_SIZE = 15;
+    const MIN_INTERVAL_MS = 4300; // ~14 RPM safe pacing for Free Tier
+
+    for (let i = 0; i < prompts.length; i += BUNDLE_SIZE) {
+      const bundleStartTime = Date.now();
+      const chunk = prompts.slice(i, i + BUNDLE_SIZE);
+
+      const bundledPrompt = `You are resolving multiple job application questions. For each task below, answer using ONLY its candidate evidence and job context.
+Return ONLY a valid JSON object mapping each task customId to its answers object:
+{
+  "tasks": {
+    "<customId>": {
+      "answers": [
+        {
+          "answer": "resolved answer text or exact choice",
+          "confidence": 0.95,
+          "supportQuote": "exact quote from candidate evidence"
+        }
+      ]
+    }
+  }
+}
+
+Tasks to resolve:
+${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${item.prompt}`).join('\n\n')}`;
+
+      const bundledSystem = `You are an automated job application assistant resolving multiple independent questions. For each task ID, answer using only the provided candidate evidence and context for that task. Return a JSON object with a 'tasks' mapping of customId to answers array. Return an empty answer with 0.0 confidence when unsupported.`;
+
+      try {
+        const res = await callGemini({
+          prompt: bundledPrompt,
+          systemMessage: bundledSystem,
+          maxTokens: 4096,
+          modelName: model,
+          apiKey: this.geminiApiKey,
+        });
+
+        if (res.usage) {
+          totalPromptTokens += res.usage.promptTokens;
+          totalCompletionTokens += res.usage.completionTokens;
+        }
+
+        let tasksMap: Record<string, any> = {};
+        try {
+          const parsed = extractJsonValue(cleanLLMOutput(res.text));
+          if (parsed && typeof parsed === 'object') {
+            tasksMap = (parsed as any).tasks || parsed;
+          }
+        } catch (parseErr: any) {
+          log.warn(`[Gemini Prompt Batch] Failed to parse JSON response for bundle: ${parseErr.message}`);
+        }
+
+        for (const item of chunk) {
+          const taskData = tasksMap[item.customId];
+          if (taskData) {
+            responses.set(item.customId, JSON.stringify(taskData));
+          } else {
+            const matchedKey = Object.keys(tasksMap).find((k) => k.toLowerCase() === item.customId.toLowerCase());
+            if (matchedKey && tasksMap[matchedKey]) {
+              responses.set(item.customId, JSON.stringify(tasksMap[matchedKey]));
+            } else {
+              failedIds.add(item.customId);
+            }
+          }
+        }
+
+        log.info(
+          `[Gemini Prompt Batch] Processed ${Math.min(i + BUNDLE_SIZE, prompts.length)}/${prompts.length} questions ` +
+            `(bundle ${Math.floor(i / BUNDLE_SIZE) + 1}/${Math.ceil(prompts.length / BUNDLE_SIZE)})`
+        );
+      } catch (err: any) {
+        log.warn(`[Gemini Prompt Batch] Error processing bundle at index ${i}: ${err.message}`);
+        for (const item of chunk) failedIds.add(item.customId);
+      }
+
+      const elapsed = Date.now() - bundleStartTime;
+      if (i + BUNDLE_SIZE < prompts.length && elapsed < MIN_INTERVAL_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_INTERVAL_MS - elapsed));
+      }
+    }
+
+    return {
+      status: 'ended' as const,
+      batchIds: [`gemini-batch-${runKey}`],
+      responses,
+      failedIds,
+      usage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens },
+    };
+  }
+
+  public async runOllamaPromptBatch(
+    runKey: string,
+    prompts: readonly { customId: string; prompt: string; system: string }[],
+    model = this.ollamaModel
+  ): Promise<{
+    status: AnthropicBatchStatus;
+    batchIds: string[];
+    responses: Map<string, string>;
+    failedIds: Set<string>;
+    usage?: { promptTokens: number; completionTokens: number };
+  }> {
+    const responses = new Map<string, string>();
+    const failedIds = new Set<string>();
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
+
+    const CHUNK_SIZE = 2;
+    for (let i = 0; i < prompts.length; i += CHUNK_SIZE) {
+      const chunk = prompts.slice(i, i + CHUNK_SIZE);
+      await Promise.all(
+        chunk.map(async ({ customId, prompt, system }) => {
+          try {
+            const res = await callOllama({
+              prompt,
+              systemMessage: system,
+              modelName: model,
+              endpoint: this.ollamaEndpoint,
+            });
+            if (res.text?.trim()) {
+              responses.set(customId, res.text);
+            } else {
+              failedIds.add(customId);
+            }
+            if (res.usage) {
+              totalPromptTokens += res.usage.promptTokens;
+              totalCompletionTokens += res.usage.completionTokens;
+            }
+          } catch (err: any) {
+            log.warn(`[Ollama Prompt Batch] Error processing ${customId}: ${err.message}`);
+            failedIds.add(customId);
+          }
+        })
+      );
+    }
+
+    return {
+      status: 'ended' as const,
+      batchIds: [`ollama-batch-${runKey}`],
+      responses,
+      failedIds,
+      usage: { promptTokens: totalPromptTokens, completionTokens: totalCompletionTokens },
+    };
+  }
+
+  public async runAnthropicPromptBatch(
+    runKey: string,
+    prompts: readonly { customId: string; prompt: string; system: string }[],
+    model = this.modelName,
+  ): Promise<{ status: AnthropicBatchStatus; batchIds: string[]; responses: Map<string, string>; failedIds: Set<string>; usage?: { promptTokens: number; completionTokens: number } }> {
+    if (this.provider === 'ollama') {
+      return this.runOllamaPromptBatch(runKey, prompts, model.includes('sonnet') ? this.ollamaSonnetModel : this.ollamaModel);
+    }
+    if (this.provider === 'gemini' || (!this.apiKey && this.geminiApiKey)) {
+      return this.runGeminiPromptBatch(runKey, prompts, model.includes('sonnet') ? config.GEMINI_DEEP_MODEL : this.geminiModel);
+    }
+
+    try {
+      const result = await this.runAnthropicMessageBatch(runKey, prompts.map(({ customId, prompt, system }) => ({
+        custom_id: customId,
+        params: {
+          model,
+          max_tokens: 1200,
+          system,
+          messages: [{ role: 'user', content: prompt }],
+        },
+      })));
+      const responses = new Map<string, string>();
+      const failedIds = new Set<string>();
+      for (const [id, item] of result.results || []) {
+        if (item.result.type !== 'succeeded') { failedIds.add(id); continue; }
+        const text = item.result.message?.content?.filter((part) => part.type === 'text').map((part) => part.text || '').join('\n');
+        if (text?.trim()) responses.set(id, text);
+      }
+      return { status: result.status, batchIds: result.batchIds, responses, failedIds,
+        ...(result.usage ? { usage: { promptTokens: result.usage.inputTokens, completionTokens: result.usage.outputTokens } } : {}) };
+    } catch (err: any) {
+      if (this.geminiApiKey && (String(err).includes('usage limits') || String(err).includes('workspace') || String(err).includes('400'))) {
+        log.warn(`[LLM Provider] Anthropic batch failed with usage limits. Automatically failing over to Gemini prompt batch.`);
+        return this.runGeminiPromptBatch(runKey, prompts, model.includes('sonnet') ? config.GEMINI_DEEP_MODEL : this.geminiModel);
+      }
+      throw err;
+    }
+  }
+
   /** Runs the one allowed Tier 5 escalation through OpenRouter JSON mode. */
   public async synthesizeDeepSeekAnswer(
     field: ScannedField,
     profile: ApplyWizzCandidateProfile,
     resumeText = '',
     jobContext: JobContext = { title: 'Software Engineer', company: 'Company' },
-    resumeFacts?: any
-  ): Promise<{ result: ResolvedField; usage?: BatchSynthesizeResult['usage'] }> {
+    resumeFacts?: any,
+    model = this.deepSeekModel,
+    reviewDraft?: string,
+  ): Promise<{ result: ResolvedField; supportQuote?: string; usage?: BatchSynthesizeResult['usage'] }> {
     const apiKey = this.openRouterApiKey;
     if (!apiKey) throw new Error('No OpenRouter credentials configured for DeepSeek escalation.');
     const options = getEffectiveFieldOptions(field);
     const isChoice = Boolean(options?.length && CHOICE_FIELD_TYPES.has(field.type));
     const systemMessage = `${isChoice
-      ? 'You are a factual job application assistant. Return JSON only with answer and confidence. The answer must exactly match one provided option.'
-      : 'You are a factual job application assistant. Return JSON only as {"answer":"...","confidence":0.0}. Use candidate evidence only; if unsupported, return NONE with low confidence.'}\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
-    const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
+      ? 'You are a factual job application assistant. Return JSON only with answer, confidence, and supportQuote. The answer must exactly match one provided option.'
+      : 'You are a factual job application assistant. Return JSON only as {"answer":"...","confidence":0.0,"supportQuote":"exact quote from candidate evidence"}. Use candidate evidence only; if unsupported, return NONE with low confidence and an empty supportQuote.'}\nFor factual answers, supportQuote must be copied verbatim from this question’s candidate evidence. It establishes provenance but does not by itself prove entailment.\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
+    const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts) + (reviewDraft
+      ? `\n\nRequired answer draft for review:\n${reviewDraft}\nReview the draft against the evidence and question. Correct unsupported or inaccurate claims. Return an empty answer if it cannot be made truthful.`
+      : '');
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -733,7 +1404,7 @@ export class LLMSynthesizer {
         'X-Title': 'ApplyWizz Tier 5 escalation',
       },
       body: JSON.stringify({
-        model: this.deepSeekModel,
+        model,
         messages: [
           { role: 'system', content: systemMessage },
           { role: 'user', content: prompt },
@@ -756,25 +1427,24 @@ export class LLMSynthesizer {
       return { result: unresolvedField(field) };
     }
     const parsed = parseLlmResponse(raw);
+    const isCreative = classifyTier5Question(field) === 'creative';
     if (
       !parsed.answer ||
-      parsed.confidence == null ||
-      !Number.isFinite(parsed.confidence) ||
-      parsed.confidence < 0.65
+      (!isCreative && (parsed.confidence == null || !Number.isFinite(parsed.confidence) || parsed.confidence < 0.65))
     ) {
       return { result: unresolvedField(field) };
     }
     const result = this.finalizeRawAnswer(raw, field, profile, jobContext, {
-      defaultConfidenceIfMissing: parsed.confidence,
+      defaultConfidenceIfMissing: parsed.confidence ?? undefined,
+      allowLowConfidenceCreative: isCreative,
     });
     const usage = data?.usage;
     const promptTokens = Number(usage?.prompt_tokens) || 0;
     const completionTokens = Number(usage?.completion_tokens) || 0;
-    const cost = typeof usage?.cost === 'number'
-      ? usage.cost
-      : (promptTokens * 0.55 + completionTokens * 2.19) / 1_000_000;
+    const cost = typeof usage?.cost === 'number' ? usage.cost : undefined;
     return {
       result,
+      supportQuote: parsed.supportQuote || undefined,
       usage: {
         promptTokens,
         completionTokens,
@@ -782,7 +1452,7 @@ export class LLMSynthesizer {
         cacheWriteTokens: 0,
         totalTokens: promptTokens + completionTokens,
         cost,
-        model: this.deepSeekModel,
+      model,
       },
     };
   }
@@ -927,10 +1597,64 @@ export class LLMSynthesizer {
       : isChoiceField
       ? 'You are an automated job application assistant. You MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.'
       : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
-    const systemMessage = `${baseSystemMessage}\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
+    const systemMessage = `${baseSystemMessage}\nFor factual answers, include supportQuote as an exact, concise quote copied from the question's candidate evidence. If the evidence does not support the answer, set answer to NONE and supportQuote to an empty string. A quote identifies its source but does not by itself prove the answer follows from it. Return JSON with answer, confidence, and supportQuote.\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
-    // If Anthropic Claude API key is configured, execute LLM call
-    if (this.apiKey) {
+    const canUseGemini = Boolean(this.geminiApiKey);
+    const preferGemini = this.provider === 'gemini' || (!this.apiKey && canUseGemini);
+
+    if (this.provider === 'ollama') {
+      try {
+        const startedAt = Date.now();
+        const { text: outputText } = await callOllama({
+          prompt,
+          systemMessage,
+          modelName: this.ollamaModel,
+          endpoint: this.ollamaEndpoint,
+        });
+        haltIfFirstProviderCallFailed(true);
+        const cleaned = cleanLLMOutput(outputText);
+        log.debug(
+          `[LLM Provider] event=request_completed operation=single provider=ollama ` +
+            `model=${this.ollamaModel} elapsed_ms=${Date.now() - startedAt} content_chars=${cleaned.length}`
+        );
+        if (cleaned && cleaned.length > 0) {
+          const result = this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+          const supportQuote = parseLlmResponse(cleaned).supportQuote;
+          if (supportQuote) answerSupportQuotes.set(result, supportQuote);
+          return result;
+        }
+      } catch (err: any) {
+        log.warn(`[LLM Provider] event=request_failed operation=single provider=ollama error=${err.message}`);
+      }
+    } else if (preferGemini) {
+      if (!this.geminiApiKey) {
+        throw new Error('No Gemini provider credentials configured.');
+      }
+      try {
+        const startedAt = Date.now();
+        const { text: outputText } = await callGemini({
+          prompt,
+          systemMessage,
+          maxTokens: 350,
+          modelName: this.geminiModel,
+          apiKey: this.geminiApiKey,
+        });
+        haltIfFirstProviderCallFailed(true);
+        const cleaned = cleanLLMOutput(outputText);
+        log.debug(
+          `[LLM Provider] event=request_completed operation=single provider=gemini ` +
+            `model=${this.geminiModel} elapsed_ms=${Date.now() - startedAt} content_chars=${cleaned.length}`
+        );
+        if (cleaned && cleaned.length > 0) {
+          const result = this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+          const supportQuote = parseLlmResponse(cleaned).supportQuote;
+          if (supportQuote) answerSupportQuotes.set(result, supportQuote);
+          return result;
+        }
+      } catch (err: any) {
+        log.warn(`[LLM Provider] event=request_failed operation=single provider=gemini error=${err.message}`);
+      }
+    } else if (this.apiKey) {
       let failureDiagnosticEmitted = false;
       try {
         const startedAt = Date.now();
@@ -945,7 +1669,10 @@ export class LLMSynthesizer {
 
         if (cleaned && cleaned.length > 0) {
           try {
-            return this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+            const result = this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+            const supportQuote = parseLlmResponse(cleaned).supportQuote;
+            if (supportQuote) answerSupportQuotes.set(result, supportQuote);
+            return result;
           } catch (error) {
             await emitFailureDiagnostic({
               category: 'RESOLVE_TIER5_PARSE',
@@ -960,6 +1687,35 @@ export class LLMSynthesizer {
           }
         }
       } catch (err: any) {
+        if (
+          canUseGemini &&
+          (String(err).includes('usage limits') ||
+            String(err).includes('workspace') ||
+            String(err).includes('400'))
+        ) {
+          log.warn(
+            `[LLM Provider] Anthropic hit workspace limit. Automatically failing over to Gemini provider.`
+          );
+          try {
+            const { text: outputText } = await callGemini({
+              prompt,
+              systemMessage,
+              maxTokens: 350,
+              modelName: this.geminiModel,
+              apiKey: this.geminiApiKey,
+            });
+            haltIfFirstProviderCallFailed(true);
+            const cleaned = cleanLLMOutput(outputText);
+            if (cleaned && cleaned.length > 0) {
+              const result = this.finalizeLlmAnswer(cleaned, field, profile, jobContext, choiceOptions);
+              const supportQuote = parseLlmResponse(cleaned).supportQuote;
+              if (supportQuote) answerSupportQuotes.set(result, supportQuote);
+              return result;
+            }
+          } catch (geminiErr: any) {
+            log.warn(`[LLM Provider] Failover to Gemini failed: ${geminiErr.message}`);
+          }
+        }
         if (!failureDiagnosticEmitted) {
           await emitFailureDiagnostic({
             category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
@@ -997,7 +1753,7 @@ export class LLMSynthesizer {
     field: ScannedField,
     profile: ApplyWizzCandidateProfile,
     jobContext: JobContext,
-    opts?: { defaultConfidenceIfMissing?: number }
+    opts?: { defaultConfidenceIfMissing?: number; allowLowConfidenceCreative?: boolean }
   ): ResolvedField {
     return this.finalizeLlmAnswer(
       raw,
@@ -1015,7 +1771,7 @@ export class LLMSynthesizer {
     profile: ApplyWizzCandidateProfile,
     jobContext: JobContext,
     choiceOptions: string[] | undefined,
-    opts?: { defaultConfidenceIfMissing?: number }
+    opts?: { defaultConfidenceIfMissing?: number; allowLowConfidenceCreative?: boolean }
   ): ResolvedField {
     const parsed = parseLlmResponse(raw);
     let answer = parsed.answer;
@@ -1124,7 +1880,7 @@ export class LLMSynthesizer {
       modelConfidence: confidence ?? opts?.defaultConfidenceIfMissing ?? null,
     });
 
-    if (calibratedConfidence < LLM_MIN_CONFIDENCE) {
+    if (calibratedConfidence < LLM_MIN_CONFIDENCE && !(opts?.allowLowConfidenceCreative && classifyTier5Question(field) === 'creative')) {
       return unresolvedField(field);
     }
 
@@ -1146,7 +1902,7 @@ export class LLMSynthesizer {
     if (questions.length === 0) return { answers: [] };
 
     const prompt = buildBatchPrompt(questions, jobDescription, _profile);
-    const systemMessage = `You answer job application questions. Return a JSON object with an answers array where each element has "answer" (the concise answer string) and "confidence" (a number 0.0 to 1.0 reflecting how certainly candidate data supports the answer). Example: {"answers":[{"answer":"Yes","confidence":0.95},{"answer":"No","confidence":0.80}]}. NEVER return markdown or explanatory text.
+    const systemMessage = `You answer job application questions. Return a JSON object with an answers array where each element has "answer", "confidence", and "supportQuote". supportQuote must be an exact concise quote copied from that question's candidate evidence; use an empty string if no evidence supports the answer. A quote establishes provenance but does not by itself prove entailment. Example: {"answers":[{"answer":"Yes","confidence":0.95,"supportQuote":"Authorized to work in the United States"},{"answer":"NONE","confidence":0.10,"supportQuote":""}]}. NEVER return markdown or explanatory text.
 
 EXPORT CONTROL & EAR RULE: If asked about U.S. Export Administration Regulations (EAR), ITAR, or confirming whether the candidate is a "U.S. person" under 8 U.S.C. 1324b(a)(3):
 - Only US Citizens and Permanent Residents (Green Card holders) are "U.S. persons".
@@ -1163,7 +1919,7 @@ PROFILE DATA RULE: The Candidate Profile section below contains factual data abo
 
 EEOC RULE: For gender, race/ethnicity, veteran status, and disability status fields: find the value in the Candidate Profile and return it. These are always present. Do not guess or default to "No". If the candidate's gender, race/ethnicity, veteran status, or disability status is NOT present in the Candidate Profile section, return exactly: "Decline to self-identify" for that field. Never return "No" for an EEOC demographic field.
 
-CREATIVE RULE: For open-ended behavioral/experience questions ("Have you worked with...", "Tell us about a time...", "Describe a project...") or company motivation questions ("Why choose our company...", "Why are you interested in this role?"): write a concise single paragraph (approximately 50 to 80 words) following the STAR methodology (Situation, Task, Action, and Result) without explicit section headings or bullet labels. Write in a confident, professional first-person voice ("I led...", "In my role at..."). Ground every detail strictly in the candidate's actual work experience, verified project names, and tools from their profile/resume. Do not say the resume does not contain information — synthesize a truthful answer.
+CREATIVE RULE: For open-ended motivation or general fit questions, write naturally in first person. Follow explicit word-count/length instructions; otherwise keep it concise. Use supported candidate experience when available. If specific experience is unavailable, answer in general terms without claiming a past event, employer, project, tool, or result. Questions asking for a real past example (such as "Tell us about a time" or "Give an example") are factual: answer only from evidence, otherwise return NONE.
 
 OPTION RULE: For select/radio/checkbox fields with complete options provided, return exactly one provided option. For a select marked with incomplete options, do not constrain the answer to the partial sample; return a concise exact choice supported by candidate data, or NONE if unsupported.
 
@@ -1171,48 +1927,151 @@ US LOCATION RULE: If asked whether the candidate is currently located in the US,
 
 ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
-    if (!this.apiKey) {
-      throw new Error('No LLM provider credentials configured.');
-    }
+    const canUseGemini = Boolean(this.geminiApiKey);
+    const preferGemini = this.provider === 'gemini' || (!this.apiKey && canUseGemini);
 
     let raw = '';
     let stopReason = '';
     let batchUsage: BatchSynthesizeResult['usage'] = undefined;
     const requestStartedAt = Date.now();
-    try {
-      const result = await this.callAnthropic(
-        prompt,
-        systemMessage,
-        Math.max(1024, questions.length * 250),
-        true
-      );
-      haltIfFirstProviderCallFailed(true);
-      raw = result.text;
-      stopReason = result.stopReason || '';
-      batchUsage = result.usage;
-      log.debug(
-        `[LLM Provider] event=request_completed operation=batch provider=anthropic ` +
-          `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
-          `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
-          `completion_tokens=${batchUsage?.completionTokens ?? 0}`
-      );
-    } catch (err: unknown) {
-      await emitFailureDiagnostic({
-        category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
-        stage: 'batch_provider_request',
-        reason: 'Tier 5 batch Anthropic language-model request failed.',
-        error: err,
-        isTerminal: false,
-        isRetryable: true,
-        metadata: { matchCount: questions.length },
-      });
-      log.warn(
-        `[LLM Provider] event=request_failed operation=batch provider=anthropic ` +
-          `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
-          `${formatProviderErrorDiagnostics(getLlmProviderErrorDiagnostics(err))}`
-      );
-      haltIfFirstProviderCallFailed(false);
-      throw err;
+
+    if (this.provider === 'ollama') {
+      try {
+        const result = await callOllama({
+          prompt,
+          systemMessage,
+          modelName: this.ollamaModel,
+          endpoint: this.ollamaEndpoint,
+        });
+        haltIfFirstProviderCallFailed(true);
+        raw = result.text;
+        stopReason = result.stopReason || '';
+        batchUsage = result.usage;
+        log.info(
+          `[LLM Provider] event=request_completed operation=batch provider=ollama ` +
+            `model=${result.usage?.model || this.ollamaModel} batch_size=${questions.length} ` +
+            `elapsed_ms=${Date.now() - requestStartedAt} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
+            `completion_tokens=${batchUsage?.completionTokens ?? 0}`
+        );
+      } catch (ollamaErr: unknown) {
+        await emitFailureDiagnostic({
+          category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
+          stage: 'batch_provider_request',
+          reason: 'Tier 5 batch Ollama language-model request failed.',
+          error: ollamaErr,
+          isTerminal: false,
+          isRetryable: true,
+          metadata: { matchCount: questions.length },
+        });
+        log.warn(
+          `[LLM Provider] event=request_failed operation=batch provider=ollama ` +
+            `model=${this.ollamaModel} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+            `${ollamaErr}`
+        );
+        haltIfFirstProviderCallFailed(false);
+        throw ollamaErr;
+      }
+    } else if (preferGemini) {
+      if (!this.geminiApiKey) {
+        throw new Error('No Gemini provider credentials configured.');
+      }
+      try {
+        const result = await callGemini({
+          prompt,
+          systemMessage,
+          maxTokens: Math.max(1024, questions.length * 250),
+          modelName: this.geminiModel,
+          apiKey: this.geminiApiKey,
+        });
+        haltIfFirstProviderCallFailed(true);
+        raw = result.text;
+        stopReason = result.stopReason || '';
+        batchUsage = result.usage;
+        log.info(
+          `[LLM Provider] event=request_completed operation=batch provider=gemini ` +
+            `model=${result.usage?.model || this.geminiModel} batch_size=${questions.length} ` +
+            `elapsed_ms=${Date.now() - requestStartedAt} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
+            `completion_tokens=${batchUsage?.completionTokens ?? 0}`
+        );
+      } catch (geminiErr: unknown) {
+        await emitFailureDiagnostic({
+          category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
+          stage: 'batch_provider_request',
+          reason: 'Tier 5 batch Gemini language-model request failed.',
+          error: geminiErr,
+          isTerminal: false,
+          isRetryable: true,
+          metadata: { matchCount: questions.length },
+        });
+        log.warn(
+          `[LLM Provider] event=request_failed operation=batch provider=gemini ` +
+            `model=${this.geminiModel} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+            `${geminiErr}`
+        );
+        haltIfFirstProviderCallFailed(false);
+        throw geminiErr;
+      }
+    } else {
+      if (!this.apiKey) {
+        throw new Error('No LLM provider credentials configured.');
+      }
+      try {
+        const result = await this.callAnthropic(
+          prompt,
+          systemMessage,
+          Math.max(1024, questions.length * 250),
+          true
+        );
+        haltIfFirstProviderCallFailed(true);
+        raw = result.text;
+        stopReason = result.stopReason || '';
+        batchUsage = result.usage;
+        log.debug(
+          `[LLM Provider] event=request_completed operation=batch provider=anthropic ` +
+            `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+            `content_chars=${raw.length} prompt_tokens=${batchUsage?.promptTokens ?? 0} ` +
+            `completion_tokens=${batchUsage?.completionTokens ?? 0}`
+        );
+      } catch (err: unknown) {
+        if (
+          canUseGemini &&
+          (String(err).includes('usage limits') ||
+            String(err).includes('workspace') ||
+            String(err).includes('400'))
+        ) {
+          log.warn(
+            `[LLM Provider] Anthropic hit workspace limit. Automatically failing over to Gemini provider.`
+          );
+          const geminiResult = await callGemini({
+            prompt,
+            systemMessage,
+            maxTokens: Math.max(1024, questions.length * 250),
+            modelName: this.geminiModel,
+            apiKey: this.geminiApiKey,
+          });
+          haltIfFirstProviderCallFailed(true);
+          raw = geminiResult.text;
+          stopReason = geminiResult.stopReason || '';
+          batchUsage = geminiResult.usage;
+        } else {
+          await emitFailureDiagnostic({
+            category: 'RESOLVE_TIER5_PROVIDER_FAILURE',
+            stage: 'batch_provider_request',
+            reason: 'Tier 5 batch Anthropic language-model request failed.',
+            error: err,
+            isTerminal: false,
+            isRetryable: true,
+            metadata: { matchCount: questions.length },
+          });
+          log.warn(
+            `[LLM Provider] event=request_failed operation=batch provider=anthropic ` +
+              `model=${this.modelName} batch_size=${questions.length} elapsed_ms=${Date.now() - requestStartedAt} ` +
+              `${formatProviderErrorDiagnostics(getLlmProviderErrorDiagnostics(err))}`
+          );
+          haltIfFirstProviderCallFailed(false);
+          throw err;
+        }
+      }
     }
 
     const items = parseBatchAnswerItems(raw, questions.length);
@@ -1230,11 +2089,12 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
           `batch_size=${questions.length} response_chars=${raw.length} stop_reason=${stopReason || 'unknown'} elapsed_ms=${Date.now() - requestStartedAt} ` +
           'expected_shape=json_array answers=0'
       );
-      return { answers: questions.map(() => ''), confidences: questions.map(() => 0), usage: batchUsage };
+      return { answers: questions.map(() => ''), confidences: questions.map(() => 0), supportQuotes: questions.map(() => ''), usage: batchUsage };
     }
     return {
       answers: items.map((i) => i.answer),
       confidences: items.map((i) => i.confidence ?? 0),
+      supportQuotes: items.map((i) => i.supportQuote || ''),
       usage: batchUsage,
     };
   }
@@ -1392,7 +2252,7 @@ has no matching option (return null instead).
   }
 
   const prompt = `${candidateHeaderBlock}Resolve every numbered job application question using only the candidate evidence and job description.
-Return ONLY a JSON object with an "answers" array of strings in the same order as the questions. Do not include markdown or explanations.
+Return ONLY a JSON object with an "answers" array in the same order as the questions. Each item must be {"answer":"...","confidence":0.0,"supportQuote":"exact quote from this question's candidate evidence"}. Use an empty supportQuote if evidence does not support the answer. A quote identifies provenance but does not by itself prove entailment. Do not include markdown or explanations.
 
 For any question with a complete Options list provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate. If a choice list is marked incomplete, do not treat the captured options as exhaustive; return a concise exact choice supported by candidate data or NONE.
 ${corporateDefaultsBlock}
@@ -1407,8 +2267,8 @@ ${questions
           ? ` ${question.optionsComplete === false ? 'Captured options (incomplete)' : 'Options'}: ${question.options.join(' | ')}`
           : '';
       const completenessHint = question.optionsComplete === false ? ' [choice options incomplete]' : '';
-      const starHint = isBehavioralOrMotivationalQuestion({ label: question.label, type: question.type, options: question.options })
-        ? ' [STAR format 50-80 words, Situation-Task-Action-Result in first-person, strictly grounded in candidate history]'
+      const starHint = classifyTier5Question({ label: question.label, type: question.type, options: question.options } as ScannedField) === 'creative'
+        ? ' [Natural first person; follow explicit length instructions; do not invent candidate facts; generalize truthfully when specific evidence is unavailable.]'
         : '';
       const hintLine = question.corporateDefaultHint
         ? `\nCorporate default hint: ${question.corporateDefaultHint}`
@@ -1477,14 +2337,12 @@ Corporate default hint for this question: ${corporateDefaultHint}
 2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.
 3. For Export Administration Regulations (EAR) / U.S. person questions: non-immigrant visa holders (F-1, H-1B, OPT) and candidates requiring sponsorship are NOT U.S. persons. Select "I am not a U.S. person...".
 4. Respond as JSON only: {"answer":"<selected exact option>","confidence":<0.0-1.0>}.`
-      : isBehavioralOrMotivationalQuestion(field)
-      ? `Strict Instructions (STAR Methodology):
-1. Format answer as a concise single paragraph (approximately 50 to 80 words) following the STAR methodology (Situation, Task, Action, and Result) without explicit headings or bullet labels.
-2. Provide a professional, confident direct response written in first-person ("I led...", "In my role at...").
-3. Ground every detail strictly in the candidate's actual work experience, verified project names, and tools from their resume or profile. NEVER invent companies, degrees, or tools.
-4. For questions asking why you want to work at this company ("${jobContext.company}"), tie the candidate's specific background and aspirations directly to ${jobContext.company} and the ${jobContext.title} position.
-5. If the candidate's resume does not mention the exact requested tool/technology, write honestly using adjacent skills: "While my hands-on experience has primarily focused on [adjacent skill/tool from resume], I have foundational knowledge and am rapid to ramp up."
-6. Respond as JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. If you are not at least 0.65 confident, set confidence below 0.65.`
+      : classifyTier5Question(field) === 'creative'
+      ? `Creative response instructions:
+1. Write a natural, professional first-person response. Follow any explicit length instruction; otherwise be concise.
+2. Use supported experience when available. If details are unavailable, answer in general terms without claiming a past event, employer, project, tool, or result.
+3. For motivation questions, connect only evidenced candidate background with the ${jobContext.title} role at ${jobContext.company}; do not invent company facts.
+4. Return JSON only: {"answer":"<your answer>","confidence":<0.0-1.0>}. Confidence does not determine whether a creative answer is usable.`
       : `Strict Instructions:
 1. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile.
 2. Provide a professional, concise, direct response written in first-person ("I am...", "My experience...").
