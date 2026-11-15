@@ -937,7 +937,7 @@ async function runFailedDiagnostics(
   let downloadedCount = 0;
   let missingUrlCount = 0;
 
-  const CHUNK_SIZE = 6;
+  const CHUNK_SIZE = 25;
   for (let i = 0; i < failedApps.length; i += CHUNK_SIZE) {
     const chunk = failedApps.slice(i, i + CHUNK_SIZE);
     await Promise.all(
