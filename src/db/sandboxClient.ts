@@ -10,24 +10,64 @@ import path from 'path';
 import pg from 'pg';
 import { createLogger } from '../utils/logger.js';
 import { SANDBOX_CA_EMAIL } from './sandboxAssignment.js';
+import {
+  assertSandboxTestDatabaseConnection,
+  assertSandboxTestDatabaseIdentity,
+  isSandboxTestMode,
+} from '../config/sandboxTestMode.js';
 
 const { Pool } = pg;
 const log = createLogger('SandboxDB');
 
 let poolInstance: pg.Pool | null = null;
+let poolConnectionString: string | null = null;
+let poolVerifiedForSandboxTest = false;
+
+function verifySandboxTestClient(client: pg.Client, done: (error?: Error) => void): void {
+  client.query<{ database: string; server_address: string | null }>(
+    'SELECT current_database() AS database, inet_server_addr()::text AS server_address'
+  ).then(
+    ({ rows }) => {
+      try {
+        const stream = client.connection.stream as typeof client.connection.stream & { remoteAddress?: string };
+        assertSandboxTestDatabaseConnection({
+          database: rows[0]?.database,
+          serverAddress: rows[0]?.server_address,
+          remoteAddress: stream.remoteAddress,
+        });
+        done();
+      } catch (error) {
+        done(error instanceof Error ? error : new Error('Sandbox test database identity check failed.'));
+      }
+    },
+    (error: unknown) => done(error instanceof Error ? error : new Error('Sandbox test database identity check failed.'))
+  );
+}
 
 export function getSandboxPool(): pg.Pool {
-  if (poolInstance) return poolInstance;
-
   const connectionString =
     process.env.DATABASE_URL ||
     'postgresql://postgres:postgres@localhost:5432/applywizz_sandbox';
+
+  if (isSandboxTestMode()) assertSandboxTestDatabaseIdentity(connectionString);
+  if (poolInstance) {
+    if (isSandboxTestMode() && poolConnectionString !== connectionString) {
+      throw new Error('Sandbox test mode database connection changed after pool initialization.');
+    }
+    if (isSandboxTestMode() && !poolVerifiedForSandboxTest) {
+      throw new Error('Sandbox test mode cannot reuse a pool created without local database verification.');
+    }
+    return poolInstance;
+  }
 
   poolInstance = new Pool({
     connectionString,
     max: 10,
     idleTimeoutMillis: 30000,
+    ...(isSandboxTestMode() ? { verify: (client, done) => verifySandboxTestClient(client as pg.Client, done) } : {}),
   });
+  poolConnectionString = connectionString;
+  poolVerifiedForSandboxTest = isSandboxTestMode();
 
   poolInstance.on('error', (err) => {
     log.error('Unexpected error on idle PostgreSQL sandbox client:', err);
@@ -727,6 +767,11 @@ export async function ensureSandboxDatabaseExists(): Promise<void> {
     process.env.DATABASE_URL ||
     'postgresql://postgres:postgres@localhost:5432/applywizz_sandbox';
 
+  if (isSandboxTestMode()) {
+    assertSandboxTestDatabaseIdentity(connectionString);
+    throw new Error('Sandbox test mode does not create or initialize databases.');
+  }
+
   const match = connectionString.match(/\/([^/?]+)(\?.*)?$/);
   const targetDb = match ? match[1] : 'applywizz_sandbox';
   const adminUrl = connectionString.replace(/\/([^/?]+)(\?.*)?$/, '/postgres$2');
@@ -755,6 +800,16 @@ export async function ensureSandboxDatabaseExists(): Promise<void> {
 }
 
 export async function runSandboxMigrations(): Promise<void> {
+  if (isSandboxTestMode()) {
+    const pool = getSandboxPool();
+    const result = await pool.query('SELECT current_database() AS name');
+    if (result.rows[0]?.name !== 'applywizz_sandbox') {
+      throw new Error('Sandbox test mode connected to an unexpected database.');
+    }
+    log.info('Sandbox test mode verified local database identity; migrations, profile sync, Zoho, and demo seeding are disabled.');
+    return;
+  }
+
   await ensureSandboxDatabaseExists();
   const pool = getSandboxPool();
   log.info('🛠️ Initializing local Sandbox PostgreSQL database & running migrations...');
