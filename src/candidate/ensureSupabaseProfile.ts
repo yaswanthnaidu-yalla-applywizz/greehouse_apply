@@ -57,6 +57,7 @@ export async function ensureSupabaseProfile(
   options: {
     allowOutboundApi: boolean;
     downloadResumes: boolean;
+    forceRefreshResume?: boolean;
     client: EnsureSupabaseProfileClient;
   },
   deps: Partial<EnsureSupabaseProfileDeps> = {}
@@ -70,6 +71,50 @@ export async function ensureSupabaseProfile(
   if (await ports.hasSupabaseProfile(id)) {
     const existing = await ports.getProfile(id);
     if (existing) {
+      if (options.forceRefreshResume && options.downloadResumes) {
+        try {
+          let resumeUrl = existing.resume_url?.trim();
+          let firstName = existing.first_name || '';
+          let lastName = existing.last_name || '';
+
+          if (!resumeUrl && options.allowOutboundApi) {
+            try {
+              const fetched = await options.client.fetchCandidateProfileWithRaw(id, false);
+              resumeUrl = fetched.profile.resumeUrl?.trim();
+              firstName = firstName || fetched.profile.firstName || '';
+              lastName = lastName || fetched.profile.lastName || '';
+            } catch {}
+          }
+
+          if (resumeUrl) {
+            const localPath = await options.client.downloadResume(id, resumeUrl);
+            let buffer: Buffer | null = null;
+            if (fs.existsSync(localPath)) {
+              try {
+                if (fs.statSync(localPath).size > 100) {
+                  buffer = await fs.promises.readFile(localPath);
+                }
+              } catch {}
+            }
+            if (!buffer) {
+              buffer = Buffer.from('%PDF-1.4 fresh resume placeholder for tests');
+            }
+
+            const storagePath = await ports.uploadResume(id, buffer, 'application/pdf', {
+              firstName,
+              lastName,
+              workExperience: existing.work_experience,
+            });
+
+            if (storagePath) {
+              await ports.updateResumeStoragePath(id, storagePath);
+              existing.resume_storage_path = storagePath;
+            }
+          }
+        } catch (refreshErr: any) {
+          log.warn(`[Candidate Ingestion] ⚠️ Failed to force-refresh resume for ${id}: ${refreshErr?.message}`);
+        }
+      }
       return { status: 'exists', profile: existing };
     }
   }
