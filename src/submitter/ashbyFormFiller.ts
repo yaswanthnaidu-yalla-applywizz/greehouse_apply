@@ -164,6 +164,21 @@ export interface FilledAshbyField {
   controlType: string;
 }
 
+export function extractNumericValue(text: string): string {
+  if (!text) return '';
+  const trimmed = text.trim();
+  const kMatch = trimmed.match(/(\d+(?:\.\d+)?)\s*k\b/i);
+  if (kMatch) {
+    return Math.round(parseFloat(kMatch[1]) * 1000).toString();
+  }
+  const mMatch = trimmed.match(/(\d+(?:\.\d+)?)\s*m\b/i);
+  if (mMatch) {
+    return Math.round(parseFloat(mMatch[1]) * 1000000).toString();
+  }
+  const numMatch = trimmed.replace(/,/g, '').match(/\d+(?:\.\d+)?/);
+  return numMatch ? numMatch[0] : '';
+}
+
 /**
  * Iterates through resolved form fields and fills the Ashby application form.
  * Performs live DOM state verification before accounting fields as successfully filled.
@@ -275,11 +290,17 @@ export async function fillAshbyForm(
 
     // 2. Radio Button Group
     if (controlType === 'radio') {
-      const radioLabel = container.locator(`label:has-text("${answer}")`).first();
-      const radioInput = container.locator(`input[type="radio"][value="${answer}"]`).first();
+      const escapedAnswer = answer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const radioOption = container
+        .locator('label.ashby-application-form-input-radio-group-option-label, [class*="radio-group-option"], label:has(input[type="radio"])')
+        .filter({ hasText: new RegExp(`^\\s*${escapedAnswer}\\s*$`, 'i') })
+        .first();
+      const radioInput = container
+        .locator(`input[type="radio"][value="${answer}" i], input[type="radio"][value="${answer}"]`)
+        .first();
 
-      if ((await radioLabel.count()) > 0 && (await radioLabel.isVisible())) {
-        await glideCursor(page, radioLabel, { click: true });
+      if ((await radioOption.count()) > 0 && (await radioOption.isVisible())) {
+        await glideCursor(page, radioOption, { click: true });
       } else if ((await radioInput.count()) > 0) {
         await glideCursor(page, radioInput, { click: true });
       }
@@ -323,9 +344,14 @@ export async function fillAshbyForm(
       const normalizedAnswer = answer.trim().replace(/\s+/g, ' ').toLowerCase();
       const isBooleanAnswer = ['true', 'yes', '1', 'false', 'no', '0'].includes(normalizedAnswer);
       const shouldCheck = ['true', 'yes', '1'].includes(normalizedAnswer);
-      const optionMatchesAnswer = field.options?.some(
-        (option) => option.trim().replace(/\s+/g, ' ').toLowerCase() === normalizedAnswer
-      ) ?? false;
+      const isSyntheticBooleanOption =
+        field.options?.length === 1 &&
+        ['true', 'false', '1', '0'].includes((field.options[0] || '').toLowerCase().trim());
+      const optionMatchesAnswer =
+        !isSyntheticBooleanOption &&
+        (field.options?.some(
+          (option) => option.trim().replace(/\s+/g, ' ').toLowerCase() === normalizedAnswer
+        ) ?? false);
 
       if (optionMatchesAnswer) {
         const matches: Locator[] = [];
@@ -468,16 +494,18 @@ export async function fillAshbyForm(
     // 5. Standard text / textarea
     const input = container.locator('input, textarea').first();
     if ((await input.count()) > 0 && (await input.isVisible())) {
-      await humanType(page, input, answer);
+      const inputType = await input.getAttribute('type').catch(() => null);
+      const textToType = inputType === 'number' ? extractNumericValue(answer) : answer;
+      await humanType(page, input, textToType);
       await dispatchReactChangeEvent(input);
       await sleep(350, 650);
 
       // Live DOM verification: verify input.inputValue() equals or matches answer
       const val = await input.inputValue().catch(() => '');
-      if (val.trim() === answer.trim() || val.toLowerCase().includes(answer.toLowerCase())) {
-        filledFields.push({ fieldId: fieldPath, label: questionText, value: answer, controlType: 'text' });
+      if (val.trim() === textToType.trim() || val.toLowerCase().includes(textToType.toLowerCase())) {
+        filledFields.push({ fieldId: fieldPath, label: questionText, value: textToType, controlType: 'text' });
       } else {
-        log.warn(`[AshbyFormFiller] Text / textarea value mismatch for ${fieldPath}: expected "${answer}", got "${val}"`);
+        log.warn(`[AshbyFormFiller] Text / textarea value mismatch for ${fieldPath}: expected "${textToType}", got "${val}"`);
       }
     }
   }
