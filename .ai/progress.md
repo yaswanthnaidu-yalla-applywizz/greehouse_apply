@@ -1,3 +1,36 @@
+### Fresh Resume Ingest & Dynamic ATS Form Submission Naming (2026-11-17 COMPLETE)
+- [x] **Adapted fileNameUtils into `src/utils/resumeNaming.ts`:**
+  - Implemented `extractJobRoleFromPage`, `cleanJobRole`, `sanitizeForFileName`, `buildDocumentFileName`, and `buildResumeStorageFilename`.
+  - Added Node.js + Playwright DOM compatibility (accepts string `pageTitle` with fallback to `document.title`).
+  - Added multi-shape candidate profile support (`personal.firstName`, `first_name`, `firstName`, `client_name`).
+  - Maintained backwards compatibility for all existing callers in `storage.ts`, `formFiller.ts`, and `ashbySubmit.ts`.
+- [x] **Supabase Storage Bucket Purge & Local Resumes Clean:**
+  - Added `purgeResumesBucket` in `src/db/storage.ts` to wipe the Supabase Storage `resumes` bucket with pagination and clear the local `./resumes/` folder.
+  - Updated `resumeStorageFilename` in `src/db/storage.ts` to standard `Resume_FirstName_LastName.pdf` via `buildResumeStorageFilename`.
+- [x] **Parsed Resume Cache Invalidation:**
+  - Added `invalidateResumeParseCache(applywizzIds)` in `src/resolver/tier2ResumeParse.ts` to clear `resume_text` and `resume_facts` on `profiles` (and legacy `candidate_resume_parsed`).
+- [x] **Fresh Resume Sync at Ingestion:**
+  - Added `forceRefreshResume` in `src/candidate/ensureSupabaseProfile.ts` and enabled it in `src/candidate/segregator.ts`.
+  - Hooked `purgeResumesBucket` and `invalidateResumeParseCache` into `src/scanner/storageCsvIngestion.ts` and `src/orchestrator/pipeline.ts`.
+- [x] **Dynamic ATS Form Submission Renaming:**
+  - Updated `src/submitter/formFiller.ts` and `src/submitter/ashbySubmit.ts` to rename attached resumes to `Resume_FirstName_LastName_JobRole.pdf` based on the live job page title and job title.
+  - Added collision prevention unlinking before renaming in the temporary directory.
+- [x] **Verification:**
+  - 100% test suites pass: 89 node unit tests, 111 vitest tests, and all 5 new unit test suites (`tests/resumeNaming.test.ts`, `tests/storageResumePurge.test.ts`, `tests/tier2ResumeCacheInvalidation.test.ts`, `tests/freshResumeIngest.test.ts`, `tests/formFillerResumeNaming.test.ts`).
+  - Clean TypeScript compilation (`npx tsc --noEmit`).
+
+### Ashby Apify Residential Proxy Preflight Fallback & DB2 Verification (2026-11-17 COMPLETE)
+- [x] **Ashby Apify Preflight Fallback Implementation (`src/submitter/ashbyProxy.ts`, `src/submitter/ashbySubmit.ts`):**
+  - Added support for `APIFY_STRING` optional residential fallback proxy in URL format (`http://username:password@hostname:port`).
+  - Added `shouldAttemptApifyPreflightFallback` and `preflightFallback` helpers in `src/submitter/ashbySubmit.ts` enabling seamless switch when primary Massive preflight fails with HTTP 471 or route exhaustion.
+  - Added unit test suite `tests/ashbyApifyPreflightFallback.test.ts` (5/5 tests passing).
+- [x] **DB2 Historical Failure Diagnostic & Dry-Run Verification (`scripts/testAshbyApifyRetry.ts`):**
+  - Audited 8 DB2 Ashby applications created yesterday (`2026-11-16`) that failed on `stage: 'PREFLIGHT'` with HTTP 400.
+  - Executed end-to-end dry-run verification without submitting:
+    - Confirmed Apify fallback automatically engaged in 100% of Massive route failure cases (5 of 5) and resolved exit IPs cleanly.
+    - Verified 3 applications are immediately eligible for submission (`CAN APPLY NOW`): Clera (`AWL-42673`), ClickHouse (`AWL-29612`), and ClickHouse (`AWL-41703`). Captured full-page dry run proof screenshots in `output/proofs_dry_run/`.
+    - Identified that the remaining 5 applications are blocked by downstream form controls (Netic & Assort Health uncommitted radio buttons, Eragon readiness timeout) rather than proxy preflight.
+
 ### Executive Daily 9:00 AM IST Reporting & Post-Ingestion Metrics (2026-11-17 COMPLETE)
 - [x] **Post-Ingest Email Metrics Enrichment (`src/services/caNotificationEmail.ts`):**
   - Updated `LeadershipInitialSummary` and `ExecutiveInitialSummary` to accept `totalApplications` and `totalQueued`.
