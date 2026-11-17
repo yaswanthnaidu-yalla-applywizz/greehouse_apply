@@ -5,7 +5,7 @@ import { getDbClient, isSupabaseConfigured } from './client.js';
 import { getProfile } from './profiles.js';
 import config from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
-import { resolveResumeDomain, buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
+import { resolveResumeDomain, buildResumeSubmissionFilename, buildResumeStorageFilename } from '../utils/resumeNaming.js';
 
 const log = createLogger('Storage');
 
@@ -58,9 +58,91 @@ export function resumeStorageFilename(
   applywizzId: string,
   profile?: ResumeNamingProfile
 ): string {
-  const clientName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || applywizzId;
-  const role = profile?.jobTitle || profile?.workExperience?.[0]?.title || '';
-  return buildResumeSubmissionFilename(clientName, role);
+  return buildResumeStorageFilename(profile, applywizzId);
+}
+
+/**
+ * Purges all files in the Supabase Storage resumes bucket and clears the local resumes cache.
+ */
+export async function purgeResumesBucket(options?: {
+  resumesDir?: string;
+}): Promise<{ deletedCount: number; clearedLocalCount: number }> {
+  let deletedCount = 0;
+  let clearedLocalCount = 0;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      let hasMore = true;
+      let offset = 0;
+      const pageSize = 1000;
+
+      while (hasMore) {
+        const { data: files, error: listError } = await supabase.storage
+          .from(RESUMES_BUCKET)
+          .list('', { limit: pageSize, offset, sortBy: { column: 'name', order: 'asc' } });
+
+        if (listError) {
+          log.warn(`[Storage] Failed to list resumes bucket for purge: ${listError.message}`);
+          break;
+        }
+
+        if (!files || files.length === 0) {
+          break;
+        }
+
+        const validFileNames = files
+          .map((f: any) => f.name)
+          .filter((name: string) => name && !name.startsWith('.') && name !== '.emptyFolderPlaceholder');
+
+        if (validFileNames.length > 0) {
+          const { error: removeError } = await supabase.storage
+            .from(RESUMES_BUCKET)
+            .remove(validFileNames);
+
+          if (removeError) {
+            log.warn(`[Storage] Failed to remove batch of ${validFileNames.length} resumes: ${removeError.message}`);
+          } else {
+            deletedCount += validFileNames.length;
+          }
+        }
+
+        if (files.length < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
+        }
+      }
+      log.info(`[Storage] 🧹 Purged ${deletedCount} objects from Supabase Storage '${RESUMES_BUCKET}' bucket.`);
+    } catch (err: any) {
+      log.warn(`[Storage] Error purging Supabase resumes bucket: ${err.message}`);
+    }
+  }
+
+  // Clear local resumes cache folder
+  try {
+    const resumesDir = path.resolve(process.cwd(), options?.resumesDir || config.RESUMES_DIR || 'resumes');
+    if (fs.existsSync(resumesDir)) {
+      const entries = fs.readdirSync(resumesDir);
+      for (const entry of entries) {
+        if (
+          entry.toLowerCase().endsWith('.pdf') ||
+          entry.toLowerCase().endsWith('.doc') ||
+          entry.toLowerCase().endsWith('.docx')
+        ) {
+          try {
+            fs.unlinkSync(path.join(resumesDir, entry));
+            clearedLocalCount++;
+          } catch {}
+        }
+      }
+      log.info(`[Storage] 🧹 Cleared ${clearedLocalCount} files from local resumes folder.`);
+    }
+  } catch (err: any) {
+    log.warn(`[Storage] Error clearing local resumes folder: ${err.message}`);
+  }
+
+  return { deletedCount, clearedLocalCount };
 }
 
 /**
