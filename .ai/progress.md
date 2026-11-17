@@ -1,3 +1,75 @@
+### Executive Daily 9:00 AM IST Reporting & Post-Ingestion Metrics (2026-11-17 COMPLETE)
+- [x] **Post-Ingest Email Metrics Enrichment (`src/services/caNotificationEmail.ts`):**
+  - Updated `LeadershipInitialSummary` and `ExecutiveInitialSummary` to accept `totalApplications` and `totalQueued`.
+  - Added metrics ribbon to `buildLeadershipInitialEmailHtml` and `buildExecutiveInitialEmailHtml` displaying Total Applications Ingested and Currently Queued.
+  - Updated `sendLeadershipIngestionSummary` to query total run applications and current queue depth safely via PostgREST exact head count.
+- [x] **Executive Daily Report Service (`src/services/executiveDailyReport.ts`):**
+  - Evaluates the single latest ingest run (authoritatively via `getLatestIngestRunDate()`).
+  - Aggregates status metrics (`totalApplications`, `totalApplied`, `totalFailed`, `totalQueued`, `totalReadyForReview`, `successRatePercent`, `completionRatePercent`).
+  - Classifies ATS breakdown across Greenhouse, Ashby, and Other using `isAshbyUrl` and `isGreenhouseUrl`.
+  - Normalizes and groups failure reasons descending by frequency using `normalizeFailureReason`.
+  - Generates deterministic executive summary text with no LLM dependency.
+  - Builds comprehensive, responsive HTML email matching ApplyWizz dashboard styling.
+  - Configured recipient resolver targeting Ramakrishna (`ramakrishna@applywizz.ai`), CC: Anusha, Yaswanth, Vivek, with full `SANDBOX` and `CA_NOTIFICATION_EMAIL_OVERRIDE` safety.
+- [x] **Automated Daily 9:00 AM IST Scheduler (`src/server/index.ts`):**
+  - Calculated exact ms offset to next 9:00 AM IST (03:30 UTC) with unref'd timer and 24-hour cycle.
+  - Wired `startExecutiveDailyReportScheduler()` into `src/server/index.ts:startServer()`.
+- [x] **Verification:**
+  - 26/26 unit tests pass in `tests/executiveDailyReport.test.ts` and `tests/leadershipNotificationEmail.test.ts`.
+  - 100% clean typecheck across root and dashboard (`npm run typecheck`).
+
+### Submission Engine Remediations for Ashby & Greenhouse Failures (2026-11-16 COMPLETE)
+- [x] **Executed 100% of Implementation Plan (`docs/superpowers/plans/2026-11-16-submission-engine-failure-fixes.md`):**
+  - **Task 1 (Ashby Confirmation Detection Broadening):** Updated `src/submitter/ashbySubmit.ts` to detect diverse success card copies ("Thanks for applying to...", "Your application was received...", DOM `.ashby-application-form-success`), salvaging false failures across IRIS, Lovable, BillGO, HUMAN, Cohere, algo1.
+  - **Task 2 (Ashby Radio Button Selector Precision):** Updated `src/submitter/ashbyFormFiller.ts` to target radio labels with strict boundaries and exact value fallback, eliminating collision with question title headers containing "now" or "not".
+  - **Task 3 (Ashby Boolean Checkbox Option Routing Fix):** Updated `src/submitter/ashbyFormFiller.ts` to exclude synthetic `options: ["true"]` from multi-option logic, routing single agreement checkboxes to boolean toggle logic.
+  - **Task 4 (Ashby Overview Tab Auto-Transition & Hydration Extension):** Added auto-transition click for "Apply for this Job" / "Application" tab and extended Next.js hydration wait to 35,000ms with spinner detachment detection.
+  - **Task 5 (Ashby Field Handling & Normalization):** Prioritized telephone inputs over radio inputs in `ashbyScanner.ts`, extracted integer numeric values (e.g. 100000) from compensation strings in `ashbyFormFiller.ts`, and stripped `"https://N/A"` or `"N/A"` for LinkedIn/URL fields in `answerResolver.ts` & `tier1Supabase.ts`.
+  - **Task 6 (Ashby Proxy Location & Preflight Endpoint):** Added `US_STATE_CODES` to disambiguate US states like GA from foreign ISO codes (Gabon), and repointed preflight probe to `api64.ipify.org` avoiding `ipapi.co` quota blocks.
+  - **Task 7 (Greenhouse Education Section Requiredness & Retention):** Broadened regex to match `School *` with whitespace or child spans, and guaranteed education answers are retained and fallbacks applied whenever education containers exist on DOM.
+  - **Task 8 (Greenhouse Custom Demographic Surveys & Hidden Invalid Inputs):** Extracted custom demographic survey sections on Remix pages and captured hidden `input.requiredInput:invalid` comboboxes in `detectFormFillingErrors`.
+  - **Task 9 (Greenhouse Mandatory Consent Checkbox Guarantee & OTP Window):** Automatically checks all uncommitted mandatory checkboxes before submission, and extended OTP timeout window to 180s.
+  - **Task 10 (Full Integration & Regression Verification):** 39/39 tests pass across all 9 new remediation test suites; core unit test suite passes (22/22); 100% clean typecheck on root and dashboard (`npm run typecheck`).
+
+### Implementation Plan for Submission Engine Failure Fixes (2026-11-16 COMPLETE)
+- [x] **Authored Multi-Phase Implementation Plan (`docs/superpowers/plans/2026-11-16-submission-engine-failure-fixes.md`):**
+  - Mapped 10 surgical TDD tasks across Phase 1 (Ashby submission hardening), Phase 2 (Greenhouse submission hardening), and Phase 3 (full integration & regression verification).
+  - Updated all 13 verified false-failure Ashby applications in DB2 to `APPLIED`.
+  - Ready for execution via `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
+
+### Forensic Visual Root Cause Audit for 1,229 Failed Applications (2026-11-16 COMPLETE)
+- [x] **100% Visual Screenshot Audit of Failed Applications Created 2026-11-15 (`.ai/diagnostics/fada_failed_audit_2026-11-15.md`):**
+  - Downloaded and analyzed 1,194 screenshots via FADA engine and 4 parallel subagents (`Greenhouse Visual Auditor`, `Ashby Navigation Auditor`, `Ashby PreSubmit Auditor`, `Ashby Confirmation Auditor`).
+  - Accounted for 100% of all 1,229 failure records across Greenhouse (462) and Ashby (767).
+  - Isolated 13 false-failure successes on Ashby (IRIS, Lovable, BillGO, HUMAN, Cohere, algo1) marked failed due to rigid 45s confirmation text timeout.
+  - Pinpointed exact code bugs: Greenhouse Education section stripping bug (`School *` whitespace vs `label:has-text("School*")`), Ashby radio group header matching collision (`:has-text("No")` matching question titles containing "now"/"not"), single boolean checkbox synthetic option trap, and proxy rate limits on `ipapi.co`.
+  - Zero code changes made; produced full diagnostic report and surgical remediation recommendations.
+
+### Ingest Auto-Queue Diagnostics & Non-Auto-Queued Applications Re-resolution (2026-11-16 COMPLETE)
+- [x] **Root Cause Diagnosis for Ingest Drops & Review Gating (`.ai/diagnostics/fada-report-2026-11-16.md`):**
+  - Audited 105 rows in `combined_jobs_20261116.csv`. Diagnosed 15 pre-creation drops (12 candidate Zoho disconnected, 2 Samsara scan template failures, 1 Superhuman expired job).
+  - Diagnosed 31 non-auto-queued applications in DB2 (28 `READY_FOR_REVIEW`, 3 `FILTERED_OUT`).
+  - Isolated resolver gaps: anti-nepotism / employee ties, citizenship status vs work authorization, `legally able/allowed` regex phrases, Ashby empty-option select scrubbing in `alignResolvedChoice`, and onsite willingness city token omission (*"our SF office"*).
+- [x] **Surgical Resolver Fixes (`src/resolver/corporatePolicies.ts`, `src/resolver/tier1Supabase.ts`, `src/resolver/answerResolver.ts`):**
+  - Added anti-nepotism / employee ties corporate policy returning `"No"`.
+  - Added citizenship / immigration category question resolver mapping to candidate work authorization (`"No"` for F1/H1B, `"Yes"` for Citizen/Green Card).
+  - Broadened work authorization regex to include `legally able` and `legally allowed`.
+  - Preserved empty-option select field values in `alignResolvedChoice`.
+  - Broadened onsite willingness regex (`isOnsiteWillingness`) to allow optional city tokens (`work from (?:our|the)(?:\s+\w+)?\s+office`).
+- [x] **Database Re-resolution & Enqueueing (Production DB2):**
+  - Re-resolved 100% of the 31 held applications with ground-truth-verified answers and updated them to `QUEUED` (`status = 'QUEUED'`, `error_message = NULL`, `retry_count = 0`).
+  - Result: 0 applications remaining in review; all 90 ingested applications are actively queued or progressing through submission.
+- [x] **Verification:**
+  - 100% clean typecheck (`tsc --noEmit && npm run typecheck:dashboard`).
+  - Unit tests in `tests/choiceOptions.test.ts`, `tests/resolverDiagnosedFixes.test.ts`, and `tests/resolverProgressTracker.test.ts` pass green (6/6).
+
+### Submitter Worker Pool Supervisor & Resilient Failure Handling (2026-11-16 COMPLETE)
+- [x] **Eliminated Submitter Queue Freezes & Added Worker Auto-Restart (`src/submitter/submitterPool.ts`):**
+  - **Failure Status Transition Hardening:** Removed conflicting `expected_status: 'APPLYING'` in terminal failure updates, which previously threw state mismatch exceptions when jobs were already marked `FAILED` by `runLiveSubmit` or `submitAshbyApplication`.
+  - **Try/Catch Guards:** Wrapped failure updates in `try/catch` inside `runWorker` and its error handlers so unexpected status write failures can never escape into the event loop.
+  - **Worker Supervisor Loop:** Implemented `startWorkerSupervisor(workerIndex)` to continuously monitor each submission lane and auto-respawn `runWorker` with a 1-second delay if it ever exits unexpectedly.
+  - **Verification:** Unit tests in `tests/submitterPoolRetry.test.ts` (5/5 pass) and `tests/submitterPoolCircuitBreaker.test.ts` (1/1 pass). Full typecheck clean (`tsc --noEmit && npm run typecheck:dashboard`). Pushed commit `30594b8` to `origin/dev` and verified live Railway deployment `920d07b4`.
+
 ### Dev Dashboard Ingest Drop Reporting & Candidate Volume View (2026-11-15 COMPLETE)
 - [x] **Granular Ingest Drop Taxonomy & Itemized Reporting (`src/scanner/storageCsvIngestion.ts`, `src/server/filteredStats.ts`):**
   - Expanded `computeIngestFunnelStats` to parse and track granular pre-creation drop reasons: `security_clearance`, `excluded_company`, `latest_employer`, `already_applied`, `job_expired`, `zoho_disconnected`, `no_scan_template`, and `exclusions_or_other`.
@@ -1315,3 +1387,7 @@ _Last updated: 2026-10-07_
 - Local changes support profile-only phone evidence with conflict checks, preserve explicit relocation willingness, and allow reviewed creative fallback without a confidence score. The read-only evaluator records slot-level audit data and classifies task-aware funnel outcomes conservatively. These changes have not been deployed.
 - Focused resolver and evaluation tests passed (82 passed, 2 skipped), and `npm run typecheck` passed. A full answer-truthfulness audit, refreshed provider-backed evaluation and the 80% ingest-created auto-queue target remain unverified. No production data, queue or submission was changed.
 
+
+### Ashby scanner navigation classification (2026-11-16 investigation)
+- A read-only Obscura comparison reproduced a scanner classification defect: a blocked navigation was caught and treated as HTTP 200, after which a zero-field Ashby scan was marked expired. The site loaded normally once network access was restored. No production code or data was changed; distinguish navigation errors from closed postings in a future fix.
+- **2026-11-17 local fix:** Initial and embedded-page navigation exceptions or missing responses now emit retryable diagnostics and produce no expired template. The worker continues with other URLs and pipeline progress reports failed scans separately. Focused regression tests and the Ashby scanner suite passed; typecheck passed. No deployment or historical data changes were made. HTTP error-response classification was not changed.

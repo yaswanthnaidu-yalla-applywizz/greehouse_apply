@@ -1,3 +1,14 @@
+2026-11-17 session-start scan: files=9 parsed=9 (check why some applications in db 2 remain in queued instead of being applied)
+2026-11-16 session-checkpoint: completed 100% execution of 10-task implementation plan for submission engine failure remediations; resolved 13 false-failure Ashby successes to APPLIED in DB2; fixed Ashby confirmation detection regex, radio selector title collisions, synthetic options ["true"] boolean checkbox routing, overview tab transition and hydration timeouts, telephone vs radio priority, numeric compensation extraction, and LinkedIn "https://N/A" stripping; disambiguated US state GA from Gabon proxy routing and repointed preflight to api64.ipify.org; fixed Greenhouse Remix School * whitespace education stripping, scanned custom demographic surveys, surfaced hidden combobox invalid inputs, guaranteed mandatory consent checkboxes, and extended OTP timeout to 180s; verified 39/39 passing across all 9 new remediation test suites and clean full typecheck across root and dashboard; no new observations
+2026-11-16 session-checkpoint: diagnosed low auto-queue count for Nov 16 ingest CSV (105 rows -> 15 pre-creation drops, 31 blocked in READY_FOR_REVIEW/FILTERED_OUT, 59 auto-queued); identified gaps in corporatePolicies.ts (employee ties/nepotism), tier1Supabase.ts (citizenship categories and 'legally able/allowed' phrasing), and answerResolver.ts (empty-option select scrubbing and city-token onsite willingness); updated code with surgical fixes; re-resolved 100% of the 31 held applications with ground-truth-verified answers and updated status to QUEUED in DB2 (0 remaining in review); verified clean typecheck across root and dashboard; no new observations
+2026-11-16 session-start scan: files=9 parsed=9 (fada: check why auto-queued count is so low for apps created today from original csv)
+2026-11-16 session-checkpoint: diagnosed worker service stall root cause where state mismatch exceptions on FAILED transitions escaped runWorker and permanently killed worker loops without supervisor auto-restart; fixed submitterPool.ts by removing redundant expected_status: 'APPLYING' on terminal failures, wrapping failure status updates in try/catch, and introducing resilient startWorkerSupervisor auto-respawn loop; verified 5/5 submitterPoolRetry tests, clean full typecheck, pushed commit 30594b8 to dev, and verified Railway deployment 920d07b4 actively processing 18 live applications; no new observations
+2026-11-16 session-start scan: files=9 parsed=9 (check railway worker service, restart if none applying, diagnose why restarting needed)
+2026-11-15 session-checkpoint: patched multi-ATS scanner gaps in atsDetector.ts (gh_jid query param support) and ashbyScanner.ts (domcontentloaded navigation, client-side custom domain iframe detection, and automated tab-click fallback on 0 initial fields); scanned 40 custom-domain URLs across 190 tasks from ingest CSV; extracted 27 active templates and 12 expired URLs; resolved Tiers 1-4 for 148 active applications; resolved 262 Tier 5 questions using 2-shard subagent swarm with exact candidate profile ground truth; parent agent verified 100% of answers with zero uncommitted required fields; successfully imported all 190 applications to DB2 (184 inserted, 6 updated; 2,839 total QUEUED applications for Nov 15); no new observations
+2026-11-15 session-checkpoint: completed implementation of Answer Resolver Progress Tracker for both Tiers 1-4 and Tier 5 batches; built ResolverProgressTracker in src/resolver/progressTracker.ts supporting dual interactive TTY (multi-bar) and headless/Railway non-TTY (throttled heartbeat) presentation; hooked into AnswerResolver.resolveAllApplications, LLMSynthesizer batch methods, and createIngestTier5Stages; verified with 4 unit tests and clean full typecheck; no new observations
+2026-11-15 session-start scan: files=9 parsed=9 (progress tracker for answer resolver: tiers 1-4 and batches)
+2026-11-15 session-checkpoint: backfilled 6 authentic candidate profiles in DB2 with remote resume_urls, downloaded and parsed resume_text (7.3k - 15.1k chars), raw_api_payload, and contact fields (AWL-1369, AWL-35049, AWL-44741, AWL-44782, AWL-45416, AWL-45417); verified 3 remaining candidates (AWL-11, AWL-2114, AWL-2452) have null additional_information and no resume in ApplyWizz CRM; no new observations
+2026-11-15 session-start scan: files=9 parsed=9 (checking db 2 profiles missing resume url and checking get clients api)
 2026-11-15 session-start scan: files=9 parsed=9 (switching auto-queue benchmark to local Ollama llama3.1 & qwen3)
 2026-11-15 session-checkpoint: completed native implementation of Ingest Drop Reporting, Candidate Volume Tab, and Filtered/Analysis Stats Accuracy; added granular pre-creation drop taxonomy in storageCsvIngestion.ts and itemized pre-creation drops in filteredStats.ts; implemented fast candidate volume aggregation with 30s TTL cache in candidateVolume.ts; built DevCandidateVolumeView.tsx with KPI cards, AWL ID search, date filtering, and ProofViewer/EmailProofModal accordion; resolved PostgREST 1000-row cap via chunked pagination in filteredStats.ts and analysisStats.ts; fixed false autoApplied categorization; synchronized DevDashboard global date range across all tabs; verified with 18 unit tests, clean dashboard typecheck, and clean root typecheck; no new observations
 2026-11-13 session-start scan: files=9 parsed=9 (checking scanned job templates for repeated questions grouped by company; interviewing requirements)
@@ -19,7 +30,7 @@
 2026-11-05 session-checkpoint: added retryable failure classification (1, 2, 4, 8) and requeue buttons (bulk Requeue All Retryable + per-category requeue) on Analysis failure breakdown; resets status to QUEUED and retry_count to 0 for up to 3 retries; 15/15 unit tests pass green, typecheck clean; no new observations
 2026-11-05 session-checkpoint: implemented Admin Filtered tab and Dev/Admin Analysis observability tab (time-series and single-day bar chart with Total/Applied/Failed/Clients metrics, ATS filter, failure root-cause breakdown with visual distribution bars); 13/13 new unit tests pass, typecheck and dashboard build clean; no new observations
 2026-11-05 session-checkpoint: excluded SKIPPED applications from operator queue and API queries; replaced OperatorFormBlockedPanel banner in favor of neutral fallback; simplified horizontal job cards to Company, Title, and Pending/Submitted pill driven by submitted_at/operator_approved_at; verified with 10/10 unit tests, 32/32 master E2E integration tests, clean tsc and Vite build; no new observations
-2026-11-05 session-checkpoint: completed implementation and verification of Ashby proxy & reCAPTCHA hardening across Task 1 (Massive mobile CGNAT targeting & -sessionmode-flex in src/config/env.ts, src/submitter/ashbyProxy.ts), Task 2 (adaptive 471 preflight route fallback in src/submitter/ashbySubmit.ts), and Task 3 (humanized Bézier submit click with glideCursor in src/submitter/ashbySubmit.ts); verified 20/20 ashbyProxy unit tests, 40/40 Ashby test suite, 32/32 master E2E checkpoints, clean typecheck, clean Vite build; no new observations
+2026-11-05 session-checkpoint: completed implementation and verification of Ashby proxy & reCAPTCHA hardening across Task 1 (Massive mobile CGNAT targeting & -sessionmode-flex in src/config/env.ts, src/submitter/ashbyProxy.ts), Task 2 (adaptive 471 preflight route fallback in src/submitter/ashbySubmit.ts), and Task 3 (humanized BÃ©zier submit click with glideCursor in src/submitter/ashbySubmit.ts); verified 20/20 ashbyProxy unit tests, 40/40 Ashby test suite, 32/32 master E2E checkpoints, clean typecheck, clean Vite build; no new observations
 2026-11-05 session-start scan: files=7 parsed=7 (investigating captcha failure spike between DataImpulse and Massive proxies)
 2026-11-05 session-checkpoint: completed native implementation and unit tests for 5 auto-queue yield & pre-submit failure remediations across commits 0ba5970, 108d4d3, 047dc92, 778c129, b23f222; verified Ashby system location & radio SMS consent resolution, Greenhouse Tier 1 employer policy rules, sponsorship combobox binary priority, and conditional sub-field skipping; 100% tests pass (ashbySystemFields, resolverDiagnosedFixes, greenhouseValidation), clean typecheck, clean Vite dashboard build; no new observations
 2026-11-03 session-checkpoint: completed implementation of Developer Dashboard Filtered tab and conversion funnel analytics across commits c93dc8f, b4be3f8, 29ffa0b, 46f8973; added IngestFunnelStats DB persistence via system_config, storageCsvIngestion automated computation, GET /api/dev/filtered-stats route, and DevFilteredView component with 4 KPI summary cards, visual funnel trigger comparisons, and paginated itemized drill-down table; 100% tests pass (3/3 vitest, tsc and vite build clean); no new observations
@@ -97,14 +108,14 @@
 2026-10-28 session-checkpoint: applied targeted location resolutions (Cincinnati, Fort Wayne, Santa Clara, St. Louis, Owings Mills, Minneapolis, Detroit, New York City) across DB 1 profiles with 0 non-standard candidate locations remaining; set AWL-32573 phone to 9620404636 with +1 country code per user instruction; preserved AWL-29518 phone; no new observations
 2026-10-28 session-checkpoint: cleaned phone numbers in DB 1 profiles table (stripped country calling codes, normalized 30 numbers to national formats e.g. (xxx) xxx-xxxx or local 0xx format with 0 phones containing '+' prefix); updated AWL-11 to authentic client data (Rajkumar Bharath, rajkumarbharath7@gmail.com, (312) 868-2355, +1, Chicago, Illinois, United States); no new observations
 2026-10-28 session-checkpoint: backfilled DB 1 profiles table; mapped country to country_code (+1, +44, +353, +61, +91); extracted LinkedIn URLs from resumes and S3 PDF annotations across 139 target profiles (updated to 255 valid, 130 N/A, 0 NULL); backfilled phone, country, and normalized 100% of populated locations to 'City, State, Country' format; fetched missing candidate records via ApplyWizz API; no new observations
-2026-10-28 session-checkpoint: shipped and confirmed Ashby fix live (URL normalization to /application, submit button targeting, yes/no container matching); verified with live execution on Momentic (AWL-43089) — all 9 fields populated, submitted, green success banner confirmed, web proof uploaded, DB2 transitioned to APPLIED; 100% tests and typecheck pass; no new observations
+2026-10-28 session-checkpoint: shipped and confirmed Ashby fix live (URL normalization to /application, submit button targeting, yes/no container matching); verified with live execution on Momentic (AWL-43089) â all 9 fields populated, submitted, green success banner confirmed, web proof uploaded, DB2 transitioned to APPLIED; 100% tests and typecheck pass; no new observations
 2026-10-28 session-checkpoint: executed headful Ashby submit debug run on Momentic (AWL-43089); failure screenshot verified root cause: 0 fields filled because ashbySubmit navigates to overview URL instead of /application; submit locator clicked 'Apply' tab switcher instead of 'Submit Application'; no new observations
 2026-10-28 session-checkpoint: created scripts/debugAshbySubmit.ts (headful Playwright Ashby submit prober with residential proxy, DB2 write, and full production pipeline fidelity); added npm run ashby:debug script; verified typecheck and tests pass (3/3); no new observations
 2026-10-28 session-checkpoint: shipped Ashby failure screenshot capture in ashbySubmit.ts & submitterPool.ts; verified full-page screenshot upload to proofs_failed bucket, DB persistence, and queue worker propagation; 100% tests pass (3/3 routing unit tests, 55 vitest suites) & typecheck clean; no new observations
 2026-10-28 session-checkpoint: analyzed plan for capturing Ashby failure screenshots in ashbySubmit.ts & submitterPool.ts and evaluated system impact; no new observations
-2026-10-28 session-checkpoint: answered user question on Ashby failure screenshots (No — ashbySubmit.ts catch block does not invoke page.screenshot or uploadProof); no new observations
+2026-10-28 session-checkpoint: answered user question on Ashby failure screenshots (No â ashbySubmit.ts catch block does not invoke page.screenshot or uploadProof); no new observations
 2026-10-28 session-checkpoint: checked Ashby submission totals in DB2 (40 attempted/submitted, 40 failed, 0 succeeded, 30 READY_FOR_REVIEW, 6 FILTERED_OUT out of 76 total); no new observations
-2026-10-28 session-checkpoint: investigated 42 failed applications from 2026-10-27 in DB2 (39 Ashby confirmation timeouts across Sodalis/Cheiron/Momentic; 3 Greenhouse Parsec OTP failures — 1 OTP timeout with verified challenge screenshot, 2 mailbox not configured); noted missing failure screenshot capture in ashbySubmit.ts; no new observations
+2026-10-28 session-checkpoint: investigated 42 failed applications from 2026-10-27 in DB2 (39 Ashby confirmation timeouts across Sodalis/Cheiron/Momentic; 3 Greenhouse Parsec OTP failures â 1 OTP timeout with verified challenge screenshot, 2 mailbox not configured); noted missing failure screenshot capture in ashbySubmit.ts; no new observations
 2026-10-28 session-start scan: files=2 parsed=2 (investigating failed applications from 2026-10-27 via postgres-db2 MCP, failure reasons, ats types, screenshots)
 2026-10-27 session-checkpoint: completed fresh /rsift technical appraisal; generated complete self-contained evidence report (report.html), facts.json, scores.json, assessment.json, logs, and screenshots in rsift-report/ at root; verified 0 audit vulnerabilities and 100% test pass rate (118 unit + 32/32 e2e); no new observations
 2026-10-27 session-checkpoint: resolved all 10 dependency vulnerabilities; npm audit is 0 vulnerabilities; uninstalled unused openai package, upgraded zod to ^4.6.7, patched proxy-addr/vite/body-parser/qs/express/source-map-js/postcss-selector-parser; verified 100% pass across typecheck, build, test:unit (118/118), and test:e2e (32/32); no new observations
@@ -117,7 +128,7 @@
 2026-10-27 session-checkpoint: completed native TDD implementation for strict Anthropic Claude Tier 5 resolution & exclusive OpenRouter Tier 3 embeddings; 100% tests and typecheck clean; no new observations
 2026-10-27 session-start scan: files=2 parsed=2 (investigating resolver LLM synthesizer & batch resolver to enforce Anthropic Claude API key)
 2026-10-27 session-checkpoint: verified strict Anthropic Claude API usage in LLM synthesis; confirmed no fallback to OpenRouter or secondary providers; no new observations
-2026-10-27 session-checkpoint: calculated 2k apps/day semantic search cost projection ($0.08–$0.45/mo); no new observations
+2026-10-27 session-checkpoint: calculated 2k apps/day semantic search cost projection ($0.08â$0.45/mo); no new observations
 2026-10-27 session-checkpoint: evaluated self-hosted HuggingFace NLP embeddings vs pgvector vector(1536) schema & Railway compute trade-offs; no new observations
 2026-10-27 session-checkpoint: clarified Claude Haiku pricing ($0.10 in / $0.50 out) vs embedding model requirements for Tier 3 vector search; no new observations
 2026-10-27 session-checkpoint: analyzed semantic search embedding architecture (OpenRouter text-embedding-3-small vs Bedrock Titan V2) and Claude Haiku compatibility; no new observations
@@ -130,7 +141,7 @@
 2026-10-26 session-checkpoint: completed tasks 1, 2, and 3 (CA mapping ingestion sync, direct DB CA candidate scoping, and dropping percentage stat cards + stripping resolved_fields from stats); typecheck clean (src + dashboard), all unit tests pass; no new observations
 2026-10-26 session-start scan: files=2 parsed=2 (resuming dashboard performance & ingestion CA mapping optimization)
 2026-10-23 session-checkpoint: shipped universal Gmail & Zoho confirmation email proof resolution across submission-time capture, post-submission polling, dashboard batch worker pool, and DB2 recovery script; added isCandidateMailboxDomain to profiles; typecheck clean (src + dashboard), all unit and Vitest suites pass (55/55); no new observations
-2026-10-22 session-checkpoint: shipped full Ashby ATS integration across 13 tasks (migrations 036 & 037, ATS URL detection, Ashby JSON API & DOM scanner with browserManager fallback, ats propagation to DB, system field short-circuit in resolver, unified playwright-extra + stealth across BrowserManager for Greenhouse and Ashby, DataImpulse geo-proxy builder, Ashby form filler with Bézier cursor & jitter, confirmation detection via green banner, queue worker routing); 100% tests pass (28 Ashby tests, 55 vitest, all unit suites), typecheck clean, dashboard build clean; no new observations
+2026-10-22 session-checkpoint: shipped full Ashby ATS integration across 13 tasks (migrations 036 & 037, ATS URL detection, Ashby JSON API & DOM scanner with browserManager fallback, ats propagation to DB, system field short-circuit in resolver, unified playwright-extra + stealth across BrowserManager for Greenhouse and Ashby, DataImpulse geo-proxy builder, Ashby form filler with BÃ©zier cursor & jitter, confirmation detection via green banner, queue worker routing); 100% tests pass (28 Ashby tests, 55 vitest, all unit suites), typecheck clean, dashboard build clean; no new observations
 2026-10-21 session-checkpoint: completed all 9 PRs of thermo-nuclear code quality debloat refactor; purged V1 artifact disk fallbacks; extracted devDb & candidates express routers; isolated demo fixtures; decomposed applications.ts into 7 submodules; canonicalized choice matching; decomposed formFiller into field strategies; unified OTP session registry with liveSubmit pipeline; modularized inbox connector into shared poller + Zoho/Gmail strategies; enforced strict domain types & decomposed dashboard App.tsx (DashboardHeader, CandidateSidebar, useDashboardState); 100% tests pass (node:test + vitest), typecheck clean, dashboard build clean; no new observations
 2026-10-21 session-start scan: files=2 parsed=2 (resuming debloat refactor; executing remaining PRs 2, 4-9)
 2026-10-21 session-checkpoint: installed thermo-nuclear-code-quality-review skill globally from cursor-team-kit; verified SKILL.md; no new observations
@@ -154,7 +165,7 @@
 2026-10-14 session-checkpoint: audited unresolved LinkedIn applications in DB1; verified 100% genuine data absence (0 resolution bugs; 171 unresolved entries are from profiles with no LinkedIn in DB, payload, or resume text); no new observations
 2026-10-14 session-checkpoint: re-resolved DB1 applications; fixed country resolution on incomplete options selects; 174 applications promoted to QUEUED (208 total); unresolved Country dropped from 593 to 16; no new observations
 2026-10-14 session-checkpoint: local DB1 profiles table verified synchronized with remote DB2 (373 rows, identical counts across country, phone, location, linkedin_url); no new observations
-2026-10-14 session-checkpoint: DB1 cleaned — truncated all applications, templates, qa bank, events, stats, diagnostics, and runs; profiles preserved (376 rows); no new observations
+2026-10-14 session-checkpoint: DB1 cleaned â truncated all applications, templates, qa bank, events, stats, diagnostics, and runs; profiles preserved (376 rows); no new observations
 2026-10-14 session-checkpoint: backfilled country, phone, location, linkedin_url in DB1 profiles from remote DB2 (373 matched rows updated); empty country reduced from 224 to 18; no new observations
 2026-10-14 session-checkpoint: gh_candidate_applications cleared in DB1 (637 rows); profiles table audited for empty country/phone/location/linkedin_url; no new observations
 2026-10-14 session-checkpoint: profiles table copied from DB2 to DB1 (373 rows); gh_scanned_job_templates and gh_candidate_applications cleared; no new observations
@@ -178,7 +189,7 @@
 2026-09-15 deliverable flush: dashboard typecheck enforced (dashboard/tsconfig.json + chained script, positive control verified); docs updated
 2026-09-15 session end: .ai docs updated per AGENTS.md (activeContext focus/blockers/decisions, progress shipped + In Progress row, techContext commands + key files, systemPatterns submission rules)
 2026-09-15 session end: observations 0004 and 0005 logged; 0001-0003 unchanged (0001/0002 actioned today, archive tomorrow; 0003 open)
-2026-09-15 session-end catch-up: task-observer backlog — logged 0006 (Storage listBuckets credential blindness), 0007 actioned (no auto ingest trigger); prior turn updated AGENTS.md docs only without observation flush
+2026-09-15 session-end catch-up: task-observer backlog â logged 0006 (Storage listBuckets credential blindness), 0007 actioned (no auto ingest trigger); prior turn updated AGENTS.md docs only without observation flush
 2026-09-15 session-start scan: files=7 parsed=7
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-15 session end: docs updated (activeContext, progress, systemPatterns, techContext); observations 0006 and 0008 actioned; uncommitted work since 37bab44 documented
@@ -190,7 +201,7 @@
 
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-15 deliverable flush: observation 0006 resolution updated (prefer SERVICE_ROLE_KEY including sb_secret; empty dropzone list is failure); ingest listing no longer gates on listBuckets
-2026-09-15 session: fields_schema chain fix � no new observation
+2026-09-15 session: fields_schema chain fix ï¿½ no new observation
 2026-09-15 session-end: no new observations (LLM fail-closed + SMS skip shipped in 31b830e)
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-15 session-end: docs aligned to 31b830e (ingest probes, SKIPPED/014, cap 35, LLM fail-closed, hydration); 0004 and 0009 actioned; 0003+0005 remain open
@@ -220,7 +231,7 @@
 2026-09-15 session-start scan: files=13 parsed=13
 2026-09-15 session-end: no new observations; haltWithDevAlert shipped (systemic ingest halt); typecheck clean; open 0003+0005+0011+0012+0013
 2026-09-15 session-start scan: files=13 parsed=13 (ingest skip audit)
-2026-09-15 checkpoint: no observations � answered ingest scan/resolve skip behavior (no code changes)
+2026-09-15 checkpoint: no observations ï¿½ answered ingest scan/resolve skip behavior (no code changes)
 2026-09-15 checkpoint: shipped dev pipeline stop (pipelineAbort, admin Stop, ENABLE_PIPELINE_STOP)
 2026-09-15 session-start scan: files=13 parsed=13 suspect=0 (new-profile create failures)
 2026-09-15 session-end: logged 0014 (TS row fields need SQL columns); migration 016 + upsertProfile country retry; open 0003+0005+0011+0012+0013+0014
@@ -241,12 +252,12 @@
 2026-09-17 session-end | OVERVIEW.md four-perspective analysis | observation 0015 actioned | docs activeContext + README pointer
 2026-09-17 session-start scan: files=15 parsed=15 suspect=0 (act-mode session start; 0015 actioned, uncommitted)
 2026-09-17 session-end: paginated auth lookup + CORS/qa_bank fixes; tests/authUserLookup.test.ts
-2026-09-17 session: dashboard load perf (split operator-app, prod React, static tailwind) � no observations
-2026-09-17 session: job card status Map persistence � no observations
+2026-09-17 session: dashboard load perf (split operator-app, prod React, static tailwind) ï¿½ no observations
+2026-09-17 session: job card status Map persistence ï¿½ no observations
 2026-09-17 session: submitted-today stats scoped by role; dashboard polling and manager operator column shipped
 2026-09-17 14:28 session-start + push commit ac0caa5 (excluded cache, supabase/.temp, rules.md, skill-obs log delta)
 2026-09-17 session-start scan: files=15 parsed=15 suspect=0 (fresh start-session prompt; open=0003,0005,0011,0012,0013)
-2026-09-17 checkpoint: no observations � start-session only; user declined all suggested tasks (no task selected)
+2026-09-17 checkpoint: no observations ï¿½ start-session only; user declined all suggested tasks (no task selected)
 2026-09-17 deliverable flush: logged 0016 (token presence is not shape - stats card nested, poll 3s vs spec 30s); extended 0003 (second instance: spec already implemented in ae4946b); no code changes made
 2026-09-17 deliverable flush: no observations (operator-triggered retry implemented; backend typecheck and diff check passed)
 2026-09-17 deliverable flush: operator completion toast added; no new observations
@@ -286,7 +297,7 @@
 2026-09-19 session-start scan: files=21 parsed=21
 2026-09-19 checkpoint: no observations
 2026-09-19 checkpoint: no observations
-2026-09-19 checkpoint: build crash fix � Vite dist/client collision with tsc dist/dashboard
+2026-09-19 checkpoint: build crash fix ï¿½ Vite dist/client collision with tsc dist/dashboard
 2026-09-20 deliverable flush: fixed Vite outDir back to dist/client and updated static serve path in src/server/index.ts to prevent Vite from wiping tsc-compiled dist/dashboard files (ERR_MODULE_NOT_FOUND candidateQueueFilter); pushed to main; no new observations
 2026-09-20 deliverable flush: created .github/workflows/ci.yml with typecheck, build, test jobs, PR failure comments, and added status badge to README.md; branch feature/ci-pipeline; no new observations
 2026-09-20 deliverable flush: added applywizz_dev_operator_view session signaling in DevSwitcher (dev.html) and App.tsx mount redirect guard; branch feature/ci-pipeline; no new observations
@@ -329,7 +340,7 @@
 2026-09-15 deliverable flush: dashboard typecheck enforced (dashboard/tsconfig.json + chained script, positive control verified); docs updated
 2026-09-15 session end: .ai docs updated per AGENTS.md (activeContext focus/blockers/decisions, progress shipped + In Progress row, techContext commands + key files, systemPatterns submission rules)
 2026-09-15 session end: observations 0004 and 0005 logged; 0001-0003 unchanged (0001/0002 actioned today, archive tomorrow; 0003 open)
-2026-09-15 session-end catch-up: task-observer backlog — logged 0006 (Storage listBuckets credential blindness), 0007 actioned (no auto ingest trigger); prior turn updated AGENTS.md docs only without observation flush
+2026-09-15 session-end catch-up: task-observer backlog â logged 0006 (Storage listBuckets credential blindness), 0007 actioned (no auto ingest trigger); prior turn updated AGENTS.md docs only without observation flush
 2026-09-15 session-start scan: files=7 parsed=7
 2026-09-15 session-start scan: files=8 parsed=8
 2026-09-15 session end: docs updated (activeContext, progress, systemPatterns, techContext); observations 0006 and 0008 actioned; uncommitted work since 37bab44 documented
@@ -573,7 +584,7 @@
 2026-10-05 sandbox boot verified: fresh reset and pipeline resolution operational
 2026-10-05 grill-me round 2: root cause analysis of sandbox loop and database viewing completed
 2026-10-05 grill-me round 2 conclusion: plan aligned for root CSV auto-ingest and /dev/db explorer
-2026-10-05 — weekly review complete; 11 obs actioned; Principles 7/8/9 added to cross-cutting-principles.md
+2026-10-05 â weekly review complete; 11 obs actioned; Principles 7/8/9 added to cross-cutting-principles.md
 2026-10-05 deliverable flush: removed obsolete Playwright zohoReader.ts and 15-instance browser pool; switched OTP & confirmation proof exclusively to Zoho REST API (/api/zoho/ui/inbox); no new observations
 2026-10-05 deliverable flush: tuned OTP REST polling interval to 5s with min 2.5s inter-request pause; increased timeout budget to 60s; no new observations
 2026-10-05 session-start scan
@@ -817,7 +828,7 @@ checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.179187715245
 2026-10-15 20:11 [greehouse_apply] checkpoint: downloaded 109 failure screenshots to failed_screenshots_non_otp/; visually inspected failure modes across top employers (Scale AI, Mixpanel, Care Access, Capco, Anthropic, Carta); identified root causes: location dropdown selection rejection, education sub-field omissions, and custom EEQ validation rules; no observations
 2026-10-15 20:22 [greehouse_apply] checkpoint: killed background re-resolution task (task-341) per user instruction; immediately cleared and reverted all in-flight applications back to FAILED in DB2; verified QUEUED count is 0; no observations
 2026-10-15 20:30 [greehouse_apply] checkpoint: exported resolved AI question/answer fields for APPLIED, EMAIL_PROOF_PENDING, and FAILED applications to output/ai-resolved-questions-2026-10-15.json; no observations
-2026-10-15 session-start scan: files=N parsed=N (new session; context loaded from summary; last-review-date=2026-10-05 >7 days ago; open observations present — offer review)
+2026-10-15 session-start scan: files=N parsed=N (new session; context loaded from summary; last-review-date=2026-10-05 >7 days ago; open observations present â offer review)
 2026-10-16 09:28 [greehouse_apply] session-start scan: files=19 parsed=19 principles=unparsed
 2026-10-16 [greehouse_apply] checkpoint: queried DB2 gh_candidate_applications status counts and FAILED rows grouped by error_message; no observations
 2026-10-16 09:35 [greehouse_apply] checkpoint: requeued 20 exact OTP-timeout FAILED rows in DB2; exported 72 screenshots into output/16th oct failed across four non-OTP cause folders; 3 records had no screenshot object; no observations; user deferred overdue review until task completion
@@ -840,7 +851,7 @@ checkpoint 2026-10-13T13:26:10 conversation=log-diagnosis task=logs.179187715245
 2026-10-16 task checkpoint: addressed guided-test hallucination risk with explicit date-bounded evidence rule; recorded and closed that loophole.
 2026-10-16 task checkpoint: completed five fresh-context reportkaro re-tests; all stayed within supplied dates, separated baseline context from impact, and produced a consistent report structure.
 2026-10-16 task checkpoint: reportkaro quality checks complete and personal skill installed under ~/.agents/skills/reportkaro.
-2026-10-16 session-checkpoint: installed personal reportkaro skill, saved the Oct 14�16 report, and verified guided outputs; no observations.
+2026-10-16 session-checkpoint: installed personal reportkaro skill, saved the Oct 14ï¿½16 report, and verified guided outputs; no observations.
 2026-10-16 11:45 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
 2026-10-16 session checkpoint: staged the reportkaro update-doc workflow; updated observation 0034 (open, structural guard proposed); no other observations.
 2026-10-16 11:56 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
@@ -916,7 +927,7 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-10-27 session-start scan: files=2 parsed=2
 2026-10-27 no observations: updated README with two-part business and technical architecture; no reusable skill issue observed.
 2026-10-27 16:41 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
-2026-10-27 16:42 loaded reportkaro — 0 open observations
+2026-10-27 16:42 loaded reportkaro â 0 open observations
 2026-10-27 no observations: staged reportkaro output-format update; no reusable skill issue observed.
 2026-10-27 16:45 [greehouse_apply] session-start scan: files=2 parsed=2 principles=unparsed
 2026-10-27 no observations: compiled dated change report from Git history and current project notes; no reusable skill issue observed.
@@ -1126,3 +1137,34 @@ checkpoint 2026-10-26T19:45:12+05:30 conversation-6159295c-13be-4b24-99c9-07d41c
 2026-11-15 session-checkpoint: completed implementation and verification of Filtered & Analysis Dashboard Metrics Accuracy & Performance (Tasks 1-4); fixed PostgREST 1000-row truncation ceiling via range pagination, corrected autoApplied status classification, synchronized header date picker to AnalysisView, added 30s TTL in-memory caching; 34/34 tests pass green, full typecheck clean; no new observations
 2026-11-15 session-start scan: files=9 parsed=9 (prp audit - group y features and fixes)
 2026-11-15 session-checkpoint: completed prp audit, feature & fix atomic commits, clean rebase with origin/dev (0 conflicts), and pushed to remote dev; clean typecheck and green tests; no new observations
+2026-11-15 session-start scan: files=9 parsed=9 (check railway injest worker check if its stuck)
+2026-11-15 session-start scan: files=71 parsed=71
+2026-11-15 session-start scan: files=9 parsed=9 (diagnose resolver issues giving wrong answers from tier5 audit)
+2026-11-15 session-checkpoint: completed resolver truthful answers remediation (Tasks 1-8); disentangled visa sponsorship vs general work authorization precedence; added spousal sponsorship negative rule; extended choice polarity for negative sponsorship phrases; eliminated uncontained || 'Yes' in corporate policies; reconciled checkbox option label alignment with boolean consent preservation; expanded preferred and legal name matching; added deterministic anti-bot human verification trap, prompt-level human identity constraints, and EAR/ITAR compliance rules; added semantic URL boolean guard; all 19 unit tests pass, 101 existing regression tests pass (89 node:test + 12 vitest), 100% clean TypeScript typecheck; no new observations
+
+2026-11-16 session-start scan: files=9 parsed=9 (debugging and root cause analysis of failed candidate applications in db2 created yesterday)
+2026-11-16 session-checkpoint: completed forensic visual root cause audit of all 1,229 DB2 failed applications created 2026-11-15 across Greenhouse and Ashby; 1,194 screenshots analyzed across 4 parallel subagents; identified 13 false-failure successes on Ashby, education stripping bugs on Greenhouse, uncommitted radio/checkbox collisions, and proxy probe rate limits; report saved to .ai/diagnostics/fada_failed_audit_2026-11-15.md; no code changes; no observations
+2026-11-16 [greehouse_apply] session-start scan: files=9 parsed=9; reportkaro requested for Nov 516, 2026 IST.
+2026-11-16 [greehouse_apply] task-observer checkpoint: no new observations; saved positive-only project change report for Nov 516 at reports/2026-11-05-to-2026-11-16-change-report.md based on dated commits, project notes and checkpoints; deployment not independently checked.
+2026-11-16 session-checkpoint: completed implementation plan for Ashby and Greenhouse submission engine fixes in docs/superpowers/plans/2026-11-16-submission-engine-failure-fixes.md; updated 13 false-failure Ashby apps in DB2 to APPLIED; no observations
+2026-11-16 [greehouse_apply] task-observer checkpoint: revised report into manager read-aloud script per user direction; showcase paths lead, background/operational changes follow; saved reports/2026-11-05-to-2026-11-16-manager-presentation-script.md; no new observations.
+2026-11-16 [greehouse_apply] task-observer checkpoint: refreshed manager presentation script against latest Nov 16 notes and workspace; separated showcase, background fixes, and operations; saved reports/2026-11-05-to-2026-11-16-manager-presentation-script-2.md; no new observations.
+2026-11-16 session-start scan: files=9 parsed=9
+2026-11-16 deliverable-flush: count-automated-companies (no observations)
+2026-11-16 deliverable-flush: unique-applied-companies-csv (no observations)
+2026-11-16 22:44 [greehouse_apply] session-start scan: files=9 parsed=9 principles=unparsed
+2026-11-16 repository research: no observations
+2026-11-16 deliverable-flush: streamlined-companies-csv (no observations)
+2026-11-16 deliverable-flush: scanned-companies-summary-in-csv (no observations)
+2026-11-16 Obscura scanner comparison and web guidance research: no new skill observations
+2026-11-16 Google guidance issue review and Obscura fill-only comparison: no new skill observations
+2026-11-16 Obscura minimal upload metrics and web guidance report: no new skill observations
+2026-11-16 Obscura documented CDP upload retest: no new skill observations
+2026-11-16 temporary Obscura tailored fill-only fixture: no new skill observations
+2026-11-17 Ashby navigation failure classification fix: no new skill observations
+2026-11-17 Ashby Apify research session-start scan; completion: no new observations
+2026-11-17 Ashby Apify fallback implementation: no new observations; local tests and typecheck passed; live provider not verified
+2026-11-17 APIFY_STRING proxy URL wiring: no new observations; focused Ashby proxy tests (34 passed) and npm run typecheck passed; no live proxy or deployment check.
+2026-11-17 leadership email reporting session-start scan
+2026-11-17 CA and manager review broadcast message drafting session-start scan
+2026-11-17 executive daily reporting and post-ingest metrics implementation complete: 26/26 tests passed; clean typecheck; no new skill observations
