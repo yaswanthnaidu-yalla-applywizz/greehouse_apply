@@ -483,3 +483,51 @@ export async function sendExecutiveDailyDigest(
     return { success: false, error: msg };
   }
 }
+
+export function calculateMsUntilNext9AmIst(nowMs: number = Date.now()): number {
+  const nextTarget = new Date(nowMs);
+  nextTarget.setUTCHours(3, 30, 0, 0); // 09:00:00 IST is 03:30:00 UTC
+
+  if (nextTarget.getTime() <= nowMs) {
+    nextTarget.setUTCDate(nextTarget.getUTCDate() + 1);
+  }
+
+  return nextTarget.getTime() - nowMs;
+}
+
+let schedulerTimer: NodeJS.Timeout | null = null;
+
+export function startExecutiveDailyReportScheduler(
+  options: { dryRun?: boolean; sendEmailFn?: (opts: any) => Promise<any> } = {}
+): NodeJS.Timeout {
+  if (schedulerTimer) {
+    return schedulerTimer;
+  }
+
+  const scheduleNext = () => {
+    const delayMs = calculateMsUntilNext9AmIst();
+    log.info(
+      `[Executive Report] Next 9:00 AM IST daily report scheduled in ${(delayMs / 3600000).toFixed(2)} hours`
+    );
+
+    schedulerTimer = setTimeout(async () => {
+      try {
+        if (!options.dryRun) {
+          await sendExecutiveDailyDigest({ sendEmailFn: options.sendEmailFn });
+        } else {
+          log.info('[Executive Report] Dry-run execution triggered');
+        }
+      } catch (err: any) {
+        log.error(`[Executive Report] Scheduled run error: ${err?.message || err}`);
+      } finally {
+        schedulerTimer = null;
+        scheduleNext();
+      }
+    }, delayMs);
+
+    schedulerTimer.unref();
+    return schedulerTimer;
+  };
+
+  return scheduleNext();
+}

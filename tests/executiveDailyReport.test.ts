@@ -6,6 +6,8 @@ import {
   generateExecutiveSummary,
   buildExecutiveDailyReportHtml,
   sendExecutiveDailyDigest,
+  calculateMsUntilNext9AmIst,
+  startExecutiveDailyReportScheduler,
 } from '../src/services/executiveDailyReport.js';
 
 describe('executiveDailyReport - recipients resolution', () => {
@@ -213,5 +215,31 @@ describe('executiveDailyReport - dispatch service', () => {
     assert.ok(sent.subject.includes('ApplyWizz Executive Daily Report'));
     assert.ok(sent.subject.includes('2026-11-17'));
     assert.ok(sent.html.includes('Daily Executive Operations Digest'));
+  });
+});
+
+describe('executiveDailyReport - 9:00 AM IST scheduler timing', () => {
+  it('calculates milliseconds until 9:00 AM IST (03:30 UTC) today if currently earlier', () => {
+    // 02:30 UTC = 8:00 AM IST
+    const earlierToday = new Date('2026-11-17T02:30:00.000Z').getTime();
+    const delayMs = calculateMsUntilNext9AmIst(earlierToday);
+    // Should be exactly 1 hour = 3600000 ms
+    assert.equal(delayMs, 60 * 60 * 1000);
+  });
+
+  it('rolls over to tomorrow 9:00 AM IST if currently after 9:00 AM IST', () => {
+    // 04:30 UTC = 10:00 AM IST
+    const laterToday = new Date('2026-11-17T04:30:00.000Z').getTime();
+    const delayMs = calculateMsUntilNext9AmIst(laterToday);
+    // Should be exactly 23 hours = 23 * 3600000 ms
+    assert.equal(delayMs, 23 * 60 * 60 * 1000);
+  });
+
+  it('initializes scheduler without errors and respects singleton guard', () => {
+    const timer = startExecutiveDailyReportScheduler({ dryRun: true });
+    assert.ok(timer);
+    // Second invocation should return the active timer (idempotent singleton)
+    const second = startExecutiveDailyReportScheduler({ dryRun: true });
+    assert.equal(second, timer);
   });
 });
