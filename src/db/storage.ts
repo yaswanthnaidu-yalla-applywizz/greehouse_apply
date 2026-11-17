@@ -5,7 +5,7 @@ import { getDbClient, isSupabaseConfigured } from './client.js';
 import { getProfile } from './profiles.js';
 import config from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
-import { resolveResumeDomain, buildResumeSubmissionFilename, buildResumeStorageFilename } from '../utils/resumeNaming.js';
+import { resolveResumeDomain, buildResumeStorageFilename } from '../utils/resumeNaming.js';
 
 const log = createLogger('Storage');
 
