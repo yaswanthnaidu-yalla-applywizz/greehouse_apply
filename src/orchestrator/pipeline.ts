@@ -21,6 +21,7 @@ import { readAndDeduplicateUrls, resolveShortlink, atsFromUrl } from '../scanner
 import { PlaywrightScanner } from '../scanner/playwrightScanner.js';
 import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
 import { AshbyScanner } from '../scanner/ashbyScanner.js';
+import { LeverScanner } from '../scanner/leverScanner.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
 import { syncCaCandidateAssignments } from '../services/caAssignmentSync.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
@@ -232,10 +233,11 @@ export class V1Pipeline {
       let scanCompleted = false;
       let scannedCount = 0;
       let scanFailures = 0;
+      let expiredScans = 0;
       const reportScanProgress = (): void => {
         if (scannedCount === uniqueUrls.length || scannedCount % 25 === 0) {
           log.info(
-            `[Pipeline Phase B] Progress: ${scannedCount}/${uniqueUrls.length} scanned | Active: ${scannedCount - scanFailures}, Expired: ${scanFailures}`
+            `[Pipeline Phase B] Progress: ${scannedCount}/${uniqueUrls.length} scanned | Active: ${scannedCount - scanFailures - expiredScans}, Expired: ${expiredScans}, Failed: ${scanFailures}`
           );
         }
       };
@@ -247,13 +249,14 @@ export class V1Pipeline {
           maxJitterMs: config.SCANNER_JITTER_MAX_MS,
           onJobScanned: (job) => {
             scannedCount++;
-            if (job.isExpired) scanFailures++;
+            if (job.isExpired) expiredScans++;
             reportScanProgress();
           },
         });
 
         const ashbyUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'ashby');
-        const greenhouseUrls = uniqueUrls.filter((u) => atsFromUrl(u) !== 'ashby');
+        const leverUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'lever');
+        const greenhouseUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'greenhouse');
 
         const ashbyScanner = new AshbyScanner({
           workerPoolSize: scanWorkers,
@@ -262,17 +265,40 @@ export class V1Pipeline {
           maxJitterMs: config.SCANNER_JITTER_MAX_MS,
           onJobScanned: (job) => {
             scannedCount++;
-            if (job.isExpired) scanFailures++;
+            if (job.isExpired) expiredScans++;
+            reportScanProgress();
+          },
+          onScanFailed: () => {
+            scannedCount++;
+            scanFailures++;
             reportScanProgress();
           },
         });
 
-        const [ghTemplates, ashbyTemplates] = await Promise.all([
+        const leverScanner = new LeverScanner({
+          workerPoolSize: scanWorkers,
+          timeoutMs: config.PLAYWRIGHT_TIMEOUT,
+          minJitterMs: config.SCANNER_JITTER_MIN_MS,
+          maxJitterMs: config.SCANNER_JITTER_MAX_MS,
+          onJobScanned: (job) => {
+            scannedCount++;
+            if (job.isExpired) expiredScans++;
+            reportScanProgress();
+          },
+          onScanFailed: () => {
+            scannedCount++;
+            scanFailures++;
+            reportScanProgress();
+          },
+        });
+
+        const [ghTemplates, ashbyTemplates, leverTemplates] = await Promise.all([
           greenhouseUrls.length > 0 ? scanner.scanUniqueUrls(greenhouseUrls) : Promise.resolve([]),
           ashbyUrls.length > 0 ? ashbyScanner.scanUniqueUrls(ashbyUrls) : Promise.resolve([]),
+          leverUrls.length > 0 ? leverScanner.scanUniqueUrls(leverUrls) : Promise.resolve([]),
         ]);
 
-        scannedTemplates = [...ghTemplates, ...ashbyTemplates];
+        scannedTemplates = [...ghTemplates, ...ashbyTemplates, ...leverTemplates];
         scanCompleted = true;
       } catch (err: any) {
         if (isPipelineAbortedError(err)) {
@@ -289,7 +315,7 @@ export class V1Pipeline {
           if (!isSandboxTestMode()) await sendEmail({
             to: 'yaswanthnaiduyalla@applywizz.ai',
             subject: 'ApplyWizz job scanning complete',
-            text: `Scanned ${scannedCount}/${uniqueUrls.length} job URLs. Greenhouse: ${greenhouseCount}. Ashby: ${ashbyCount}. Failed: ${scanFailures}.`,
+            text: `Scanned ${scannedCount}/${uniqueUrls.length} job URLs. Greenhouse: ${greenhouseCount}. Ashby: ${ashbyCount}. Expired: ${expiredScans}. Failed: ${scanFailures}.`,
           });
         } catch (emailErr: any) {
           log.warn(`[Pipeline Phase B] Scan-complete email failed: ${emailErr?.message || emailErr}`);
@@ -309,6 +335,15 @@ export class V1Pipeline {
     // -------------------------------------------------------------
     // Phase C: Candidate Segregation & Profile Sync (Branch 2)
     // -------------------------------------------------------------
+    if (!isSandboxTestMode() && !options.skipScanIfCached) {
+      try {
+        const { purgeResumesBucket } = await import('../db/storage.js');
+        await purgeResumesBucket();
+      } catch (purgeErr: any) {
+        log.warn(`[Pipeline Phase C] ⚠️ Non-blocking resumes bucket purge: ${purgeErr?.message}`);
+      }
+    }
+
     if (compact) {
       log.info('[Pipeline] phase C segregate start');
     } else {
