@@ -1,3 +1,39 @@
+# Current Session Update (2026-11-17 - Fresh Resume Ingest & Dynamic ATS Form Submission Naming)
+
+- **Dynamic Resume Renaming Adaptation (`src/utils/resumeNaming.ts`)**:
+  - Adapted `fileNameUtils.ts` into our codebase to dynamically format resumes as `Resume_FirstName_LastName_JobRole.pdf` (or `CoverLetter_...`).
+  - Added compatibility for Node.js (via string pageTitle/jobTitle with fallback to `document.title`) and diverse profile shapes (`personal.firstName`, `first_name`, `firstName`, `client_name`).
+  - Preserved backward-compatible exports for all existing callers in `storage.ts`, `formFiller.ts`, and `ashbySubmit.ts`.
+- **Supabase Storage `resumes` Bucket Purge (`src/db/storage.ts`)**:
+  - Added `purgeResumesBucket()` with pagination to wipe all files in the Supabase Storage `resumes` bucket and clear the local `./resumes/` folder.
+  - Standardized storage master resume filename to `Resume_FirstName_LastName.pdf` via `buildResumeStorageFilename()`.
+- **Parsed Resume Cache Invalidation (`src/resolver/tier2ResumeParse.ts`)**:
+  - Added `invalidateResumeParseCache(applywizzIds)` clearing `resume_text` and `resume_facts` on candidate profiles so Tier 2 re-downloads and re-parses from the fresh resume.
+- **Fresh Resume Ingest Sync (`src/candidate/ensureSupabaseProfile.ts`, `src/scanner/storageCsvIngestion.ts`, `src/candidate/segregator.ts`)**:
+  - Added `forceRefreshResume: true` to `ensureSupabaseProfile` ensuring resumes are re-downloaded from ApplyWizz S3 and re-uploaded to Supabase Storage even when candidate profiles already exist in Supabase.
+  - Wired bucket purge and cache invalidation into `storageCsvIngestion.ts` and `segregator.ts`.
+- **Submission Engine Integration (`src/submitter/formFiller.ts`, `src/submitter/ashbySubmit.ts`)**:
+  - Updated Greenhouse and Ashby submitters to name attached resumes as `Resume_FirstName_LastName_JobRole.pdf` based on the live job page title / job title.
+  - Added safe unlink before rename to prevent Windows temporary directory file collisions.
+- **Verification**: 100% test suites pass (89 node unit tests, 111 vitest tests, 5 new unit test suites); 0 TypeScript errors across the repository (`npx tsc --noEmit`).
+
+# Current Session Update (2026-11-17 - Rippling Standalone Scanner/Filler/Outcome and URL Safety)
+
+- **Standalone exploratory work only:** Rippling scanner, filler, outcome handling, and URL safety have not been wired into the application pipeline.
+- **Public form observations:** 10 scan attempts produced 4 field lists; 6 stopped fail-closed on ambiguous labels. There were 3 distinct Apply clicks total: 2 outcomes remain unconfirmed, and 1 after-click view showed a Cloudflare CAPTCHA (screenshot: `.ai/diagnostics/rippling-submission-after.png`).
+- **Current state:** No confirmed submission success. No further retry was made.
+
+# Current Session Update (2026-11-17 - Ashby Apify Preflight Fallback Verification & DB2 Diagnostic Audit)
+
+- **Audited 8 Ashby Applications from DB2 Created 2026-11-16 Failing on Preflight**:
+  - Out of 27 Ashby failures created yesterday in DB2, 8 applications failed at `stage: 'PREFLIGHT'` with `Ashby proxy preflight failed: Preflight probe failed with HTTP status 400`.
+- **Live Verification of Apify Residential Fallback**:
+  - Implemented and wired `APIFY_STRING` optional residential fallback into `src/submitter/ashbyProxy.ts` and `src/submitter/ashbySubmit.ts`.
+  - Executed dry-run verification (`scripts/testAshbyApifyRetry.ts`) across all 8 applications without submitting:
+    - **100% of Massive route failure cases (5 of 5)** automatically engaged Apify residential fallback, passed preflight, and resolved exit IPs successfully.
+    - **3 applications are fully ready for submission (`CAN APPLY NOW`)**: Clera (`AWL-42673`), ClickHouse (`AWL-29612`), and ClickHouse (`AWL-41703` via Apify). All required fields were committed and submit buttons mounted. Proof screenshots saved to `output/proofs_dry_run/`.
+    - **5 applications remain blocked by form/DOM controls, not proxy**: Netic (3 apps) missing radio button commit for question *"What technical domain do you prefer to work in..."*, Assort Health (1 app) missing radio commit for visa type, and Eragon (1 app) timed out on form mounting after 35s.
+
 # Current Session Update (2026-11-17 - Executive Daily Reporting & Post-Ingest Pipeline Visibility)
 
 - **Shipped Executive Daily 9:00 AM IST Digest & Post-Ingest Metrics**:
