@@ -8,6 +8,7 @@ CORPORATE POLICIES & MANDATORY ANSWER GUIDELINES:
 2. Mandatory Agreements & Policies: For terms & conditions, arbitration agreements, privacy policies, AI usage/application policies, or declarations, always agree/accept (choose the affirmative option, e.g. "I agree", "Yes", or true).
 3. Communication & Messaging Consent: If asked for consent to receive text messages, SMS, or WhatsApp communications regarding the application, always decline (answer No, or false).
 4. Job Source / Referral: When asked how the candidate heard about this opportunity or role, select the option containing "LinkedIn" if available (fallback to "Job Board" or "Career site"), or return "LinkedIn" for free text.
+5. Human Candidate Identity & Anti-Bot Screening: You are answering as the human job applicant. NEVER identify as an AI, bot, automated program, language model, or virtual assistant. When answering questions that distinguish human candidates from automated tools (e.g. "Which of the following best describes you?", "Are you an AI or automated system?"), ALWAYS select the human applicant option (e.g. "I am a human.") or answer "No".
 `.trim();
 
 /**
@@ -31,6 +32,29 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
       return 'false';
     }
     return matchChoiceOption('No', field.options) || 'No';
+  }
+
+  // 1b. Employee Relatives & Personal Ties (Anti-Nepotism / Conflict of Interest) -> Always "No"
+  if (
+    /\b(?:related to|family member|relative|personal ties|close ties)\b.*(?:employee|worker|staff|anyone (?:at|with))|any.*(?:employee|worker|staff).*(?:related to|family member|relative|personal ties|close ties)/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') {
+      return 'false';
+    }
+    return matchChoiceOption('No', field.options) || 'No';
+  }
+
+  // 1c. Anti-Bot / Human Verification Screening Traps -> Always human
+  if (
+    /\b(?:which.*best describes you|are you a human|confirm you are human|automated program|if you are an? (?:ai|large language model|llm)|select .* if you are an? ai)\b/i.test(combined) &&
+    Array.isArray(field.options) &&
+    field.options.some((opt) => /\bhuman\b/i.test(opt))
+  ) {
+    const humanOpt = field.options.find((opt) => /\bhuman\b/i.test(opt) && !/\b(?:ai|bot|automated|nelly)\b/i.test(opt));
+    if (humanOpt) return humanOpt;
+    return 'Human';
   }
 
   // 2. Communication / SMS / WhatsApp Consent
@@ -99,6 +123,29 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
   }
 
   // 5. Sanctioned Countries & Export Controls
+  // Export Administration Regulations (EAR) / ITAR U.S. Person Compliance
+  if (
+    /\b(?:u\.?s\.?\s*person.*(?:ear|itar)|ear.*definition.*u\.?s\.?\s*person|export control.*u\.?s\.?\s*person)\b/i.test(combined)
+  ) {
+    const isNonImmigrant =
+      profile?.requires_sponsorship === true ||
+      profile?.work_authorization === 'F1' ||
+      profile?.work_authorization === 'H1B' ||
+      profile?.work_authorization === 'Other';
+    const target = isNonImmigrant ? 'No' : 'Yes';
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      if (isNonImmigrant) {
+        const notPersonOpt = field.options.find((opt) => /\bnot\s+a\s+u\.?s\.?\s*person\b/i.test(opt));
+        if (notPersonOpt) return notPersonOpt;
+      } else {
+        const personOpt = field.options.find((opt) => /\bi am a u\.?s\.?\s*person\b/i.test(opt));
+        if (personOpt) return personOpt;
+      }
+      return matchChoiceOption(target, field.options) || target;
+    }
+    return target;
+  }
+
   if (
     /\b(?:cuba|iran|north korea|syria|crimea|donetsk|luhansk|sanctioned countr|export control)\b/i.test(
       combined
@@ -172,7 +219,16 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
     )
   ) {
     if (field.type === 'checkbox') return 'true';
-    return matchChoiceOption('Yes', field.options) || 'Yes';
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      const direct = matchChoiceOption('Yes', field.options);
+      if (direct) return direct;
+      const sfOrUs = field.options.find((opt) => /san francisco|\b(?:us|usa|united states)\b/i.test(opt));
+      if (sfOrUs) return sfOrUs;
+      const firstAffirmative = field.options.find((opt) => /^(?:yes|agree)\b/i.test(opt.trim()));
+      if (firstAffirmative) return firstAffirmative;
+      return null;
+    }
+    return 'Yes';
   }
 
   // 8. Numbered Work Experience (1)-(3) (e.g. employer (1), job title (2))
@@ -222,7 +278,10 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
     )
   ) {
     if (field.type === 'checkbox') return 'true';
-    return matchChoiceOption('Yes', field.options) || 'Yes';
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      return matchChoiceOption('Yes', field.options);
+    }
+    return 'Yes';
   }
 
   if (
@@ -231,7 +290,16 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
     )
   ) {
     if (field.type === 'checkbox') return 'true';
-    return matchChoiceOption('Yes', field.options) || 'Yes';
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      const direct = matchChoiceOption('Yes', field.options);
+      if (direct) return direct;
+      const both = field.options.find((opt) => /^both$/i.test(opt.trim()));
+      if (both) return both;
+      const nation = field.options.find((opt) => /nationwide|state-wide|any/i.test(opt));
+      if (nation) return nation;
+      return field.options[0];
+    }
+    return 'Yes';
   }
 
   return null;
@@ -247,6 +315,11 @@ export function enforceCorporatePolicy(
 ): ResolvedField {
   const policyVal = matchCorporatePolicy(field);
   if (!policyVal) {
+    return resolved;
+  }
+
+  // If the field has options and policyVal is not in options, do not clamp
+  if (Array.isArray(field.options) && field.options.length > 0 && !field.options.includes(policyVal)) {
     return resolved;
   }
 
