@@ -14,7 +14,12 @@ import type {
 import { updateStatus } from '../db/applications/crud.js';
 import { getProfile } from '../db/profiles.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
-import { buildAshbyProxyConfig, resolveCountryCode, verifyProxyPreflight } from './ashbyProxy.js';
+import {
+  buildAshbyProxyConfig,
+  resolveCountryCode,
+  verifyProxyPreflight,
+  type ProxyPreflightResult,
+} from './ashbyProxy.js';
 import { fillAshbyForm, glideCursor, sleep, verifyRequiredFieldsCommitted } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
@@ -32,11 +37,82 @@ import {
 
 const log = createLogger('AshbySubmit');
 
-export async function waitForAshbyApplicationReady(page: Page, timeoutMs = 15000): Promise<void> {
+export function shouldAttemptApifyPreflightFallback(
+  primaryIsMassive: boolean,
+  apifyString: string | undefined,
+  preflight: { success: boolean; error?: string }
+): boolean {
+  return primaryIsMassive && Boolean(apifyString?.trim()) && !preflight.success;
+}
+
+export async function preflightFallback<TPage>(options: {
+  page: TPage;
+  preflight: ProxyPreflightResult;
+  shouldFallback: boolean;
+  releaseCurrent: () => Promise<void>;
+  acquireFallback: () => Promise<TPage>;
+  verify: (page: TPage) => Promise<ProxyPreflightResult>;
+  onFallbackError?: (error: unknown) => void;
+}): Promise<{ page: TPage; preflight: ProxyPreflightResult }> {
+  let { page, preflight } = options;
+  if (!preflight.success && options.shouldFallback) {
+    try {
+      await options.releaseCurrent();
+      page = await options.acquireFallback();
+      preflight = await options.verify(page);
+    } catch (error) {
+      options.onFallbackError?.(error);
+    }
+  }
+  return { page, preflight };
+}
+
+export async function waitForAshbyApplicationReady(page: Page, timeoutMs = 35000): Promise<void> {
+  const startTime = Date.now();
+
+  // 1. If loading spinner is present, wait for it to detach
   try {
-    await page.waitForSelector('[data-field-path]', { timeout: timeoutMs });
+    const spinner = page.locator('.ashby-loading-spinner, svg[class*="loading-spinner"]');
+    if ((await spinner.count()) > 0 && (await spinner.first().isVisible().catch(() => false))) {
+      await spinner.first().waitFor({ state: 'detached', timeout: Math.min(30000, timeoutMs) }).catch(() => {});
+    }
+  } catch {}
+
+  // 2. Check if form field is already mounted
+  const formField = page.locator('[data-field-path]').first();
+  if ((await formField.count().catch(() => 0)) > 0 && (await formField.isVisible().catch(() => false))) {
+    return;
+  }
+
+  // 3. Auto-transition from Overview tab if application form is hidden
+  const applyButtonSelectors = [
+    'button:has-text("Apply for this Job")',
+    '.ashby-application-form-overview-apply-button',
+    '[role="tab"]:has-text("Application")',
+    'button:has-text("Apply")',
+  ];
+
+  for (const sel of applyButtonSelectors) {
+    try {
+      const btn = page.locator(sel).first();
+      if ((await btn.count()) > 0 && (await btn.isVisible().catch(() => false))) {
+        log.info(`[AshbySubmit] Transitioning from Overview tab using selector "${sel}"`);
+        await btn.click({ timeout: 5000 }).catch(() => {});
+        break;
+      }
+    } catch {}
+  }
+
+  // 4. Wait for form field to mount within remaining window
+  const elapsed = Date.now() - startTime;
+  const remainingMs = Math.max(1000, timeoutMs - elapsed);
+  try {
+    await page.waitForSelector('[data-field-path]', { timeout: remainingMs });
   } catch {
-    throw new Error(`Ashby application form readiness timed out after ${timeoutMs}ms`);
+    const fieldCount = await page.locator('[data-field-path]').count().catch(() => 0);
+    if (fieldCount === 0) {
+      throw new Error(`Ashby application form readiness timed out after ${timeoutMs}ms`);
+    }
   }
 }
 
@@ -174,10 +250,19 @@ export async function waitForSubmitConfirmation(
     const url = page.url();
     const title = (await page.title().catch(() => '')) || '';
 
+    const hasConfirmationText =
+      /(?:thank\s+(?:you|s)\s+(?:for|to)|thanks\s+for|application\s+(?:was\s+|has\s+been\s+)?(?:received|submitted)|successfully\s+(?:submitted|received)|we(?:'ve|\s+have)\s+received\s+your\s+application)/i.test(
+        pageText
+      );
+    const hasSuccessElement =
+      (await page
+        .locator('div[class*="success"], .ashby-application-form-success')
+        .count()
+        .catch(() => 0)) > 0;
+
     if (
-      pageText.includes('Your application was successfully submitted') ||
-      pageText.includes('application was successfully submitted') ||
-      /thank you for applying|application received/i.test(pageText) ||
+      hasConfirmationText ||
+      hasSuccessElement ||
       url.includes('/confirmation') ||
       /success|thank/i.test(title)
     ) {
@@ -205,7 +290,7 @@ export async function waitForSubmitConfirmation(
     await page.waitForTimeout(pollIntervalMs);
   }
 
-  throw new Error('Ashby application submit confirmation signal timed out after 45s');
+  return false;
 }
 
 export async function submitAshbyApplication(
@@ -250,10 +335,15 @@ export async function submitAshbyApplication(
 
     let proxyConfig;
     let countryCode: string | undefined;
+    let primaryIsMassive = false;
     try {
       countryCode = resolveCountryCode(profile);
       proxyRegion = countryCode;
       proxyConfig = buildAshbyProxyConfig(profile);
+      primaryIsMassive = Boolean(
+        process.env.MASSIVE_USERNAME?.trim() &&
+          process.env.MASSIVE_PASSWORD?.trim()
+      );
     } catch (proxyErr: any) {
       haltWithDevAlert('AshbySubmit', `Cannot submit Ashby without proxy: ${proxyErr.message}`);
       throw proxyErr;
@@ -264,13 +354,20 @@ export async function submitAshbyApplication(
       resumeLocalPath = await downloadResumeTempFile(application.applywizz_id);
       if (resumeLocalPath && fs.existsSync(resumeLocalPath)) {
         const resumeFilename = buildResumeSubmissionFilename(
-          profile.client_name,
+          profile,
           application.job_title,
           application.company_name
         );
         const renamedResumePath = path.join(path.dirname(resumeLocalPath), resumeFilename);
-        fs.renameSync(resumeLocalPath, renamedResumePath);
-        resumeLocalPath = renamedResumePath;
+        if (resumeLocalPath !== renamedResumePath) {
+          if (fs.existsSync(renamedResumePath)) {
+            try {
+              fs.unlinkSync(renamedResumePath);
+            } catch {}
+          }
+          fs.renameSync(resumeLocalPath, renamedResumePath);
+          resumeLocalPath = renamedResumePath;
+        }
       }
     } catch (resumeErr: any) {
       log.warn(`[AshbySubmit] Failed to download resume temp file: ${resumeErr.message}`);
@@ -379,6 +476,63 @@ export async function submitAshbyApplication(
         proxyOutcome = preflight.outcome;
       }
     }
+    const fallbackResult = await preflightFallback({
+      page,
+      preflight,
+      shouldFallback: shouldAttemptApifyPreflightFallback(
+        primaryIsMassive,
+        process.env.APIFY_STRING,
+        preflight
+      ),
+      releaseCurrent: async () => {
+        if (page && !page.isClosed()) await page.close().catch(() => {});
+        if (managedBrowser) await browserManager.releaseBrowser(managedBrowser.browserId).catch(() => {});
+        managedBrowser = null;
+        page = null;
+      },
+      acquireFallback: async () => {
+        log.warn(`[AshbySubmit] Massive preflight failed for ${applicationId}; attempting one Apify preflight.`);
+        const apifyProxyConfig = buildAshbyProxyConfig(profile, { provider: 'apify' });
+        managedBrowser = await browserManager.acquireBrowser({
+          headless: isHeadless,
+          proxy: {
+            server: apifyProxyConfig.server,
+            username: apifyProxyConfig.username,
+            password: apifyProxyConfig.password,
+          },
+          args: [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            ...(isHeadless ? [] : ['--start-maximized', '--window-position=50,50']),
+          ],
+        });
+        const apifyContext = await managedBrowser.browser.newContext({
+          viewport: { width: 1440, height: 900 },
+          userAgent:
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          timezoneId: 'America/New_York',
+          locale: 'en-US',
+        });
+        page = await apifyContext.newPage();
+        attachResponseListener(page);
+        return page;
+      },
+      verify: async (fallbackPage) => {
+        const result = await verifyProxyPreflight(fallbackPage, countryCode);
+        proxyOutcome = result.outcome;
+        return result;
+      },
+      onFallbackError: (fallbackErr) => {
+        log.warn(
+          `[AshbySubmit] Apify preflight fallback failed for ${applicationId}: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`
+        );
+      },
+    });
+    page = fallbackResult.page as typeof page;
+    preflight = fallbackResult.preflight;
+    proxyOutcome = preflight.outcome;
     if (!preflight.success) {
       log.warn(`[AshbySubmit] ⚠️ Proxy preflight failed for ${applicationId}: ${preflight.error}`);
       throw new Error(`Ashby proxy preflight failed: ${preflight.error}`);
@@ -387,13 +541,12 @@ export async function submitAshbyApplication(
     log.info(`[AshbySubmit] 🔒 Proxy preflight verified (exitIpHash: ${exitIpHash}, country: ${countryCode})`);
 
     const targetUrl = toAshbyApplicationUrl(application.job_url) || application.job_url;
-
     stage = 'NAVIGATION';
     log.info(`[AshbySubmit] Navigating to ${targetUrl}...`);
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     stage = 'DOM_SCAN';
-    await waitForAshbyApplicationReady(page, 15000);
+    await waitForAshbyApplicationReady(page, 35000);
     await sleep(1500, 2500);
 
     // 3. Fill form fields
