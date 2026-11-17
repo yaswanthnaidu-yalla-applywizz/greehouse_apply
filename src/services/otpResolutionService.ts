@@ -13,6 +13,7 @@ import { OTP_CHALLENGE_TIMEOUT_MS, OTP_POLL_INTERVAL_MS } from '../submitter/otp
 
 const log = createLogger('OTP Resolution');
 export { OTP_CHALLENGE_TIMEOUT_MS } from '../submitter/otpTimeouts.js';
+export const DEFAULT_OTP_RESOLUTION_TIMEOUT_MS = 180000;
 const TERMINAL_OTP_FETCH_REASONS = new Set([
   'INVALID_CANDIDATE_EMAIL',
   'INVALID_SUBMIT_TIMESTAMP',
