@@ -71,10 +71,11 @@ export interface FormFillSummary {
 function buildResumeFilename(
   profile: ProfileRow | null,
   companyName: string,
-  jobTitle: string
+  jobTitle: string,
+  pageTitle?: string | null
 ): string {
-  const clientName = profile?.client_name || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || undefined;
-  return buildResumeSubmissionFilename(clientName, jobTitle, companyName);
+  const roleInput = pageTitle || jobTitle || '';
+  return buildResumeSubmissionFilename(profile, roleInput, companyName);
 }
 
 /**
@@ -1434,8 +1435,15 @@ export async function fillSingleField(
           tempResumePath = await downloadResumeTempFile(applywizzId);
           if (resumeFilename) {
             const renamedResumePath = path.join(path.dirname(tempResumePath), resumeFilename);
-            fs.renameSync(tempResumePath, renamedResumePath);
-            tempResumePath = renamedResumePath;
+            if (tempResumePath !== renamedResumePath) {
+              if (fs.existsSync(renamedResumePath)) {
+                try {
+                  fs.unlinkSync(renamedResumePath);
+                } catch {}
+              }
+              fs.renameSync(tempResumePath, renamedResumePath);
+              tempResumePath = renamedResumePath;
+            }
           }
           tempFilesToClean.push(tempResumePath);
         } catch (dlErr: any) {
@@ -2595,7 +2603,7 @@ export async function fillSingleField(
   return fillResult;
 }
 
-function isExplicitEducationField(field: ResolvedField | ScannedField): boolean {
+export function isExplicitEducationField(field: ResolvedField | ScannedField): boolean {
   const normId = (field.fieldId || '').toLowerCase();
   const normName = (field.name || '').toLowerCase();
   const normLabel = (field.label || '').toLowerCase();
@@ -2608,7 +2616,7 @@ function isExplicitEducationField(field: ResolvedField | ScannedField): boolean 
   );
 }
 
-async function isEducationSectionRequiredOnDom(page: Page): Promise<boolean> {
+export async function isEducationSectionRequiredOnDom(page: Page): Promise<boolean> {
   const eduSelectors = [
     '#school--0',
     '#degree--0',
@@ -2641,7 +2649,61 @@ async function isEducationSectionRequiredOnDom(page: Page): Promise<boolean> {
       if (text.includes('*') || /required/i.test(text)) return true;
     }
   }
+
+  // Broaden matching for Remix / modern Greenhouse DOM:
+  // Regex matching School / Degree / Discipline followed by asterisk or required, allowing whitespace
+  const eduLabelCount = await page
+    .locator('label, legend, [id*="label"]')
+    .filter({ hasText: /^(?:School|Degree|Discipline)\s*(?:\*|required)/i })
+    .count()
+    .catch(() => 0);
+  if (eduLabelCount > 0) return true;
+
+  const nestedAsteriskCount = await page
+    .locator('label[for*="school"], label[for*="degree"], #school--0-label, #degree--0-label')
+    .filter({ hasText: /\*|required/i })
+    .count()
+    .catch(() => 0);
+  if (nestedAsteriskCount > 0) return true;
+
   return false;
+}
+
+export async function ensureRequiredConsentCheckboxes(page: Page): Promise<number> {
+  const mandatoryLocators = [
+    'input[type="checkbox"][required]:not(:checked)',
+    'input[type="checkbox"][aria-required="true"]:not(:checked)',
+    'label:has-text("*") input[type="checkbox"]:not(:checked)',
+    'label:has-text("*") ~ input[type="checkbox"]:not(:checked)',
+    '.field:has(label:has-text("*")) input[type="checkbox"]:not(:checked)',
+    '[class*="field"]:has(label:has-text("*")) input[type="checkbox"]:not(:checked)',
+    '.required input[type="checkbox"]:not(:checked)',
+    '[class*="required"] input[type="checkbox"]:not(:checked)',
+    '[data-required="true"] input[type="checkbox"]:not(:checked)',
+  ];
+
+  let checkedCount = 0;
+  for (const sel of mandatoryLocators) {
+    const loc = page.locator(sel);
+    const count = await loc.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const cb = loc.nth(i);
+      const isVisible = await cb.isVisible().catch(() => false);
+      const isChecked = await cb.isChecked().catch(() => true);
+      if (isVisible && !isChecked) {
+        log.info(`[Form Filler] 🛡️ Mandatory Consent Guarantee: Checking unchecked required checkbox (${sel})`);
+        await cb.evaluate((el: HTMLInputElement) => {
+          if (!el.checked) {
+            el.checked = true;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }).catch(() => {});
+        checkedCount++;
+      }
+    }
+  }
+  return checkedCount;
 }
 
 /**
@@ -2676,7 +2738,11 @@ export async function fillForm(
   } catch (profileErr: any) {
     log.warn(`[Form Filler] ⚠️ Could not load profile for resume filename: ${profileErr.message}`);
   }
-  const resumeFilename = buildResumeFilename(profile, companyName, jobTitle);
+  let pageTitle = '';
+  try {
+    pageTitle = await page.title().catch(() => '');
+  } catch {}
+  const resumeFilename = buildResumeFilename(profile, companyName, jobTitle, pageTitle);
   const fillerOptions: FormFillerOptions = {
     ...options,
     phoneCountry: options.phoneCountry || profile?.country || undefined,
@@ -2704,17 +2770,18 @@ export async function fillForm(
 
     // Check explicit education section requirement
     const isEducationRequired = await isEducationSectionRequiredOnDom(page);
+    const hasEduContainers = (await page.locator('#school--0, #degree--0, select[id*="school"], [id*="school--"]').count().catch(() => 0)) > 0;
     const educationFields = fields.filter((f) => isExplicitEducationField(f));
     const hasIncompleteEducation = educationFields.some((f) => !f.value || !f.value.trim());
 
     let activeFields = fields;
-    if (!isEducationRequired && hasIncompleteEducation && educationFields.length > 0) {
+    if (isEducationRequired || hasEduContainers) {
+      activeFields = applyEducationDegreeFallback(activeFields, true);
+    } else if (hasIncompleteEducation && educationFields.length > 0) {
       log.info(
         `[Form Filler] 🎓 Explicit Education section is optional on DOM and candidate lacks complete education answers; leaving entire education section untouched to prevent required field cascade.`
       );
       activeFields = fields.filter((f) => !isExplicitEducationField(f));
-    } else if (isEducationRequired) {
-      activeFields = applyEducationDegreeFallback(activeFields, true);
     }
 
     // 2. Populate initial queue of resolved fields
@@ -3014,6 +3081,9 @@ export async function fillForm(
           }
         }
       }
+
+      // 4f. Mandatory Consent Guarantee: Ensure all required checkboxes are checked
+      await ensureRequiredConsentCheckboxes(page);
     } catch (sweepErr: any) {
       log.warn(`[Form Filler] ⚠️ Safety sweep notice: ${sweepErr.message}`);
     }
