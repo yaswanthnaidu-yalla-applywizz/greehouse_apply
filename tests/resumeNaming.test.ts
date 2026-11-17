@@ -1,121 +1,142 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  resolveResumeDomain,
-  sanitizeResumeClientName,
+  extractJobRoleFromPage,
+  cleanJobRole,
+  sanitizeForFileName,
+  buildDocumentFileName,
   buildResumeSubmissionFilename,
+  buildResumeStorageFilename,
 } from '../src/utils/resumeNaming.js';
-import { resumeDomainShortcode, resumeStorageFilename } from '../src/db/storage.js';
 
-describe('resumeNaming', () => {
-  describe('resolveResumeDomain', () => {
-    it('resolves Full Stack roles accurately to FULL_STACK', () => {
-      assert.equal(resolveResumeDomain('Full Stack Engineer'), 'FULL_STACK');
-      assert.equal(resolveResumeDomain('Senior Full-Stack Developer'), 'FULL_STACK');
-      assert.equal(resolveResumeDomain('Staff FullStack Software Engineer'), 'FULL_STACK');
+describe('resumeNaming - dynamic adapted fileNameUtils', () => {
+  describe('extractJobRoleFromPage', () => {
+    it('extracts role from "Job Title at Company | Platform"', () => {
+      assert.equal(
+        extractJobRoleFromPage('Software Engineer at Google | Greenhouse'),
+        'Software Engineer'
+      );
     });
 
-    it('resolves frontend, backend, and core software engineering roles', () => {
-      assert.equal(resolveResumeDomain('Frontend Engineer (React)'), 'FRONTEND');
-      assert.equal(resolveResumeDomain('Senior Backend Developer - Go/Node'), 'BACKEND');
-      assert.equal(resolveResumeDomain('Software Engineer II'), 'SOFTWARE_ENGINEER');
-      assert.equal(resolveResumeDomain('SWE - Infrastructure'), 'DEVOPS');
-      assert.equal(resolveResumeDomain('Mobile App Developer (iOS/Android)'), 'MOBILE');
+    it('extracts role from "Job Title - Company - Platform"', () => {
+      assert.equal(
+        extractJobRoleFromPage('Senior Product Manager - Stripe - LinkedIn'),
+        'Senior Product Manager'
+      );
     });
 
-    it('resolves data, ML, and AI roles', () => {
-      assert.equal(resolveResumeDomain('Data Engineer'), 'DATA_ENGINEER');
-      assert.equal(resolveResumeDomain('Senior Data Analyst'), 'DATA_ANALYST');
-      assert.equal(resolveResumeDomain('Lead Data Scientist'), 'DATA_SCIENCE');
-      assert.equal(resolveResumeDomain('Machine Learning Engineer'), 'AI_ML');
-      assert.equal(resolveResumeDomain('Gen AI Prompt Engineer'), 'AI_ML');
-      assert.equal(resolveResumeDomain('Artificial Intelligence Researcher'), 'AI_ML');
+    it('extracts role from "Platform | Job Title | Company"', () => {
+      assert.equal(
+        extractJobRoleFromPage('Apply | Software Engineer | Workday'),
+        'Software Engineer'
+      );
     });
 
-    it('resolves DevOps, Cloud, QA, Security, Product, and Business roles', () => {
-      assert.equal(resolveResumeDomain('DevOps Engineer'), 'DEVOPS');
-      assert.equal(resolveResumeDomain('Cloud Architect'), 'DEVOPS');
-      assert.equal(resolveResumeDomain('Site Reliability Engineer (SRE)'), 'DEVOPS');
-      assert.equal(resolveResumeDomain('QA Automation Engineer / SDET'), 'QA_TEST');
-      assert.equal(resolveResumeDomain('Information Security Analyst'), 'SECURITY');
-      assert.equal(resolveResumeDomain('Technical Product Manager'), 'PRODUCT_MANAGER');
-      assert.equal(resolveResumeDomain('Senior Business Analyst'), 'BUSINESS_ANALYST');
-      assert.equal(resolveResumeDomain('UI/UX Product Designer'), 'DESIGNER');
+    it('strips common ATS boilerplate prefixes', () => {
+      assert.equal(
+        extractJobRoleFromPage('Job Application for Retirement Specialist at Vanguard'),
+        'Retirement Specialist'
+      );
+      assert.equal(
+        extractJobRoleFromPage('Apply for Data Analyst at Meta'),
+        'Data Analyst'
+      );
     });
 
-    it('cleans unmatched custom job titles into standardized uppercase slugs', () => {
-      assert.equal(resolveResumeDomain('Solutions Architect, Enterprise'), 'SOLUTIONS_ARCHITECT');
-      assert.equal(resolveResumeDomain('Technical Writer - Documentation'), 'TECHNICAL_WRITER');
-    });
-
-    it('falls back to candidate profile role when job title is empty or generic', () => {
-      assert.equal(resolveResumeDomain('', '', 'Full Stack Developer'), 'FULL_STACK');
-      assert.equal(resolveResumeDomain(null, null, 'Data Analyst'), 'DATA_ANALYST');
-      assert.equal(resolveResumeDomain(undefined, undefined, undefined), 'GENERAL');
+    it('handles empty or null safely without throwing in Node.js', () => {
+      assert.equal(extractJobRoleFromPage(''), '');
+      assert.equal(extractJobRoleFromPage(null), '');
+      assert.equal(extractJobRoleFromPage(undefined), '');
     });
   });
 
-  describe('sanitizeResumeClientName', () => {
-    it('normalizes multi-word names with underscores and uppercase', () => {
-      assert.equal(sanitizeResumeClientName('John Doe'), 'JOHN_DOE');
-      assert.equal(sanitizeResumeClientName('Sai Kiran Akula'), 'SAI_KIRAN_AKULA');
-      assert.equal(sanitizeResumeClientName('ARCHANA YARAMALA'), 'ARCHANA_YARAMALA');
+  describe('cleanJobRole & sanitizeForFileName', () => {
+    it('cleans application prefixes', () => {
+      assert.equal(cleanJobRole('Job Application for Backend Engineer'), 'Backend Engineer');
+      assert.equal(cleanJobRole('Apply to Frontend Lead'), 'Frontend Lead');
     });
 
-    it('strips special characters and trims excess whitespace', () => {
-      assert.equal(sanitizeResumeClientName('Mary-Jane Watson-Parker'), 'MARY_JANE_WATSON_PARKER');
-      assert.equal(sanitizeResumeClientName('  O\'Connor, Sean  '), 'O_CONNOR_SEAN');
-    });
-
-    it('falls back cleanly if name is empty', () => {
-      assert.equal(sanitizeResumeClientName(''), 'CANDIDATE');
-      assert.equal(sanitizeResumeClientName(null), 'CANDIDATE');
+    it('sanitizes special characters, replaces spaces with underscores and truncates length', () => {
+      assert.equal(sanitizeForFileName('John Doe', 20), 'John_Doe');
+      assert.equal(sanitizeForFileName('Senior - Staff C++ Developer (Remote!)', 30), 'Senior_Staff_C_Developer_Remot');
+      assert.equal(sanitizeForFileName('___Leading and Trailing___', 30), 'Leading_and_Trailing');
     });
   });
 
-  describe('buildResumeSubmissionFilename', () => {
-    it('builds canonical RESUME_CLIENTNAME_DOMAIN.pdf filename for Full Stack position', () => {
+  describe('buildDocumentFileName', () => {
+    it('builds Resume_FirstName_LastName_JobRole.pdf when all fields present', () => {
+      const filename = buildDocumentFileName(
+        { firstName: 'John', lastName: 'Smith' },
+        'Software Engineer at Google | Greenhouse'
+      );
+      assert.equal(filename, 'Resume_John_Smith_Software_Engineer.pdf');
+    });
+
+    it('supports profile objects with first_name / last_name or personal sub-object', () => {
+      const filename1 = buildDocumentFileName(
+        { first_name: 'Jane', last_name: 'Doe' },
+        'Senior Product Manager'
+      );
+      assert.equal(filename1, 'Resume_Jane_Doe_Senior_Product_Manager.pdf');
+
+      const filename2 = buildDocumentFileName(
+        { personal: { firstName: 'Alice', lastName: 'Wonder' } },
+        'Data Scientist'
+      );
+      assert.equal(filename2, 'Resume_Alice_Wonder_Data_Scientist.pdf');
+    });
+
+    it('supports string client_name and splits into first and last name', () => {
+      const filename = buildDocumentFileName('Sai Kiran Akula', 'Data Analyst');
+      assert.equal(filename, 'Resume_Sai_Kiran_Akula_Data_Analyst.pdf');
+    });
+
+    it('falls back to candidate profile job title when page title is absent', () => {
+      const filename = buildDocumentFileName(
+        { firstName: 'Bob', lastName: 'Builder', jobTitle: 'DevOps Architect' },
+        ''
+      );
+      assert.equal(filename, 'Resume_Bob_Builder_DevOps_Architect.pdf');
+    });
+
+    it('omits role when no job title or profile role is present', () => {
+      const filename = buildDocumentFileName({ firstName: 'John', lastName: 'Smith' });
+      assert.equal(filename, 'Resume_John_Smith.pdf');
+    });
+
+    it('falls back to Candidate when no name is provided', () => {
+      assert.equal(buildDocumentFileName(null), 'Resume_Candidate.pdf');
+    });
+
+    it('supports cover letters and preserves extensions', () => {
+      assert.equal(
+        buildDocumentFileName({ firstName: 'John', lastName: 'Doe' }, 'Backend Developer', 'letter.docx', false),
+        'CoverLetter_John_Doe_Backend_Developer.docx'
+      );
+    });
+  });
+
+  describe('buildResumeSubmissionFilename backwards compatibility', () => {
+    it('builds Resume_FirstName_LastName_JobRole.pdf from legacy parameters', () => {
       const filename = buildResumeSubmissionFilename('John Doe', 'Full Stack Engineer');
-      assert.equal(filename, 'RESUME_JOHN_DOE_FULL_STACK.pdf');
+      assert.equal(filename, 'Resume_John_Doe_Full_Stack_Engineer.pdf');
     });
 
-    it('builds canonical filename across diverse roles and client names', () => {
-      assert.equal(
-        buildResumeSubmissionFilename('Sai Kiran Akula', 'Senior Data Analyst', 'Acme Corp'),
-        'RESUME_SAI_KIRAN_AKULA_DATA_ANALYST.pdf'
-      );
-      assert.equal(
-        buildResumeSubmissionFilename('Raj Kumar', 'DevOps / Cloud Specialist', 'Stripe'),
-        'RESUME_RAJ_KUMAR_DEVOPS.pdf'
-      );
-      assert.equal(
-        buildResumeSubmissionFilename('Archana Yaramala', 'Backend Java Developer'),
-        'RESUME_ARCHANA_YARAMALA_BACKEND.pdf'
-      );
-    });
-
-    it('handles fallback profile role when job title is missing', () => {
-      assert.equal(
-        buildResumeSubmissionFilename('Jane Doe', '', 'Meta', 'Product Manager'),
-        'RESUME_JANE_DOE_PRODUCT_MANAGER.pdf'
-      );
+    it('handles companyName and fallbackRole', () => {
+      const filename = buildResumeSubmissionFilename('Mary Watson', null, 'Stripe', 'Security Engineer');
+      assert.equal(filename, 'Resume_Mary_Watson_Security_Engineer.pdf');
     });
   });
 
-  describe('storage integration', () => {
-    it('produces standard uppercase domain shortcode without GEN fallback', () => {
-      assert.equal(resumeDomainShortcode({ jobTitle: 'Full Stack Engineer' }), 'FULL_STACK');
-      assert.equal(resumeDomainShortcode({ jobTitle: 'Software Engineer' }), 'SOFTWARE_ENGINEER');
-      assert.equal(resumeDomainShortcode({ jobTitle: 'Data Analyst' }), 'DATA_ANALYST');
+  describe('buildResumeStorageFilename', () => {
+    it('builds Resume_FirstName_LastName.pdf for Supabase Storage', () => {
+      const filename = buildResumeStorageFilename({ firstName: 'Raj', lastName: 'Kumar' }, 'AWL-12345');
+      assert.equal(filename, 'Resume_Raj_Kumar.pdf');
     });
 
-    it('generates standard uppercase storage filename for profiles', () => {
-      const filename = resumeStorageFilename('AWL-45422', {
-        firstName: 'Raj',
-        lastName: 'Kumar',
-        jobTitle: 'Full Stack Engineer',
-      });
-      assert.equal(filename, 'RESUME_RAJ_KUMAR_FULL_STACK.pdf');
+    it('falls back to applywizzId when name is missing', () => {
+      const filename = buildResumeStorageFilename(null, 'AWL-12345');
+      assert.equal(filename, 'Resume_AWL_12345.pdf');
     });
   });
 });
