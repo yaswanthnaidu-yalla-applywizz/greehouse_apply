@@ -67,7 +67,6 @@ import {
   type ApplicationRow,
   type ApplicationStatus,
   type AshbySubmissionTelemetry,
-  type LeverSubmissionTelemetry,
   type EmailProofJson,
 } from '../db/applications.js';
 import { getProfile, updateResumeStoragePath } from '../db/profiles.js';
@@ -191,7 +190,7 @@ export interface LiveSubmitResult {
   summary?: FormFillSummary;
   submitClickedAt?: string | null;
   submitClicked?: boolean;
-  telemetry?: AshbySubmissionTelemetry | LeverSubmissionTelemetry;
+  telemetry?: AshbySubmissionTelemetry;
 }
 
 

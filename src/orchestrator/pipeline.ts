@@ -21,7 +21,6 @@ import { readAndDeduplicateUrls, resolveShortlink, atsFromUrl } from '../scanner
 import { PlaywrightScanner } from '../scanner/playwrightScanner.js';
 import { exportScannedJobs } from '../scanner/exportScannedJobs.js';
 import { AshbyScanner } from '../scanner/ashbyScanner.js';
-import { LeverScanner } from '../scanner/leverScanner.js';
 import { segregateCandidatesByApplyWizzId, exportCandidateSegments } from '../candidate/segregator.js';
 import { syncCaCandidateAssignments } from '../services/caAssignmentSync.js';
 import { getSandboxCaEmail } from '../db/sandboxAssignment.js';
@@ -255,8 +254,7 @@ export class V1Pipeline {
         });
 
         const ashbyUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'ashby');
-        const leverUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'lever');
-        const greenhouseUrls = uniqueUrls.filter((u) => atsFromUrl(u) === 'greenhouse');
+        const greenhouseUrls = uniqueUrls.filter((u) => atsFromUrl(u) !== 'ashby');
 
         const ashbyScanner = new AshbyScanner({
           workerPoolSize: scanWorkers,
@@ -275,30 +273,12 @@ export class V1Pipeline {
           },
         });
 
-        const leverScanner = new LeverScanner({
-          workerPoolSize: scanWorkers,
-          timeoutMs: config.PLAYWRIGHT_TIMEOUT,
-          minJitterMs: config.SCANNER_JITTER_MIN_MS,
-          maxJitterMs: config.SCANNER_JITTER_MAX_MS,
-          onJobScanned: (job) => {
-            scannedCount++;
-            if (job.isExpired) expiredScans++;
-            reportScanProgress();
-          },
-          onScanFailed: () => {
-            scannedCount++;
-            scanFailures++;
-            reportScanProgress();
-          },
-        });
-
-        const [ghTemplates, ashbyTemplates, leverTemplates] = await Promise.all([
+        const [ghTemplates, ashbyTemplates] = await Promise.all([
           greenhouseUrls.length > 0 ? scanner.scanUniqueUrls(greenhouseUrls) : Promise.resolve([]),
           ashbyUrls.length > 0 ? ashbyScanner.scanUniqueUrls(ashbyUrls) : Promise.resolve([]),
-          leverUrls.length > 0 ? leverScanner.scanUniqueUrls(leverUrls) : Promise.resolve([]),
         ]);
 
-        scannedTemplates = [...ghTemplates, ...ashbyTemplates, ...leverTemplates];
+        scannedTemplates = [...ghTemplates, ...ashbyTemplates];
         scanCompleted = true;
       } catch (err: any) {
         if (isPipelineAbortedError(err)) {
