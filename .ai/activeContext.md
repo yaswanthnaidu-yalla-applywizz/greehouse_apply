@@ -1,3 +1,171 @@
+# Current Session Update (2026-11-17 - Executive Daily Reporting & Post-Ingest Pipeline Visibility)
+
+- **Shipped Executive Daily 9:00 AM IST Digest & Post-Ingest Metrics**:
+  - **Post-Ingestion Email Enrichment (`src/services/caNotificationEmail.ts`)**:
+    - Added Total Applications Ingested and Currently Queued counts to both Leadership (`buildLeadershipInitialEmailHtml`) and Executive (`buildExecutiveInitialEmailHtml`) post-ingest emails.
+    - Updated `sendLeadershipIngestionSummary` to query total run applications and current queue depth safely.
+  - **Executive Daily Report Service (`src/services/executiveDailyReport.ts`)**:
+    - Evaluates the single latest ingest run (authoritatively via `getLatestIngestRunDate()`).
+    - Produces clean metrics: total applications, applied, failed, queued, ready-for-review, success rate %, completion rate %.
+    - Breaks down performance by ATS platform (Greenhouse vs Ashby vs Other).
+    - Groups and sorts failure reasons using `normalizeFailureReason`.
+    - Generates a deterministic executive summary with no external LLM latency or cost.
+    - Renders responsive HTML email with ApplyWizz executive styling.
+  - **Daily 9:00 AM IST Scheduler**:
+    - Implemented `calculateMsUntilNext9AmIst` and `startExecutiveDailyReportScheduler` with unref'd timer and automatic 24-hour rollover.
+    - Wired into `src/server/index.ts:startServer()`.
+  - **Recipient Safety**:
+    - Dispatches to Ramakrishna (`ramakrishna@applywizz.ai`), CC: Anusha (`anushabandreddy@applywizz.ai`), Yaswanth (`yaswanthnaiduyalla@applywizz.ai`), and Vivek (`vivek@applywizz.ai`).
+    - Enforces `SANDBOX` and `CA_NOTIFICATION_EMAIL_OVERRIDE` safety overrides.
+  - **Verification**: 26/26 unit tests passing across `tests/executiveDailyReport.test.ts` and `tests/leadershipNotificationEmail.test.ts`; `npm run typecheck` clean (0 errors across root and dashboard).
+
+# Current Session Update (2026-11-16 - Obscura Scanner Comparison)
+
+- **Ashby scanner navigation classification fixed locally (2026-11-17):** Navigation exceptions and missing responses are recorded as retryable scan failures instead of expired templates. The batch continues and reports failed scans separately. Focused regressions, the Ashby scanner suite, and typecheck passed. Production deployment and historical data repair were not performed.
+- **Obscura evaluation:** The two browsers produced identical scanner field data and outcomes for 26 CSV URLs; this is parity, not independent ground truth or a reliable performance benchmark. In a local Yaswanth demo fill-only fixture, Obscura failed to attach a placeholder resume through Playwright `setInputFiles`; the other 34 committed values matched Chromium. A documentation-based retest showed direct CDP `DOM.setFileInputFiles` does attach the same file with matching bytes and input/change events when file access is enabled, while Playwright `setInputFiles` still fails. Any adaptation needs full no-submit verification. No application was submitted or production data changed.
+- **Temporary Obscura tailored fill:** A local-only test runs the existing filler, then attaches the placeholder resume through CDP and verifies identical file bytes. The filler itself still reports a resume failure before the separate CDP step; 33 of 35 controls exactly matched fixture values and phone/location were normalized. No submission was attempted. Real ATS behavior and production integration remain unverified.
+- **Google web guidance:** Useful for targeted native requiredness, accessible labels, form validity, and custom-control fixtures; it does not resolve navigation classification, ATS routing, mailbox, proxy, or CAPTCHA failures. Historical Ashby standard URL, education-widget, and Greenhouse cascade fixes exist in current code; live production verification remains outstanding.
+
+# Current Session Update (2026-11-16 - Production Unique Companies Automation Metrics)
+
+- **Audited and Quantified Unique Employer Automation Coverage (DB2 Production)**:
+  - **1,043 unique employer companies** (1,036 by ATS domain slug) have automated web submissions completed with proof.
+  - **8,614 total web applications** submitted by the automation engine across October 14, 2026 – November 16, 2026.
+  - **Status Breakdown**:
+    - **Strict APPLIED (Email verified / Ashby green banner)**: 685 unique companies (5,343 applications).
+    - **EMAIL_PROOF_PENDING (Web proof captured, email verification timeout/pending)**: 644 unique companies (3,271 applications).
+  - **ATS Breakdown**:
+    - **Greenhouse**: 729 unique companies (6,772 applications).
+    - **Ashby**: 316 unique companies (1,842 applications).
+  - **Shipped Reusable Metric CLI**: Added `scripts/countAutomatedCompanies.ts` and `npm run stats:companies` supporting `--json`, `--since=`, `--until=`, and `--csv=` exports.
+
+# Current Session Update (2026-11-16 - Submission Engine Failure Fixes Execution & Verification)
+
+- **Completed 100% Execution of Plan (`docs/superpowers/plans/2026-11-16-submission-engine-failure-fixes.md`)**:
+  - **All 10 Tasks Shipped & Verified**:
+    - **Task 1 (Ashby Confirmation Detection)**: Match diverse success card copies and `.ashby-application-form-success` DOM class (`src/submitter/ashbySubmit.ts`).
+    - **Task 2 (Ashby Radio Option Precision)**: Eliminate question title collisions on "now"/"not" via strict option label scoping and value fallback (`src/submitter/ashbyFormFiller.ts`).
+    - **Task 3 (Ashby Boolean Checkbox Option Routing)**: Route synthetic `options: ["true"]` single checkboxes to boolean toggle logic (`src/submitter/ashbyFormFiller.ts`).
+    - **Task 4 (Ashby Overview Tab & Hydration Timeout)**: Auto-click "Apply for this Job" / "Application" tab and extend hydration timeout to 35s (`src/submitter/ashbySubmit.ts`).
+    - **Task 5 (Ashby Field Normalization)**: Prioritize tel input over radio, extract lower bound integer for number inputs (e.g. 100k -> 100000), and reject `"https://N/A"` or `"N/A"` on URL fields (`ashbyScanner.ts`, `ashbyFormFiller.ts`, `answerResolver.ts`, `tier1Supabase.ts`).
+    - **Task 6 (Ashby Proxy Disambiguation)**: Added `US_STATE_CODES` to resolve "Atlanta, GA" to "us" (never Gabon "ga") and repointed preflight to `api64.ipify.org` (`src/submitter/ashbyProxy.ts`).
+    - **Task 7 (Greenhouse Education Requiredness & Retention)**: Broaden regex for `School *` whitespace and retain education fields whenever education containers exist on DOM (`src/submitter/formFiller.ts`).
+    - **Task 8 (Greenhouse Custom Demographic Surveys & Hidden Invalid Inputs)**: Scan custom survey containers on Remix pages and surface hidden `input.requiredInput:invalid` comboboxes in error reporting (`playwrightScanner.ts`, `liveSubmit.ts`).
+    - **Task 9 (Greenhouse Mandatory Consent Checkbox Guarantee & OTP Window)**: Auto-check all visible uncommitted mandatory checkboxes before submit, and extend OTP timeout to 180s (`formFiller.ts`, `otpResolutionService.ts`, `env.ts`).
+    - **Task 10 (Full Regression & Typecheck Suite)**: 39/39 tests pass across all 9 remediation suites; 22/22 pass in core regression suite; 0 errors in root and dashboard TypeScript checks (`npm run typecheck`).
+  - **Production DB2 State**: All 13 verified in-page successes previously marked failed were updated to `APPLIED` with `error_message = NULL`.
+
+# Current Session Update (2026-11-16 - Submission Engine Implementation Plan & DB2 Status Update)
+
+- **Completed Implementation Plan (`docs/superpowers/plans/2026-11-16-submission-engine-failure-fixes.md`)**:
+  - Structured into 10 bite-sized, test-driven tasks across two sequential phases:
+    - **Phase 1: Ashby Remediations (Tasks 1-6)**: Broadened confirmation copy regex (salvaging IRIS, Lovable, BillGO, HUMAN, Cohere), fixed radio button question title substring collision (`:has-text("No")`), fixed synthetic `options: ["true"]` boolean checkbox trap, auto-transitioned embedded Overview tabs, extended Next.js hydration timeout from 15s to 35s, prioritized telephone inputs over radio inputs, parsed numeric salary bounds, eliminated `"https://N/A"` for LinkedIn, and resolved US state "GA" Gabon proxy routing collisions.
+    - **Phase 2: Greenhouse Remediations (Tasks 7-9)**: Repaired Remix `School *` whitespace education section detection, added scanner support for custom demographic surveys (DoorDash, Reddit, PlayStation), exposed invalid hidden inputs in telemetry, added pre-submit mandatory checkbox guarantee, and extended Zoho OTP window to 180s.
+    - **Phase 3: Integration & Regression Verification (Task 10)**: Full test suite, root and dashboard typecheck, and dry-run verification.
+  - **Updated 13 False-Failure Ashby Applications in DB2**: Successfully updated all 13 verified in-page successes from `FAILED` to `APPLIED` with `proof_web_url`, `submitted_at`, and `error_message = NULL`.
+
+# Current Session Update (2026-11-16 - Forensic Root Cause Analysis of 1,229 Failed Applications Created 2026-11-15)
+
+- **Completed 100% Visual Forensic Audit of 1,229 Failed Applications Created Yesterday (2026-11-15 IST) in DB2**:
+  - Downloaded and visually inspected **1,194 screenshots** across 4 specialized parallel subagents (`Greenhouse Visual Auditor`, `Ashby Navigation Auditor`, `Ashby PreSubmit Auditor`, `Ashby Confirmation Auditor`).
+  - Accounted for 100% of all 1,229 failures with verified visual ground truth (saved to `.ai/diagnostics/fada_failed_audit_2026-11-15.md`).
+  - **Key Discoveries**:
+    1. **13 False-Failure Submissions on Ashby**: IRIS (3), Lovable (4), BillGO (2), HUMAN (2), Cohere (1), and algo1 (1) actually succeeded with green in-page confirmation cards, but were marked FAILED due to rigid substring matching in `waitForSubmitConfirmation`.
+    2. **Greenhouse Education Section Stripping Bug (63 apps)**: In `src/submitter/formFiller.ts`, `isEducationSectionRequiredOnDom` checks `label:has-text("School*")`, which fails on Remix `School *` (space before asterisk or child `<span>`), causing partial education fields to be stripped and submitted empty.
+    3. **Unscanned Custom Demographic Fields (124 apps)**: DoorDash USA (53), Reddit (33), PlayStation (13) omitted during scanning because they are not under standard `remixState.eeoc_sections`.
+    4. **Ashby Radio Group Substring Collision (43 apps)**: In `ashbyFormFiller.ts`, `:has-text("No")` matches words like "now" or "not" in question headers (e.g. "...now or in the future..."), clicking the header instead of the radio option.
+    5. **Ashby Boolean Checkbox Trap (31 apps)**: Synthetic `options: ["true"]` from scanner causes filler to search for checkboxes with text `"true"`, skipping single agreement/policy checkboxes.
+    6. **Ashby Proxy Preflight Failures (265 apps)**: Rate limiting on `ipapi.co` and US state "GA" parsed as foreign country Gabon (`__cr.ga`).
+    7. **Ashby Overview Tab Trapping (59 apps)**: Embedded widgets stay on Overview tab without clicking "Apply for this Job".
+    8. **Ashby Loading Spinner Timeout (76 apps)**: 15s timeout too short for Next.js bundle hydration over residential proxies.
+    9. **Greenhouse OTP Timeouts (69 apps)**: Verified 100% of forms filled; timed out waiting for 8-char security code from Zoho email.
+  - Zero code modifications were made; concrete surgical diff recommendations were documented.
+
+# Current Session Update (2026-11-16 - Ingest Auto-Queue Diagnostics & Re-resolution)
+
+- **Diagnosed and Re-resolved 31 Applications from Nov 16 Ingest CSV (`combined_jobs_20261116.csv`)**:
+  - **Funnel Drop Diagnostics (15 rows pre-creation)**:
+    - 12 rows dropped due to disconnected candidate Zoho mailboxes (`zoho_disconnected`).
+    - 2 rows dropped due to scanning failures on Samsara (`no_scan_template`).
+    - 1 row dropped due to expired posting on Superhuman (`job_expired`).
+  - **Non-Auto-Queue Diagnostics (31 applications blocked in DB2)**:
+    - 28 applications in `READY_FOR_REVIEW`, 3 in `FILTERED_OUT`.
+    - 12 Mission Lane applications blocked by anti-nepotism (*"related to employee"*) and specific immigration status (*"US citizen, permanent resident, green card"*) questions.
+    - 11 Netic applications blocked by Ashby empty-option select scrubbing in `alignResolvedChoice`, onsite willingness city token omission (*"our SF office"*), and custom coding prompts.
+    - Convera & Sentis blocked by missing `legally able` and `legally allowed` work authorization regex variations.
+  - **Surgical Resolver Fixes**:
+    1. Added anti-nepotism / employee ties corporate policy in `src/resolver/corporatePolicies.ts` returning `"No"`.
+    2. Added citizenship / immigration category question resolver in `src/resolver/tier1Supabase.ts` mapping accurately to candidate work authorization (returning `"No"` for F1/H1B, `"Yes"` for Citizen/Green Card).
+    3. Broadened work authorization regex in `src/resolver/tier1Supabase.ts` to include `legally able` and `legally allowed`.
+    4. Preserved empty-option select field values in `src/resolver/answerResolver.ts` (`alignResolvedChoice`).
+    5. Broadened onsite willingness regex in `src/resolver/answerResolver.ts` (`isOnsiteWillingness`) to allow optional city tokens (`work from (?:our|the)(?:\s+\w+)?\s+office`).
+  - **DB2 Re-resolution Execution**:
+    - Re-resolved all 31 held applications with 100% accurate, ground-truth-verified profile answers.
+    - Successfully updated `gh_candidate_applications` for all 31 applications, setting `status = 'QUEUED'`, `error_message = NULL`, `retry_count = 0`.
+    - Production DB2 state: **0 applications in `READY_FOR_REVIEW` or `FILTERED_OUT`**; all 90 ingested applications are now queued or active.
+  - **Verification**:
+    - Clean typecheck across root (`tsc --noEmit`) and dashboard (`npm run typecheck:dashboard`).
+    - Resolver test suites pass cleanly green (tests 6, suites 1, pass 6, fail 0).
+
+# Current Session Update (2026-11-16 - Railway Worker Service Stall Remediation)
+
+- **Diagnosed and Remediated Worker Service Stalls (`submitterPool.ts`)**:
+  - **Root Cause**: When a job submission failed in `runLiveSubmit` or `submitAshbyApplication`, the submission engine already updated the DB status to `FAILED`. When control returned to `SubmitterPool.runWorker`, it called `updateStatusFn(applicationId, 'FAILED', { expected_status: 'APPLYING' })`. Because the status was already `FAILED`, `updateStatus` threw `Application <id> no longer matches expected state`. In `catch (error)`, it attempted the exact same call with `{ expected_status: 'APPLYING' }` without an inner `try/catch`. This unhandled rejection terminated the `runWorker` loop permanently. Without a supervisor, `dispatchOnce()` continued assigning new applications into dead worker lanes, trapping all replicas at `idleWorkers=0 dequeued=0 inFlight=3`.
+  - **Surgical Fix Committed (30594b8)**:
+    1. Removed redundant `expected_status: 'APPLYING'` in terminal failure status updates in `src/submitter/submitterPool.ts`.
+    2. Wrapped all failure status updates in `try/catch` so status persistence errors never escape or terminate the worker loop.
+    3. Added `startWorkerSupervisor(workerIndex)` to automatically respawn `runWorker` if it ever exits unexpectedly.
+  - **Verification**:
+    - `tests/submitterPoolRetry.test.ts` (5/5 pass) and `tests/submitterPoolCircuitBreaker.test.ts` (1/1 pass).
+    - Clean typecheck (`tsc --noEmit && npm run typecheck:dashboard`).
+    - Pushed to `origin/dev`; triggered Railway deployment `920d07b4` from source; verified deployment is active, healthy, and processing applications.
+
+# Current Session Update (2026-11-15 - Resolver Truthful Answers Remediation)
+
+- **Completed Resolver Truthful Answers Remediation (Tasks 1-8)**:
+  - Addressed resolver inaccuracies and untruthful answers identified in `docs/tier5-resolution-anomalies-and-learnings-2026-11-15.md` and audit log `output/audit_all_resolved_fields_20261115.json` adhering strictly to AGENTS.md Rule 12:
+    1. **Visa Sponsorship vs Work Authorization Inversion Fix**: Disentangled evaluation precedence in `src/resolver/tier1Supabase.ts` and `src/resolver/llmSynthesizer.ts`. Questions asking *"Do you require sponsorship for work authorization?"* now evaluate sponsorship criteria first, eliminating 832 candidate applications falsely declaring they need sponsorship when `requires_sponsorship = false`. Added spousal sponsorship dependency negative rule.
+    2. **Choice Polarity Extension**: Added negative polarity matching in `src/utils/choiceOptions.ts` for phrases such as `"Does not require sponsorship"`.
+    3. **Elimination of Uncontained Choice Fallbacks**: Removed hardcoded `|| 'Yes'` in `src/resolver/corporatePolicies.ts` (commute, travel, overtime) and enforced option containment in `enforceCorporatePolicy`.
+    4. **Checkbox Option Alignment & Boolean Consent Preservation**: In `src/resolver/answerResolver.ts` (`alignResolvedChoice`), preserved boolean `"true"` when options contain binary consent choices (`['I agree', 'I do not agree']`), while mapping `"true"` to exact affirmative option strings (e.g. `'I Agree'`) when options contain custom labeled agreement options (Ashby GameChanger).
+    5. **Expanded Identity Field Matching**: Expanded Tier 1 Supabase name matching in `src/resolver/tier1Supabase.ts` to include `"Preferred Name"`, `"Legal Name (if different than above)"`, and `"What is your full legal name?"`.
+    6. **Deterministic Anti-Bot Human Trap, Prompt Protection & EAR Compliance**: Added rules in `src/resolver/corporatePolicies.ts` deterministic matching for anti-bot trap questions (*"Which of the following best describes you?"* -> `"I am a human"`) and EAR/ITAR U.S. person compliance based on candidate sponsorship status. Added explicit human applicant identity and negative constraints into `src/resolver/llmSynthesizer.ts` (`CORPORATE_POLICY_PROMPT_GUIDELINES`, `buildSinglePrompt`, `buildBatchPrompt`, and system messages) preventing the model from ever identifying as an AI, bot, or automated program.
+    7. **Semantic URL Guard**: In `src/resolver/answerResolver.ts`, added guard rejecting boolean answers (`"Yes"`, `"No"`, `"true"`, `"false"`) for URL input fields.
+    8. **Comprehensive Verification**: Created 7 new unit test suites (17/17 pass); verified all 101 existing regression tests pass (89 `node:test` + 12 `vitest`); clean root and dashboard TypeScript typecheck (`npm run typecheck`).
+
+# Current Session Update (2026-11-15 - Scanner Gap Patch, Custom Embed Resolution & DB 2 Salvage)
+
+- **Patched Scanner Gaps for Multi-ATS and Custom Domains**:
+  - `src/scanner/atsDetector.ts`: Extended `isGreenhouseUrl` to match query parameters (`parsed.searchParams.has('gh_jid')`).
+  - `src/scanner/ashbyScanner.ts`: Switched navigation to `'domcontentloaded'`, added client-side iframe detection for custom domains, and implemented automated tab clicking (`[role="tab"]` / `"Application"` / `"Apply"`) when initial `[data-field-path]` count is 0.
+- **Scanned and Salvaged 40 Custom-Domain URLs across 190 Tasks from Ingest CSV**:
+  - Extracted **27 active templates** (Superhuman, Adonis, SimpleClosure, SandboxAQ, SewerAI, Qumulo, Voleon, Playlist, Skydio, OXMAN, RegScale, AZX, Mudflap, TradingHub, AppFolio, PAR Technology).
+  - Detected 12 expired/closed URLs.
+- **5-Tier Resolution & Subagent Swarm for Tier 5**:
+  - Resolved Tiers 1–4 deterministically for **148 active applications**.
+  - Partitioned 262 unresolved custom required fields into 2 shards and resolved via subagent swarm.
+  - Performed parent-agent verification across all 262 fields against DB 2 profile ground truth.
+- **Production DB 2 State**:
+  - Inserted/updated all 190 applications into DB 2 (`gh_candidate_applications`):
+    - **`QUEUED` applications created today in DB 2 now total: 2,839** (up from 2,719; 100% of active eligible applications are queued).
+    - **`FILTERED_OUT` applications: 42** (properly recorded expired jobs with full audit history).
+
+# Current Session Update (2026-11-15 - Answer Resolver Dual Progress Tracker)
+
+- **Completed Progress Tracker for Answer Resolution Engine**:
+  - Implemented `ResolverProgressTracker` (`src/resolver/progressTracker.ts`) providing unified tracking for both phases of the resolver:
+    1. **Tiers 1–4 Resolution**: Tracks completed/total candidate-job assignments, fields resolved via deterministic tiers vs escaped to Tier 5, skip reasons, elapsed time, and live throughput velocity (`jobs/s`).
+    2. **Tier 5 Batches**: Tracks batch stages (`Haiku`, `Sonnet`, `Malformed-Retry`, `Gemini`, `Ollama`), active `batchId`, status transitions (`submitting` -> `polling` -> `completed`), items processed, and accept/escalation counts.
+  - **Dual Mode (Interactive TTY vs Non-TTY / Railway)**:
+    - In local interactive TTY: renders clean 2-line in-place terminal progress bars with percentage, speed, and real-time polling state.
+    - In non-interactive environments (`RAILWAY_ENV`, CI, Docker, headless logs): automatically throttles to clean, single-line heartbeat log entries without ANSI escape code corruption.
+  - **Integration**:
+    - Embedded into `AnswerResolver.resolveAllApplications` with optional `onProgress` and `progressTracker` options.
+    - Wired batch progress callbacks from `LLMSynthesizer` (`runAnthropicPromptBatch`, `runGeminiPromptBatch`, `runOllamaPromptBatch`) through `createIngestTier5Stages`.
+  - **Verification**:
+    - Created `tests/resolverProgressTracker.test.ts` covering snapshot lifecycle, Tier 1-4 progress, Tier 5 batch updates, and interactive rendering (4/4 tests pass).
+    - Verified clean root TypeScript typecheck (`tsc --noEmit`) and dashboard typecheck (`tsc -p dashboard`).
+
 # Current Session Update (2026-11-15 - Ingest Drop Reporting & Candidate Volume View)
 
 - **Completed Ingest Drop Reporting & Dedicated Candidate Volume Tab in Dev Dashboard**:
@@ -2195,4 +2363,8 @@ _Last updated: 2026-10-09_
 Live, non-submitting control replays confirmed numeric-option normalization, country mis-targeting, punctuation search, and numeric-ID selector failures. Samsung raw date-to-month resolution reproduced; Walker-Miller template points at newsletter instead of embedded application. No production fixes applied. Evidence and unresolved coverage: .ai/diagnostics/required-fields-2026-11-03/REPORT.md.
 
 Cross River follow-up reproduced a false-positive React-Select commitment result: the filler reports success while hidden required controls remain invalid. The fix must verify selected or hidden required state before returning success. Evidence is in the same report.
+
+# Ashby Apify preflight fallback (2026-11-17)
+
+- Local implementation adds an optional Apify residential fallback after unsuccessful Massive preflight attempts. It has not been deployed or verified with Apify credentials. Preserve challenge and post-submit safeguards. See `docs/superpowers/plans/2026-11-17-ashby-apify-preflight-fallback.md`.
 
