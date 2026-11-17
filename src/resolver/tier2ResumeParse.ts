@@ -10,6 +10,7 @@ import { getProfile, updateParsedResume } from '../db/profiles.js';
 import { getProfileFromDatabase } from '../db/profiles.js';
 import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
+import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { normalizeText } from './fingerprint.js';
 import { extractResumePhone, isPhoneNumberField } from './candidateEvidence.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
@@ -52,6 +53,52 @@ export interface ResumeParsedRow {
 
 const pdfParse: (dataBuffer: Buffer, options?: any) => Promise<{ text: string }> =
   (_pdfParse as any).default || _pdfParse;
+
+/**
+ * Invalidates cached resume text and structured facts on profiles (and legacy candidate_resume_parsed).
+ * This forces Tier 2 to re-download the fresh master resume and re-parse structured facts.
+ */
+export async function invalidateResumeParseCache(applywizzIds: string[]): Promise<number> {
+  const cleanIds = (applywizzIds || [])
+    .map((id) => (id || '').trim())
+    .filter(Boolean);
+
+  if (cleanIds.length === 0) return 0;
+
+  let clearedCount = 0;
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          resume_text: null,
+          resume_facts: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('applywizz_id', cleanIds);
+
+      if (profileError) {
+        log.warn(`[Tier 2] Failed to invalidate profile resume cache: ${profileError.message}`);
+      } else {
+        clearedCount = cleanIds.length;
+        log.info(`[Tier 2] 🧹 Invalidated parsed resume cache for ${cleanIds.length} candidate profiles.`);
+      }
+
+      // Also clean legacy table if present
+      try {
+        await supabase
+          .from('candidate_resume_parsed')
+          .delete()
+          .in('applywizz_id', cleanIds);
+      } catch {}
+    } catch (err: any) {
+      log.warn(`[Tier 2] Error invalidating resume cache: ${err.message}`);
+    }
+  }
+
+  return clearedCount;
+}
 
 /**
  * Parses raw resume text into structured components.
