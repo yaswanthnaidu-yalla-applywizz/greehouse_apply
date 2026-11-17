@@ -313,6 +313,72 @@ async function markHiddenRequiredFields(page: Page, fields: ScannedField[]): Pro
   }));
 }
 
+export async function extractCustomDemographicSurveys(page: Page): Promise<ScannedField[]> {
+  const customSurveyFields = await page.evaluate(() => {
+    const containers = Array.from(
+      document.querySelectorAll(
+        'div[data-qa*="demographic"], div[data-qa*="survey"], div[class*="demographic" i], div[id*="demographic" i], fieldset[class*="demographic" i], fieldset[class*="eeoc" i], div.custom-eeoc, section[class*="demographic" i]'
+      )
+    );
+    const scanned: Array<{
+      name: string;
+      label: string;
+      type: string;
+      isRequired: boolean;
+      options?: string[];
+    }> = [];
+
+    for (const container of containers) {
+      const fieldContainers = container.querySelectorAll('.field, [data-field-id], [class*="question"], [class*="form-group"]');
+      const targetEls = fieldContainers.length > 0 ? Array.from(fieldContainers) : [container];
+
+      for (const fc of targetEls) {
+        const select = fc.querySelector('select');
+        const radios = Array.from(fc.querySelectorAll('input[type="radio"]'));
+        const labelEl = fc.querySelector('label, legend, [class*="label"]');
+        const rawLabel = labelEl ? (labelEl.textContent || '').trim().replace(/\s*\*\s*$/, '') : '';
+        const isReq =
+          (labelEl && (labelEl.textContent || '').includes('*')) ||
+          !!fc.querySelector('[class*="required"], [aria-required="true"], input[required], select[required]');
+
+        if (select) {
+          const name = select.name || select.id;
+          if (!name) continue;
+          const options = Array.from(select.options)
+            .map((o) => o.text.trim())
+            .filter((t) => t && !/^(select\.\.\.|select|choose|\s*)$/i.test(t));
+          scanned.push({ name, label: rawLabel, type: 'select', isRequired: isReq, options });
+        } else if (radios.length > 0) {
+          const name = (radios[0] as HTMLInputElement).name;
+          if (!name) continue;
+          const options = radios
+            .map((r) => {
+              const lbl = r.closest('label') || document.querySelector(`label[for="${r.id}"]`);
+              return lbl ? (lbl.textContent || '').trim() : (r as HTMLInputElement).value;
+            })
+            .filter(Boolean);
+          scanned.push({ name, label: rawLabel, type: 'radio', isRequired: isReq, options });
+        }
+      }
+    }
+    return scanned;
+  }).catch(() => []);
+
+  return customSurveyFields.map((sf) => ({
+    fieldId: generateFieldId(sf.name, '', sf.label),
+    name: sf.name,
+    type: sf.type as ScannedFieldType,
+    label: sanitizeLabelText(sf.label) || sf.name,
+    isRequired: sf.isRequired,
+    options: sf.options && sf.options.length > 0 ? sf.options : undefined,
+    ...(sf.options && sf.options.length > 0 ? { optionsComplete: true } : {}),
+    metadata: {
+      section: 'Demographics',
+      selector: `select[name="${sf.name}"], input[name="${sf.name}"]`,
+    },
+  }));
+}
+
 /**
  * PlaywrightScanner manages a pool of headless Chromium workers to inspect
  * unique Greenhouse job postings and extract form structures.
@@ -743,6 +809,13 @@ export class PlaywrightScanner {
                 }
               }
             }
+          }
+        }
+
+        const customSurveys = await extractCustomDemographicSurveys(page);
+        for (const cs of customSurveys) {
+          if (!fields.some((existing) => existing.name === cs.name || existing.fieldId === cs.fieldId)) {
+            fields.push(cs);
           }
         }
 
