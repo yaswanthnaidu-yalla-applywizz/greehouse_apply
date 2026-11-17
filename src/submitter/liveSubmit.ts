@@ -67,6 +67,7 @@ import {
   type ApplicationRow,
   type ApplicationStatus,
   type AshbySubmissionTelemetry,
+  type LeverSubmissionTelemetry,
   type EmailProofJson,
 } from '../db/applications.js';
 import { getProfile, updateResumeStoragePath } from '../db/profiles.js';
@@ -190,7 +191,7 @@ export interface LiveSubmitResult {
   summary?: FormFillSummary;
   submitClickedAt?: string | null;
   submitClicked?: boolean;
-  telemetry?: AshbySubmissionTelemetry;
+  telemetry?: AshbySubmissionTelemetry | LeverSubmissionTelemetry;
 }
 
 
@@ -515,11 +516,10 @@ export async function detectFormFillingErrors(
     }
 
     // 2. Check for HTML5 invalid form inputs that blocked submission.
-    //    Exclude aria-hidden="true" inputs — these are hidden backing inputs
-    //    for Greenhouse Remix/React-Select comboboxes (class "requiredInput").
-    //    They are not real user-facing fields; the combobox fill handles them.
+    //    Include input:invalid, select:invalid, textarea:invalid, aria-invalid="true",
+    //    and hidden backing inputs with class "requiredInput:invalid" (Greenhouse Remix comboboxes)
     const invalidInputs = page.locator(
-      'input:invalid:not([aria-hidden="true"]):not([tabindex="-1"]), select:invalid, textarea:invalid'
+      'input:invalid:not([aria-hidden="true"]:not(.requiredInput)):not([tabindex="-1"]:not(.requiredInput)), select:invalid, textarea:invalid, [aria-invalid="true"], input.requiredInput:invalid'
     );
     const invalidCount = await invalidInputs.count().catch(() => 0);
     if (invalidCount > 0) {
