@@ -9,7 +9,7 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('ExecutiveDailyReport');
 
-const DASHBOARD_URL = config.DASHBOARD_URL || 'https://applywizz.ai/admin';
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://applywizz.ai/admin';
 
 const DEV_EMAIL = 'yaswanthnaiduyalla@applywizz.ai';
 const PROD_EXECUTIVE_DAILY_TO = ['ramakrishna@applywizz.ai'];
@@ -386,6 +386,7 @@ export function buildExecutiveDailyReportHtml(data: ExecutiveDailyReportData): s
         <td colspan="2" style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px 16px; border-radius: 6px; text-align: center;">
           <span style="font-size: 12px; color: #475569; font-weight: 600;">Completion Rate: </span>
           <span style="font-size: 18px; font-weight: bold; color: #334155;">${completionRatePercent}%</span>
+          <span style="font-size: 12px; color: #64748b; margin-left: 8px;">(${totalReadyForReview} ready for review)</span>
         </td>
       </tr>
     </table>
