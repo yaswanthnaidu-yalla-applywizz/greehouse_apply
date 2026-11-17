@@ -1,36 +1,250 @@
 /**
- * @fileoverview Domain-aware resume naming utilities for ATS job submissions and storage.
- * Standardizes naming convention: RESUME_<CLIENTNAME>_<DOMAIN>.pdf
+ * @fileoverview Dynamic, professional resume/cover letter filename utilities for ATS submissions and storage.
+ *
+ * Format: Resume_FirstName_LastName_JobRole.pdf
+ * Falls back gracefully if any component is missing:
+ *   - Resume_John_Smith_Software_Engineer.pdf
+ *   - Resume_John_Smith.pdf (when role is missing)
+ *   - Resume_Candidate.pdf (when name is missing)
  */
 
-const NOISE_WORDS = new Set([
-  'senior',
-  'junior',
-  'lead',
-  'staff',
-  'principal',
-  'associate',
-  'entry',
-  'intern',
-  'remote',
-  'hybrid',
-  'onsite',
-  'us',
-  'contract',
-  'fulltime',
-  'full-time',
-  'parttime',
-  'part-time',
-  'i',
-  'ii',
-  'iii',
-  'iv',
-  'v',
-]);
+/**
+ * Extracts the job title/role from a page title string or current document.title.
+ * Strips ATS suffixes and common prefixes like "Job Application for".
+ */
+export function extractJobRoleFromPage(pageTitle?: string | null): string {
+  try {
+    let title = (pageTitle ?? (typeof document !== 'undefined' ? document.title : '')) || '';
+    if (!title || typeof title !== 'string') return '';
+
+    // Remove common ATS suffixes like "| Greenhouse", "| Workday", "| Lever", etc.
+    title = title
+      .replace(/\|\s*(Greenhouse|Workday|Lever|Ashby|iCIMS|SmartRecruiters|BambooHR|Taleo|SuccessFactors)\s*$/i, '')
+      .trim();
+
+    // Format: "Job Title at Company"
+    if (title.includes(' at ')) {
+      return cleanJobRole(title.split(' at ')[0].trim());
+    }
+
+    // Format: "Job Title - Company - Platform" or "Job Title - Company"
+    if (title.includes(' - ')) {
+      const parts = title.split(' - ');
+      return cleanJobRole(parts[0].trim());
+    }
+
+    // Format: "Platform | Job Title | Company" or just "Job Title | Company"
+    if (title.includes(' | ')) {
+      const parts = title.split(' | ').map((p) => p.trim()).filter(Boolean);
+      const candidate = parts.find((p) => p.split(' ').length >= 2) || '';
+      return cleanJobRole(candidate);
+    }
+
+    return cleanJobRole(title);
+  } catch {
+    return '';
+  }
+}
 
 /**
- * Normalizes and sanitizes a client name for resume filenames.
- * Example: "John Doe" -> "JOHN_DOE"
+ * Strips common ATS boilerplate prefixes from an extracted candidate string.
+ */
+export function cleanJobRole(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  return raw
+    .replace(/^(job\s+application\s+for|application\s+for|apply\s+for|apply\s+to|applying\s+for)\s+/i, '')
+    .trim();
+}
+
+/**
+ * Sanitizes a string for use in a file name:
+ * - Removes invalid filename characters
+ * - Replaces spaces/special chars with underscores
+ * - Collapses multiple underscores
+ * - Trims leading/trailing underscores
+ * - Limits length
+ */
+export function sanitizeForFileName(text: string, maxLength = 30): string {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+    .replace(/[\s\-–—,;.()[\]{}!@#$%^&+=~`']+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .substring(0, maxLength);
+}
+
+export interface CandidateProfileInput {
+  personal?: { firstName?: string; lastName?: string };
+  firstName?: string | null;
+  lastName?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  client_name?: string | null;
+  jobTitle?: string | null;
+  job_title?: string | null;
+  experience?: Array<{ title?: string | null }>;
+  workExperience?: Array<{ title?: string | null }>;
+  work_experience?: Array<{ title?: string | null }>;
+}
+
+/**
+ * Builds a professional, dynamic resume or cover letter filename.
+ * Format: Resume_FirstName_LastName_JobRole.pdf
+ */
+export function buildDocumentFileName(
+  profileOrName?: CandidateProfileInput | string | null,
+  jobTitleOrPage?: string | null,
+  storedFileName?: string | null,
+  isResume = true
+): string {
+  const prefix = isResume ? 'Resume' : 'CoverLetter';
+
+  const ext = storedFileName?.endsWith('.docx')
+    ? '.docx'
+    : storedFileName?.endsWith('.doc')
+    ? '.doc'
+    : '.pdf';
+
+  let firstName = '';
+  let lastName = '';
+  let fallbackRole = '';
+
+  if (typeof profileOrName === 'string') {
+    const rawName = profileOrName.trim();
+    if (rawName) {
+      const nameParts = rawName.split(/\s+/);
+      firstName = nameParts[0] || '';
+      lastName = nameParts.slice(1).join(' ') || '';
+    }
+  } else if (profileOrName && typeof profileOrName === 'object') {
+    firstName = (
+      profileOrName.personal?.firstName ||
+      profileOrName.firstName ||
+      profileOrName.first_name ||
+      ''
+    ).trim();
+
+    lastName = (
+      profileOrName.personal?.lastName ||
+      profileOrName.lastName ||
+      profileOrName.last_name ||
+      ''
+    ).trim();
+
+    if (!firstName && !lastName && profileOrName.client_name) {
+      const parts = profileOrName.client_name.trim().split(/\s+/);
+      firstName = parts[0] || '';
+      lastName = parts.slice(1).join(' ') || '';
+    }
+
+    fallbackRole = (
+      profileOrName.jobTitle ||
+      profileOrName.job_title ||
+      profileOrName.experience?.[0]?.title ||
+      profileOrName.workExperience?.[0]?.title ||
+      profileOrName.work_experience?.[0]?.title ||
+      ''
+    ).trim();
+  }
+
+  // 1. Extract role from job title / page title, then fallback to profile's role
+  let jobRole = extractJobRoleFromPage(jobTitleOrPage);
+  if (!jobRole && fallbackRole) {
+    jobRole = cleanJobRole(fallbackRole);
+  }
+
+  const parts: string[] = [prefix];
+  if (firstName) parts.push(sanitizeForFileName(firstName, 20));
+  if (lastName) parts.push(sanitizeForFileName(lastName, 20));
+  if (jobRole) parts.push(sanitizeForFileName(jobRole, 30));
+
+  if (parts.length === 1) {
+    parts.push('Candidate');
+  }
+
+  return parts.join('_') + ext;
+}
+
+/**
+ * Backwards-compatible resume submission filename builder.
+ * Drops directly into formFiller, ashbySubmit, and storage callers.
+ */
+export function buildResumeSubmissionFilename(
+  clientNameOrProfile?: CandidateProfileInput | string | null,
+  jobTitle?: string | null,
+  _companyName?: string | null,
+  fallbackRole?: string | null,
+  storedFileName?: string | null
+): string {
+  const roleInput = jobTitle || fallbackRole || '';
+  return buildDocumentFileName(clientNameOrProfile, roleInput, storedFileName, true);
+}
+
+/**
+ * Builds standard storage filename for master resumes in Supabase Storage.
+ * Format: Resume_FirstName_LastName.pdf (falls back to Resume_AWL_ID.pdf)
+ */
+export function buildResumeStorageFilename(
+  profileOrName?: CandidateProfileInput | string | null,
+  applywizzId?: string,
+  storedFileName?: string | null
+): string {
+  const ext = storedFileName?.endsWith('.docx')
+    ? '.docx'
+    : storedFileName?.endsWith('.doc')
+    ? '.doc'
+    : '.pdf';
+
+  let firstName = '';
+  let lastName = '';
+
+  if (typeof profileOrName === 'string') {
+    const rawName = profileOrName.trim();
+    if (rawName) {
+      const nameParts = rawName.split(/\s+/);
+      firstName = nameParts[0] || '';
+      lastName = nameParts.slice(1).join(' ') || '';
+    }
+  } else if (profileOrName && typeof profileOrName === 'object') {
+    firstName = (
+      profileOrName.personal?.firstName ||
+      profileOrName.firstName ||
+      profileOrName.first_name ||
+      ''
+    ).trim();
+
+    lastName = (
+      profileOrName.personal?.lastName ||
+      profileOrName.lastName ||
+      profileOrName.last_name ||
+      ''
+    ).trim();
+
+    if (!firstName && !lastName && profileOrName.client_name) {
+      const parts = profileOrName.client_name.trim().split(/\s+/);
+      firstName = parts[0] || '';
+      lastName = parts.slice(1).join(' ') || '';
+    }
+  }
+
+  const parts: string[] = ['Resume'];
+  if (firstName) parts.push(sanitizeForFileName(firstName, 20));
+  if (lastName) parts.push(sanitizeForFileName(lastName, 20));
+
+  if (parts.length === 1) {
+    if (applywizzId) {
+      parts.push(sanitizeForFileName(applywizzId, 25));
+    } else {
+      parts.push('Candidate');
+    }
+  }
+
+  return parts.join('_') + ext;
+}
+
+/**
+ * Legacy helper maintained for any remaining external references.
  */
 export function sanitizeResumeClientName(name?: string | null, fallback: string = 'CANDIDATE'): string {
   const sanitized = (name || '')
@@ -47,95 +261,14 @@ export function sanitizeResumeClientName(name?: string | null, fallback: string 
 }
 
 /**
- * Extracts a standardized domain category from job context or candidate role.
- */
-function matchCategory(text: string): string | null {
-  if (!text) return null;
-  const lower = text.toLowerCase();
-
-  // 1. High-specificity tracks first
-  if (/full[\s-]*stack/i.test(lower)) return 'FULL_STACK';
-  if (/devops|cloud|infrastructure|\bsre\b|site\s*reliability/i.test(lower)) return 'DEVOPS';
-  if (/data\s*engineer|data\s*pipeline|\betl\b/i.test(lower)) return 'DATA_ENGINEER';
-  if (/data\s*scientist/i.test(lower)) return 'DATA_SCIENCE';
-  if (/data\s*analyst|analytics|\bbi\b\s*analyst/i.test(lower)) return 'DATA_ANALYST';
-  if (/machine\s*learning|deep\s*learning|\bml\b|\bai\b|artificial\s*intelligence|gen[\s-]*ai|\bllm\b/i.test(lower)) return 'AI_ML';
-  if (/qa\b|\btest\b|quality\s*assurance|\bsdet\b/i.test(lower)) return 'QA_TEST';
-  if (/security|infosec|cyber/i.test(lower)) return 'SECURITY';
-  if (/product\s*manager|\bpm\b/i.test(lower)) return 'PRODUCT_MANAGER';
-  if (/business\s*analyst|\bba\b/i.test(lower)) return 'BUSINESS_ANALYST';
-  if (/designer|\bux\b|\bui\/ux\b/i.test(lower)) return 'DESIGNER';
-  if (/mobile|\bios\b|\bandroid\b|\bflutter\b|react[\s-]*native/i.test(lower)) return 'MOBILE';
-  if (/front[\s-]*end|\bui\b|\breact\b|\bvue\b|\bangular\b/i.test(lower)) return 'FRONTEND';
-  if (/back[\s-]*end|\bnode(?:\.js)?\b|\bgolang\b|\bjava\b|\bpython\b|\bapi\b/i.test(lower)) return 'BACKEND';
-  if (/software\s*(?:engineer|developer)|\bswe\b|programmer/i.test(lower)) return 'SOFTWARE_ENGINEER';
-
-  return null;
-}
-
-/**
- * Cleans arbitrary job title into a clean domain slug if no standard category matched.
- */
-function cleanCustomTitleToDomain(title: string): string | null {
-  if (!title) return null;
-
-  // Split title before separators like -, |, ,, (, etc.
-  const primaryPart = title.split(/[-–—|,/(]/)[0].trim();
-  const words = primaryPart
-    .replace(/[^a-zA-Z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .map((w) => w.trim())
-    .filter((w) => w.length > 0 && !NOISE_WORDS.has(w.toLowerCase()));
-
-  if (words.length === 0) return null;
-
-  // Take up to 3 meaningful words
-  return words.slice(0, 3).join('_').toUpperCase();
-}
-
-/**
- * Resolves the uppercase domain slug for resume naming based on job title,
- * company name, or fallback candidate profile role.
+ * Legacy domain shortcode resolver.
  */
 export function resolveResumeDomain(
   jobTitle?: string | null,
   companyName?: string | null,
   fallbackRole?: string | null
 ): string {
-  const jobContext = [companyName, jobTitle].filter(Boolean).join(' ').trim();
-
-  // Try matching category against job context
-  const directMatch = matchCategory(jobContext);
-  if (directMatch) return directMatch;
-
-  // Try custom slug from job title
-  if (jobTitle) {
-    const customSlug = cleanCustomTitleToDomain(jobTitle);
-    if (customSlug) return customSlug;
-  }
-
-  // Fallback to candidate profile role
-  if (fallbackRole) {
-    const fallbackMatch = matchCategory(fallbackRole);
-    if (fallbackMatch) return fallbackMatch;
-
-    const fallbackSlug = cleanCustomTitleToDomain(fallbackRole);
-    if (fallbackSlug) return fallbackSlug;
-  }
-
-  return 'GENERAL';
-}
-
-/**
- * Builds standard resume submission filename: RESUME_<CLIENTNAME>_<DOMAIN>.pdf
- */
-export function buildResumeSubmissionFilename(
-  clientName?: string | null,
-  jobTitle?: string | null,
-  companyName?: string | null,
-  fallbackRole?: string | null
-): string {
-  const sanitizedClient = sanitizeResumeClientName(clientName);
-  const domain = resolveResumeDomain(jobTitle, companyName, fallbackRole);
-  return `RESUME_${sanitizedClient}_${domain}.pdf`;
+  const title = jobTitle || fallbackRole || companyName || '';
+  const clean = cleanJobRole(title);
+  return sanitizeForFileName(clean, 30).toUpperCase() || 'GENERAL';
 }
