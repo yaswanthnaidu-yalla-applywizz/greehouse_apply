@@ -107,14 +107,14 @@ function optionPolarity(option: string): 'affirmative' | 'negative' | null {
     negativeTokens.some((token) => normalized === token) ||
     /^(no|not|false|decline)\b/.test(normalized) ||
     /\bnever\b/.test(normalized) ||
-    /^(i do not|i am not)\b/.test(normalized)
+    /^(i do not|i am not|does not require|will not require|do not require|not need)\b/.test(normalized)
   ) {
     return 'negative';
   }
   if (
     affirmativeTokens.some((token) => normalized === token) ||
     /^(yes|true|agree|accept|acknowledge|confirm)\b/.test(normalized) ||
-    /^(i confirm|i acknowledge|i have reviewed)\b/.test(normalized) ||
+    /^(i confirm|i acknowledge|i have reviewed|requires sponsorship)\b/.test(normalized) ||
     affirmativeTokens.some(
       (token) =>
         normalized.includes(` ${token} `) ||

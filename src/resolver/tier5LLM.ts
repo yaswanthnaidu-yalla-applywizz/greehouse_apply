@@ -33,6 +33,7 @@ import { recordApplicationTokenUsage } from '../db/tokenUsage.js';
 import type { IngestTier5Stages, IngestTier5Work, IngestTier5StageOutcome, IngestTier5StageResult } from './ingestTier5Coordinator.js';
 import { createHash } from 'node:crypto';
 import { AnthropicBatchPollingAbortedError, BatchReconciliationRequiredError, stableBatchCustomIds } from './anthropicMessageBatch.js';
+import type { Tier5BatchProgressState } from './progressTracker.js';
 
 const log = createLogger('Tier 5 LLM');
 const REQUIRED_FACTUAL_ACCEPT_CONFIDENCE = 0.70;
@@ -79,13 +80,24 @@ export function meetsCreativeLengthConstraint(answer: string, constraint: Creati
 
 export type Tier5UsageRecord = { provider: 'anthropic' | 'openrouter'; model: string; batchIds?: readonly string[]; promptTokens?: number; completionTokens?: number; cost?: number };
 
-export function createIngestTier5Stages(runKey: string, synthesizer = getSynthesizer(), onUsage?: (record: Tier5UsageRecord) => void): IngestTier5Stages {
+export function createIngestTier5Stages(
+  runKey: string,
+  synthesizer = getSynthesizer(),
+  onUsage?: (record: Tier5UsageRecord) => void,
+  onBatchProgress?: (update: Partial<Tier5BatchProgressState>) => void
+): IngestTier5Stages {
   const runStage = async (
     stage: 'haiku' | 'sonnet',
     items: readonly IngestTier5Work[],
     haiku?: ReadonlyMap<string, ResolvedField | null>,
   ): Promise<readonly IngestTier5StageResult[] | IngestTier5StageOutcome> => {
     if (!items.length) return [];
+    onBatchProgress?.({
+      stage,
+      status: 'submitting',
+      totalItems: items.length,
+      completedItems: 0,
+    });
     const questions: BatchQuestion[] = items.map(({ field, profile, resumeText }) => ({
       label: field.label,
       type: field.type,
@@ -112,7 +124,21 @@ export function createIngestTier5Stages(runKey: string, synthesizer = getSynthes
     let result: Awaited<ReturnType<LLMSynthesizer['runAnthropicPromptBatch']>> | undefined;
     const failedIds = new Set<string>();
     try {
-      result = await synthesizer.runAnthropicPromptBatch(`${runKey}:${stage}`, prompts, stage === 'sonnet' ? config.CLAUDE_SONNET_MODEL : synthesizer.getPrimaryModelName());
+      result = await synthesizer.runAnthropicPromptBatch(
+        `${runKey}:${stage}`,
+        prompts,
+        stage === 'sonnet' ? config.CLAUDE_SONNET_MODEL : synthesizer.getPrimaryModelName(),
+        (progress) => {
+          onBatchProgress?.({
+            stage,
+            status: progress.status,
+            batchId: progress.batchId,
+            totalItems: progress.totalItems ?? items.length,
+            completedItems: progress.completedItems ?? 0,
+            elapsedMs: progress.elapsedMs,
+          });
+        }
+      );
       onUsage?.({ provider: 'anthropic', model: stage === 'sonnet' ? config.CLAUDE_SONNET_MODEL : synthesizer.getPrimaryModelName(), batchIds: result.batchIds, ...result.usage });
       for (const id of result.failedIds) failedIds.add(id);
     } catch (error) {
@@ -126,12 +152,29 @@ export function createIngestTier5Stages(runKey: string, synthesizer = getSynthes
       return !failedIds.has(ids[index]) && (!raw || !parseBatchAnswerItems(raw, 1)) ? [index] : [];
     });
     if (malformedIndexes.length) {
+      onBatchProgress?.({
+        stage: 'retry',
+        status: 'submitting',
+        totalItems: malformedIndexes.length,
+        completedItems: 0,
+        details: `${malformedIndexes.length} malformed answers`,
+      });
       const retryPrompts = malformedIndexes.map((index) => ({ ...prompts[index], customId: `retry_${ids[index]}` }));
       try {
         const retry = await synthesizer.runAnthropicPromptBatch(
           `${runKey}:${stage}:malformed-retry`,
           retryPrompts,
           stage === 'sonnet' ? config.CLAUDE_SONNET_MODEL : synthesizer.getPrimaryModelName(),
+          (progress) => {
+            onBatchProgress?.({
+              stage: 'retry',
+              status: progress.status,
+              batchId: progress.batchId,
+              totalItems: progress.totalItems ?? malformedIndexes.length,
+              completedItems: progress.completedItems ?? 0,
+              elapsedMs: progress.elapsedMs,
+            });
+          }
         );
         onUsage?.({ provider: 'anthropic', model: stage === 'sonnet' ? config.CLAUDE_SONNET_MODEL : synthesizer.getPrimaryModelName(), batchIds: retry.batchIds, ...retry.usage });
         if (retry.status !== 'ended') return { results: [], pending: true, batchIds: [...(result?.batchIds || []), ...retry.batchIds] };
@@ -247,6 +290,16 @@ export function createIngestTier5Stages(runKey: string, synthesizer = getSynthes
         },
       }, evaluation: evaluation(requiredCreativeDraft ? 'rejected' : 'accepted', decision.reason) });
     }
+    const acceptedCount = results.filter((r) => r.answer !== null).length;
+    const failedCount = results.length - acceptedCount;
+    onBatchProgress?.({
+      stage,
+      status: 'completed',
+      totalItems: items.length,
+      completedItems: items.length,
+      acceptedCount,
+      failedCount,
+    });
     return results;
   };
   return {

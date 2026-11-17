@@ -303,17 +303,24 @@ export function inferYesNoFromProfile(
 ): 'Yes' | 'No' | null {
   const combined = `${field.label || ''} ${field.name || ''} ${field.fieldId || ''}`.toLowerCase();
 
-  if (/authorized to work|legally authorized|work authorization|legal right to work|eligible to work/i.test(combined)) {
+  if (/dependent upon.*spouse|spouse.*sponsorship/i.test(combined)) {
+    return 'No';
+  }
+
+  if (/sponsorship|require.*visa|future.*sponsorship|visa status|sponsor.*work authorization/i.test(combined)) {
+    return profile.requiresSponsorship ? 'Yes' : 'No';
+  }
+
+  if (
+    /authorized to work|legally authorized|work authorization|legal right to work|eligible to work/i.test(combined) &&
+    !/sponsorship|require.*visa|future.*sponsorship|sponsor.*work authorization|dependent upon.*spouse/i.test(combined)
+  ) {
     const auth = (profile.workAuthorization || '').trim();
     if (!auth) return null;
     if (/^(no|false)$/i.test(auth) || /not authorized|unauthorized/i.test(auth)) {
       return 'No';
     }
     return 'Yes';
-  }
-
-  if (/sponsorship|require.*visa|future.*sponsorship|visa status/i.test(combined)) {
-    return profile.requiresSponsorship ? 'Yes' : 'No';
   }
 
   if (
@@ -1127,6 +1134,7 @@ export class LLMSynthesizer {
   public async runAnthropicMessageBatch(
     runKey: string,
     requests: AnthropicBatchRequest[],
+    onBatchEvent?: (event: { event: 'created' | 'pending' | 'completed' | 'item_error'; batchId: string; elapsedMs: number }) => void,
   ) {
     if (!this.batchProvider) throw new Error('No Anthropic credentials configured for Message Batches.');
     const result = await executeAnthropicBatchWithRetry(
@@ -1134,10 +1142,13 @@ export class LLMSynthesizer {
       requests,
       this.batchProvider,
       this.batchStateStore,
-      (event) => log.info(
-        `[LLM Provider] event=message_batch_${event.event} batch_id=${event.batchId} elapsed_ms=${event.elapsedMs}` +
-        (event.usage ? ` input_tokens=${event.usage.inputTokens} output_tokens=${event.usage.outputTokens}` : '')
-      ),
+      (event) => {
+        log.info(
+          `[LLM Provider] event=message_batch_${event.event} batch_id=${event.batchId} elapsed_ms=${event.elapsedMs}` +
+          (event.usage ? ` input_tokens=${event.usage.inputTokens} output_tokens=${event.usage.outputTokens}` : '')
+        );
+        onBatchEvent?.(event);
+      },
       { waitForCompletion: true, intervalMs: this.batchPollIntervalMs, sleep: this.batchPollSleep, shouldAbort: isPipelineAbortRequested },
     );
     return result;
@@ -1146,7 +1157,8 @@ export class LLMSynthesizer {
   public async runGeminiPromptBatch(
     runKey: string,
     prompts: readonly { customId: string; prompt: string; system: string }[],
-    model = this.geminiModel
+    model = this.geminiModel,
+    onProgress?: (event: { status: 'submitting' | 'polling' | 'completed' | 'errored'; batchId?: string; elapsedMs?: number; completedItems?: number; totalItems?: number }) => void,
   ): Promise<{
     status: AnthropicBatchStatus;
     batchIds: string[];
@@ -1261,6 +1273,12 @@ ${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${it
           `[Gemini Prompt Batch] Processed ${Math.min(i + BUNDLE_SIZE, prompts.length)}/${prompts.length} questions ` +
             `(bundle ${Math.floor(i / BUNDLE_SIZE) + 1}/${Math.ceil(prompts.length / BUNDLE_SIZE)})`
         );
+        onProgress?.({
+          status: 'polling',
+          batchId: `gemini-batch-${runKey}`,
+          completedItems: Math.min(i + BUNDLE_SIZE, prompts.length),
+          totalItems: prompts.length,
+        });
       } catch (err: any) {
         log.warn(`[Gemini Prompt Batch] Error processing bundle at index ${i}: ${err.message}`);
         for (const item of chunk) failedIds.add(item.customId);
@@ -1284,7 +1302,8 @@ ${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${it
   public async runOllamaPromptBatch(
     runKey: string,
     prompts: readonly { customId: string; prompt: string; system: string }[],
-    model = this.ollamaModel
+    model = this.ollamaModel,
+    onProgress?: (event: { status: 'submitting' | 'polling' | 'completed' | 'errored'; batchId?: string; elapsedMs?: number; completedItems?: number; totalItems?: number }) => void,
   ): Promise<{
     status: AnthropicBatchStatus;
     batchIds: string[];
@@ -1324,6 +1343,12 @@ ${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${it
           }
         })
       );
+      onProgress?.({
+        status: 'polling',
+        batchId: `ollama-batch-${runKey}`,
+        completedItems: Math.min(i + CHUNK_SIZE, prompts.length),
+        totalItems: prompts.length,
+      });
     }
 
     return {
@@ -1339,24 +1364,36 @@ ${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${it
     runKey: string,
     prompts: readonly { customId: string; prompt: string; system: string }[],
     model = this.modelName,
+    onProgress?: (event: { status: 'submitting' | 'polling' | 'completed' | 'errored'; batchId?: string; elapsedMs?: number; completedItems?: number; totalItems?: number }) => void,
   ): Promise<{ status: AnthropicBatchStatus; batchIds: string[]; responses: Map<string, string>; failedIds: Set<string>; usage?: { promptTokens: number; completionTokens: number } }> {
     if (this.provider === 'ollama') {
-      return this.runOllamaPromptBatch(runKey, prompts, model.includes('sonnet') ? this.ollamaSonnetModel : this.ollamaModel);
+      return this.runOllamaPromptBatch(runKey, prompts, model.includes('sonnet') ? this.ollamaSonnetModel : this.ollamaModel, onProgress);
     }
     if (this.provider === 'gemini' || (!this.apiKey && this.geminiApiKey)) {
-      return this.runGeminiPromptBatch(runKey, prompts, model.includes('sonnet') ? config.GEMINI_DEEP_MODEL : this.geminiModel);
+      return this.runGeminiPromptBatch(runKey, prompts, model.includes('sonnet') ? config.GEMINI_DEEP_MODEL : this.geminiModel, onProgress);
     }
 
     try {
-      const result = await this.runAnthropicMessageBatch(runKey, prompts.map(({ customId, prompt, system }) => ({
-        custom_id: customId,
-        params: {
-          model,
-          max_tokens: 1200,
-          system,
-          messages: [{ role: 'user', content: prompt }],
-        },
-      })));
+      const result = await this.runAnthropicMessageBatch(
+        runKey,
+        prompts.map(({ customId, prompt, system }) => ({
+          custom_id: customId,
+          params: {
+            model,
+            max_tokens: 1200,
+            system,
+            messages: [{ role: 'user', content: prompt }],
+          },
+        })),
+        (event) => {
+          onProgress?.({
+            status: event.event === 'completed' ? 'completed' : 'polling',
+            batchId: event.batchId,
+            elapsedMs: event.elapsedMs,
+            totalItems: prompts.length,
+          });
+        }
+      );
       const responses = new Map<string, string>();
       const failedIds = new Set<string>();
       for (const [id, item] of result.results || []) {
@@ -1369,7 +1406,7 @@ ${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${it
     } catch (err: any) {
       if (this.geminiApiKey && (String(err).includes('usage limits') || String(err).includes('workspace') || String(err).includes('400'))) {
         log.warn(`[LLM Provider] Anthropic batch failed with usage limits. Automatically failing over to Gemini prompt batch.`);
-        return this.runGeminiPromptBatch(runKey, prompts, model.includes('sonnet') ? config.GEMINI_DEEP_MODEL : this.geminiModel);
+        return this.runGeminiPromptBatch(runKey, prompts, model.includes('sonnet') ? config.GEMINI_DEEP_MODEL : this.geminiModel, onProgress);
       }
       throw err;
     }
@@ -1390,8 +1427,8 @@ ${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${it
     const options = getEffectiveFieldOptions(field);
     const isChoice = Boolean(options?.length && CHOICE_FIELD_TYPES.has(field.type));
     const systemMessage = `${isChoice
-      ? 'You are a factual job application assistant. Return JSON only with answer, confidence, and supportQuote. The answer must exactly match one provided option.'
-      : 'You are a factual job application assistant. Return JSON only as {"answer":"...","confidence":0.0,"supportQuote":"exact quote from candidate evidence"}. Use candidate evidence only; if unsupported, return NONE with low confidence and an empty supportQuote.'}\nFor factual answers, supportQuote must be copied verbatim from this question’s candidate evidence. It establishes provenance but does not by itself prove entailment.\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
+      ? 'You are a factual job application assistant answering for the human candidate. Never identify as an AI, bot, or automated program. Return JSON only with answer, confidence, and supportQuote. The answer must exactly match one provided option.'
+      : 'You are a factual job application assistant answering for the human candidate. Never identify as an AI, bot, or automated program. Return JSON only as {"answer":"...","confidence":0.0,"supportQuote":"exact quote from candidate evidence"}. Use candidate evidence only; if unsupported, return NONE with low confidence and an empty supportQuote.'}\nFor factual answers, supportQuote must be copied verbatim from this question’s candidate evidence. It establishes provenance but does not by itself prove entailment.\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
     const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts) + (reviewDraft
       ? `\n\nRequired answer draft for review:\n${reviewDraft}\nReview the draft against the evidence and question. Correct unsupported or inaccurate claims. Return an empty answer if it cannot be made truthful.`
       : '');
@@ -1593,10 +1630,10 @@ ${chunk.map((item, idx) => `=== Task ${idx + 1} [ID: ${item.customId}] ===\n${it
     const prompt = this.constructPrompt(field, profile, resumeText, jobContext, resumeFacts);
     const incompleteChoice = field.type === 'select' && field.optionsComplete === false;
     const baseSystemMessage = incompleteChoice
-      ? 'You are an automated job application assistant. Return only one concise, exact choice label supported by candidate data. The scanned choice list is incomplete; do not invent a value. If candidate data does not support an answer, return NONE.'
+      ? 'You are an assistant answering job application questions on behalf of the human candidate. Never identify as an AI, bot, or automated system. Return only one concise, exact choice label supported by candidate data. The scanned choice list is incomplete; do not invent a value. If candidate data does not support an answer, return NONE.'
       : isChoiceField
-      ? 'You are an automated job application assistant. You MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.'
-      : 'You are an automated job application assistant. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
+      ? 'You are an assistant answering job application questions on behalf of the human candidate. Never identify as an AI, bot, or automated system. You MUST return exactly one of the provided options. Choose the closest true answer based on candidate data. If none fit, return NONE.'
+      : 'You are an assistant answering job application questions on behalf of the human candidate. Never identify as an AI, bot, or automated system. Be concise and factual. Base your answer only on the candidate profile data provided. Do not invent or assume information not present in the profile. Reply as JSON only: {"answer":"<text>","confidence":<0.0-1.0>}. NEVER return markdown or explanatory text.';
     const systemMessage = `${baseSystemMessage}\nFor factual answers, include supportQuote as an exact, concise quote copied from the question's candidate evidence. If the evidence does not support the answer, set answer to NONE and supportQuote to an empty string. A quote identifies its source but does not by itself prove the answer follows from it. Return JSON with answer, confidence, and supportQuote.\n\n${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
 
     const canUseGemini = Boolean(this.geminiApiKey);
@@ -2251,7 +2288,7 @@ has no matching option (return null instead).
 `;
   }
 
-  const prompt = `${candidateHeaderBlock}Resolve every numbered job application question using only the candidate evidence and job description.
+  const prompt = `${candidateHeaderBlock}Resolve every numbered job application question as the human applicant using only the candidate evidence and job description. Never identify as an AI, bot, or automated program.
 Return ONLY a JSON object with an "answers" array in the same order as the questions. Each item must be {"answer":"...","confidence":0.0,"supportQuote":"exact quote from this question's candidate evidence"}. Use an empty supportQuote if evidence does not support the answer. A quote identifies provenance but does not by itself prove entailment. Do not include markdown or explanations.
 
 For any question with a complete Options list provided, your answer MUST be one of the exact option strings listed. Do not rephrase or abbreviate. If a choice list is marked incomplete, do not treat the captured options as exhaustive; return a concise exact choice supported by candidate data or NONE.
@@ -2335,8 +2372,9 @@ Corporate default hint for this question: ${corporateDefaultHint}
       ? `Instructions:
 1. You MUST respond with exactly one of these options, no other text.
 2. Base the choice only on the candidate profile data provided. Do not invent or assume information not present in the profile.
-3. For Export Administration Regulations (EAR) / U.S. person questions: non-immigrant visa holders (F-1, H-1B, OPT) and candidates requiring sponsorship are NOT U.S. persons. Select "I am not a U.S. person...".
-4. Respond as JSON only: {"answer":"<selected exact option>","confidence":<0.0-1.0>}.`
+3. For anti-bot screening questions ("Which describes you?"): select "I am a human." or the human applicant option. Never select an AI, bot, or automated program option.
+4. For Export Administration Regulations (EAR) / U.S. person questions: non-immigrant visa holders (F-1, H-1B, OPT) and candidates requiring sponsorship are NOT U.S. persons. Select "I am not a U.S. person...".
+5. Respond as JSON only: {"answer":"<selected exact option>","confidence":<0.0-1.0>}.`
       : classifyTier5Question(field) === 'creative'
       ? `Creative response instructions:
 1. Write a natural, professional first-person response. Follow any explicit length instruction; otherwise be concise.
