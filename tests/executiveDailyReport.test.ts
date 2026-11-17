@@ -4,6 +4,8 @@ import {
   resolveExecutiveDailyReportRecipients,
   aggregateIngestRunMetrics,
   generateExecutiveSummary,
+  buildExecutiveDailyReportHtml,
+  sendExecutiveDailyDigest,
 } from '../src/services/executiveDailyReport.js';
 
 describe('executiveDailyReport - recipients resolution', () => {
@@ -130,5 +132,86 @@ describe('executiveDailyReport - summary generator', () => {
     assert.ok(summary.includes('83.3% success rate'));
     assert.ok(summary.includes('Greenhouse'));
     assert.ok(summary.includes('Anti-bot / CAPTCHA challenge encountered'));
+  });
+});
+
+describe('executiveDailyReport - HTML template builder', () => {
+  it('builds comprehensive HTML email with summary callout, KPI cards, ATS table, and failure reasons', () => {
+    const mockData = aggregateIngestRunMetrics(
+      [
+        { id: '1', status: 'APPLIED', job_url: 'https://boards.greenhouse.io/job/1' },
+        { id: '2', status: 'FAILED', job_url: 'https://boards.greenhouse.io/job/2', error_message: 'anti-bot challenge' },
+        { id: '3', status: 'QUEUED', job_url: 'https://jobs.ashbyhq.com/job/3' },
+      ],
+      '2026-11-17'
+    );
+
+    const html = buildExecutiveDailyReportHtml(mockData);
+
+    assert.ok(html.includes('Daily Executive Operations Digest — 9:00 AM IST'));
+    assert.ok(html.includes('2026-11-17'));
+    // Executive summary callout box
+    assert.ok(html.includes('Executive Summary'));
+    // KPI metrics
+    assert.ok(html.includes('Total Ingested'));
+    assert.ok(html.includes('Applied'));
+    assert.ok(html.includes('Failed'));
+    assert.ok(html.includes('Queued'));
+    // ATS Breakdown
+    assert.ok(html.includes('Greenhouse'));
+    assert.ok(html.includes('Ashby'));
+    // Failure reasons table
+    assert.ok(html.includes('Top Failure Reasons'));
+    assert.ok(html.includes('challenge'));
+  });
+});
+
+describe('executiveDailyReport - dispatch service', () => {
+  it('dispatches report email to Ramakrishna with CC to Anusha, Yaswanth, Vivek using injected sendEmailFn', async () => {
+    delete process.env.SANDBOX;
+    delete process.env.CA_NOTIFICATION_EMAIL_OVERRIDE;
+
+    const sentEmails: any[] = [];
+    const mockSendEmail = async (payload: any) => {
+      sentEmails.push(payload);
+      return { success: true };
+    };
+
+    const mockSupabase = {
+      from: () => ({
+        select: () => ({
+          gte: () => ({
+            lte: () => ({
+              range: async () => ({
+                data: [
+                  { id: '1', status: 'APPLIED', job_url: 'https://boards.greenhouse.io/job/1' },
+                  { id: '2', status: 'FAILED', job_url: 'https://jobs.ashbyhq.com/job/2', error_message: 'OTP timeout' },
+                ],
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    const result = await sendExecutiveDailyDigest({
+      targetDate: '2026-11-17',
+      sendEmailFn: mockSendEmail,
+      supabaseClient: mockSupabase,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(sentEmails.length, 1);
+    const sent = sentEmails[0];
+    assert.deepEqual(sent.to, ['ramakrishna@applywizz.ai']);
+    assert.deepEqual(sent.cc, [
+      'anushabandreddy@applywizz.ai',
+      'yaswanthnaiduyalla@applywizz.ai',
+      'vivek@applywizz.ai',
+    ]);
+    assert.ok(sent.subject.includes('ApplyWizz Executive Daily Report'));
+    assert.ok(sent.subject.includes('2026-11-17'));
+    assert.ok(sent.html.includes('Daily Executive Operations Digest'));
   });
 });
