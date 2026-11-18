@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isAshbyUrl, isGreenhouseUrl, extractAshbyJobIds } from '../src/scanner/atsDetector.js';
+import {
+  isAshbyUrl,
+  isGreenhouseUrl,
+  isLeverUrl,
+  toLeverApplicationUrl,
+  extractLeverJobIds,
+  extractAshbyJobIds,
+} from '../src/scanner/atsDetector.js';
 
 test('detects jobs.ashbyhq.com as Ashby', () => {
   assert.equal(isAshbyUrl('https://jobs.ashbyhq.com/constructor/630a1c38-e1be-48f9-a565-fcfdd3db6f24'), true);
@@ -15,6 +22,7 @@ test('detects Greenhouse URL', () => {
   assert.equal(isGreenhouseUrl('https://job-boards.greenhouse.io/pmg/jobs/8765658002'), true);
   assert.equal(isGreenhouseUrl('https://boards.greenhouse.io/embed/job_app?token=123'), true);
   assert.equal(isGreenhouseUrl('https://grnh.se/abcd123'), true);
+  assert.equal(isGreenhouseUrl('https://www.crossriver.com/greenhouse?gh_jid=7666383003'), true);
   assert.equal(isAshbyUrl('https://job-boards.greenhouse.io/pmg/jobs/8765658002'), false);
 });
 
@@ -34,3 +42,35 @@ test('extracts UUID from /application path variant', () => {
   assert.equal(ids?.jobPostingId, '78975a32-c00f-4b1b-bc4e-2462857d0a5a');
   assert.equal(ids?.orgSlug, 'chainalysis-careers');
 });
+
+test('detects jobs.lever.co as Lever', () => {
+  assert.equal(isLeverUrl('https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654'), true);
+  assert.equal(isLeverUrl('https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654/apply'), true);
+  assert.equal(isLeverUrl('https://api.lever.co/v0/postings/floqast'), true);
+  assert.equal(isLeverUrl('https://job-boards.greenhouse.io/pmg/jobs/8765658002'), false);
+  assert.equal(isLeverUrl('https://jobs.ashbyhq.com/constructor/630a1c38-e1be-48f9-a565-fcfdd3db6f24'), false);
+});
+
+test('canonicalizes Lever job URL to /apply route', () => {
+  assert.equal(
+    toLeverApplicationUrl('https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654'),
+    'https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654/apply'
+  );
+  assert.equal(
+    toLeverApplicationUrl('https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654/apply'),
+    'https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654/apply'
+  );
+  assert.equal(
+    toLeverApplicationUrl('https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654?lever-source=linkedin'),
+    'https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654/apply?lever-source=linkedin'
+  );
+});
+
+test('extracts company and jobId from Lever URLs', () => {
+  const ids = extractLeverJobIds('https://jobs.lever.co/floqast/63fb5622-9e07-4fde-b73b-dca1081ef654');
+  assert.deepEqual(ids, { company: 'floqast', jobId: '63fb5622-9e07-4fde-b73b-dca1081ef654' });
+
+  const apiIds = extractLeverJobIds('https://api.lever.co/v0/postings/zoox/8befaec7-bb9f-4cf3-a48c-46b5e3886bf3');
+  assert.deepEqual(apiIds, { company: 'zoox', jobId: '8befaec7-bb9f-4cf3-a48c-46b5e3886bf3' });
+});
+

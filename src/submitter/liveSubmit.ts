@@ -68,6 +68,7 @@ import {
   type ApplicationStatus,
   type AshbySubmissionTelemetry,
   type EmailProofJson,
+  type VerificationFailureDetails,
 } from '../db/applications.js';
 import { getProfile, updateResumeStoragePath } from '../db/profiles.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
@@ -190,6 +191,7 @@ export interface LiveSubmitResult {
   summary?: FormFillSummary;
   submitClickedAt?: string | null;
   submitClicked?: boolean;
+  verificationFailure?: VerificationFailureDetails;
   telemetry?: AshbySubmissionTelemetry;
 }
 
@@ -1518,7 +1520,7 @@ export async function runLiveSubmit(
       };
     }
 
-    context = await browser.newContext({
+    context = await browserManager.createSterileContext(browser, {
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 900 },

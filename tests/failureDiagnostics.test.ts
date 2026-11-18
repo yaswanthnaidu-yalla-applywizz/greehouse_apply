@@ -4,6 +4,31 @@ import { buildFailureDiagnostic } from '../src/utils/failureDiagnostics.js';
 import type { Page } from 'playwright';
 
 describe('captureFailureDiagnostics', () => {
+  it('maps ATS throttle diagnostics to scanning and keeps the safe server wait', () => {
+    const diagnostic = buildFailureDiagnostic({
+      category: 'SCAN_HTTP_THROTTLED',
+      stage: 'navigation',
+      reason: 'ATS asked the scanner to wait.',
+      metadata: { httpStatus: 429, retryAfterMs: 1500, token: 'secret-token' },
+      isTerminal: false,
+      isRetryable: true,
+    });
+    expect(diagnostic.phase).toBe('SCAN');
+    expect(diagnostic.metadata).toEqual({ httpStatus: 429, retryAfterMs: 1500 });
+  });
+
+  it('maps interactive challenge diagnostics to terminal submission failures', () => {
+    const diagnostic = buildFailureDiagnostic({
+      category: 'SUBMIT_INTERACTIVE_CHALLENGE',
+      reason: 'Interactive verification stopped submission.',
+      isTerminal: true,
+      isRetryable: false,
+    });
+    expect(diagnostic.phase).toBe('SUBMIT');
+    expect(diagnostic.is_terminal).toBe(true);
+    expect(diagnostic.is_retryable).toBe(false);
+  });
+
   it('does not redact short numeric choice identifiers as phone numbers', () => {
     const diagnostic = buildFailureDiagnostic({
       category: 'FORM_VALIDATION',

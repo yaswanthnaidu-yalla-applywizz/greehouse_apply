@@ -105,7 +105,7 @@ export interface ScannedJobTemplate {
   scannedAt: string;
   /** Flag indicating if the job posting has closed or returns a 404 */
   isExpired: boolean;
-  ats?: 'greenhouse' | 'ashby';
+  ats?: 'greenhouse' | 'ashby' | 'lever';
   jobPostingLocation?: string;
   jobPostingFacts?: JobPostingFacts;
 }
@@ -429,7 +429,7 @@ export interface CandidateJobApplication {
   /** Assigned Career Associate email */
   assignedCaEmail?: string | null;
   taskId?: string | null;
-  ats?: 'greenhouse' | 'ashby';
+  ats?: 'greenhouse' | 'ashby' | 'lever';
 }
 
 // ============================================================================

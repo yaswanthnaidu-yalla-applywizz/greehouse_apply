@@ -74,9 +74,7 @@ describe('Ashby Instant Interactive Challenge Quarantine (3s Grace Window)', () 
       <head><title>Ashby Job Application</title></head>
       <body>
         <div id="challenge-stage" class="challenge-popup" style="display: block; width: 300px; height: 100px;">
-          <iframe title="Widget containing a Cloudflare security challenge" style="display: block; width: 300px; height: 65px;">
-            Verify you are human
-          </iframe>
+        <iframe title="Widget containing a Cloudflare security challenge" srcdoc="<body>Verify you are human</body>" style="display: block; width: 300px; height: 65px;"></iframe>
         </div>
       </body>
       </html>
@@ -99,9 +97,7 @@ describe('Ashby Instant Interactive Challenge Quarantine (3s Grace Window)', () 
           <button type="submit" class="ashby-application-form-submit-button">Submit Application</button>
         </form>
         <div id="challenge-stage" class="challenge-popup" style="display: block; width: 300px; height: 100px;">
-          <iframe title="Widget containing a Cloudflare security challenge">
-            Verify you are human
-          </iframe>
+        <iframe title="Widget containing a Cloudflare security challenge" srcdoc="<body>Verify you are human</body>"></iframe>
         </div>
       </body>
       </html>
@@ -168,7 +164,7 @@ describe('Ashby Instant Interactive Challenge Quarantine (3s Grace Window)', () 
       <html>
       <head><title>Ashby Job Application</title></head>
       <body>
-        <iframe src="https://www.google.com/recaptcha/api2/bframe" title="recaptcha challenge" style="display: block; width: 300px; height: 400px;"></iframe>
+        <iframe src="https://www.google.com/recaptcha/api2/bframe" srcdoc="<body>Select all images with a bus</body>" title="reCAPTCHA" style="display: block; width: 300px; height: 400px;"></iframe>
       </body>
       </html>
     `;
@@ -178,5 +174,11 @@ describe('Ashby Instant Interactive Challenge Quarantine (3s Grace Window)', () 
     assert.equal(result.detected, true, 'reCAPTCHA challenge modal must be detected');
     assert.equal(result.challengeType, 'recaptcha');
     assert.ok(result.details?.includes('recaptcha'));
+  });
+
+  it('keeps a visible non-interactive provider frame passive', async () => {
+    await page.setContent('<iframe src="https://challenges.cloudflare.com/turnstile" title="Cloudflare Turnstile" style="display:block;width:300px;height:65px"></iframe>');
+    const result = await detectInteractiveChallenge(page);
+    assert.equal(result.detected, false);
   });
 });

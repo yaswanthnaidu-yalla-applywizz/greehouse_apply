@@ -74,6 +74,7 @@ npm run typecheck:dashboard  # dashboard/**/*.tsx only (dashboard/tsconfig.json)
 npm run demo:fixture-31428   # Sync demo fixture data for AWL-31428
 npm run ingest:storage       # Ingest CSV from Supabase Storage
 npm run scan:zoho-connected  # Scan Zoho-connected profiles
+npm run stats:companies      # Count unique companies automated in production DB2
 npm run delete:old-jobs      # Delete old jobs and applications
 ```
 
@@ -153,6 +154,7 @@ DATAIMPULSE_LOGIN=
 DATAIMPULSE_PASSWORD=
 DATAIMPULSE_HOST=gw.dataimpulse.com
 DATAIMPULSE_PORT=823
+APIFY_STRING=                      # Optional Apify proxy: http://username:password@hostname:port
 
 # Zoho Mail Connector (OTP & Confirmation Proofs)
 ZOHO_CONNECTOR_URL=https://zoho-mail-reader.onrender.com/

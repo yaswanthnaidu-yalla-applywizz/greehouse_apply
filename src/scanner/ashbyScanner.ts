@@ -13,6 +13,13 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import type { FailureDiagnosticInput } from '../types/failureDiagnostics.js';
+import { observeAtsVerification } from '../submitter/atsVerification.js';
+import {
+  AtsScanFailure,
+  classifyAtsNavigationStatus,
+  navigationFailure,
+  extractAtsHostKey,
+} from './atsScanFailure.js';
 
 const log = createLogger('Ashby Scanner');
 
@@ -30,6 +37,38 @@ async function navigateAshby(page: Page, url: string, timeoutMs: number) {
   } catch (error) {
     throw new AshbyNavigationError(error);
   }
+}
+
+async function validateAshbyResponse(page: Page, response: Awaited<ReturnType<typeof navigateAshby>>): Promise<boolean> {
+  const status = response.status();
+  const classification = classifyAtsNavigationStatus(status);
+  if (classification === 'expired') return true;
+  if (classification !== 'ok' && classification !== 'blocked') {
+    throw navigationFailure(status, await response.headerValue('retry-after').catch(() => null));
+  }
+
+  const verification = await observeAtsVerification(page, 'ashby');
+  if (verification.kind === 'interactive') {
+    throw new AtsScanFailure('challenge', `Ashby verification challenge detected (${verification.provider}/${verification.evidence})`);
+  }
+  if (verification.kind === 'widget_error') {
+    throw new AtsScanFailure('blocked', `Ashby verification widget error detected (${verification.provider})`);
+  }
+  if (classification === 'blocked') {
+    throw navigationFailure(status, await response.headerValue('retry-after').catch(() => null));
+  }
+  return false;
+}
+
+function expiredAshbyTemplate(url: string): ScannedJobTemplate {
+  return {
+    jobUrl: url,
+    companyName: '',
+    jobTitle: '',
+    fields: [],
+    scannedAt: new Date().toISOString(),
+    isExpired: true,
+  };
 }
 
 function sleepRandomJitter(minMs: number, maxMs: number): Promise<void> {
@@ -68,24 +107,10 @@ export async function extractAshbyFieldsFromPage(
 ): Promise<ScannedJobTemplate> {
   const applicationUrl = toAshbyApplicationUrl(url) || url;
   const timeoutMs = options?.timeoutMs ?? 45000;
-  const throwOnZeroFields = options?.throwOnZeroFields ?? false;
 
   if (!options?.skipNavigation) {
     const response = await navigateAshby(page, applicationUrl, timeoutMs);
-    const httpStatus = response.status();
-    if (httpStatus >= 400) {
-      if (throwOnZeroFields) {
-        throw new Error(`Scan failed: Ashby page returned HTTP ${httpStatus} for ${url}`);
-      }
-      return {
-        jobUrl: url,
-        companyName: '',
-        jobTitle: '',
-        fields: [],
-        scannedAt: new Date().toISOString(),
-        isExpired: true,
-      };
-    }
+    if (await validateAshbyResponse(page, response)) return expiredAshbyTemplate(url);
 
     // Check if current page is on a custom domain with an embedded Ashby iframe (e.g. ?ashby_jid=...)
     const isDirectAshbyHost = new URL(page.url()).hostname.toLowerCase().includes('ashbyhq.com');
@@ -96,7 +121,8 @@ export async function extractAshbyFieldsFromPage(
       const ashbyFrame = page.frames().find((f) => f.url().includes('ashbyhq.com'));
       if (ashbyFrame && ashbyFrame.url() !== page.url()) {
         const targetUrl = toAshbyApplicationUrl(ashbyFrame.url()) || ashbyFrame.url();
-        await navigateAshby(page, targetUrl, timeoutMs);
+        const embeddedResponse = await navigateAshby(page, targetUrl, timeoutMs);
+        if (await validateAshbyResponse(page, embeddedResponse)) return expiredAshbyTemplate(url);
       } else {
         const iframeSrc = await page.evaluate(() => {
           const el = document.querySelector('iframe[src*="ashbyhq.com"]');
@@ -104,16 +130,18 @@ export async function extractAshbyFieldsFromPage(
         }).catch(() => null);
         if (iframeSrc && iframeSrc.startsWith('http')) {
           const targetUrl = toAshbyApplicationUrl(iframeSrc) || iframeSrc;
-          await navigateAshby(page, targetUrl, timeoutMs);
+          const embeddedResponse = await navigateAshby(page, targetUrl, timeoutMs);
+          if (await validateAshbyResponse(page, embeddedResponse)) return expiredAshbyTemplate(url);
         }
       }
     }
   }
 
   let selectorFound = await page.waitForSelector('[data-field-path]', { timeout: 15000 }).catch(() => null);
+  let isExplicitlyClosed = false;
   if (!selectorFound) {
     const pageText = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
-    const isExplicitlyClosed = /404|no longer available|position has been filled|job (?:not found|is closed|has ended)|no longer accepting/i.test(pageText);
+    isExplicitlyClosed = /404|no longer available|position has been filled|job (?:not found|is closed|has ended)|no longer accepting/i.test(pageText);
     if (!isExplicitlyClosed) {
       // Attempt clicking visible "Application" or "Apply" button / tab
       const clickedTab = await page.evaluate(() => {
@@ -269,18 +297,8 @@ export async function extractAshbyFieldsFromPage(
   }));
 
   if (scannedFields.length === 0) {
-    if (throwOnZeroFields) {
-      throw new Error(`Scan failed: Ashby form yielded zero fields for ${url}`);
-    }
-    return {
-      jobUrl: url,
-      companyName: companyName || 'Company',
-      jobTitle,
-      fields: [],
-      scannedAt: new Date().toISOString(),
-      isExpired: true,
-      jobPostingLocation: headerInfo.location || undefined,
-    };
+    if (isExplicitlyClosed) return { ...expiredAshbyTemplate(url), companyName: companyName || 'Company', jobTitle, jobPostingLocation: headerInfo.location || undefined };
+    throw new AtsScanFailure('extraction', `Scan failed: Ashby form yielded zero fields for ${url}`);
   }
 
   const jobPostingLocation = headerInfo.location || undefined;
@@ -350,6 +368,8 @@ export class AshbyScanner {
   private onFailureDiagnostic: (input: FailureDiagnosticInput) => Promise<void>;
   private onFatal: (module: string, message: string, error?: unknown) => never;
 
+  public readonly hostCooldownUntil = new Map<string, number>();
+
   constructor(options: AshbyScannerOptions = {}) {
     this.workerPoolSize = options.workerPoolSize ?? config.WORKER_POOL_SIZE ?? 4;
     this.timeoutMs = options.timeoutMs ?? config.PLAYWRIGHT_TIMEOUT ?? 45000;
@@ -370,16 +390,6 @@ export class AshbyScanner {
     page: Page,
     compactLogs = isPipelineCompactLogging()
   ): Promise<ScannedJobTemplate | null> {
-    const scannedAt = new Date().toISOString();
-    const template: ScannedJobTemplate = {
-      jobUrl: url,
-      companyName: '',
-      jobTitle: '',
-      fields: [],
-      scannedAt,
-      isExpired: false,
-    };
-
     try {
       return await extractAshbyFieldsFromPage(page, url, {
         timeoutMs: this.timeoutMs,
@@ -389,27 +399,46 @@ export class AshbyScanner {
       if (!compactLogs) {
         log.warn(`[Ashby Scanner] ⚠️ Error scanning ${url}: ${error.message}`);
       }
+      const scanFailure = error instanceof AtsScanFailure ? error : null;
       const isTimeout = /time.*out/i.test(error?.message || '');
       const isNav = error instanceof AshbyNavigationError || /net::|navigation|resolve|dns|load/i.test(error?.message || '');
-      const category = isTimeout
+      const category: FailureDiagnosticInput['category'] = scanFailure?.kind === 'throttled'
+        ? 'SCAN_HTTP_THROTTLED'
+        : scanFailure?.kind === 'temporary'
+          ? 'SCAN_TEMPORARY_FAILURE'
+          : scanFailure?.kind === 'challenge'
+            ? 'SCAN_INTERACTIVE_CHALLENGE'
+            : isTimeout
         ? 'SCAN_PLAYWRIGHT_TIMEOUT'
         : isNav
           ? 'SCAN_PLAYWRIGHT_NAVIGATE'
           : 'SCAN_FIELD_EXTRACTION';
+
+      const isRetryable = scanFailure
+        ? scanFailure.kind === 'throttled' || scanFailure.kind === 'temporary' || scanFailure.kind === 'extraction'
+        : true;
 
       await this.onFailureDiagnostic({
         category,
         stage: 'url_scan',
         reason: error?.message || 'Error scanning Ashby job posting URL',
         error,
+        errorCode: scanFailure?.httpStatus,
         jobUrl: url,
-        isTerminal: false,
-        isRetryable: true,
+        metadata: scanFailure?.httpStatus === null || !scanFailure
+          ? undefined
+          : { httpStatus: scanFailure.httpStatus, ...(scanFailure.retryAfterMs === null ? {} : { retryAfterMs: scanFailure.retryAfterMs }) },
+        isTerminal: !isRetryable,
+        isRetryable,
       }).catch(() => {});
 
-      if (error instanceof AshbyNavigationError) return null;
-      template.isExpired = true;
-      return template;
+      if (scanFailure?.kind === 'throttled') {
+        const retryAfterMs = scanFailure.retryAfterMs ?? 5000;
+        const hostKey = extractAtsHostKey(url, 'ashby');
+        this.hostCooldownUntil.set(hostKey, Date.now() + retryAfterMs);
+      }
+
+      return null;
     }
   }
 
@@ -471,6 +500,7 @@ export class AshbyScanner {
 
       const workerTasks: Promise<void>[] = [];
       const poolSize = Math.min(this.workerPoolSize, total);
+      const deferredUrls: Array<{ url: string; index: number }> = [];
 
       for (let workerId = 0; workerId < poolSize; workerId++) {
         const task = (async () => {
@@ -490,17 +520,30 @@ export class AshbyScanner {
 
               const targetUrl = urls[jobIndex];
               throwIfPipelineAborted('Ashby scan');
+
+              const hostKey = extractAtsHostKey(targetUrl, 'ashby');
+              const cooldownUntil = this.hostCooldownUntil.get(hostKey) ?? 0;
+              if (Date.now() < cooldownUntil) {
+                log.info(`[Ashby Scanner] ⏸️ Host ${hostKey} in cooldown until ${new Date(cooldownUntil).toISOString()}. Deferring ${targetUrl}.`);
+                deferredUrls.push({ url: targetUrl, index: jobIndex });
+                continue;
+              }
+
               const page = await context.newPage();
               try {
                 const template = await this.scanSingleUrl(targetUrl, page, compact);
-                completedCount++;
                 if (template) {
+                  completedCount++;
                   results[jobIndex] = template;
                   if (template.isExpired) expiredJobs++;
                   else activeJobs++;
                   totalFields += template.fields?.length || 0;
                   this.onJobScanned?.(template, completedCount, total);
+                } else if ((this.hostCooldownUntil.get(hostKey) ?? 0) > Date.now()) {
+                  log.warn(`[Ashby Scanner] ⚠️ Throttled on ${hostKey}. Deferring ${targetUrl} for end-of-queue retry.`);
+                  deferredUrls.push({ url: targetUrl, index: jobIndex });
                 } else {
+                  completedCount++;
                   failedJobs++;
                   this.onScanFailed?.(targetUrl, completedCount, total);
                 }
@@ -541,6 +584,57 @@ export class AshbyScanner {
       }
 
       await Promise.all(workerTasks);
+
+      // End-of-queue second pass retry for deferred 429 URLs
+      if (deferredUrls.length > 0) {
+        log.info(`[Ashby Scanner] 🔄 Main queue complete. Starting second-pass retry for ${deferredUrls.length} deferred URL(s)...`);
+        const now = Date.now();
+        let maxWait = 0;
+        for (const item of deferredUrls) {
+          const hostKey = extractAtsHostKey(item.url, 'ashby');
+          const cooldown = this.hostCooldownUntil.get(hostKey) ?? 0;
+          if (cooldown > now) {
+            maxWait = Math.max(maxWait, cooldown - now);
+          }
+        }
+        if (maxWait > 0) {
+          const sleepMs = Math.min(maxWait, 60_000);
+          log.info(`[Ashby Scanner] ⏳ Waiting ${sleepMs}ms for host cooldown(s) to expire before second pass...`);
+          await new Promise((r) => setTimeout(r, sleepMs));
+        }
+
+        if (browser) {
+          const context = await browser.newContext({
+            viewport: { width: 1440, height: 900 },
+            userAgent:
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          });
+          const page = await context.newPage();
+          try {
+            for (const item of deferredUrls) {
+              try {
+                const template = await this.scanSingleUrl(item.url, page, compact);
+                if (template) {
+                  results[item.index] = template;
+                  if (template.isExpired) expiredJobs++;
+                  else activeJobs++;
+                  totalFields += template.fields?.length || 0;
+                  this.onJobScanned?.(template, ++completedCount, total);
+                } else {
+                  failedJobs++;
+                  this.onScanFailed?.(item.url, ++completedCount, total);
+                }
+              } catch {
+                failedJobs++;
+                this.onScanFailed?.(item.url, ++completedCount, total);
+              }
+            }
+          } finally {
+            await page.close().catch(() => {});
+            await context.close().catch(() => {});
+          }
+        }
+      }
     } finally {
       if (browser) {
         await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 5000))]).catch(() => {});

@@ -184,8 +184,8 @@ const envSchema = z.object({
   /** Zoho Mail Reader Login Password */
   ZOHO_CONNECTOR_PASS: z.string().optional(),
 
-  /** Zoho Mail Reader timeout in milliseconds (default: 120000) */
-  ZOHO_CONNECTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
+  /** Zoho Mail Reader timeout in milliseconds (default: 180000) */
+  ZOHO_CONNECTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
 
   /** Zoho Mail Reader polling interval in milliseconds (default: 5000) */
   ZOHO_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
@@ -242,6 +242,9 @@ const envSchema = z.object({
 
   /** DataImpulse Residential Proxy Password */
   DATAIMPULSE_PASSWORD: z.string().optional(),
+
+  /** Apify Residential Proxy URL (http://username:password@hostname:port) */
+  APIFY_STRING: z.string().optional(),
 
   /** DataImpulse Proxy Gateway Host */
   DATAIMPULSE_HOST: z.string().default('gw.dataimpulse.com'),

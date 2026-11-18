@@ -4,9 +4,10 @@ export type SubmissionRetryReason = 'OTP_FETCH_FAIL' | 'UNRESOLVED_REQUIRED_FIEL
 export type AutomaticSubmissionRetryReason = 'BROWSER_LAUNCH_FAILED';
 
 export function getRetryReason(
-  resultOrError: Pick<LiveSubmitResult, 'retryReason' | 'errorMessage'> | Error | string
+  resultOrError: Pick<LiveSubmitResult, 'retryReason' | 'errorMessage' | 'verificationFailure'> | Error | string
 ): SubmissionRetryReason | null {
   if (typeof resultOrError === 'string' || resultOrError instanceof Error) return null;
+  if (resultOrError.verificationFailure?.reasonCode === 'INTERACTIVE_CHALLENGE') return null;
   return resultOrError.retryReason ?? null;
 }
 

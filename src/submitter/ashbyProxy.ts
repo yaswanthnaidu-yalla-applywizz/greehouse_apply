@@ -392,6 +392,8 @@ export interface ProxyPreflightResult {
   exitIpHash?: string;
   error?: string;
   outcome?: 'success' | 'http_status' | 'timeout' | 'invalid_ip' | 'country_mismatch' | 'network_error';
+  latencyMs?: number;
+  errorKind?: 'tcp_reset' | 'http_block' | 'timeout' | 'unknown';
 }
 
 /**
@@ -414,6 +416,8 @@ export async function verifyProxyPreflight(
   const fallbackUrls = ['https://ipwho.is/'];
   const probeUrls = [primaryUrl, ...fallbackUrls.filter((u) => u !== primaryUrl)];
   let outcome: ProxyPreflightResult['outcome'];
+  let lastStatus = 0;
+  const startTime = Date.now();
 
   let timer: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -424,7 +428,6 @@ export async function verifyProxyPreflight(
 
   try {
     const probePromise = (async (): Promise<ProxyPreflightResult> => {
-      let lastStatus = 0;
       for (const url of probeUrls) {
         const response = await page.request.get(url, { timeout: timeoutMs });
         lastStatus = response.status();
@@ -434,7 +437,9 @@ export async function verifyProxyPreflight(
             continue;
           }
           outcome = 'http_status';
-          throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
+          const error: any = new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
+          error.status = lastStatus;
+          throw error;
         }
         const data = await response.json();
         const ip = data?.ip || data?.query;
@@ -466,6 +471,7 @@ export async function verifyProxyPreflight(
           success: true,
           exitIpHash,
           outcome: 'success',
+          latencyMs: Date.now() - startTime,
         };
       }
       throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
@@ -473,11 +479,24 @@ export async function verifyProxyPreflight(
 
     return await Promise.race([probePromise, timeoutPromise]);
   } catch (err: any) {
+    const latencyMs = Date.now() - startTime;
     outcome ??= /timed out/i.test(err?.message || '') ? 'timeout' : 'network_error';
+
+    let errorKind: ProxyPreflightResult['errorKind'] = 'unknown';
+    if (outcome === 'timeout' || /timed out|timeout/i.test(err?.message || '')) {
+      errorKind = 'timeout';
+    } else if (err?.status === 403 || lastStatus === 403 || /403|forbidden|blocked/i.test(err?.message || '')) {
+      errorKind = 'http_block';
+    } else if (/econnrefused|econnreset|socket hang up|connection refused|reset/i.test(err?.message || '')) {
+      errorKind = 'tcp_reset';
+    }
+
     return {
       success: false,
       error: err?.message || 'Preflight probe failed',
       outcome,
+      latencyMs,
+      errorKind,
     };
   } finally {
     if (timer) {

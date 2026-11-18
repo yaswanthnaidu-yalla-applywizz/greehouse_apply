@@ -79,6 +79,61 @@ it('accepts injected submitter and requeue operations for isolated queue tests',
 });
 
 describe('SubmitterPool automatic retry policy', { skip: !hasRetrySeams }, () => {
+  it('keeps Lever terminal details from a duplicate pool write and proceeds to the next application', async () => {
+    const statuses: Array<{ status: string; extra?: any }> = [];
+    const challenge = {
+      reasonCode: 'INTERACTIVE_CHALLENGE' as const,
+      ats: 'lever' as const,
+      provider: 'hcaptcha' as const,
+      stage: 'PRE_SUBMIT',
+      capturedAt: '2026-11-18T00:00:00.000Z',
+      submitClicked: false,
+      submitClickedAt: null,
+    };
+    let greenhouseCalls = 0;
+    const leverApplication: ApplicationRow = { ...application, id: 'lever-challenge', ats: 'lever' };
+    const greenhouseApplication: ApplicationRow = { ...application, id: 'greenhouse-next', ats: 'greenhouse' };
+    const pool = new SubmitterPool({
+      poolSize: 1,
+      updateStatusFn: async (_id, status, extra) => {
+        statuses.push({ status, extra });
+        return true;
+      },
+      submitLeverFn: async (app, options) => {
+        await options.updateStatusFn?.(app.id!, 'FAILED', {
+          error_message: 'Interactive verification stopped submission.',
+          error_details: { verificationFailure: challenge },
+        });
+        return {
+          success: false,
+          status: 'FAILED',
+          applicationId: app.id!,
+          errorMessage: 'Interactive verification stopped submission.',
+          verificationFailure: challenge,
+          retryReason: null,
+        };
+      },
+      submitFn: async (id) => {
+        greenhouseCalls += 1;
+        return { success: true, status: 'APPLIED', applicationId: id };
+      },
+      requeueFn: async () => ({ requeued: true, retryCount: 1 }),
+    });
+
+    const leverResult = pool.enqueue(leverApplication);
+    const runWorker = Reflect.get(pool, 'runWorker');
+    await runWorker.call(pool, 0);
+    assert.equal((await leverResult).retryReason, null);
+    assert.deepEqual(statuses.map(({ status }) => status), ['APPLYING', 'FAILED']);
+    assert.deepEqual(statuses.at(-1)?.extra.error_details, { verificationFailure: challenge });
+
+    const greenhouseResult = pool.enqueue(greenhouseApplication);
+    await runWorker.call(pool, 0);
+    assert.equal((await greenhouseResult).status, 'APPLIED');
+    assert.equal(greenhouseCalls, 1);
+    assert.deepEqual(statuses.map(({ status }) => status), ['APPLYING', 'FAILED', 'APPLYING']);
+  });
+
   it('keeps required-field failures failed without requeueing', async () => {
     const { statuses, requeueCalls } = await processSubmission(
       async () => ({

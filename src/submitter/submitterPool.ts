@@ -17,6 +17,7 @@ import {
 import { wsManager } from '../server/ws.js';
 import { runLiveSubmit, type LiveSubmitOptions, type LiveSubmitResult } from './liveSubmit.js';
 import { submitAshbyApplication } from './ashbySubmit.js';
+import { submitLeverApplication } from './leverSubmit.js';
 import { createLogger } from '../utils/logger.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { config } from '../config/env.js';
@@ -31,6 +32,7 @@ export interface SubmitterPoolOptions {
   updateStatusFn?: (id: string, status: any, extra?: any) => Promise<boolean>;
   submitFn?: (applicationId: string, options: LiveSubmitOptions) => Promise<LiveSubmitResult>;
   submitAshbyFn?: (application: ApplicationRow, options: { headless?: boolean }) => Promise<LiveSubmitResult>;
+  submitLeverFn?: (application: ApplicationRow, options: { headless?: boolean; updateStatusFn?: SubmitterPoolOptions['updateStatusFn'] }) => Promise<LiveSubmitResult>;
   requeueFn?: typeof requeueApplicationForRetry;
   launchFailureCooldownMs?: number;
   poolSize?: number;
@@ -48,6 +50,7 @@ export class SubmitterPool {
   private readonly updateStatusFn: (id: string, status: any, extra?: any) => Promise<boolean>;
   private readonly submitFn: (applicationId: string, options: LiveSubmitOptions) => Promise<LiveSubmitResult>;
   private readonly submitAshbyFn: (application: ApplicationRow, options: { headless?: boolean }) => Promise<LiveSubmitResult>;
+  private readonly submitLeverFn: (application: ApplicationRow, options: { headless?: boolean; updateStatusFn?: SubmitterPoolOptions['updateStatusFn'] }) => Promise<LiveSubmitResult>;
   private readonly requeueFn: typeof requeueApplicationForRetry;
   private readonly poolSize: number;
   private readonly launchFailureCooldownMs: number;
@@ -68,6 +71,7 @@ export class SubmitterPool {
     this.updateStatusFn = options.updateStatusFn ?? updateStatus;
     this.submitFn = options.submitFn ?? runLiveSubmit;
     this.submitAshbyFn = options.submitAshbyFn ?? submitAshbyApplication;
+    this.submitLeverFn = options.submitLeverFn ?? submitLeverApplication;
     this.requeueFn = options.requeueFn ?? requeueApplicationForRetry;
     this.launchFailureCooldownMs = options.launchFailureCooldownMs ?? 30000;
     const poolSize = options.poolSize ?? parseInt(config.SUBMISSION_POOL_SIZE ?? '3', 10);
@@ -370,6 +374,8 @@ export class SubmitterPool {
         const result =
           application.ats === 'ashby'
             ? await this.submitAshbyFn(application, { headless: true })
+            : application.ats === 'lever'
+            ? await this.submitLeverFn(application, { headless: true, updateStatusFn: this.updateStatusFn })
             : await this.submitFn(applicationId, {
                 headless: true,
                 jobUrl: application.job_url,
@@ -410,7 +416,7 @@ export class SubmitterPool {
               application.job_url
             );
             finalStatus = retryOutcome.requeued ? 'QUEUED' : 'FAILED';
-          } else {
+          } else if (application.ats !== 'lever') {
             try {
               await this.updateStatusFn(applicationId, 'FAILED', {
                 error_message: failureMessage,
@@ -463,7 +469,7 @@ export class SubmitterPool {
               log.error(`[Submitter] Worker ${workerNumber} fallback status update failed: ${(fallbackError as Error).message}`);
             }
           }
-        } else {
+        } else if (application.ats !== 'lever') {
           try {
             await this.updateStatusFn(applicationId, 'FAILED', {
               error_message: message,

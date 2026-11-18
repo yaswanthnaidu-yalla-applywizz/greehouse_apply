@@ -126,6 +126,7 @@ scripts/*
 !scripts/scanZohoConnected.ts
 !scripts/deleteOldJobsAndApplications.ts
 !scripts/fetchEmailProofsDb2.ts
+!scripts/countAutomatedCompanies.ts
 !scripts/resetSandboxDb.ts
 !scripts/resolveFirst5Haiku.ts
 !scripts/README.md
@@ -147,3 +148,5 @@ vite.config.mjs
 .ai/end-session-report.md
 .ai/skills/task-observer/scripts/
 
+
+graphify-out/
