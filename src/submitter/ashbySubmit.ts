@@ -32,6 +32,7 @@ import { toAshbyApplicationUrl } from '../scanner/atsDetector.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 import { isAshbySubmissionRetryAllowed } from './submissionRetry.js';
 import { classifyRequiredFieldFailure } from '../utils/failureDiagnostics.js';
+import { remediateUncommittedFields } from './realtimeRemediator.js';
 import {
   captureAndSaveEmailProof,
   startEmailProofPolling,
@@ -537,7 +538,29 @@ export async function submitAshbyApplication(
       .map((f) => f.fieldId || f.name)
       .filter((p): p is string => Boolean(p));
 
-    const domVerification = await verifyRequiredFieldsCommitted(page, requiredFieldPaths);
+    let domVerification = await verifyRequiredFieldsCommitted(page, requiredFieldPaths);
+    if (!domVerification.allCommitted) {
+      log.info(
+        `[AshbySubmit] 🤖 Pre-submit verification found ${domVerification.missingFields.length} uncommitted fields. Triggering real-time remediation...`
+      );
+      const missingLabels = domVerification.missingFields.map((path) => {
+        const matchingField = (application.resolved_fields || []).find((f) => f.fieldId === path || f.name === path);
+        return matchingField?.label || path;
+      });
+
+      try {
+        const remediation = await remediateUncommittedFields(page, missingLabels, application);
+        if (remediation.remediatedCount > 0) {
+          log.info(
+            `[AshbySubmit] ✅ Real-time remediation committed ${remediation.remediatedCount} field(s).`
+          );
+          domVerification = await verifyRequiredFieldsCommitted(page, requiredFieldPaths);
+        }
+      } catch (remErr: any) {
+        log.warn(`[AshbySubmit] Real-time remediation encountered an error: ${remErr.message}`);
+      }
+    }
+
     if (!domVerification.allCommitted) {
       log.warn(
         `[AshbySubmit] ⛔ Pre-submit validation failed for ${applicationId}. Missing required DOM fields: ${domVerification.missingFields.join(', ')}`
