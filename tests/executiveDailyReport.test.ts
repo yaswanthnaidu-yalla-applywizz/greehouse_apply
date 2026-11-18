@@ -6,6 +6,7 @@ import {
   generateExecutiveSummary,
   buildExecutiveDailyReportHtml,
   sendExecutiveDailyDigest,
+  sendScheduledExecutiveDailyDigest,
   calculateMsUntilNext9AmIst,
   startExecutiveDailyReportScheduler,
 } from '../src/services/executiveDailyReport.js';
@@ -219,6 +220,31 @@ describe('executiveDailyReport - dispatch service', () => {
 });
 
 describe('executiveDailyReport - 9:00 AM IST scheduler timing', () => {
+  it('allows only one scheduled send across concurrent instances for each IST day', async () => {
+    const claims = new Set<string>();
+    const client = { from: () => ({ insert: async ({ report_date }: { report_date: string }) => {
+      if (claims.has(report_date)) return { error: { code: '23505' } };
+      claims.add(report_date);
+      return { error: null };
+    } }) };
+    let sends = 0;
+    const send = async () => { sends++; return { success: true }; };
+    const scheduled = new Date('2026-11-17T03:30:00Z');
+    await Promise.all(Array.from({ length: 6 }, () => sendScheduledExecutiveDailyDigest(scheduled, client, send)));
+    assert.equal(sends, 1);
+    await sendScheduledExecutiveDailyDigest(new Date('2026-11-18T03:30:00Z'), client, send);
+    assert.equal(sends, 2);
+  });
+
+  it('does not send when the shared claim cannot be recorded', async () => {
+    const client = { from: () => ({ insert: async () => ({ error: { code: 'other', message: 'unavailable' } }) }) };
+    let sends = 0;
+    await assert.rejects(sendScheduledExecutiveDailyDigest(new Date(), client, async () => {
+      sends++;
+      return { success: true };
+    }), /Could not claim/);
+    assert.equal(sends, 0);
+  });
   it('calculates milliseconds until 9:00 AM IST (03:30 UTC) today if currently earlier', () => {
     // 02:30 UTC = 8:00 AM IST
     const earlierToday = new Date('2026-11-17T02:30:00.000Z').getTime();
