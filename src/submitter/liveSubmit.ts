@@ -82,6 +82,7 @@ import { classifyRequiredFieldFailure, emitFailureDiagnostic } from '../utils/fa
 import { captureFailureDiagnostics } from './domFailureCapture.js';
 import { browserManager, type ManagedBrowser } from './browserManager.js';
 import { validateGreenhouseSubmission } from './greenhouseValidation.js';
+import { remediateUncommittedFields } from './realtimeRemediator.js';
 
 const log = createLogger('Live Submit');
 const RESUMES_BUCKET = 'resumes';
@@ -1605,7 +1606,48 @@ export async function runLiveSubmit(
       fillSummary = fillResult.fillSummary;
       application = fillResult.freshApplication;
 
-      const submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
+      let submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
+
+      // Real-time agentic remediation fallback: resolve and commit uncommitted required fields
+      if (!submissionGate.ok || fillResult.unfilledRequiredLabels.length > 0) {
+        const uncommittedLabels = Array.from(
+          new Set([
+            ...fillResult.unfilledRequiredLabels,
+            ...(submissionGate.ok ? [] : submissionGate.failure.fields.map((field) => field.label)),
+          ])
+        ).filter(Boolean);
+
+        if (uncommittedLabels.length > 0) {
+          log.info(
+            `[Live Submit] 🤖 Triggering real-time agentic remediation for ${uncommittedLabels.length} uncommitted fields...`
+          );
+          try {
+            const remediation = await remediateUncommittedFields(page, uncommittedLabels, application);
+            if (remediation.remediatedCount > 0) {
+              log.info(
+                `[Live Submit] ✅ Real-time remediation committed ${remediation.remediatedCount} field(s).`
+              );
+              for (const rf of remediation.remediatedFields) {
+                const matchRes = fillSummary.results.find(
+                  (r: any) => r.label === rf.label || r.fieldId === rf.fieldId
+                );
+                if (matchRes) {
+                  matchRes.success = true;
+                  matchRes.domCommitted = true;
+                  matchRes.valuePopulated = rf.value;
+                }
+              }
+              fillResult.unfilledRequiredLabels = fillResult.unfilledRequiredLabels.filter(
+                (label) => !remediation.remediatedFields.some((rf) => rf.label === label)
+              );
+              submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
+            }
+          } catch (remErr: any) {
+            log.warn(`[Live Submit] Real-time remediation encountered an error: ${remErr.message}`);
+          }
+        }
+      }
+
       if (!submissionGate.ok) {
         const failureCategory = classifyRequiredFieldFailure(
           application.resolved_fields || [],
