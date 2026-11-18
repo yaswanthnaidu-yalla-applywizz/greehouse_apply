@@ -7,11 +7,15 @@
  * validated RemediationDecision for Playwright DOM commitment.
  */
 
+import type { Page } from 'playwright';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { createLogger } from '../utils/logger.js';
-import type { ProfileRow } from '../db/profiles.js';
+import { getProfile, type ProfileRow } from '../db/profiles.js';
+import { getOrParseResume, type ResumeParsedRow } from '../resolver/tier2ResumeParse.js';
+import { appendResolvedFields, type ApplicationRow } from '../db/applications.js';
 import type { ResolvedField } from '../types/index.js';
 import { callGemini } from '../resolver/geminiProvider.js';
+import { scrapeLiveFieldFromDom, commitRemediatedValue } from './realtimeDomAction.js';
 
 const log = createLogger('Realtime Remediator');
 
@@ -52,6 +56,22 @@ export interface LlmCallPayload {
 export interface RemediationOptions {
   llmCallFn?: (prompt: string, systemPrompt: string) => Promise<LlmCallPayload>;
   minConfidence?: number;
+}
+
+export interface RemediationRunResult {
+  attemptedCount: number;
+  remediatedCount: number;
+  remediatedFields: ResolvedField[];
+  allResolved: boolean;
+  errors: string[];
+}
+
+export interface RemediationOrchestratorOptions extends RemediationOptions {
+  timeoutMs?: number;
+  maxFields?: number;
+  getProfileFn?: (applywizzId: string) => Promise<ProfileRow | null>;
+  getResumeFn?: (applywizzId: string) => Promise<ResumeParsedRow | null>;
+  persistToDb?: boolean;
 }
 
 /**
@@ -231,4 +251,154 @@ Select or synthesize the truthful answer for this candidate.`;
     log.error(`[Realtime Remediator] Resolution failed for "${field.label}": ${error.message}`);
     return null;
   }
+}
+
+/**
+ * Orchestrates real-time remediation across multiple uncommitted fields on a live Playwright page.
+ */
+export async function remediateUncommittedFields(
+  page: Page,
+  unfilledLabels: string[],
+  application: ApplicationRow,
+  options: RemediationOrchestratorOptions = {}
+): Promise<RemediationRunResult> {
+  const timeoutMs = options.timeoutMs ?? 20000;
+  const deadline = Date.now() + timeoutMs;
+  const maxFields = options.maxFields ?? 3;
+
+  const result: RemediationRunResult = {
+    attemptedCount: 0,
+    remediatedCount: 0,
+    remediatedFields: [],
+    allResolved: false,
+    errors: [],
+  };
+
+  const labelsToProcess = unfilledLabels.slice(0, maxFields);
+  if (labelsToProcess.length === 0) {
+    result.allResolved = true;
+    return result;
+  }
+
+  log.info(
+    `[Realtime Remediator] Starting remediation for ${labelsToProcess.length} field(s) on ${application.job_url || 'application'}`
+  );
+
+  // 1. Fetch candidate context
+  const getProfileFn = options.getProfileFn ?? getProfile;
+  const getResumeFn = options.getResumeFn ?? getOrParseResume;
+
+  let profile: ProfileRow | null = null;
+  let resumeFacts: Record<string, any> | undefined = undefined;
+
+  try {
+    if (Date.now() > deadline) {
+      result.errors.push('Remediation aborted: timeout before profile fetch.');
+      return result;
+    }
+    profile = await getProfileFn(application.applywizz_id);
+    if (!profile) {
+      result.errors.push(`Candidate profile not found for "${application.applywizz_id}".`);
+      return result;
+    }
+
+    const resumeRow = await getResumeFn(application.applywizz_id).catch(() => null);
+    resumeFacts = resumeRow?.structured && typeof resumeRow.structured === 'object' ? resumeRow.structured : undefined;
+  } catch (ctxErr: any) {
+    result.errors.push(`Error loading candidate context: ${ctxErr.message}`);
+    return result;
+  }
+
+  const alreadyResolved: ResolvedField[] = Array.isArray(application.resolved_fields)
+    ? (application.resolved_fields as ResolvedField[])
+    : [];
+
+  const context: RemediationCandidateContext = {
+    profile,
+    resumeFacts,
+    alreadyResolvedFields: [...alreadyResolved],
+    jobTitle: application.job_url ? 'Applicant' : '',
+    companyName: '',
+  };
+
+  // 2. Iterate each uncommitted field
+  for (const label of labelsToProcess) {
+    if (Date.now() > deadline) {
+      result.errors.push(`Remediation aborted: timeout exceeded (${timeoutMs}ms limit).`);
+      break;
+    }
+
+    result.attemptedCount++;
+    log.info(`[Realtime Remediator] [${result.attemptedCount}/${labelsToProcess.length}] Remediating "${label}"...`);
+
+    try {
+      // Step A: Scrape live DOM
+      const scraped = await scrapeLiveFieldFromDom(page, label);
+      if (!scraped) {
+        result.errors.push(`Field "${label}" could not be located in live DOM.`);
+        continue;
+      }
+
+      // Step B: Resolve answer
+      const remediationField: RemediationField = {
+        fieldId: scraped.locatorSelector.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 64) || 'remediated_field',
+        label: scraped.label,
+        type: scraped.type,
+        options: scraped.options,
+      };
+
+      const decision = await resolveRemediationAnswer(remediationField, context, options);
+      if (!decision) {
+        result.errors.push(`Could not resolve truthful answer for "${label}".`);
+        continue;
+      }
+
+      // Step C: Commit value into DOM
+      const commitRes = await commitRemediatedValue(page, scraped, decision);
+      if (!commitRes.success) {
+        result.errors.push(`Failed to commit "${decision.value}" to DOM for "${label}": ${commitRes.error || 'unknown error'}`);
+        continue;
+      }
+
+      // Step D: Construct ResolvedField
+      const resolvedField: ResolvedField = {
+        fieldId: decision.fieldId,
+        name: decision.fieldId,
+        type: scraped.type,
+        label: scraped.label,
+        value: commitRes.committedValue || decision.value,
+        options: scraped.options,
+        source: 'ai' as any,
+        resolvedByTier: 5,
+        confidence: decision.confidence,
+      };
+
+      result.remediatedFields.push(resolvedField);
+      result.remediatedCount++;
+      context.alreadyResolvedFields.push(resolvedField);
+      log.info(`[Realtime Remediator] ✅ Successfully committed and verified "${label}" -> "${resolvedField.value}"`);
+    } catch (fieldErr: any) {
+      result.errors.push(`Error during remediation of "${label}": ${fieldErr.message}`);
+    }
+  }
+
+  // 3. Persist remediated fields to DB and application object
+  if (result.remediatedFields.length > 0 && options.persistToDb !== false) {
+    try {
+      const appId = application.id || application.applywizz_id;
+      if (appId) {
+        await appendResolvedFields(appId, result.remediatedFields, {
+          job_url: application.job_url,
+          applywizz_id: application.applywizz_id,
+          existingFields: application.resolved_fields,
+        });
+        application.resolved_fields = [...alreadyResolved, ...result.remediatedFields];
+      }
+    } catch (dbErr: any) {
+      log.warn(`[Realtime Remediator] Failed to persist remediated fields to DB: ${dbErr.message}`);
+    }
+  }
+
+  result.allResolved = result.remediatedCount === labelsToProcess.length && result.errors.length === 0;
+  return result;
 }

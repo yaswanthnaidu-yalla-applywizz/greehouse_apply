@@ -482,6 +482,36 @@ export async function updateResolvedFields(
   }
 }
 
+/**
+ * Merges newly resolved fields into an existing application record and persists to Supabase and memory cache.
+ */
+export async function appendResolvedFields(
+  id: string,
+  newFields: any[],
+  extra?: {
+    job_url?: string;
+    applywizz_id?: string;
+    existingFields?: any[];
+  }
+): Promise<any[]> {
+  const mem = memoryApplications.get(id);
+  const existing = extra?.existingFields || mem?.resolved_fields || [];
+
+  const fieldMap = new Map<string, any>();
+  for (const f of existing) {
+    const key = f.fieldId || f.label || JSON.stringify(f);
+    fieldMap.set(key, f);
+  }
+  for (const f of newFields) {
+    const key = f.fieldId || f.label || JSON.stringify(f);
+    fieldMap.set(key, f);
+  }
+
+  const merged = Array.from(fieldMap.values());
+  await updateResolvedFields(id, merged, extra);
+  return merged;
+}
+
 
 export async function updateStatus(
   id: string,
