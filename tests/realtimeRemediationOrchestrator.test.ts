@@ -86,6 +86,24 @@ describe('Realtime Remediation Orchestrator', () => {
     assert.equal(result.allResolved, true);
     assert.equal(result.remediatedFields.length, 2);
 
+    // Verify session report and remediation metadata
+    assert.ok(result.sessionReport, 'Session report must be present');
+    assert.equal(result.sessionReport.attemptedCount, 2);
+    assert.equal(result.sessionReport.resolvedCount, 2);
+    assert.equal(result.sessionReport.failedCount, 0);
+    assert.equal(result.sessionReport.items.length, 2);
+    assert.ok(result.sessionReport.items[0].issueFaced);
+    assert.ok(result.sessionReport.items[0].issueFixed);
+    assert.equal(result.sessionReport.items[0].status, 'resolved');
+
+    // Verify error_details attached to application
+    assert.ok((mockApp.error_details as any)?.remediationReport, 'error_details.remediationReport must be set');
+
+    // Verify per-field remediation metadata
+    assert.ok(result.remediatedFields[0].remediation);
+    assert.equal(result.remediatedFields[0].remediation.status, 'resolved');
+    assert.ok(result.remediatedFields[0].remediation.issueFaced);
+
     // Verify DOM updates
     const selectVal = await page.$eval('#auth_select', (el: HTMLSelectElement) => el.options[el.selectedIndex]?.text);
     const textVal = await page.$eval('#hybrid_pref', (el: HTMLInputElement) => el.value);
@@ -133,6 +151,19 @@ describe('Realtime Remediation Orchestrator', () => {
     assert.equal(result.remediatedCount, 1);
     assert.equal(result.allResolved, false);
     assert.equal(result.errors.length, 1);
+
+    // Verify sessionReport recorded the failed closed attempt
+    assert.ok(result.sessionReport);
+    assert.equal(result.sessionReport.attemptedCount, 2);
+    assert.equal(result.sessionReport.resolvedCount, 1);
+    assert.equal(result.sessionReport.failedCount, 1);
+    assert.equal(result.sessionReport.items.length, 2);
+
+    const failedItem = result.sessionReport.items.find((i) => i.label === 'Employee Referral Code');
+    assert.ok(failedItem);
+    assert.equal(failedItem.status, 'failed_closed');
+    assert.ok(failedItem.issueFaced);
+    assert.ok(failedItem.issueFixed);
   });
 
   it('respects timeout circuit breaker', async () => {

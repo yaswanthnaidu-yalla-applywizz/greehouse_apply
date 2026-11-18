@@ -419,6 +419,8 @@ export async function updateResolvedFields(
     operator_approved_at?: string | null;
     job_url?: string;
     applywizz_id?: string;
+    remediationReport?: any;
+    error_details?: any;
   }
 ): Promise<void> {
   const updatePayload: Record<string, any> = {
@@ -438,6 +440,15 @@ export async function updateResolvedFields(
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
   const mem = memoryApplications.get(id);
+
+  if (extra?.remediationReport !== undefined || extra?.error_details !== undefined) {
+    const prevDetails = (mem?.error_details as any) || {};
+    updatePayload.error_details = {
+      ...prevDetails,
+      ...(extra.error_details || {}),
+      ...(extra.remediationReport ? { remediationReport: extra.remediationReport } : {}),
+    };
+  }
   const cleanApplywizz = extra?.applywizz_id || mem?.applywizz_id || (id.includes('_') ? id.split('_')[0] : id);
   const targetJobUrl = extra?.job_url || mem?.job_url;
 
@@ -492,6 +503,8 @@ export async function appendResolvedFields(
     job_url?: string;
     applywizz_id?: string;
     existingFields?: any[];
+    remediationReport?: any;
+    error_details?: any;
   }
 ): Promise<any[]> {
   const mem = memoryApplications.get(id);
@@ -518,6 +531,7 @@ export async function updateStatus(
   status: ApplicationStatus,
   extra?: UpdateStatusExtra
 ): Promise<boolean> {
+  const mem = memoryApplications.get(id);
   const updatePayload: Partial<ApplicationRow> = {
     status,
     updated_at: new Date().toISOString(),
@@ -540,7 +554,13 @@ export async function updateStatus(
     if (extra.email_proof_attempted_at !== undefined) updatePayload.email_proof_attempted_at = extra.email_proof_attempted_at;
     if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
     if (extra.retry_count !== undefined) updatePayload.retry_count = extra.retry_count;
-    if (extra.error_details !== undefined) updatePayload.error_details = extra.error_details;
+    if (extra.error_details !== undefined) {
+      const existingDetails = (mem?.error_details as any) || {};
+      if (existingDetails.remediationReport && extra.error_details && !extra.error_details.remediationReport) {
+        extra.error_details.remediationReport = existingDetails.remediationReport;
+      }
+      updatePayload.error_details = extra.error_details;
+    }
   }
   const expectedStatus = extra && typeof extra === 'object' ? extra.expected_status : undefined;
   const expectedRetryCount = extra && typeof extra === 'object' ? extra.expected_retry_count : undefined;
@@ -558,7 +578,6 @@ export async function updateStatus(
   }
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-  const mem = memoryApplications.get(id);
   const cleanApplywizz = id.includes('_') ? id.split('_')[0] : id;
   const targetJobUrl = (extra && typeof extra === 'object' && extra.job_url) || mem?.job_url;
   let previousStatus: ApplicationStatus | undefined = mem?.status;

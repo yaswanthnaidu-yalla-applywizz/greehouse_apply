@@ -1,3 +1,12 @@
+# Current Session Update (2026-11-18 - Real-Time In-Browser Remediation & Incident Reporting Completed & Verified)
+
+- **Completed Real-Time In-Browser Remediation Incident Recording & Reporting (`docs/superpowers/plans/2026-11-18-remediation-incident-reporting.md`)**:
+  - **Task 1 (Incident Reporting Types & LLM Prompt Schema)**: Extended `resolveRemediationAnswer` in `src/submitter/realtimeRemediator.ts` and `ResolvedField.remediation` in `src/types/index.ts` to capture `issueFaced` ("what specific issue the automation faced on the live form") and `issueFixed` ("how the answer resolves this using candidate facts"). Tested by `tests/realtimeRemediatorResolution.test.ts` (5/5 passing).
+  - **Task 2 (Multi-Field Orchestration & Atomic DB Persistence)**: Updated `remediateUncommittedFields` and `appendResolvedFields` (`src/db/applications/crud.ts`) to attach `remediation` metadata to `resolved_fields` and persist `SessionRemediationReport` into `error_details.remediationReport`. Captures both rescued applications and failed-closed attempts. Tested by `tests/realtimeRemediationOrchestrator.test.ts` (3/3 passing), `tests/greenhouseRemediatorIntegration.test.ts` (1/1 passing), and `tests/ashbyRemediatorIntegration.test.ts` (1/1 passing).
+  - **Task 3 (On-Demand Dev CSV Export Endpoint)**: Built `handleRemediationExport` and RFC 4180 CSV builder in `src/server/remediationReport.ts`. Mounted on `devDashboardRouter` at `GET /api/dev/remediations/export` with query filters (`startDate`, `endDate`, `ats`, `status`) and JSON/CSV streaming. Tested by `tests/remediationExport.test.ts` (4/4 passing).
+  - **Task 4 (Verification)**: 100% test suites pass (17 remediation tests, 89 node unit tests, 111 vitest tests). TypeScript typecheck 100% clean (`npm run typecheck`).
+- **Branch**: `feat/realtime-form-remediation`.
+
 # Current Session Update (2026-11-18 - Real-Time In-Browser Agentic Remediation Completed & Verified)
 
 - **Completed 100% Execution of Real-Time In-Browser Remediation Plan (`docs/superpowers/plans/2026-11-18-realtime-form-remediation-agent.md`)**:

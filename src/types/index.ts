@@ -350,6 +350,18 @@ export interface ResolvedField {
   provenance?: ResolutionProvenance;
   /** Immutable Tier 5 model lineage for later answer review. */
   tier5Provenance?: Tier5Provenance;
+  /** Real-time in-browser remediation incident record if resolved or attempted by submitter AI agent. */
+  remediation?: FieldRemediationReport;
+}
+
+export interface FieldRemediationReport {
+  issueFaced: string;
+  issueFixed: string;
+  status: 'resolved' | 'failed_closed';
+  attemptedAt: string;
+  controlType: string;
+  liveOptions?: string[];
+  failureReason?: string;
 }
 
 export interface Tier5ModelAttempt {

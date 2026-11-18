@@ -83,6 +83,31 @@ test('resolves uncommitted sponsorship dropdown to authorized choice', async () 
   assert.equal(decision.value, 'No, I am authorized to work without sponsorship');
   assert.equal(decision.source, 'ai_realtime_remediated');
   assert.ok(decision.confidence >= 0.7);
+  assert.ok(decision.issueFaced && decision.issueFaced.length > 5, 'issueFaced must be reported');
+  assert.ok(decision.issueFixed && decision.issueFixed.length > 5, 'issueFixed must be reported');
+});
+
+test('captures explicit issueFaced and issueFixed reported by LLM', async () => {
+  const customField: RemediationField = {
+    fieldId: 'question_auth',
+    label: 'Work Authorization',
+    type: 'select',
+    options: ['US Citizen', 'Non-Citizen'],
+  };
+
+  const decision = await resolveRemediationAnswer(customField, mockContext, {
+    llmCallFn: async () => ({
+      answer: 'US Citizen',
+      confidence: 0.98,
+      reasoning: 'Candidate is US Citizen.',
+      issueFaced: 'Automation failed to match custom dropdown wording.',
+      issueFixed: 'Selected US Citizen based on profile facts.',
+    }),
+  });
+
+  assert.ok(decision);
+  assert.equal(decision.issueFaced, 'Automation failed to match custom dropdown wording.');
+  assert.equal(decision.issueFixed, 'Selected US Citizen based on profile facts.');
 });
 
 test('resolves hybrid willingness question using candidate context facts', async () => {

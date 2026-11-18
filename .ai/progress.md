@@ -1,3 +1,20 @@
+### Real-Time In-Browser Remediation Incident Recording & Reporting (2026-11-18 COMPLETE)
+- [x] **Incident Reporting Engine & Schema (`src/submitter/realtimeRemediator.ts`):**
+  - Extended `resolveRemediationAnswer` prompt and parser to extract `issueFaced` ("what specific issue the automation faced on the live form") and `issueFixed` ("how the answer resolves this using candidate facts").
+  - Added `FieldRemediationReport` to `ResolvedField.remediation` in `src/types/index.ts`.
+  - Added unit test suite `tests/realtimeRemediatorResolution.test.ts` (5/5 tests passing).
+- [x] **Multi-Field Orchestration & Atomic Persistence:**
+  - Updated `remediateUncommittedFields` and `appendResolvedFields` (`src/db/applications/crud.ts`) to attach `remediation` metadata to `resolved_fields` and persist `SessionRemediationReport` into `error_details.remediationReport`.
+  - Captures both rescued applications and failed-closed attempts.
+  - Added test suite `tests/realtimeRemediationOrchestrator.test.ts` (3/3 tests passing).
+- [x] **On-Demand Dev CSV Export Endpoint (`src/server/remediationReport.ts`):**
+  - Created `handleRemediationExport` streaming RFC 4180 CSV / JSON.
+  - Mounted on `devDashboardRouter` at `GET /api/dev/remediations/export` with `startDate`, `endDate`, `ats`, and `status` filters.
+  - Added test suite `tests/remediationExport.test.ts` (4/4 tests passing).
+- [x] **Verification:**
+  - 100% test suites pass (17 remediation tests, 89 node unit tests, 111 vitest tests).
+  - 0 errors across root and dashboard TypeScript typechecks (`npm run typecheck`).
+
 ### Real-Time In-Browser Agentic Form Remediation (2026-11-18 COMPLETE)
 - [x] **Real-Time Remediation Engine & Types (`src/submitter/realtimeRemediator.ts`):**
   - Implemented `resolveRemediationAnswer` and `remediateUncommittedFields` coordinating real-time LLM resolution (`claude-haiku-5-5` / Gemini) using candidate background facts (work authorization, location, sponsorship, education, skills, prior committed fields) matched against live choices.

@@ -44,6 +44,8 @@ export interface RemediationDecision {
   chosenOptionLabel?: string;
   confidence: number;
   reasoning: string;
+  issueFaced: string;
+  issueFixed: string;
   source: 'ai_realtime_remediated';
 }
 
@@ -51,6 +53,29 @@ export interface LlmCallPayload {
   answer: string;
   confidence: number;
   reasoning: string;
+  issueFaced?: string;
+  issueFixed?: string;
+}
+
+export interface SessionRemediationItem {
+  fieldId: string;
+  label: string;
+  controlType: string;
+  status: 'resolved' | 'failed_closed';
+  issueFaced: string;
+  issueFixed: string;
+  value: string | null;
+  liveOptions?: string[];
+  failureReason?: string;
+  attemptedAt: string;
+}
+
+export interface SessionRemediationReport {
+  timestamp: string;
+  attemptedCount: number;
+  resolvedCount: number;
+  failedCount: number;
+  items: SessionRemediationItem[];
 }
 
 export interface RemediationOptions {
@@ -64,6 +89,7 @@ export interface RemediationRunResult {
   remediatedFields: ResolvedField[];
   allResolved: boolean;
   errors: string[];
+  sessionReport?: SessionRemediationReport;
 }
 
 export interface RemediationOrchestratorOptions extends RemediationOptions {
@@ -149,6 +175,8 @@ async function defaultLlmCall(prompt: string, systemPrompt: string): Promise<Llm
       answer: String(parsed.answer || ''),
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.0,
       reasoning: String(parsed.reasoning || ''),
+      issueFaced: typeof parsed.issueFaced === 'string' ? parsed.issueFaced : undefined,
+      issueFixed: typeof parsed.issueFixed === 'string' ? parsed.issueFixed : undefined,
     };
   } catch {
     return {
@@ -174,18 +202,22 @@ export async function resolveRemediationAnswer(
   const hasOptions = Array.isArray(field.options) && field.options.length > 0;
 
   const systemPrompt = `You are an automated real-time job application form remediation assistant.
-You are given the exact question/label from a job application form, available options (if select/radio), and the verified candidate profile facts.
-Your goal is to provide a truthful, accurate answer for this candidate.
+You are given the exact question/label from a job application form, available options (if select/radio), and verified candidate profile facts.
+Your goal is to provide a truthful, accurate answer for this candidate, and report what issue the automation faced and how it is fixed.
 
 Rules:
 1. If options are provided, you MUST select an answer that best represents the candidate from those options.
-2. If the candidate facts genuinely do NOT provide enough information to answer truthfully, return an empty string for "answer" and confidence < 0.5.
+2. If the candidate facts genuinely do NOT provide enough information to answer truthfully, return an empty string for "answer", confidence < 0.5, and explain in "issueFaced" and "issueFixed".
 3. For Yes/No questions on work authorization:
    - If candidate is US Citizen/Permanent Resident, they do NOT require sponsorship (Sponsorship = "No", Authorized = "Yes").
-4. Return ONLY valid JSON in this exact shape:
+4. In "issueFaced", concisely explain what issue the automation encountered on the live form (e.g., "Automation left required radio unselected on page; options required specific phrasing").
+5. In "issueFixed", concisely explain how the answer resolves this using candidate facts (e.g., "Selected 'No' because candidate is a US Citizen requiring no sponsorship").
+6. Return ONLY valid JSON in this exact shape:
 {
   "answer": "chosen answer text or exact choice",
   "confidence": 0.95,
+  "issueFaced": "concise description of issue faced by automation on live form",
+  "issueFixed": "concise explanation of how this answer fixes it",
   "reasoning": "brief explanation"
 }`;
 
@@ -202,7 +234,7 @@ ${field.errorHint ? `- Error message shown on page: "${field.errorHint}"` : ''}
 Candidate Evidence:
 ${candidateEvidence}
 
-Select or synthesize the truthful answer for this candidate.`;
+Select or synthesize the truthful answer for this candidate, reporting the issue faced and fix.`;
 
   try {
     const response = await llmCall(prompt, systemPrompt);
@@ -235,6 +267,13 @@ Select or synthesize the truthful answer for this candidate.`;
       chosenOptionLabel = matched;
     }
 
+    const issueFaced =
+      response.issueFaced?.trim() ||
+      `Automation left required ${field.type} question "${field.label}" uncommitted on the live page.`;
+    const issueFixed =
+      response.issueFixed?.trim() ||
+      `Resolved and committed "${finalValue}" using candidate profile facts and verified background context.`;
+
     log.info(
       `[Realtime Remediator] ✅ Resolved "${field.label}" -> "${finalValue}" (conf: ${response.confidence.toFixed(2)})`
     );
@@ -245,6 +284,8 @@ Select or synthesize the truthful answer for this candidate.`;
       chosenOptionLabel,
       confidence: response.confidence,
       reasoning: response.reasoning,
+      issueFaced,
+      issueFixed,
       source: 'ai_realtime_remediated',
     };
   } catch (error: any) {
@@ -322,6 +363,8 @@ export async function remediateUncommittedFields(
   };
 
   // 2. Iterate each uncommitted field
+  const sessionItems: SessionRemediationItem[] = [];
+
   for (const label of labelsToProcess) {
     if (Date.now() > deadline) {
       result.errors.push(`Remediation aborted: timeout exceeded (${timeoutMs}ms limit).`);
@@ -335,7 +378,19 @@ export async function remediateUncommittedFields(
       // Step A: Scrape live DOM
       const scraped = await scrapeLiveFieldFromDom(page, label);
       if (!scraped) {
-        result.errors.push(`Field "${label}" could not be located in live DOM.`);
+        const errorMsg = `Field "${label}" could not be located in live DOM.`;
+        result.errors.push(errorMsg);
+        sessionItems.push({
+          fieldId: label.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 64) || 'unlocated_field',
+          label,
+          controlType: 'unknown',
+          status: 'failed_closed',
+          issueFaced: `Automation left required field "${label}" uncommitted; field locator could not find it in DOM.`,
+          issueFixed: 'Could not remediate: control not accessible in live DOM.',
+          value: null,
+          failureReason: errorMsg,
+          attemptedAt: new Date().toISOString(),
+        });
         continue;
       }
 
@@ -349,28 +404,77 @@ export async function remediateUncommittedFields(
 
       const decision = await resolveRemediationAnswer(remediationField, context, options);
       if (!decision) {
-        result.errors.push(`Could not resolve truthful answer for "${label}".`);
+        const errorMsg = `Could not resolve truthful answer for "${label}".`;
+        result.errors.push(errorMsg);
+        sessionItems.push({
+          fieldId: remediationField.fieldId,
+          label: scraped.label,
+          controlType: scraped.type,
+          status: 'failed_closed',
+          issueFaced: `Automation left required ${scraped.type} "${scraped.label}" unselected on live page.`,
+          issueFixed: 'Could not resolve: candidate profile and resume facts do not contain verified information; failed closed to prevent hallucination.',
+          value: null,
+          liveOptions: scraped.options,
+          failureReason: errorMsg,
+          attemptedAt: new Date().toISOString(),
+        });
         continue;
       }
 
       // Step C: Commit value into DOM
       const commitRes = await commitRemediatedValue(page, scraped, decision);
       if (!commitRes.success) {
-        result.errors.push(`Failed to commit "${decision.value}" to DOM for "${label}": ${commitRes.error || 'unknown error'}`);
+        const errorMsg = `Failed to commit "${decision.value}" to DOM for "${label}": ${commitRes.error || 'unknown error'}`;
+        result.errors.push(errorMsg);
+        sessionItems.push({
+          fieldId: decision.fieldId,
+          label: scraped.label,
+          controlType: scraped.type,
+          status: 'failed_closed',
+          issueFaced: decision.issueFaced,
+          issueFixed: `Attempted to commit "${decision.value}" to ${scraped.type}, but DOM action failed: ${commitRes.error || 'unknown error'}.`,
+          value: decision.value,
+          liveOptions: scraped.options,
+          failureReason: commitRes.error || 'DOM commit error',
+          attemptedAt: new Date().toISOString(),
+        });
         continue;
       }
 
-      // Step D: Construct ResolvedField
+      // Step D: Construct ResolvedField with remediation report
+      const nowIso = new Date().toISOString();
+      const committedVal = commitRes.committedValue || decision.value;
+      const remediationReportItem: SessionRemediationItem = {
+        fieldId: decision.fieldId,
+        label: scraped.label,
+        controlType: scraped.type,
+        status: 'resolved',
+        issueFaced: decision.issueFaced,
+        issueFixed: decision.issueFixed,
+        value: committedVal,
+        liveOptions: scraped.options,
+        attemptedAt: nowIso,
+      };
+      sessionItems.push(remediationReportItem);
+
       const resolvedField: ResolvedField = {
         fieldId: decision.fieldId,
         name: decision.fieldId,
         type: scraped.type,
         label: scraped.label,
-        value: commitRes.committedValue || decision.value,
+        value: committedVal,
         options: scraped.options,
         source: 'ai' as any,
         resolvedByTier: 5,
         confidence: decision.confidence,
+        remediation: {
+          issueFaced: decision.issueFaced,
+          issueFixed: decision.issueFixed,
+          status: 'resolved',
+          attemptedAt: nowIso,
+          controlType: scraped.type,
+          liveOptions: scraped.options,
+        },
       };
 
       result.remediatedFields.push(resolvedField);
@@ -382,8 +486,24 @@ export async function remediateUncommittedFields(
     }
   }
 
-  // 3. Persist remediated fields to DB and application object
-  if (result.remediatedFields.length > 0 && options.persistToDb !== false) {
+  // Build aggregated session report
+  const sessionReport: SessionRemediationReport = {
+    timestamp: new Date().toISOString(),
+    attemptedCount: result.attemptedCount,
+    resolvedCount: result.remediatedCount,
+    failedCount: result.attemptedCount - result.remediatedCount,
+    items: sessionItems,
+  };
+  result.sessionReport = sessionReport;
+
+  // Attach session report to application in-memory error_details
+  application.error_details = {
+    ...(application.error_details || {}),
+    remediationReport: sessionReport,
+  };
+
+  // 3. Persist remediated fields and session report to DB
+  if (options.persistToDb !== false) {
     try {
       const appId = application.id || application.applywizz_id;
       if (appId) {
@@ -391,6 +511,7 @@ export async function remediateUncommittedFields(
           job_url: application.job_url,
           applywizz_id: application.applywizz_id,
           existingFields: application.resolved_fields,
+          remediationReport: sessionReport,
         });
         application.resolved_fields = [...alreadyResolved, ...result.remediatedFields];
       }

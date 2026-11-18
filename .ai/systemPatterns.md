@@ -58,6 +58,8 @@ Input CSV (greenhouse_only_applywizz_prod(in).csv)
 - **Ground Truth Context**: Pairs candidate profile facts (work authorization, location, sponsorship) and parsed resume facts with the live rendered options scraped directly from the DOM (`realtimeDomAction.ts`).
 - **Choice Alignment**: Resolves via fast LLM (`claude-haiku-5-5` or Gemini) with confidence threshold $\ge 0.70$ and strict `matchChoiceOption` alignment against live options. Fails closed if facts are absent.
 - **Atomic Persistence**: Successfully committed fields are appended to `gh_candidate_applications.resolved_fields` with provenance tag `source: 'ai_realtime_remediated'`.
+- **Incident Recording (`issueFaced` & `issueFixed`)**: For every field attempted (both rescued and failed-closed), the LLM synthesizes structured statements of what issue the automation faced on the live form (`issueFaced`) and how it was resolved (`issueFixed`). Persisted per-field in `resolved_fields[i].remediation` and aggregated across the submission in `gh_candidate_applications.error_details.remediationReport`.
+- **On-Demand Dev Export API**: `GET /api/dev/remediations/export` streams standard RFC 4180 CSV (or JSON) filtered by `startDate`, `endDate`, `ats`, and outcome `status` (`resolved` vs `failed_closed`) for upstream template and selector improvements.
 - **Supported Submissions**: Greenhouse (`liveSubmit.ts`) and Ashby (`ashbySubmit.ts`).
 - **Railway Guardrails**: Max 3 fields per application, 20-second hard timeout, zero PNG screenshot memory overhead.
 
