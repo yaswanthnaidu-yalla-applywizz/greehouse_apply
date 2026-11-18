@@ -465,13 +465,14 @@ export async function sendExecutiveDailyDigest(
     const recipients = resolveExecutiveDailyReportRecipients();
     const subject = `ApplyWizz Executive Daily Report — ${data.targetDate} (${data.totalApplied} applied, ${data.totalFailed} failed)`;
 
-    await sendEmailImpl({
+    const result = await sendEmailImpl({
       to: recipients.to,
       cc: recipients.cc,
       subject,
       html: buildExecutiveDailyReportHtml(data),
       text: data.executiveSummary,
     });
+    if (result?.success === false) throw new Error(result.error || 'Email provider rejected the digest');
 
     log.info(
       `[Executive Report] Dispatched daily digest to ${recipients.to.join(', ')} (apps=${data.totalApplications}, applied=${data.totalApplied}, failed=${data.totalFailed})`
@@ -483,6 +484,27 @@ export async function sendExecutiveDailyDigest(
     log.error(`[Executive Report] Failed to dispatch daily digest: ${msg}`);
     return { success: false, error: msg };
   }
+}
+
+/** Atomically reserve one scheduled send per IST calendar day across all servers. */
+export async function sendScheduledExecutiveDailyDigest(
+  scheduledAt: Date,
+  client: any = isSupabaseConfigured() ? getDbClient() : null,
+  sendDigest: () => Promise<{ success: boolean; error?: string }> = () => sendExecutiveDailyDigest()
+): Promise<void> {
+  if (!client) throw new Error('Supabase is required to coordinate the executive daily digest');
+  const date = new Date(scheduledAt.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+  const { error } = await client.from('gh_executive_daily_report_sends').insert({ report_date: date });
+  if (error?.code === '23505') {
+    log.info(`[Executive Report] Digest already claimed for ${date}; skipping`);
+    return;
+  }
+  if (error) throw new Error(`Could not claim executive digest for ${date}: ${error.message}`);
+
+  // Keep the claim even if sending fails: an ambiguous provider failure may have
+  // delivered the message, and retrying from another server could duplicate it.
+  const result = await sendDigest();
+  if (!result.success) throw new Error(result.error || 'Executive digest send failed');
 }
 
 export function calculateMsUntilNext9AmIst(nowMs: number = Date.now()): number {
@@ -506,7 +528,9 @@ export function startExecutiveDailyReportScheduler(
   }
 
   const scheduleNext = () => {
-    const delayMs = calculateMsUntilNext9AmIst();
+    const now = Date.now();
+    const delayMs = calculateMsUntilNext9AmIst(now);
+    const scheduledAt = new Date(now + delayMs);
     log.info(
       `[Executive Report] Next 9:00 AM IST daily report scheduled in ${(delayMs / 3600000).toFixed(2)} hours`
     );
@@ -514,7 +538,8 @@ export function startExecutiveDailyReportScheduler(
     schedulerTimer = setTimeout(async () => {
       try {
         if (!options.dryRun) {
-          await sendExecutiveDailyDigest({ sendEmailFn: options.sendEmailFn });
+          await sendScheduledExecutiveDailyDigest(scheduledAt, undefined, () =>
+            sendExecutiveDailyDigest({ sendEmailFn: options.sendEmailFn }));
         } else {
           log.info('[Executive Report] Dry-run execution triggered');
         }
