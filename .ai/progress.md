@@ -1,3 +1,28 @@
+### Real-Time In-Browser Agentic Form Remediation (2026-11-18 COMPLETE)
+- [x] **Real-Time Remediation Engine & Types (`src/submitter/realtimeRemediator.ts`):**
+  - Implemented `resolveRemediationAnswer` and `remediateUncommittedFields` coordinating real-time LLM resolution (`claude-haiku-5-5` / Gemini) using candidate background facts (work authorization, location, sponsorship, education, skills, prior committed fields) matched against live choices.
+  - Enforced strict choice alignment via `matchChoiceOption` and fail-closed guardrails (`confidence < 0.70`).
+  - Added unit test suite `tests/realtimeRemediatorResolution.test.ts` (4/4 tests passing).
+- [x] **Live Playwright DOM Field Scraper & Action Committer (`src/submitter/realtimeDomAction.ts`):**
+  - Implemented `scrapeLiveFieldFromDom` extracting input types (`select`, `radio`, `checkbox`, `text`, `textarea`) and rendered choice labels directly from browser DOM.
+  - Implemented `commitRemediatedValue` executing humanized Playwright commitment and asserting DOM value retention.
+  - Added unit test suite `tests/realtimeDomAction.test.ts` (3/3 tests passing).
+- [x] **Multi-Field Orchestration & Atomic DB Persistence:**
+  - Added `appendResolvedFields` in `src/db/applications/crud.ts` to atomically merge newly resolved fields into `gh_candidate_applications.resolved_fields`.
+  - Added circuit breakers: 20s timeout, max 3 fields per application.
+  - Added test suite `tests/realtimeRemediationOrchestrator.test.ts` (3/3 tests passing).
+- [x] **Greenhouse Submitter Pipeline Integration (`src/submitter/liveSubmit.ts`):**
+  - Intercepts `unfilledRequiredLabels` before `validateGreenhouseSubmission`.
+  - Re-evaluates submission gate after committing fields and clears unfilled labels before clicking Submit.
+  - Added test suite `tests/greenhouseRemediatorIntegration.test.ts` (1/1 test passing).
+- [x] **Ashby Submitter Pipeline Integration (`src/submitter/ashbySubmit.ts`):**
+  - Wired into `verifyRequiredFieldsCommitted` in `submitAshbyApplication` to remediate missing radio/custom fields before submit click.
+  - Added diagnostic category `REALTIME_REMEDIATION_APPLIED` in `src/types/failureDiagnostics.ts` and `src/utils/failureDiagnostics.ts`.
+  - Added test suite `tests/ashbyRemediatorIntegration.test.ts` (1/1 test passing).
+- [x] **Verification:**
+  - 100% test suites pass (111 unit tests, 12 new remediation tests across 5 test suites).
+  - 0 errors across root and dashboard TypeScript typechecks (`npm run typecheck`).
+
 ### Fresh Resume Ingest & Dynamic ATS Form Submission Naming (2026-11-17 COMPLETE)
 - [x] **Adapted fileNameUtils into `src/utils/resumeNaming.ts`:**
   - Implemented `extractJobRoleFromPage`, `cleanJobRole`, `sanitizeForFileName`, `buildDocumentFileName`, and `buildResumeStorageFilename`.
