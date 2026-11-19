@@ -168,6 +168,7 @@ export interface SendEmailOptions {
     contentType: string;
     contentBytes: string;
   }>;
+  isOtp?: boolean;
 }
 
 /**
@@ -211,7 +212,13 @@ export function buildGraphMailPayload(options: SendEmailOptions) {
  * Sends a generic email using Microsoft Graph sendMail API.
  */
 export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
-  const { to } = options;
+  const { to, isOtp } = options;
+
+  if (config.DISABLE_EMAIL && !isOtp) {
+    const recipientDesc = Array.isArray(to) ? to.join(', ') : to;
+    log.info(`[AzureEmail] Notification email sending disabled (DISABLE_EMAIL=true); skipped email to ${recipientDesc} ("${options.subject}")`);
+    return { success: true, messageId: 'disabled-by-env' };
+  }
 
   if (!isAzureEmailConfigured()) {
     throw new Error('Azure Communication Services / Microsoft 365 credentials are not configured on the server.');
@@ -257,5 +264,6 @@ export async function sendOtpEmail(options: SendOtpEmailOptions): Promise<SendEm
     subject,
     html: generateOtpEmailHtml(otp),
     text: `Your ApplyWizz verification code is: ${otp}. It expires in 10 minutes.`,
+    isOtp: true,
   });
 }

@@ -96,6 +96,19 @@ export interface EmailProofJson {
 import type { ResolvedField } from '../../types/index.js';
 export type { ResolvedField };
 
+export type VerificationAts = 'ashby' | 'lever' | 'rippling';
+export type VerificationProvider = 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown';
+
+export interface VerificationFailureDetails {
+  reasonCode: 'INTERACTIVE_CHALLENGE' | 'SUBMISSION_UNCONFIRMED' | 'WIDGET_ERROR' | 'HTTP_THROTTLED' | 'EMPLOYER_APPLICATION_LIMIT';
+  ats: VerificationAts;
+  provider: VerificationProvider;
+  stage: string;
+  capturedAt: string;
+  submitClicked: boolean;
+  submitClickedAt: string | null;
+}
+
 export interface SubmissionErrorDetails {
   category?: string;
   stage?: string;
@@ -104,6 +117,7 @@ export interface SubmissionErrorDetails {
   pageUrl?: string;
   pageTitle?: string;
   domErrors?: string[];
+  verificationFailure?: VerificationFailureDetails;
   [key: string]: unknown;
 }
 
@@ -135,6 +149,37 @@ export interface AshbySubmissionTelemetry {
     | 'CONTROL_NOT_COMMITTED'
     | 'PROXY_PREFLIGHT'
     | 'NAVIGATION_READINESS';
+}
+
+export type LeverSubmissionStage =
+  | 'INITIALIZED'
+  | 'PROXY_PREFLIGHT'
+  | 'NAVIGATED'
+  | 'FORM_MOUNTED'
+  | 'FIELDS_FILLED'
+  | 'RESUME_ATTACHED'
+  | 'SUBMIT_CLICKED'
+  | 'HCAPTCHA_EVALUATED'
+  | 'CONFIRMED'
+  | 'CHALLENGE_DETECTED'
+  | 'FAILED'
+  | 'COMPLETED';
+
+export interface LeverSubmissionTelemetry {
+  deployedCommit?: string;
+  stage: LeverSubmissionStage;
+  exitIpHash?: string;
+  proxyRegion?: string;
+  proxyOutcome?: string;
+  committedFieldCount?: number;
+  hcaptchaDetected?: boolean;
+  hcaptchaSilentPass?: boolean;
+  challengeType?: 'none' | 'hcaptcha' | 'cloudflare' | 'unknown';
+  submitResponseStatus?: number;
+  errorMessage?: string;
+  capturedAt: string;
+  submitClickedAt?: string | null;
+  confirmedAt?: string | null;
 }
 
 export interface ApplicationRow {
@@ -170,7 +215,7 @@ export interface ApplicationRow {
   field_count?: number | null;
   retry_count?: number | null;
   error_details?: SubmissionErrorDetails | null;
-  ats?: 'greenhouse' | 'ashby';
+  ats?: 'greenhouse' | 'ashby' | 'lever';
   scheduled_not_before?: string | null;
 }
 
@@ -210,6 +255,7 @@ export type UpdateStatusExtra =
       error_details?: any | null;
       expected_status?: ApplicationStatus;
       expected_retry_count?: number;
+      force?: boolean;
     };
 
 export const OPERATOR_WORKLOAD_STATUSES: ApplicationStatus[] = ['READY_FOR_REVIEW', 'APPROVED'];

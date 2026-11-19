@@ -258,13 +258,24 @@ export const App: React.FC = () => {
         const unreachable = !Array.isArray(raw)
           ? Boolean(raw.workHistoryUnreachable)
           : candidatesRes.headers.get('x-work-history-unreachable') === 'true';
-        const emptyMsg = !Array.isArray(raw) ? (raw.message || null) : null;
+        const emptyMsg = !Array.isArray(raw) && raw.emptyState === 'NO_ASSIGNED_APPLICATIONS'
+          ? (raw.message || null)
+          : null;
 
         setCandidates(candidateData);
         if (unreachable) setWorkHistoryUnreachable(true);
         setNoCandidatesMessage(emptyMsg);
 
+        if (emptyMsg) {
+          setSelectedCandidateId(null);
+          setCandidateDetail(null);
+          setSelectedJobUrl(null);
+          setApplication(null);
+          setIsLoadingApplication(false);
+        }
+
         setSelectedCandidateId((prev) => {
+          if (emptyMsg) return null;
           if (prev && candidateData.some((c: CandidateSummary) => c.applywizzId === prev)) return prev;
           if (isPolling) return prev;
           return candidateData.length > 0 ? candidateData[0].applywizzId : null;
@@ -404,8 +415,29 @@ export const App: React.FC = () => {
         jobs: candidateJobs,
       });
 
-      setSelectedJobUrl(null);
-      setApplication(null);
+      // Preserve active job selection if still present in candidateJobs; otherwise auto-select first available job
+      const currentJobUrl = selectedJobRef.current;
+      const matchingJob = currentJobUrl
+        ? candidateJobs.find(
+            (j) => (j.canonicalUrl || j.rawUrl || (j as any).id) === currentJobUrl
+          )
+        : null;
+
+      if (matchingJob) {
+        const matchingKey = matchingJob.canonicalUrl || matchingJob.rawUrl || (matchingJob as any).id;
+        setSelectedJobUrl(matchingKey);
+        fetchJobApplication(requestedId, matchingKey);
+      } else if (candidateJobs.length > 0) {
+        const firstJob = candidateJobs[0];
+        const firstJobKey = firstJob.canonicalUrl || firstJob.rawUrl || (firstJob as any).id;
+        setSelectedJobUrl(firstJobKey);
+        if (firstJobKey) {
+          fetchJobApplication(requestedId, firstJobKey);
+        }
+      } else {
+        setSelectedJobUrl(null);
+        setApplication(null);
+      }
     } catch (err: any) {
       console.error(`Failed to fetch candidate ${applywizzId}:`, err);
     }
@@ -430,7 +462,10 @@ export const App: React.FC = () => {
     setIsLoadingApplication(true);
     try {
       const encodedUrl = encodeURIComponent(jobUrl);
-      const res = await apiFetch(`${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}`);
+      const dateQuery = selectedDate ? `?date=${encodeURIComponent(selectedDate)}` : '';
+      const res = await apiFetch(
+        `${API_BASE_URL}/api/candidates/${encodeURIComponent(applywizzId)}/jobs/${encodedUrl}${dateQuery}`
+      );
 
       if (!isSameApplywizzId(selectedCandidateRef.current, requestedId)) {
         return;
@@ -458,7 +493,7 @@ export const App: React.FC = () => {
         setIsLoadingApplication(false);
       }
     }
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!selectedCandidateId || !selectedJobUrl) {
@@ -768,6 +803,12 @@ export const App: React.FC = () => {
     );
   }
 
+  const showOperatorEmptyAssignments =
+    sessionRole() === 'operator' &&
+    !isLoadingCandidates &&
+    candidates.length === 0 &&
+    Boolean(noCandidatesMessage);
+
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0a0a0a] text-[#ffffff] font-sans overflow-hidden select-none">
       {opsMode && (
@@ -958,28 +999,62 @@ export const App: React.FC = () => {
         className={`mobile-operator-workspace flex flex-1 overflow-hidden ${activeTab === 'dashboard' ? '' : 'hidden'}`}
         data-mobile-screen={mobileScreen}
       >
-        {/* Left Pane: Candidates Directory via CandidateSidebar */}
-        <CandidateSidebar
-          candidates={candidates}
-          selectedId={selectedCandidateId}
-          onSelectCandidate={(id) => {
-            const isMobile =
-              typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
-            if (isMobile && selectedCandidateId !== id) {
-              setCandidateDetail(null);
-              setSelectedJobUrl(null);
-              setApplication(null);
-            }
-            setSelectedCandidateId((prev) => (isMobile ? id : prev === id ? null : id));
-            if (isMobile) setMobileScreen('jobs');
-          }}
-          isLoading={isLoadingCandidates}
-          emptyMessage={noCandidatesMessage}
-          selectedDate={selectedDate}
-        />
+        {showOperatorEmptyAssignments ? (
+          <main
+            className="flex-1 flex items-center justify-center bg-[#0a0a0a] p-6"
+            data-testid="operator-no-assigned-jobs"
+          >
+            <section className="w-full max-w-md rounded-xl border border-[#2c2c2e] bg-[#1c1c1e] p-8 text-center">
+              <h2 className="text-xl font-bold text-white">No jobs assigned for {selectedDate || 'this date'}</h2>
+              <p className="mt-2 text-sm text-[#8e8e93]">Choose another application date or refresh the queue.</p>
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                <label className="flex items-center gap-2 text-xs font-mono text-[#8e8e93]">
+                  Application date
+                  <input
+                    aria-label="Empty state application date"
+                    data-testid="empty-state-date-picker"
+                    type="date"
+                    value={selectedDate}
+                    max={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())}
+                    onChange={(event) => setSelectedDate(event.currentTarget.value)}
+                    className="rounded-md border border-[#3a3a3c] bg-[#0a0a0a] px-2 py-1 text-white"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="rounded-md bg-[#0a84ff] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-60"
+                >
+                  {isRefreshing ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+            </section>
+          </main>
+        ) : (
+          <>
+            {/* Left Pane: Candidates Directory via CandidateSidebar */}
+            <CandidateSidebar
+              candidates={candidates}
+              selectedId={selectedCandidateId}
+              onSelectCandidate={(id) => {
+                const isMobile =
+                  typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+                if (isMobile && selectedCandidateId !== id) {
+                  setCandidateDetail(null);
+                  setSelectedJobUrl(null);
+                  setApplication(null);
+                }
+                setSelectedCandidateId((prev) => (isMobile ? id : prev === id ? null : id));
+                if (isMobile) setMobileScreen('jobs');
+              }}
+              isLoading={isLoadingCandidates}
+              emptyMessage={noCandidatesMessage}
+              selectedDate={selectedDate}
+            />
 
-        {/* Right Pane: Candidate Jobs Queue & Form Renderer */}
-        <main className="mobile-operator-detail flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden">
+            {/* Right Pane: Candidate Jobs Queue & Form Renderer */}
+            <main className="mobile-operator-detail flex-1 flex flex-col bg-[#0a0a0a] overflow-hidden">
           {candidateDetail ? (
             <>
               {/* Right Top: Job Queue Tabs */}
@@ -1010,6 +1085,8 @@ export const App: React.FC = () => {
                     isLoading={isLoadingApplication}
                     candidateName={candidateDetail.clientName}
                     apiBaseUrl={API_BASE_URL}
+                    totalQueueJobs={candidateDetail.jobs.length}
+                    hasSelectedJob={Boolean(selectedJobUrl)}
                     onBack={() => setMobileScreen('jobs')}
                     onFieldUpdate={handleFieldUpdate}
                     onStatusChange={handleStatusChange}
@@ -1052,7 +1129,9 @@ export const App: React.FC = () => {
               )}
             </div>
           )}
-        </main>
+            </main>
+          </>
+        )}
       </div>
     </div>
   );

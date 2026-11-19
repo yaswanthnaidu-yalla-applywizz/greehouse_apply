@@ -44,6 +44,7 @@ import { config } from '../config/env.js';
 import { applicationsRouter } from './routes/applications.js';
 import { submissionsRouter } from './routes/submissions.js';
 import { startFailureDiagnosticsRetention } from '../services/failureDiagnosticsRetention.js';
+import { startExecutiveDailyReportScheduler } from '../services/executiveDailyReport.js';
 import { authRouter, isUserAdmin, resolveRole } from './routes/auth.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { configRouter } from './routes/config.js';
@@ -199,7 +200,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         ],
       })
     );
-    app.use(express.json());
+    app.use(express.json({ limit: '25mb' }));
   app.use(compression());
     app.use(compression());
 
@@ -426,7 +427,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ],
     })
   );
-  app.use(express.json());
+  app.use(express.json({ limit: '25mb' }));
   app.use(compression());
 
   // Static directory for master resume PDFs
@@ -841,6 +842,7 @@ export function startServer(
 ): ReturnType<express.Application['listen']> {
   const isIngestOnly = config.INGEST_ONLY === 'true' || process.env.INGEST_ONLY === 'true';
   startFailureDiagnosticsRetention();
+  startExecutiveDailyReportScheduler();
   const app = createServer();
 
   const server = app.listen(port, '0.0.0.0', () => {

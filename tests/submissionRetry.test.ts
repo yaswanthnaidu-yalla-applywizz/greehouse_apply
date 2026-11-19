@@ -15,4 +15,21 @@ describe('automatic submission retry eligibility', () => {
     expect(getRetryReason(new Error('Target crashed'))).toBeNull();
     expect(getRetryReason('Browser launch failed')).toBeNull();
   });
+
+  it('does not infer retry eligibility from an interactive verification record', () => {
+    expect(getRetryReason({
+      retryReason: 'BROWSER_LAUNCH_FAILED',
+      errorMessage: 'Interactive verification stopped submission.',
+      verificationFailure: {
+        reasonCode: 'INTERACTIVE_CHALLENGE',
+        ats: 'lever',
+        provider: 'hcaptcha',
+        stage: 'PRE_SUBMIT',
+        capturedAt: '2026-11-18T00:00:00.000Z',
+        submitClicked: false,
+        submitClickedAt: null,
+      },
+    })).toBeNull();
+    expect(isAutomaticRetryAllowed(null)).toBe(false);
+  });
 });

@@ -8,7 +8,7 @@
 
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import type { Browser, LaunchOptions } from 'playwright';
+import type { Browser, BrowserContext, BrowserContextOptions, LaunchOptions } from 'playwright';
 
 // Initialize Playwright stealth evasion globally for all managed browser instances
 chromium.use(StealthPlugin());
@@ -16,6 +16,14 @@ import { createLogger } from '../utils/logger.js';
 import crypto from 'crypto';
 
 const log = createLogger('BrowserManager');
+
+export const STANDARD_CHROMIUM_ARGS = [
+  '--disable-blink-features=AutomationControlled',
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--window-size=1280,900',
+];
 
 export interface ManagedBrowser {
   browserId: string;
@@ -57,6 +65,19 @@ export class BrowserManager {
       waitingCount: this.waitQueue.length,
       maxBrowsers: this.maxConcurrentBrowsers,
     };
+  }
+
+  /**
+   * Creates a dedicated, sterile BrowserContext with standardized viewport,
+   * sanitized user agent, and isolated cookies/storage.
+   */
+  public async createSterileContext(browser: Browser, options: BrowserContextOptions = {}): Promise<BrowserContext> {
+    return browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      userAgent: options.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      ignoreHTTPSErrors: true,
+      ...options,
+    });
   }
 
   /**
@@ -195,7 +216,8 @@ export class BrowserManager {
       }
 
       this.lastLaunchTime = Date.now();
-      return this.launchFn(options);
+      const mergedArgs = Array.from(new Set([...STANDARD_CHROMIUM_ARGS, ...(options.args || [])]));
+      return this.launchFn({ ...options, args: mergedArgs });
     };
 
     const task = this.launchChain.then(throttled, throttled);

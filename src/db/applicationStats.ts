@@ -49,7 +49,7 @@ export interface ApplicationStatsResult {
   partial: boolean;
   availableFrom: string;
   counts: ApplicationStatsCounts;
-  byAts: Record<'greenhouse' | 'ashby', ApplicationStatsCounts>;
+  byAts: Record<'greenhouse' | 'ashby' | 'lever', ApplicationStatsCounts>;
   byCandidate: ApplicationStatsBreakdown[];
   byOperator: OperatorStatsBreakdown[];
   byDate: DateStatsBreakdown[];
@@ -141,20 +141,20 @@ export function statusMetricsForTransition(status: string): ApplicationStatsMetr
 
 export function summarizeApplicationCohortRows(rows: ApplicationCohortRow[]): {
   counts: ApplicationStatsCounts;
-  byAts: Record<'greenhouse' | 'ashby', ApplicationStatsCounts>;
+  byAts: Record<'greenhouse' | 'ashby' | 'lever', ApplicationStatsCounts>;
   byCandidate: ApplicationStatsBreakdown[];
   byOperator: OperatorStatsBreakdown[];
   byDate: DateStatsBreakdown[];
 } {
   const counts = emptyCounts();
-  const byAts = { greenhouse: emptyCounts(), ashby: emptyCounts() };
+  const byAts = { greenhouse: emptyCounts(), ashby: emptyCounts(), lever: emptyCounts() };
   const candidates = new Map<string, ApplicationStatsBreakdown>();
   const operators = new Map<string, OperatorStatsBreakdown>();
   const dates = new Map<string, ApplicationStatsCounts>();
 
   for (const row of rows) {
     counts.total = (counts.total ?? 0) + 1;
-    const atsCounts = row.ats === 'ashby' ? byAts.ashby : byAts.greenhouse;
+    const atsCounts = row.ats === 'ashby' ? byAts.ashby : row.ats === 'lever' ? byAts.lever : byAts.greenhouse;
     atsCounts.total = (atsCounts.total ?? 0) + 1;
     const attempted = isAttemptedRow(row);
     const success = isSuccessStatus(row.status);
@@ -548,7 +548,7 @@ export async function getApplicationStats(options: {
       partial: false,
       availableFrom: '2000-01-01',
       counts: emptyCounts(),
-      byAts: { greenhouse: emptyCounts(), ashby: emptyCounts() },
+      byAts: { greenhouse: emptyCounts(), ashby: emptyCounts(), lever: emptyCounts() },
       byCandidate: [],
       byOperator: [],
       byDate: [],

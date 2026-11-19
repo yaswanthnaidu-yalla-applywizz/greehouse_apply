@@ -107,14 +107,14 @@ function optionPolarity(option: string): 'affirmative' | 'negative' | null {
     negativeTokens.some((token) => normalized === token) ||
     /^(no|not|false|decline)\b/.test(normalized) ||
     /\bnever\b/.test(normalized) ||
-    /^(i do not|i am not)\b/.test(normalized)
+    /^(i do not|i am not|does not require|will not require|do not require|not need)\b/.test(normalized)
   ) {
     return 'negative';
   }
   if (
     affirmativeTokens.some((token) => normalized === token) ||
     /^(yes|true|agree|accept|acknowledge|confirm)\b/.test(normalized) ||
-    /^(i confirm|i acknowledge|i have reviewed)\b/.test(normalized) ||
+    /^(i confirm|i acknowledge|i have reviewed|requires sponsorship)\b/.test(normalized) ||
     affirmativeTokens.some(
       (token) =>
         normalized.includes(` ${token} `) ||
@@ -154,25 +154,25 @@ function canonicalAlias(value: string): string | null {
     return 'decline';
   }
   // Degree levels
-  if (/\b(?:master of science|m\.s\.|ms)\b/.test(normalized)) {
+  if (/\b(?:master of science|m\s*s|ms|m\s*sc)\b/.test(normalized)) {
     return 'ms';
   }
-  if (/\b(?:master of arts|m\.a\.|ma)\b/.test(normalized)) {
+  if (/\b(?:master of arts|m\s*a|ma)\b/.test(normalized)) {
     return 'ma';
   }
-  if (/\b(?:master(?:s|\x27s)?|master of engineering)\b/.test(normalized)) {
+  if (/\b(?:master(?:s|\x27s)?|master of engineering|m\s*e|m\s*tech|mtech)\b/.test(normalized)) {
     return 'masters';
   }
-  if (/\b(?:bachelor of science|b\.s\.|bs|bachelor of technology|b\.tech|btech)\b/.test(normalized)) {
+  if (/\b(?:bachelor of science|b\s*s|bs|bachelor of technology|b\s*tech|btech|b\s*e|bachelor of engineering)\b/.test(normalized)) {
     return 'bs';
   }
-  if (/\b(?:bachelor of arts|b\.a\.|ba)\b/.test(normalized)) {
+  if (/\b(?:bachelor of arts|b\s*a|ba)\b/.test(normalized)) {
     return 'ba';
   }
   if (/\b(?:bachelor(?:s|\x27s)?|undergraduate)\b/.test(normalized)) {
     return 'bachelors';
   }
-  if (/\b(?:doctorate|doctoral|phd|ph\.d\.|doctor of philosophy)\b/.test(normalized)) {
+  if (/\b(?:doctorate|doctoral|phd|ph\s*d|doctor of philosophy)\b/.test(normalized)) {
     return 'doctorate';
   }
   return null;
@@ -190,6 +190,35 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
   const exact = options.filter((option) => normalize(option) === normalizedAnswer);
   if (exact.length === 1) return exact[0];
   if (exact.length > 1) return null;
+
+
+
+
+  // Support single-letter matching (e.g. "A", "A.", "Option A") to options like "A. I have built..."
+  const letterAnswerMatch = answer.trim().match(/^(?:option\s+)?([a-zA-Z])[.)]?$/i);
+  if (letterAnswerMatch) {
+    const targetLetter = letterAnswerMatch[1].toUpperCase();
+    const letterPrefixedMatches = options.filter((option) => {
+      const m = option.trim().match(/^([a-zA-Z])[.)\s]/);
+      return m && m[1].toUpperCase() === targetLetter;
+    });
+    if (letterPrefixedMatches.length === 1) return letterPrefixedMatches[0];
+  }
+
+  // Strip letter prefix from options (e.g. "A. ") to match full body answers
+  const strippedPrefixMatches = options.filter((option) => {
+    const stripped = option.trim().replace(/^[a-zA-Z][.)]\s+/, '');
+    const normalizedStripped = normalize(stripped);
+    return (
+      normalizedStripped === normalizedAnswer ||
+      (normalizedAnswer.length >= 3 &&
+        (normalizedStripped.startsWith(normalizedAnswer) ||
+          normalizedAnswer.startsWith(normalizedStripped)))
+    );
+  });
+  if (strippedPrefixMatches.length === 1) return strippedPrefixMatches[0];
+
+
 
   const alias = canonicalAlias(answer);
   if (alias) {

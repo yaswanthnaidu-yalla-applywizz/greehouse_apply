@@ -10,20 +10,29 @@ import type {
   ApplicationStatus,
   AshbySubmissionStage,
   AshbySubmissionTelemetry,
+  VerificationFailureDetails,
 } from '../db/applications/types.js';
 import { updateStatus } from '../db/applications/crud.js';
 import { getProfile } from '../db/profiles.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
-import { buildAshbyProxyConfig, resolveCountryCode, verifyProxyPreflight } from './ashbyProxy.js';
+import {
+  buildAshbyProxyConfig,
+  resolveCountryCode,
+  verifyProxyPreflight,
+  type ProxyPreflightResult,
+} from './ashbyProxy.js';
 import { fillAshbyForm, glideCursor, sleep, verifyRequiredFieldsCommitted } from './ashbyFormFiller.js';
 import { browserManager } from './browserManager.js';
 import { downloadResumeTempFile, uploadProof, uploadFailedScreenshot } from '../db/storage.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 import { buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
+import { observeAtsVerification, type VerificationProvider } from './atsVerification.js';
 import { toAshbyApplicationUrl } from '../scanner/atsDetector.js';
 import type { LiveSubmitResult } from './liveSubmit.js';
 import { isAshbySubmissionRetryAllowed } from './submissionRetry.js';
 import { classifyRequiredFieldFailure } from '../utils/failureDiagnostics.js';
+import { remediateUncommittedFields } from './realtimeRemediator.js';
 import {
   captureAndSaveEmailProof,
   startEmailProofPolling,
@@ -31,11 +40,82 @@ import {
 
 const log = createLogger('AshbySubmit');
 
-export async function waitForAshbyApplicationReady(page: Page, timeoutMs = 15000): Promise<void> {
+export function shouldAttemptApifyPreflightFallback(
+  primaryIsMassive: boolean,
+  apifyString: string | undefined,
+  preflight: { success: boolean; error?: string }
+): boolean {
+  return primaryIsMassive && Boolean(apifyString?.trim()) && !preflight.success;
+}
+
+export async function preflightFallback<TPage>(options: {
+  page: TPage;
+  preflight: ProxyPreflightResult;
+  shouldFallback: boolean;
+  releaseCurrent: () => Promise<void>;
+  acquireFallback: () => Promise<TPage>;
+  verify: (page: TPage) => Promise<ProxyPreflightResult>;
+  onFallbackError?: (error: unknown) => void;
+}): Promise<{ page: TPage; preflight: ProxyPreflightResult }> {
+  let { page, preflight } = options;
+  if (!preflight.success && options.shouldFallback) {
+    try {
+      await options.releaseCurrent();
+      page = await options.acquireFallback();
+      preflight = await options.verify(page);
+    } catch (error) {
+      options.onFallbackError?.(error);
+    }
+  }
+  return { page, preflight };
+}
+
+export async function waitForAshbyApplicationReady(page: Page, timeoutMs = 35000): Promise<void> {
+  const startTime = Date.now();
+
+  // 1. If loading spinner is present, wait for it to detach
   try {
-    await page.waitForSelector('[data-field-path]', { timeout: timeoutMs });
+    const spinner = page.locator('.ashby-loading-spinner, svg[class*="loading-spinner"]');
+    if ((await spinner.count()) > 0 && (await spinner.first().isVisible().catch(() => false))) {
+      await spinner.first().waitFor({ state: 'detached', timeout: Math.min(30000, timeoutMs) }).catch(() => {});
+    }
+  } catch {}
+
+  // 2. Check if form field is already mounted
+  const formField = page.locator('[data-field-path]').first();
+  if ((await formField.count().catch(() => 0)) > 0 && (await formField.isVisible().catch(() => false))) {
+    return;
+  }
+
+  // 3. Auto-transition from Overview tab if application form is hidden
+  const applyButtonSelectors = [
+    'button:has-text("Apply for this Job")',
+    '.ashby-application-form-overview-apply-button',
+    '[role="tab"]:has-text("Application")',
+    'button:has-text("Apply")',
+  ];
+
+  for (const sel of applyButtonSelectors) {
+    try {
+      const btn = page.locator(sel).first();
+      if ((await btn.count()) > 0 && (await btn.isVisible().catch(() => false))) {
+        log.info(`[AshbySubmit] Transitioning from Overview tab using selector "${sel}"`);
+        await btn.click({ timeout: 5000 }).catch(() => {});
+        break;
+      }
+    } catch {}
+  }
+
+  // 4. Wait for form field to mount within remaining window
+  const elapsed = Date.now() - startTime;
+  const remainingMs = Math.max(1000, timeoutMs - elapsed);
+  try {
+    await page.waitForSelector('[data-field-path]', { timeout: remainingMs });
   } catch {
-    throw new Error(`Ashby application form readiness timed out after ${timeoutMs}ms`);
+    const fieldCount = await page.locator('[data-field-path]').count().catch(() => 0);
+    if (fieldCount === 0) {
+      throw new Error(`Ashby application form readiness timed out after ${timeoutMs}ms`);
+    }
   }
 }
 
@@ -89,67 +169,29 @@ export interface ChallengeDetectionResult {
   details?: string;
 }
 
-interface ChallengeSelectorGroup {
-  type: 'hcaptcha' | 'turnstile' | 'recaptcha' | 'unknown';
-  selectors: string[];
-}
-
-const CHALLENGE_SELECTOR_GROUPS: ChallengeSelectorGroup[] = [
-  {
-    type: 'hcaptcha',
-    selectors: [
-      'iframe[src*="hcaptcha.com"][style*="visible"]',
-      '.hcaptcha-box',
-      'div:has-text("Select all images")',
-      'div[class*="h-captcha"] iframe',
-    ],
-  },
-  {
-    type: 'turnstile',
-    selectors: [
-      'iframe[title*="Cloudflare"]:has-text("Verify you are human")',
-      'div[class*="challenge-popup"]',
-      'div#challenge-stage',
-      'iframe[title*="Cloudflare"][title*="Verify you are human"]',
-      'iframe[src*="challenges.cloudflare.com"]:has-text("Verify you are human")',
-    ],
-  },
-  {
-    type: 'recaptcha',
-    selectors: [
-      'iframe[src*="recaptcha"][title*="recaptcha challenge"]',
-      'iframe[src*="recaptcha"][src*="bframe"]',
-    ],
-  },
-];
-
 export async function detectInteractiveChallenge(page: Page): Promise<ChallengeDetectionResult> {
   if (!page || (typeof page.isClosed === 'function' && page.isClosed())) {
     return { detected: false };
   }
+  const observation = await observeAtsVerification(page, 'ashby');
+  if (observation.kind !== 'interactive') return { detected: false };
+  return {
+    detected: true,
+    challengeType: observation.provider,
+    details: `Detected ${observation.evidence} evidence for interactive ${observation.provider} verification`,
+  };
+}
 
-  for (const group of CHALLENGE_SELECTOR_GROUPS) {
-    for (const selector of group.selectors) {
-      try {
-        const locator = page.locator(selector).first();
-        const count = await locator.count();
-        if (count > 0) {
-          const visible = await locator.isVisible().catch(() => false);
-          if (visible) {
-            return {
-              detected: true,
-              challengeType: group.type,
-              details: `Detected visible ${group.type} interactive challenge matching "${selector}"`,
-            };
-          }
-        }
-      } catch {
-        // ignore selector syntax or navigation race
-      }
-    }
-  }
-
-  return { detected: false };
+async function throwIfAshbyChallenge(page: Page, stage: string): Promise<void> {
+  const challenge = await detectInteractiveChallenge(page);
+  if (!challenge.detected) return;
+  const error: Error & { stage?: string; classification?: string; challengeType?: VerificationProvider } = new Error(
+    `External policy block: Interactive ${challenge.challengeType || 'unknown'} CAPTCHA detected during ${stage}`,
+  );
+  error.stage = stage;
+  error.classification = 'EXTERNAL_POLICY:INTERACTIVE_CHALLENGE';
+  error.challengeType = challenge.challengeType || 'unknown';
+  throw error;
 }
 
 export interface ConfirmationWaitOptions {
@@ -173,10 +215,19 @@ export async function waitForSubmitConfirmation(
     const url = page.url();
     const title = (await page.title().catch(() => '')) || '';
 
+    const hasConfirmationText =
+      /(?:thank\s+(?:you|s)\s+(?:for|to)|thanks\s+for|application\s+(?:was\s+|has\s+been\s+)?(?:received|submitted)|successfully\s+(?:submitted|received)|we(?:'ve|\s+have)\s+received\s+your\s+application)/i.test(
+        pageText
+      );
+    const hasSuccessElement =
+      (await page
+        .locator('div[class*="success"], .ashby-application-form-success')
+        .count()
+        .catch(() => 0)) > 0;
+
     if (
-      pageText.includes('Your application was successfully submitted') ||
-      pageText.includes('application was successfully submitted') ||
-      /thank you for applying|application received/i.test(pageText) ||
+      hasConfirmationText ||
+      hasSuccessElement ||
       url.includes('/confirmation') ||
       /success|thank/i.test(title)
     ) {
@@ -204,16 +255,21 @@ export async function waitForSubmitConfirmation(
     await page.waitForTimeout(pollIntervalMs);
   }
 
-  throw new Error('Ashby application submit confirmation signal timed out after 45s');
+  return false;
 }
 
 export async function submitAshbyApplication(
   application: ApplicationRow,
   options: {
     headless?: boolean;
+    preloadedResumePath?: string;
     updateStatusFn?: (id: string, status: any, extra?: any) => Promise<any>;
   } = {}
 ): Promise<LiveSubmitResult & { telemetry?: AshbySubmissionTelemetry }> {
+  if (isSandboxTestMode()) {
+    throw new Error('Live submissions are disabled in sandbox test mode.');
+  }
+
   const applicationId = application.id || application.applywizz_id;
   const targetAppId = application.id || applicationId;
   const isHeadless = options.headless ?? (process.env.RAILWAY_ENV === 'true' || process.env.HEADLESS !== 'false');
@@ -233,8 +289,10 @@ export async function submitAshbyApplication(
   let submitClicked = false;
 
   let managedBrowser: any = null;
+  let context: any = null;
   let page: any = null;
   let resumeLocalPath = '';
+  let shouldCleanupResume = false;
 
   try {
     // 1. Check & Build mandatory DataImpulse proxy
@@ -245,30 +303,44 @@ export async function submitAshbyApplication(
 
     let proxyConfig;
     let countryCode: string | undefined;
+    let primaryIsMassive = false;
     try {
       countryCode = resolveCountryCode(profile);
       proxyRegion = countryCode;
       proxyConfig = buildAshbyProxyConfig(profile);
+      primaryIsMassive = Boolean(
+        process.env.MASSIVE_USERNAME?.trim() &&
+          process.env.MASSIVE_PASSWORD?.trim()
+      );
     } catch (proxyErr: any) {
       haltWithDevAlert('AshbySubmit', `Cannot submit Ashby without proxy: ${proxyErr.message}`);
       throw proxyErr;
     }
 
     // 2. Prepare resume temp file with standardized domain-specific naming
-    try {
+    if (options.preloadedResumePath && fs.existsSync(options.preloadedResumePath)) {
+      resumeLocalPath = options.preloadedResumePath;
+    } else {
       resumeLocalPath = await downloadResumeTempFile(application.applywizz_id);
-      if (resumeLocalPath && fs.existsSync(resumeLocalPath)) {
-        const resumeFilename = buildResumeSubmissionFilename(
-          profile.client_name,
-          application.job_title,
-          application.company_name
-        );
-        const renamedResumePath = path.join(path.dirname(resumeLocalPath), resumeFilename);
+      shouldCleanupResume = true;
+      if (!resumeLocalPath || !fs.existsSync(resumeLocalPath)) {
+        throw new Error(`Failed to download resume temp file for ${application.applywizz_id}`);
+      }
+      const resumeFilename = buildResumeSubmissionFilename(
+        profile,
+        application.job_title,
+        application.company_name
+      );
+      const renamedResumePath = path.join(path.dirname(resumeLocalPath), resumeFilename);
+      if (resumeLocalPath !== renamedResumePath) {
+        if (fs.existsSync(renamedResumePath)) {
+          try {
+            fs.unlinkSync(renamedResumePath);
+          } catch {}
+        }
         fs.renameSync(resumeLocalPath, renamedResumePath);
         resumeLocalPath = renamedResumePath;
       }
-    } catch (resumeErr: any) {
-      log.warn(`[AshbySubmit] Failed to download resume temp file: ${resumeErr.message}`);
     }
 
     if (targetAppId) {
@@ -291,7 +363,7 @@ export async function submitAshbyApplication(
       ],
     });
 
-    const context = await managedBrowser.browser.newContext({
+    context = await browserManager.createSterileContext(managedBrowser.browser, {
       viewport: { width: 1440, height: 900 },
       userAgent:
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -374,6 +446,63 @@ export async function submitAshbyApplication(
         proxyOutcome = preflight.outcome;
       }
     }
+    const fallbackResult = await preflightFallback({
+      page,
+      preflight,
+      shouldFallback: shouldAttemptApifyPreflightFallback(
+        primaryIsMassive,
+        process.env.APIFY_STRING,
+        preflight
+      ),
+      releaseCurrent: async () => {
+        if (page && !page.isClosed()) await page.close().catch(() => {});
+        if (managedBrowser) await browserManager.releaseBrowser(managedBrowser.browserId).catch(() => {});
+        managedBrowser = null;
+        page = null;
+      },
+      acquireFallback: async () => {
+        log.warn(`[AshbySubmit] Massive preflight failed for ${applicationId}; attempting one Apify preflight.`);
+        const apifyProxyConfig = buildAshbyProxyConfig(profile, { provider: 'apify' });
+        managedBrowser = await browserManager.acquireBrowser({
+          headless: isHeadless,
+          proxy: {
+            server: apifyProxyConfig.server,
+            username: apifyProxyConfig.username,
+            password: apifyProxyConfig.password,
+          },
+          args: [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            ...(isHeadless ? [] : ['--start-maximized', '--window-position=50,50']),
+          ],
+        });
+        const apifyContext = await managedBrowser.browser.newContext({
+          viewport: { width: 1440, height: 900 },
+          userAgent:
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          timezoneId: 'America/New_York',
+          locale: 'en-US',
+        });
+        page = await apifyContext.newPage();
+        attachResponseListener(page);
+        return page;
+      },
+      verify: async (fallbackPage) => {
+        const result = await verifyProxyPreflight(fallbackPage, countryCode);
+        proxyOutcome = result.outcome;
+        return result;
+      },
+      onFallbackError: (fallbackErr) => {
+        log.warn(
+          `[AshbySubmit] Apify preflight fallback failed for ${applicationId}: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`
+        );
+      },
+    });
+    page = fallbackResult.page as typeof page;
+    preflight = fallbackResult.preflight;
+    proxyOutcome = preflight.outcome;
     if (!preflight.success) {
       log.warn(`[AshbySubmit] ⚠️ Proxy preflight failed for ${applicationId}: ${preflight.error}`);
       throw new Error(`Ashby proxy preflight failed: ${preflight.error}`);
@@ -382,17 +511,17 @@ export async function submitAshbyApplication(
     log.info(`[AshbySubmit] 🔒 Proxy preflight verified (exitIpHash: ${exitIpHash}, country: ${countryCode})`);
 
     const targetUrl = toAshbyApplicationUrl(application.job_url) || application.job_url;
-
     stage = 'NAVIGATION';
     log.info(`[AshbySubmit] Navigating to ${targetUrl}...`);
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     stage = 'DOM_SCAN';
-    await waitForAshbyApplicationReady(page, 15000);
+    await waitForAshbyApplicationReady(page, 35000);
     await sleep(1500, 2500);
 
     // 3. Fill form fields
     stage = 'FORM_FILL';
+    await throwIfAshbyChallenge(page, stage);
     const fillResult = await fillAshbyForm(page, application.resolved_fields || [], resumeLocalPath);
     committedFieldCount = fillResult.filledCount;
     log.info(`[AshbySubmit] Form populated: ${fillResult.filledCount} fields filled.`);
@@ -403,12 +532,35 @@ export async function submitAshbyApplication(
 
     // 4.5 Pre-submit validation gate: verify all required fields are committed on the live DOM
     stage = 'PRE_SUBMIT';
+    await throwIfAshbyChallenge(page, stage);
     const requiredFieldPaths = (application.resolved_fields || [])
       .filter((f) => f.isRequired)
       .map((f) => f.fieldId || f.name)
       .filter((p): p is string => Boolean(p));
 
-    const domVerification = await verifyRequiredFieldsCommitted(page, requiredFieldPaths);
+    let domVerification = await verifyRequiredFieldsCommitted(page, requiredFieldPaths);
+    if (!domVerification.allCommitted) {
+      log.info(
+        `[AshbySubmit] 🤖 Pre-submit verification found ${domVerification.missingFields.length} uncommitted fields. Triggering real-time remediation...`
+      );
+      const missingLabels = domVerification.missingFields.map((path) => {
+        const matchingField = (application.resolved_fields || []).find((f) => f.fieldId === path || f.name === path);
+        return matchingField?.label || path;
+      });
+
+      try {
+        const remediation = await remediateUncommittedFields(page, missingLabels, application);
+        if (remediation.remediatedCount > 0) {
+          log.info(
+            `[AshbySubmit] ✅ Real-time remediation committed ${remediation.remediatedCount} field(s).`
+          );
+          domVerification = await verifyRequiredFieldsCommitted(page, requiredFieldPaths);
+        }
+      } catch (remErr: any) {
+        log.warn(`[AshbySubmit] Real-time remediation encountered an error: ${remErr.message}`);
+      }
+    }
+
     if (!domVerification.allCommitted) {
       log.warn(
         `[AshbySubmit] ⛔ Pre-submit validation failed for ${applicationId}. Missing required DOM fields: ${domVerification.missingFields.join(', ')}`
@@ -551,7 +703,24 @@ export async function submitAshbyApplication(
       stage = err.stage;
     }
     const classification = err.classification;
+    const verificationReason = classification === 'EXTERNAL_POLICY:INTERACTIVE_CHALLENGE'
+      ? 'INTERACTIVE_CHALLENGE'
+      : classification === 'EXTERNAL_POLICY:WIDGET_ERROR'
+        ? 'WIDGET_ERROR'
+        : undefined;
+    const verificationFailure: VerificationFailureDetails | undefined = verificationReason
+      ? {
+          reasonCode: verificationReason,
+          ats: 'ashby',
+          provider: err.challengeType || 'unknown',
+          stage,
+          capturedAt: new Date().toISOString(),
+          submitClicked,
+          submitClickedAt,
+        }
+      : undefined;
     const failureCategory = err.failureCategory
+      || (verificationReason === 'INTERACTIVE_CHALLENGE' ? 'SUBMIT_INTERACTIVE_CHALLENGE' : undefined)
       || (stage === 'PREFLIGHT' && proxyOutcome && proxyOutcome !== 'success' ? 'PROXY_PREFLIGHT'
         : stage === 'DOM_SCAN' && /readiness timed out/i.test(errorMsg) ? 'NAVIGATION_READINESS'
         : undefined);
@@ -595,6 +764,7 @@ export async function submitAshbyApplication(
           failureCategory,
           submitClickedAt,
           submitClicked,
+          ...(verificationFailure ? { verificationFailure } : {}),
         },
         proof_failed_url: failedProofUrl,
         proof_failed_captured_at: failedProofUrl ? new Date().toISOString() : undefined,
@@ -650,16 +820,20 @@ export async function submitAshbyApplication(
       submitClickedAt,
       submitClicked,
       retryReason,
+      verificationFailure,
       telemetry,
     };
   } finally {
     if (page && !page.isClosed()) {
       await page.close().catch(() => {});
     }
+    if (context) {
+      await context.close().catch(() => {});
+    }
     if (managedBrowser) {
       await browserManager.releaseBrowser(managedBrowser.browserId).catch(() => {});
     }
-    if (resumeLocalPath && fs.existsSync(resumeLocalPath)) {
+    if (shouldCleanupResume && resumeLocalPath && fs.existsSync(resumeLocalPath)) {
       try {
         fs.unlinkSync(resumeLocalPath);
       } catch {}

@@ -145,6 +145,177 @@ export function computeDateOffset(baseIsoDate: string, daysBack: number): string
   return getIstCalendarDate(date).isoDate;
 }
 
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+class TtlCache<T> {
+  private store = new Map<string, CacheEntry<T>>();
+
+  get(key: string): T | null {
+    const entry = this.store.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      return null;
+    }
+    return entry.data;
+  }
+
+  set(key: string, data: T, ttlMs = 30000): void {
+    this.store.set(key, { data, expiresAt: Date.now() + ttlMs });
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+}
+
+export const analysisStatsCache = new TtlCache<AnalysisResponse>();
+
+export function calculateAnalysisTimelineAndSummary(
+  rows: Array<{
+    id?: string;
+    applywizz_id?: string | null;
+    job_url?: string | null;
+    company_name?: string | null;
+    job_title?: string | null;
+    status: string;
+    error_message?: string | null;
+    ats?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+    proof_failed_url?: string | null;
+    proof_web_url?: string | null;
+  }>,
+  fromDate: string,
+  toDate: string,
+  atsFilter: 'all' | 'greenhouse' | 'ashby' = 'all'
+): {
+  summary: AnalysisSummary;
+  timeline: AnalysisTimelinePoint[];
+  failures: FailureReasonGroup[];
+} {
+  const filteredRows = rows.filter((row) => {
+    const isAshby = row.ats === 'ashby' || (row.job_url && /ashbyhq\.com/i.test(row.job_url));
+    const rowAts = isAshby ? 'ashby' : 'greenhouse';
+    if (atsFilter !== 'all' && rowAts !== atsFilter) {
+      return false;
+    }
+    return true;
+  });
+
+  const dateList = listIstDatesInclusive(fromDate, toDate);
+  const timelineMap = new Map<string, { total: number; applied: number; failed: number; clientSet: Set<string> }>();
+  for (const d of dateList) {
+    timelineMap.set(d, { total: 0, applied: 0, failed: 0, clientSet: new Set<string>() });
+  }
+
+  const globalClientSet = new Set<string>();
+  let totalApplied = 0;
+  let totalFailed = 0;
+  let totalRetryableFailed = 0;
+  const failureGroupsMap = new Map<string, {
+    reason: string;
+    category: string;
+    isRetryable: boolean;
+    count: number;
+    applications: FailureApplicationItem[];
+  }>();
+
+  for (const row of filteredRows) {
+    const createdDate = row.created_at ? getIstCalendarDate(new Date(row.created_at)).isoDate : fromDate;
+    const bucket = timelineMap.get(createdDate);
+
+    const isSuccess = isSuccessStatus(row.status);
+    const isFail = isFailedStatus(row.status);
+    const clientId = String(row.applywizz_id || '').trim();
+
+    if (bucket) {
+      bucket.total++;
+      if (isSuccess) bucket.applied++;
+      if (isFail) bucket.failed++;
+      if (clientId) bucket.clientSet.add(clientId);
+    }
+
+    if (clientId) globalClientSet.add(clientId);
+    if (isSuccess) totalApplied++;
+    if (isFail) {
+      totalFailed++;
+      const norm = normalizeFailureReason(row.error_message);
+      if (norm.isRetryable) {
+        totalRetryableFailed++;
+      }
+      const groupKey = `${norm.category}::${norm.reason}`;
+      let group = failureGroupsMap.get(groupKey);
+      if (!group) {
+        group = {
+          reason: norm.reason,
+          category: norm.category,
+          isRetryable: norm.isRetryable,
+          count: 0,
+          applications: [],
+        };
+        failureGroupsMap.set(groupKey, group);
+      }
+      group.count++;
+
+      const isAshby = row.ats === 'ashby' || (row.job_url && /ashbyhq\.com/i.test(row.job_url));
+      if (group.applications.length < 25) {
+        group.applications.push({
+          id: row.id || '',
+          applywizzId: clientId || 'UNKNOWN',
+          jobUrl: row.job_url || '',
+          companyName: row.company_name || 'Unknown Company',
+          jobTitle: row.job_title || 'Position',
+          ats: isAshby ? 'ashby' : 'greenhouse',
+          errorMessage: (row.error_message || '').trim() || norm.reason,
+          createdAt: row.created_at || row.updated_at || new Date().toISOString(),
+          hasProofFailed: Boolean(row.proof_failed_url),
+          proofFailedUrl: row.proof_failed_url || null,
+          proofWebUrl: row.proof_web_url || null,
+        });
+      }
+    }
+  }
+
+  const timeline: AnalysisTimelinePoint[] = dateList.map((d) => {
+    const b = timelineMap.get(d) || { total: 0, applied: 0, failed: 0, clientSet: new Set() };
+    return {
+      date: d,
+      total: b.total,
+      applied: b.applied,
+      failed: b.failed,
+      clients: b.clientSet.size,
+    };
+  });
+
+  const totalApplications = filteredRows.length;
+  const summary: AnalysisSummary = {
+    total: totalApplications,
+    applied: totalApplied,
+    failed: totalFailed,
+    clients: globalClientSet.size,
+    successRate: totalApplications > 0 ? Number(((totalApplied / totalApplications) * 100).toFixed(1)) : 0,
+    failureRate: totalApplications > 0 ? Number(((totalFailed / totalApplications) * 100).toFixed(1)) : 0,
+    retryableFailed: totalRetryableFailed,
+  };
+
+  const failures: FailureReasonGroup[] = Array.from(failureGroupsMap.values())
+    .map((g) => ({
+      reason: g.reason,
+      category: g.category,
+      isRetryable: g.isRetryable,
+      count: g.count,
+      percentage: totalFailed > 0 ? Number(((g.count / totalFailed) * 100).toFixed(1)) : 0,
+      applications: g.applications,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  return { summary, timeline, failures };
+}
+
 export async function handleAnalysisStats(req: Request, res: Response): Promise<void> {
   try {
     const today = getISTDateString();
@@ -200,6 +371,13 @@ export async function handleAnalysisStats(req: Request, res: Response): Promise<
     const { startIso } = getISTDateRangeUtc(fromDate);
     const { endIso } = getISTDateRangeUtc(toDate);
 
+    const cacheKey = `analysis:${mode}:${atsFilter}:${fromDate}:${toDate}`;
+    const cached = analysisStatsCache.get(cacheKey);
+    if (cached) {
+      res.json(cached);
+      return;
+    }
+
     interface RawAppRow {
       id?: string;
       applywizz_id?: string | null;
@@ -224,17 +402,26 @@ export async function handleAnalysisStats(req: Request, res: Response): Promise<
           .from('gh_candidate_applications')
           .select('id, applywizz_id, job_url, company_name, job_title, status, error_message, ats, created_at, updated_at, proof_failed_url, proof_web_url')
           .gte('created_at', startIso)
-          .lt('created_at', endIso);
+          .lt('created_at', endIso)
+          .order('created_at', { ascending: false });
 
         if (atsFilter !== 'all') {
           query = query.eq('ats', atsFilter);
         }
 
-        const { data, error } = await query;
-        if (!error && data) {
-          rows = data as RawAppRow[];
-        } else if (error) {
-          log.warn(`Supabase query failed in analysisStats, falling back to local: ${error.message}`);
+        let offset = 0;
+        const pageSize = 1000;
+        const maxRows = 25000;
+        while (offset < maxRows) {
+          const { data, error } = await query.range(offset, offset + pageSize - 1);
+          if (error) {
+            log.warn(`Supabase query page failed in analysisStats at offset ${offset}: ${error.message}`);
+            break;
+          }
+          if (!data || data.length === 0) break;
+          rows.push(...(data as RawAppRow[]));
+          if (data.length < pageSize) break;
+          offset += pageSize;
         }
       } catch (err: any) {
         log.warn(`Supabase connection failed in analysisStats, falling back to local: ${err.message}`);
@@ -251,122 +438,7 @@ export async function handleAnalysisStats(req: Request, res: Response): Promise<
       });
     }
 
-    // Filter by ATS if not Supabase or if ats is derived from job_url
-    const filteredRows = rows.filter((row) => {
-      const isAshby = row.ats === 'ashby' || (row.job_url && /ashbyhq\.com/i.test(row.job_url));
-      const rowAts = isAshby ? 'ashby' : 'greenhouse';
-      if (atsFilter !== 'all' && rowAts !== atsFilter) {
-        return false;
-      }
-      return true;
-    });
-
-    const dateList = listIstDatesInclusive(fromDate, toDate);
-    const timelineMap = new Map<string, { total: number; applied: number; failed: number; clientSet: Set<string> }>();
-    for (const d of dateList) {
-      timelineMap.set(d, { total: 0, applied: 0, failed: 0, clientSet: new Set<string>() });
-    }
-
-    const globalClientSet = new Set<string>();
-    let totalApplied = 0;
-    let totalFailed = 0;
-    let totalRetryableFailed = 0;
-    const failureGroupsMap = new Map<string, {
-      reason: string;
-      category: string;
-      isRetryable: boolean;
-      count: number;
-      applications: FailureApplicationItem[];
-    }>();
-
-    for (const row of filteredRows) {
-      const createdDate = row.created_at ? getIstCalendarDate(new Date(row.created_at)).isoDate : fromDate;
-      const bucket = timelineMap.get(createdDate);
-
-      const isSuccess = isSuccessStatus(row.status);
-      const isFail = isFailedStatus(row.status);
-      const clientId = String(row.applywizz_id || '').trim();
-
-      if (bucket) {
-        bucket.total++;
-        if (isSuccess) bucket.applied++;
-        if (isFail) bucket.failed++;
-        if (clientId) bucket.clientSet.add(clientId);
-      }
-
-      if (clientId) globalClientSet.add(clientId);
-      if (isSuccess) totalApplied++;
-      if (isFail) {
-        totalFailed++;
-        const norm = normalizeFailureReason(row.error_message);
-        if (norm.isRetryable) {
-          totalRetryableFailed++;
-        }
-        const groupKey = `${norm.category}::${norm.reason}`;
-        let group = failureGroupsMap.get(groupKey);
-        if (!group) {
-          group = {
-            reason: norm.reason,
-            category: norm.category,
-            isRetryable: norm.isRetryable,
-            count: 0,
-            applications: [],
-          };
-          failureGroupsMap.set(groupKey, group);
-        }
-        group.count++;
-
-        const isAshby = row.ats === 'ashby' || (row.job_url && /ashbyhq\.com/i.test(row.job_url));
-        if (group.applications.length < 25) {
-          group.applications.push({
-            id: row.id || '',
-            applywizzId: clientId || 'UNKNOWN',
-            jobUrl: row.job_url || '',
-            companyName: row.company_name || 'Unknown Company',
-            jobTitle: row.job_title || 'Position',
-            ats: isAshby ? 'ashby' : 'greenhouse',
-            errorMessage: (row.error_message || '').trim() || norm.reason,
-            createdAt: row.created_at || row.updated_at || new Date().toISOString(),
-            hasProofFailed: Boolean(row.proof_failed_url),
-            proofFailedUrl: row.proof_failed_url || null,
-            proofWebUrl: row.proof_web_url || null,
-          });
-        }
-      }
-    }
-
-    const timeline: AnalysisTimelinePoint[] = dateList.map((d) => {
-      const b = timelineMap.get(d)!;
-      return {
-        date: d,
-        total: b.total,
-        applied: b.applied,
-        failed: b.failed,
-        clients: b.clientSet.size,
-      };
-    });
-
-    const totalApplications = filteredRows.length;
-    const summary: AnalysisSummary = {
-      total: totalApplications,
-      applied: totalApplied,
-      failed: totalFailed,
-      clients: globalClientSet.size,
-      successRate: totalApplications > 0 ? Number(((totalApplied / totalApplications) * 100).toFixed(1)) : 0,
-      failureRate: totalApplications > 0 ? Number(((totalFailed / totalApplications) * 100).toFixed(1)) : 0,
-      retryableFailed: totalRetryableFailed,
-    };
-
-    const failures: FailureReasonGroup[] = Array.from(failureGroupsMap.values())
-      .map((g) => ({
-        reason: g.reason,
-        category: g.category,
-        isRetryable: g.isRetryable,
-        count: g.count,
-        percentage: totalFailed > 0 ? Number(((g.count / totalFailed) * 100).toFixed(1)) : 0,
-        applications: g.applications,
-      }))
-      .sort((a, b) => b.count - a.count);
+    const { summary, timeline, failures } = calculateAnalysisTimelineAndSummary(rows, fromDate, toDate, atsFilter);
 
     const responsePayload: AnalysisResponse = {
       mode,
@@ -381,6 +453,7 @@ export async function handleAnalysisStats(req: Request, res: Response): Promise<
       failures,
     };
 
+    analysisStatsCache.set(cacheKey, responsePayload, 30000);
     res.json(responsePayload);
   } catch (error: any) {
     log.error('handleAnalysisStats failed:', error);

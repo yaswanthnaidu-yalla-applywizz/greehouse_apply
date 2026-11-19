@@ -68,6 +68,7 @@ import {
   type ApplicationStatus,
   type AshbySubmissionTelemetry,
   type EmailProofJson,
+  type VerificationFailureDetails,
 } from '../db/applications.js';
 import { getProfile, updateResumeStoragePath } from '../db/profiles.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
@@ -75,11 +76,13 @@ import { uploadResume } from '../db/storage.js';
 import { ApplyWizzClient } from '../candidate/applywizzClient.js';
 import { otpResolutionService } from '../services/otpResolutionService.js';
 import { createLogger } from '../utils/logger.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 import type { SubmissionRetryReason } from './submissionRetry.js';
 import { classifyRequiredFieldFailure, emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
 import { captureFailureDiagnostics } from './domFailureCapture.js';
 import { browserManager, type ManagedBrowser } from './browserManager.js';
 import { validateGreenhouseSubmission } from './greenhouseValidation.js';
+import { remediateUncommittedFields } from './realtimeRemediator.js';
 
 const log = createLogger('Live Submit');
 const RESUMES_BUCKET = 'resumes';
@@ -189,6 +192,7 @@ export interface LiveSubmitResult {
   summary?: FormFillSummary;
   submitClickedAt?: string | null;
   submitClicked?: boolean;
+  verificationFailure?: VerificationFailureDetails;
   telemetry?: AshbySubmissionTelemetry;
 }
 
@@ -514,11 +518,10 @@ export async function detectFormFillingErrors(
     }
 
     // 2. Check for HTML5 invalid form inputs that blocked submission.
-    //    Exclude aria-hidden="true" inputs — these are hidden backing inputs
-    //    for Greenhouse Remix/React-Select comboboxes (class "requiredInput").
-    //    They are not real user-facing fields; the combobox fill handles them.
+    //    Include input:invalid, select:invalid, textarea:invalid, aria-invalid="true",
+    //    and hidden backing inputs with class "requiredInput:invalid" (Greenhouse Remix comboboxes)
     const invalidInputs = page.locator(
-      'input:invalid:not([aria-hidden="true"]):not([tabindex="-1"]), select:invalid, textarea:invalid'
+      'input:invalid:not([aria-hidden="true"]:not(.requiredInput)):not([tabindex="-1"]:not(.requiredInput)), select:invalid, textarea:invalid, [aria-invalid="true"], input.requiredInput:invalid'
     );
     const invalidCount = await invalidInputs.count().catch(() => 0);
     if (invalidCount > 0) {
@@ -1419,6 +1422,10 @@ export async function runLiveSubmit(
   applicationOrId: string | ApplicationRow,
   options: LiveSubmitOptions = {}
 ): Promise<LiveSubmitResult> {
+  if (isSandboxTestMode()) {
+    throw new Error('Live submissions are disabled in sandbox test mode.');
+  }
+
   const preflight = await prepareSubmissionPreflight(applicationOrId, options);
   let { application } = preflight;
   const { applicationId, targetUrl, isHeadless, timeoutMs, confirmationTimeoutMs } = preflight;
@@ -1514,7 +1521,7 @@ export async function runLiveSubmit(
       };
     }
 
-    context = await browser.newContext({
+    context = await browserManager.createSterileContext(browser, {
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 900 },
@@ -1599,7 +1606,48 @@ export async function runLiveSubmit(
       fillSummary = fillResult.fillSummary;
       application = fillResult.freshApplication;
 
-      const submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
+      let submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
+
+      // Real-time agentic remediation fallback: resolve and commit uncommitted required fields
+      if (!submissionGate.ok || fillResult.unfilledRequiredLabels.length > 0) {
+        const uncommittedLabels = Array.from(
+          new Set([
+            ...fillResult.unfilledRequiredLabels,
+            ...(submissionGate.ok ? [] : submissionGate.failure.fields.map((field) => field.label)),
+          ])
+        ).filter(Boolean);
+
+        if (uncommittedLabels.length > 0) {
+          log.info(
+            `[Live Submit] 🤖 Triggering real-time agentic remediation for ${uncommittedLabels.length} uncommitted fields...`
+          );
+          try {
+            const remediation = await remediateUncommittedFields(page, uncommittedLabels, application);
+            if (remediation.remediatedCount > 0) {
+              log.info(
+                `[Live Submit] ✅ Real-time remediation committed ${remediation.remediatedCount} field(s).`
+              );
+              for (const rf of remediation.remediatedFields) {
+                const matchRes = fillSummary.results.find(
+                  (r: any) => r.label === rf.label || r.fieldId === rf.fieldId
+                );
+                if (matchRes) {
+                  matchRes.success = true;
+                  matchRes.domCommitted = true;
+                  matchRes.valuePopulated = rf.value;
+                }
+              }
+              fillResult.unfilledRequiredLabels = fillResult.unfilledRequiredLabels.filter(
+                (label) => !remediation.remediatedFields.some((rf) => rf.label === label)
+              );
+              submissionGate = await validateGreenhouseSubmission(page, application, fillSummary);
+            }
+          } catch (remErr: any) {
+            log.warn(`[Live Submit] Real-time remediation encountered an error: ${remErr.message}`);
+          }
+        }
+      }
+
       if (!submissionGate.ok) {
         const failureCategory = classifyRequiredFieldFailure(
           application.resolved_fields || [],

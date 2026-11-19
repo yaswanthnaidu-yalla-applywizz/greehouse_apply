@@ -20,6 +20,7 @@ import {
 } from '../managerTeamScope.js';
 import {
   applicationRowHasPersistedResolution,
+  deduplicateJobsByUrl,
   filterOperatorApplicationJobs,
 } from '../../dashboard/candidateQueueFilter.js';
 import { fetchProfileListingFieldsByApplywizzIds, getProfile } from '../../db/profiles.js';
@@ -414,7 +415,9 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
         createdAtRange: restrictedAccess.createdAtRange,
         includeRow: (row: {
           assigned_ca_email?: string | null;
+          status?: string | null;
         }) =>
+          !['FILTERED_OUT', 'SKIPPED'].includes(String(row.status || '').trim().toUpperCase()) &&
           applicationAssignedCaAllowedForRequest(
             row.assigned_ca_email,
             restrictedAccess!.userEmail || '',
@@ -432,6 +435,13 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
     candidateSummaries,
     applicationAggregates
   );
+
+  // The operator queue represents actionable assignments for the selected date.
+  // Do not retain profile-only candidates or candidates whose only rows were
+  // filtered/skipped. QUEUED rows intentionally remain assignments.
+  if (!unrestricted && restrictedAccess?.role === 'operator') {
+    candidateSummaries = candidateSummaries.filter((candidate) => candidate.job_count > 0);
+  }
 
   if (unrestricted) {
     const nonDemoSummaries = candidateSummaries.filter(
@@ -499,6 +509,7 @@ candidatesRouter.get('/', async (req: AuthenticatedRequest, res: Response) => {
     res.json({
       candidates: [],
       message: `No candidates were assigned to you for ${parsedRange.label}.`,
+      emptyState: 'NO_ASSIGNED_APPLICATIONS',
       workHistoryUnreachable,
       dateRange: serializeDateRange(parsedRange),
     });
@@ -816,7 +827,10 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
       .select('*')
       .eq('applywizz_id', applywizzId)
       .neq('status', 'FILTERED_OUT')
-      .neq('status', 'SKIPPED');
+      .neq('status', 'SKIPPED')
+      .neq('status', 'APPLIED')
+      .neq('status', 'EMAIL_PROOF_PENDING')
+      .neq('status', 'FAILED');
 
     if (!unrestricted) {
       appQuery = applyCreatedAtRangeFilter(appQuery, createdAtRange);
@@ -889,6 +903,8 @@ candidatesRouter.get('/:applywizzId/jobs', async (req: AuthenticatedRequest, res
       });
     }
   }
+
+  jobs = deduplicateJobsByUrl(jobs);
 
   const afterCaFilter = jobs.length;
   const pinnedDemo = isPinnedDemoApplywizzId(applywizzId);
@@ -1020,21 +1036,33 @@ candidatesRouter.get('/:applywizzId/jobs/*', async (req: AuthenticatedRequest, r
   if (isSupabaseConfigured()) {
     try {
       const supabase = getDbClient();
-      const { data, error } = await supabase
+      let applicationQuery = supabase
         .from('gh_candidate_applications')
         .select('*')
         .eq('applywizz_id', applywizzId)
-        .eq('job_url', decodedUrl)
+        .eq('job_url', decodedUrl);
+      if (!unrestricted) {
+        applicationQuery = applyCreatedAtRangeFilter(applicationQuery, access.createdAtRange);
+      }
+      const { data, error } = await applicationQuery
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (!error && data) {
         supabaseRecord = data;
       } else if (rawJobUrl !== decodedUrl) {
-        const { data: altData } = await supabase
+        let altQuery = supabase
           .from('gh_candidate_applications')
           .select('*')
           .eq('applywizz_id', applywizzId)
-          .eq('job_url', rawJobUrl)
+          .eq('job_url', rawJobUrl);
+        if (!unrestricted) {
+          altQuery = applyCreatedAtRangeFilter(altQuery, access.createdAtRange);
+        }
+        const { data: altData } = await altQuery
+          .order('created_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
         if (altData) supabaseRecord = altData;
       }

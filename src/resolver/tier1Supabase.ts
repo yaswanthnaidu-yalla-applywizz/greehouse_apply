@@ -7,7 +7,7 @@ import Fuse from 'fuse.js';
 import { getProfile, type ProfileRow, getCompanyEmail } from '../db/profiles.js';
 import { getAnswer } from '../db/qaBank.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
-import type { ResolvedField, ScannedField } from '../types/index.js';
+import type { ResolutionExecution, ResolvedField, ScannedField } from '../types/index.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { isPhoneNumberField } from './candidateEvidence.js';
 import { formatLocationCityStateCountry } from '../submitter/formFiller.js';
@@ -77,6 +77,9 @@ export function isCountryField(field: ScannedField): boolean {
 function normalizeProfileUrl(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
+  if (/^(?:https?:\/\/(?:www\.)?)?(?:n\/?a|none|null|not applicable)$/i.test(trimmed)) {
+    return null;
+  }
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
@@ -353,6 +356,18 @@ export function resolveStandardProfileAttribute(
     return targetCode;
   }
 
+  // Preferred Name
+  if (/\bpreferred\s*(?:first\s*)?name\b/i.test(combined)) {
+    if (profile.first_name && profile.first_name.trim().length > 0) {
+      return profile.first_name.trim();
+    }
+    if (profile.client_name && !profile.client_name.startsWith('AWL-')) {
+      const parts = profile.client_name.trim().split(/\s+/);
+      return parts[0] || null;
+    }
+    return null;
+  }
+
   // First Name
   if (
     /(first|given|fore)\s*name/i.test(combined) ||
@@ -393,9 +408,18 @@ export function resolveStandardProfileAttribute(
     return null;
   }
 
-  // Full Name
-  if (/(full|client)\s*name/i.test(combined) || combined === 'name') {
-    return profile.client_name || `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
+  // Full Name & Legal Name
+  if (
+    /\b(?:full\s*(?:legal\s*)?name|legal\s*name|client\s*name)\b/i.test(combined) ||
+    combined === 'name' ||
+    /\bname\s*as\s*presented\s*on\b/i.test(combined)
+  ) {
+    if (profile.client_name && !profile.client_name.startsWith('AWL-')) {
+      return profile.client_name.trim();
+    }
+    const combinedFirstLast = `${profile.first_name || ''} ${profile.last_name || ''}`.trim();
+    if (combinedFirstLast) return combinedFirstLast;
+    return profile.client_name || null;
   }
 
   // Email — strictly company email, never personal (must not match referral or communication consent questions containing "email")
@@ -439,27 +463,46 @@ export function resolveStandardProfileAttribute(
     );
   }
 
+  // Spousal Sponsorship Dependency (Always "No")
+  if (/dependent upon.*spouse|spouse.*sponsorship/i.test(combined)) {
+    if (field.type === 'checkbox') return 'false';
+    return matchBestOption('No', field.options, field.label) || 'No';
+  }
+
+  // Visa Sponsorship (must precede general work authorization to prevent false "Yes" match)
+  if (/sponsorship|require.*visa|future.*sponsorship|visa status|immigration.*sponsor|sponsor.*immigration|sponsor.*work authorization/i.test(combined)) {
+    const rawVal = profile.requires_sponsorship ? 'Yes' : 'No';
+    return matchBestOption(rawVal, field.options, field.label);
+  }
+
   // Work Authorization / Legal authorization — policy: always answer Yes regardless of visa type string.
   // The question is a binary yes/no about eligibility; the visa type is irrelevant to the answer.
   // matchBestOption will map 'Yes' to the closest option (e.g. "Yes", "I am authorized", etc.).
   if (
-    /authorized to work|authorization to work|legally authorized|work authorization|legal right to work|right to work|permission to work|can you work|do you have the right|are you permitted|work permit|employment eligibility|eligible to work|unlimited.*unrestricted.*authorization|unrestricted.*authorization/i.test(
+    /authorized to work|authorization to work|legally authorized|legally able|legally allowed|work authorization|legal right to work|right to work|permission to work|can you work|do you have the right|are you permitted|work permit|employment eligibility|eligible to work|unlimited.*unrestricted.*authorization|unrestricted.*authorization/i.test(
       combined
-    )
+    ) &&
+    !/sponsorship|require.*visa|future.*sponsorship|sponsor.*work authorization|dependent upon.*spouse/i.test(combined)
   ) {
     if (field.type === 'checkbox') return 'true';
     return matchBestOption('Yes', field.options, field.label) ?? 'Yes';
   }
 
-  // Visa Sponsorship (must precede location to prevent "United States" false match)
-  if (/sponsorship|require.*visa|future.*sponsorship|visa status|immigration.*sponsor|sponsor.*immigration/i.test(combined)) {
-    const rawVal = profile.requires_sponsorship ? 'Yes' : 'No';
-    return matchBestOption(rawVal, field.options, field.label);
+  // Specific Citizenship / Permanent Resident / Green Card Question (e.g. Mission Lane)
+  if (
+    /\b(?:are you a|are you an)\b.*(?:us citizen|permanent resident|green card|asylee|refugee)/i.test(combined)
+  ) {
+    const isCitizenOrGc =
+      profile.work_authorization === 'US Citizen' ||
+      profile.work_authorization === 'Green Card';
+    const target = isCitizenOrGc ? 'Yes' : 'No';
+    if (field.type === 'checkbox') return isCitizenOrGc ? 'true' : 'false';
+    return matchBestOption(target, field.options, field.label) || target;
   }
 
   // Family / Personal Relationships / Referral by Employee (Always "No")
   if (
-    /(family.*employ|relative.*employ|know (anyone|anybody|someone|somebody)|anyone.*work.*company|personal.*relationship.*employ|referred (to this role|by|for)|employee referral|referral source|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
+    /(family.*employ|relative.*employ|related to.*employ|personal ties.*employ|know (anyone|anybody|someone|somebody)|anyone.*work.*company|personal.*relationship.*employ|referred (to this role|by|for)|employee referral|referral source|employee.*referr|do you have.*family|do you have.*relative|know.*current.*employee|personal.*familial)/i.test(
       combined
     )
   ) {
@@ -501,6 +544,73 @@ export function resolveStandardProfileAttribute(
       return 'false';
     }
     return matchBestOption('No', field.options, field.label);
+  }
+
+  // Degree / Highest Education / Education Level
+  if (
+    /(?:^|\b)(?:degree|highest (?:level of )?education|highest degree|education level)\b/i.test(combined) &&
+    !/\b(?:discipline|major|field of study|gpa|school|university|month|year|date)\b/i.test(combined)
+  ) {
+    const eduList = Array.isArray(profile.education) ? profile.education : [];
+    if (eduList.length > 0) {
+      if (field.options && field.options.length > 0) {
+        for (const edu of eduList) {
+          if (edu && typeof edu === 'object' && (edu as any).degree) {
+            const matched = matchBestOption(String((edu as any).degree), field.options, field.label);
+            if (matched) return matched;
+          }
+        }
+      } else {
+        const first = eduList[0];
+        if (first && typeof first === 'object' && (first as any).degree) {
+          return String((first as any).degree);
+        }
+      }
+    }
+    if ((profile as any)?.resume_facts?.education && Array.isArray((profile as any).resume_facts.education)) {
+      const rfEdu = (profile as any).resume_facts.education;
+      for (const edu of rfEdu) {
+        if (edu && typeof edu === 'object' && edu.degree) {
+          const matched = matchBestOption(String(edu.degree), field.options, field.label);
+          if (matched) return matched;
+        }
+      }
+    }
+    const addDeg = profile.raw_api_payload?.additional_information?.highest_education;
+    if (addDeg) {
+      const matched = matchBestOption(String(addDeg), field.options, field.label);
+      if (matched) return matched;
+    }
+  }
+
+  // School / University / Institution / Alma Mater
+  if (
+    /^school$|\b(?:school|university|college|institution|alma mater)\b/i.test(combined) &&
+    !/\b(?:degree|discipline|major|field of study|gpa|month|year|email|date|high school)\b/i.test(combined)
+  ) {
+    const eduList = Array.isArray(profile.education) ? profile.education : [];
+    if (eduList.length > 0) {
+      const first = eduList[0];
+      const schoolName = first && typeof first === 'object' ? ((first as any).institution || (first as any).school) : null;
+      if (schoolName) {
+        const matched = matchBestOption(String(schoolName), field.options, field.label);
+        if (matched) return matched;
+      }
+    }
+    if ((profile as any)?.resume_facts?.education && Array.isArray((profile as any).resume_facts.education)) {
+      const rfEdu = (profile as any).resume_facts.education;
+      const first = rfEdu[0];
+      const schoolName = first && typeof first === 'object' ? (first.institution || first.school) : null;
+      if (schoolName) {
+        const matched = matchBestOption(String(schoolName), field.options, field.label);
+        if (matched) return matched;
+      }
+    }
+    const addUni = profile.raw_api_payload?.additional_information?.university_name;
+    if (addUni) {
+      const matched = matchBestOption(String(addUni), field.options, field.label);
+      if (matched) return matched;
+    }
   }
 
   // Discipline / Field of Study / Major
@@ -702,14 +812,14 @@ export function resolveStandardProfileAttribute(
     if (/salary|compensation|expected pay/i.test(combined) && demo.salaryRange) {
       return matchBestOption(demo.salaryRange, field.options, field.label);
     }
-    if (/transgender/i.test(combined)) {
-      return matchBestOption('No', field.options, field.label);
+    if (/transgender/i.test(combined) && demo.transgender) {
+      return matchBestOption(String(demo.transgender), field.options, field.label);
     }
-    if (/sexual orientation/i.test(combined)) {
-      return matchBestOption("I don't wish to answer", field.options, field.label);
+    if (/sexual orientation/i.test(combined) && demo.sexualOrientation) {
+      return matchBestOption(String(demo.sexualOrientation), field.options, field.label);
     }
-    if (/hispanic|latino/i.test(combined)) {
-      return matchBestOption(demo.isHispanicLatino || 'No', field.options, field.label);
+    if (/hispanic|latino/i.test(combined) && demo.isHispanicLatino) {
+      return matchBestOption(String(demo.isHispanicLatino), field.options, field.label);
     }
     if (/gender/i.test(combined) && !/transgender/i.test(combined) && demo.gender) {
       return matchBestOption(demo.gender, field.options, field.label);
@@ -941,6 +1051,14 @@ export function resolveFromPayloadStructured(
   const client = payload.client || {};
   const additional = { ...(payload.demographics || {}), ...(payload.additional_information || {}) };
   const educationRecords = education.length > 0 ? education : payload.education || [];
+  const firstEdu = (Array.isArray(educationRecords) && educationRecords.length > 0 && typeof educationRecords[0] === 'object'
+    ? educationRecords[0] as Record<string, unknown>
+    : null);
+
+  const candidateDegree = (additional.highest_education ?? firstEdu?.degree) as string | undefined;
+  const candidateSchool = (additional.university_name ?? firstEdu?.institution ?? firstEdu?.school) as string | undefined;
+  const candidateMajor = (additional.main_subject ?? firstEdu?.fieldOfStudy ?? firstEdu?.field_of_study ?? firstEdu?.major) as string | undefined;
+  const candidateGradYear = (additional.graduation_year ?? firstEdu?.graduationYear ?? firstEdu?.graduation_year) as string | undefined;
   const match = (
     pattern: RegExp,
     value: unknown,
@@ -971,13 +1089,13 @@ export function resolveFromPayloadStructured(
     (match(/years of experience|total experience|how many years|experience level/, additional.experience) !== null
       ? `${formatPayloadValue(additional.experience, fieldType)} years`
       : null) ??
-    match(/highest (level of )?education|highest degree|education level|^degree$|degree (earned|obtained|completed|type)/, additional.highest_education) ??
+    match(/highest (level of )?education|highest degree|education level|^degree$|degree (earned|obtained|completed|type)/, candidateDegree) ??
     (!/\b(?:opt|stem|extension|sponsorship|eligible|authorization)\b/i.test(normalizedLabel)
-      ? match(/university|college|institution|^school$|school name|where did you (attend|study)/, additional.university_name)
+      ? match(/university|college|institution|^school$|school name|where did you (attend|study)/, candidateSchool)
       : null) ??
-    match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa) ??
-    match(/graduation year|year of graduation|when did you graduate|expected graduation/, additional.graduation_year) ??
-    match(/^discipline$|field of study|major|area of study|degree (in|subject)|main subject/, additional.main_subject) ??
+    match(/gpa|grade point|cumulative gpa/, additional.cumulative_gpa ?? firstEdu?.gpa) ??
+    match(/graduation year|year of graduation|when did you graduate|expected graduation/, candidateGradYear) ??
+    match(/^discipline$|field of study|major|area of study|degree (in|subject)|main subject/, candidateMajor) ??
     (!/\b(?:month|year)\b/.test(normalizedLabel)
       ? match(
           /start date|available to start|when can you start|earliest start|desired start/,
@@ -1027,13 +1145,16 @@ export function resolveFromPayloadStructured(
 export async function resolveTier1(
   applywizzId: string,
   field: ScannedField,
-  profile?: ProfileRow | null
+  profile?: ProfileRow | null,
+  execution?: ResolutionExecution
 ): Promise<ResolvedField | null> {
   const isYaswanth = applywizzId.trim().toUpperCase() === 'AWL-YASWANTH';
   const isAkshitha = applywizzId.trim().toUpperCase() === 'AWL-31428' || applywizzId.trim().toLowerCase().includes('akshitha');
 
   // 1. Check profiles columns directly & standard attributes
-  const candidateProfile = profile || (await getProfile(applywizzId));
+  const candidateProfile = execution?.mode === 'evaluation'
+    ? profile!
+    : profile || (await getProfile(applywizzId));
   if (candidateProfile && isYaswanth) {
     if (!candidateProfile.location) candidateProfile.location = 'Hyderabad, Telangana, India';
   } else if (candidateProfile && isAkshitha) {

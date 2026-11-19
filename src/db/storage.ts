@@ -2,10 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getDbClient, isSupabaseConfigured } from './client.js';
+import { isSandboxMode } from './sandboxClient.js';
 import { getProfile } from './profiles.js';
 import config from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
-import { resolveResumeDomain, buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
+import { resolveResumeDomain, buildResumeStorageFilename } from '../utils/resumeNaming.js';
 
 const log = createLogger('Storage');
 
@@ -58,9 +59,91 @@ export function resumeStorageFilename(
   applywizzId: string,
   profile?: ResumeNamingProfile
 ): string {
-  const clientName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || applywizzId;
-  const role = profile?.jobTitle || profile?.workExperience?.[0]?.title || '';
-  return buildResumeSubmissionFilename(clientName, role);
+  return buildResumeStorageFilename(profile, applywizzId);
+}
+
+/**
+ * Purges all files in the Supabase Storage resumes bucket and clears the local resumes cache.
+ */
+export async function purgeResumesBucket(options?: {
+  resumesDir?: string;
+}): Promise<{ deletedCount: number; clearedLocalCount: number }> {
+  let deletedCount = 0;
+  let clearedLocalCount = 0;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      let hasMore = true;
+      let offset = 0;
+      const pageSize = 1000;
+
+      while (hasMore) {
+        const { data: files, error: listError } = await supabase.storage
+          .from(RESUMES_BUCKET)
+          .list('', { limit: pageSize, offset, sortBy: { column: 'name', order: 'asc' } });
+
+        if (listError) {
+          log.warn(`[Storage] Failed to list resumes bucket for purge: ${listError.message}`);
+          break;
+        }
+
+        if (!files || files.length === 0) {
+          break;
+        }
+
+        const validFileNames = files
+          .map((f: any) => f.name)
+          .filter((name: string) => name && !name.startsWith('.') && name !== '.emptyFolderPlaceholder');
+
+        if (validFileNames.length > 0) {
+          const { error: removeError } = await supabase.storage
+            .from(RESUMES_BUCKET)
+            .remove(validFileNames);
+
+          if (removeError) {
+            log.warn(`[Storage] Failed to remove batch of ${validFileNames.length} resumes: ${removeError.message}`);
+          } else {
+            deletedCount += validFileNames.length;
+          }
+        }
+
+        if (files.length < pageSize) {
+          hasMore = false;
+        } else {
+          offset += pageSize;
+        }
+      }
+      log.info(`[Storage] 🧹 Purged ${deletedCount} objects from Supabase Storage '${RESUMES_BUCKET}' bucket.`);
+    } catch (err: any) {
+      log.warn(`[Storage] Error purging Supabase resumes bucket: ${err.message}`);
+    }
+  }
+
+  // Clear local resumes cache folder
+  try {
+    const resumesDir = path.resolve(process.cwd(), options?.resumesDir || config.RESUMES_DIR || 'resumes');
+    if (fs.existsSync(resumesDir)) {
+      const entries = fs.readdirSync(resumesDir);
+      for (const entry of entries) {
+        if (
+          entry.toLowerCase().endsWith('.pdf') ||
+          entry.toLowerCase().endsWith('.doc') ||
+          entry.toLowerCase().endsWith('.docx')
+        ) {
+          try {
+            fs.unlinkSync(path.join(resumesDir, entry));
+            clearedLocalCount++;
+          } catch {}
+        }
+      }
+      log.info(`[Storage] 🧹 Cleared ${clearedLocalCount} files from local resumes folder.`);
+    }
+  } catch (err: any) {
+    log.warn(`[Storage] Error clearing local resumes folder: ${err.message}`);
+  }
+
+  return { deletedCount, clearedLocalCount };
 }
 
 /**
@@ -597,5 +680,163 @@ export async function deleteResumeTempFile(filePath: string): Promise<void> {
     }
   } catch (err: any) {
     log.warn(`[Storage] Failed to delete temp resume ${filePath}: ${err.message}`);
+  }
+}
+
+/**
+ * Sanitizes an operator-uploaded filename for storage, removing directory traversal and unsafe characters.
+ */
+export function sanitizeUploadFilename(filename: string): string {
+  const base = path.basename(filename || 'uploaded_document');
+  const ext = path.extname(base);
+  const nameWithoutExt = path.basename(base, ext);
+  const cleanName = nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const cleanExt = ext.replace(/[^a-zA-Z0-9.]/g, '');
+  return `${cleanName || 'document'}${cleanExt}`;
+}
+
+/**
+ * Uploads an operator-supplied document into Supabase Storage 'resumes' bucket under operator_uploads/,
+ * with local filesystem fallback for sandbox / offline mode.
+ */
+export async function uploadOperatorFieldFile(
+  applywizzId: string,
+  applicationId: string,
+  fieldId: string,
+  filename: string,
+  buffer: Buffer,
+  mimeType: string = 'application/octet-stream',
+  dbClient?: any
+): Promise<{ storagePath: string; url?: string }> {
+  const safeFilename = sanitizeUploadFilename(filename);
+  const cleanApplywizz = (applywizzId || 'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const cleanAppId = (applicationId || 'app').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const cleanField = (fieldId || 'file').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  const relativeObjectPath = `operator_uploads/${cleanApplywizz}/${cleanAppId}_${cleanField}_${safeFilename}`;
+  const fullStoragePath = relativeObjectPath;
+
+  if (isSupabaseConfigured() && !isSandboxMode()) {
+    try {
+      const supabase = dbClient || getDbClient();
+      const { error } = await supabase.storage
+        .from(RESUMES_BUCKET)
+        .upload(relativeObjectPath, buffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (!error) {
+        log.info(`[Storage] Uploaded operator file to Supabase Storage: ${relativeObjectPath}`);
+        const signedUrl = await getSignedProofUrl(RESUMES_BUCKET, relativeObjectPath);
+        return { storagePath: fullStoragePath, url: signedUrl || undefined };
+      }
+      log.warn(`[Storage] Supabase upload failed (${error.message}), falling back to local file`);
+    } catch (err: any) {
+      log.warn(`[Storage] Error uploading to Supabase Storage: ${err.message}`);
+    }
+  }
+
+  // Local filesystem fallback
+  const localDirCandidates = [
+    path.resolve(process.cwd(), 'resumes', 'operator_uploads', cleanApplywizz),
+    path.join(os.tmpdir(), 'resumes', 'operator_uploads', cleanApplywizz),
+  ];
+
+  let localSavedPath = '';
+  for (const localDir of localDirCandidates) {
+    try {
+      fs.mkdirSync(localDir, { recursive: true });
+      const localFilePath = path.join(localDir, `${cleanAppId}_${cleanField}_${safeFilename}`);
+      fs.writeFileSync(localFilePath, buffer);
+      localSavedPath = localFilePath;
+      log.info(`[Storage] Saved operator file locally: ${localFilePath}`);
+      break;
+    } catch (err: any) {
+      log.warn(`[Storage] Could not write to ${localDir}: ${err.message}`);
+    }
+  }
+
+  if (!localSavedPath) {
+    throw new Error(`Failed to save operator file locally in any candidate directory`);
+  }
+
+  return { storagePath: fullStoragePath };
+}
+
+/**
+ * Downloads an operator-uploaded file given its relative storage path.
+ * Checks local filesystem cache first, then Supabase Storage.
+ */
+export async function downloadOperatorFieldFile(
+  storagePath: string,
+  dbClient?: any
+): Promise<Buffer> {
+  if (!storagePath) {
+    throw new Error('No storagePath provided for downloadOperatorFieldFile');
+  }
+
+  const cleanPath = storagePath.replace(/^resumes\//, '').trim();
+
+  // 1. Check local directory fallback
+  const localCandidates = [
+    path.resolve(process.cwd(), 'resumes', cleanPath),
+    path.resolve(process.cwd(), cleanPath),
+    path.join(os.tmpdir(), 'resumes', cleanPath),
+    path.join(os.tmpdir(), cleanPath),
+  ];
+  for (const candidate of localCandidates) {
+    if (fs.existsSync(candidate)) {
+      return fs.readFileSync(candidate);
+    }
+  }
+
+  // 2. Fetch from Supabase Storage
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = dbClient || getDbClient();
+      const { data, error } = await supabase.storage.from(RESUMES_BUCKET).download(cleanPath);
+      if (!error && data) {
+        return Buffer.from(await data.arrayBuffer());
+      }
+      if (error) {
+        log.warn(`[Storage] Supabase download error for ${cleanPath}: ${error.message}`);
+      }
+    } catch (err: any) {
+      log.warn(`[Storage] Error downloading operator file from Supabase: ${err.message}`);
+    }
+  }
+
+  throw new Error(`Could not find operator uploaded file at storage path: ${storagePath}`);
+}
+
+/**
+ * Updates a candidate profile's resume_storage_path in Supabase when an operator uploads a resume.
+ */
+export async function syncUploadedResumeToProfile(
+  applywizzId: string,
+  storagePath: string,
+  dbClient?: any
+): Promise<void> {
+  if (!applywizzId || !storagePath) return;
+  try {
+    const supabase = dbClient || (isSupabaseConfigured() ? getDbClient() : null);
+    if (!supabase) return;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        resume_storage_path: storagePath,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('applywizz_id', applywizzId);
+
+    if (error) {
+      log.warn(`[Storage] Failed to update profile resume_storage_path for ${applywizzId}: ${error.message}`);
+    } else {
+      log.info(`[Storage] Synchronized uploaded resume to candidate profile: ${applywizzId} -> ${storagePath}`);
+    }
+  } catch (err: any) {
+    log.warn(`[Storage] Error updating profile resume_storage_path: ${err.message}`);
   }
 }

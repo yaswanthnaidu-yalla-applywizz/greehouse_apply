@@ -5,6 +5,7 @@
 import { SubmitterPool } from './submitterPool.js';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { assertSupabaseReady } from '../db/client.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 
 const log = createLogger('Queue Worker');
 
@@ -23,6 +24,10 @@ export class SubmissionQueueDaemon {
   }
 
   public start(): void {
+    if (isSandboxTestMode()) {
+      log.info('[QueueWorker] Disabled in sandbox test mode.');
+      return;
+    }
     const poolSize = parseInt(process.env.SUBMISSION_POOL_SIZE ?? '3', 10);
     log.info(`[QueueWorker] Starting with ${poolSize} submission lanes`);
     void assertSupabaseReady();

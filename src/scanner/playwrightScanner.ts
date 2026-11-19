@@ -32,6 +32,7 @@ import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
 import { enrichMissingChoiceOptions } from './liveChoiceOptions.js';
 import { emitFailureDiagnostic } from '../utils/failureDiagnostics.js';
+import type { FailureDiagnosticInput } from '../types/failureDiagnostics.js';
 
 const log = createLogger('Playwright Scanner');
 
@@ -80,6 +81,12 @@ export interface PlaywrightScannerOptions {
    * Optional progress callback invoked as URLs finish scanning.
    */
   onJobScanned?: (job: ScannedJobTemplate, index: number, total: number) => void;
+
+  /** Override diagnostic persistence when running behind an isolated boundary. */
+  onFailureDiagnostic?: (input: FailureDiagnosticInput) => Promise<void>;
+
+  /** Override process termination when a caller must surface scanner launch failures. */
+  onFatal?: (module: string, message: string, error?: unknown) => never;
 }
 
 /**
@@ -306,6 +313,72 @@ async function markHiddenRequiredFields(page: Page, fields: ScannedField[]): Pro
   }));
 }
 
+export async function extractCustomDemographicSurveys(page: Page): Promise<ScannedField[]> {
+  const customSurveyFields = await page.evaluate(() => {
+    const containers = Array.from(
+      document.querySelectorAll(
+        'div[data-qa*="demographic"], div[data-qa*="survey"], div[class*="demographic" i], div[id*="demographic" i], fieldset[class*="demographic" i], fieldset[class*="eeoc" i], div.custom-eeoc, section[class*="demographic" i]'
+      )
+    );
+    const scanned: Array<{
+      name: string;
+      label: string;
+      type: string;
+      isRequired: boolean;
+      options?: string[];
+    }> = [];
+
+    for (const container of containers) {
+      const fieldContainers = container.querySelectorAll('.field, [data-field-id], [class*="question"], [class*="form-group"]');
+      const targetEls = fieldContainers.length > 0 ? Array.from(fieldContainers) : [container];
+
+      for (const fc of targetEls) {
+        const select = fc.querySelector('select');
+        const radios = Array.from(fc.querySelectorAll('input[type="radio"]'));
+        const labelEl = fc.querySelector('label, legend, [class*="label"]');
+        const rawLabel = labelEl ? (labelEl.textContent || '').trim().replace(/\s*\*\s*$/, '') : '';
+        const isReq =
+          (labelEl && (labelEl.textContent || '').includes('*')) ||
+          !!fc.querySelector('[class*="required"], [aria-required="true"], input[required], select[required]');
+
+        if (select) {
+          const name = select.name || select.id;
+          if (!name) continue;
+          const options = Array.from(select.options)
+            .map((o) => o.text.trim())
+            .filter((t) => t && !/^(select\.\.\.|select|choose|\s*)$/i.test(t));
+          scanned.push({ name, label: rawLabel, type: 'select', isRequired: isReq, options });
+        } else if (radios.length > 0) {
+          const name = (radios[0] as HTMLInputElement).name;
+          if (!name) continue;
+          const options = radios
+            .map((r) => {
+              const lbl = r.closest('label') || document.querySelector(`label[for="${r.id}"]`);
+              return lbl ? (lbl.textContent || '').trim() : (r as HTMLInputElement).value;
+            })
+            .filter(Boolean);
+          scanned.push({ name, label: rawLabel, type: 'radio', isRequired: isReq, options });
+        }
+      }
+    }
+    return scanned;
+  }).catch(() => []);
+
+  return customSurveyFields.map((sf) => ({
+    fieldId: generateFieldId(sf.name, '', sf.label),
+    name: sf.name,
+    type: sf.type as ScannedFieldType,
+    label: sanitizeLabelText(sf.label) || sf.name,
+    isRequired: sf.isRequired,
+    options: sf.options && sf.options.length > 0 ? sf.options : undefined,
+    ...(sf.options && sf.options.length > 0 ? { optionsComplete: true } : {}),
+    metadata: {
+      section: 'Demographics',
+      selector: `select[name="${sf.name}"], input[name="${sf.name}"]`,
+    },
+  }));
+}
+
 /**
  * PlaywrightScanner manages a pool of headless Chromium workers to inspect
  * unique Greenhouse job postings and extract form structures.
@@ -317,6 +390,8 @@ export class PlaywrightScanner {
   private readonly maxJitterMs: number;
   private readonly headless: boolean;
   private readonly onJobScanned?: (job: ScannedJobTemplate, index: number, total: number) => void;
+  private readonly onFailureDiagnostic: (input: FailureDiagnosticInput) => Promise<void>;
+  private readonly onFatal: (module: string, message: string, error?: unknown) => never;
 
   /**
    * Initializes the scanner with runtime options.
@@ -330,6 +405,8 @@ export class PlaywrightScanner {
     this.maxJitterMs = options.maxJitterMs ?? config.SCANNER_JITTER_MAX_MS;
     this.headless = process.env.RAILWAY_ENV === 'true' ? true : (options.headless ?? true);
     this.onJobScanned = options.onJobScanned;
+    this.onFailureDiagnostic = options.onFailureDiagnostic ?? emitFailureDiagnostic;
+    this.onFatal = options.onFatal ?? haltWithDevAlert;
   }
 
   /**
@@ -373,7 +450,7 @@ export class PlaywrightScanner {
           ],
         });
       } catch (launchErr: any) {
-        await emitFailureDiagnostic({
+        await this.onFailureDiagnostic({
           category: 'SCAN_PLAYWRIGHT_LAUNCH',
           stage: 'browser_launch',
           reason: `Playwright browser launch failed: ${launchErr?.message || String(launchErr)}`,
@@ -381,7 +458,7 @@ export class PlaywrightScanner {
           isTerminal: true,
           isRetryable: false,
         }).catch(() => {});
-        haltWithDevAlert(
+        this.onFatal(
           'Scanner',
           'Playwright failed to launch — check RAILWAY_ENV and browser binary',
           launchErr
@@ -511,10 +588,32 @@ export class PlaywrightScanner {
       const currentEmbeddedUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
       const pageHostname = new URL(page.url()).hostname.toLowerCase();
       const isGreenhousePage = pageHostname === 'greenhouse.io' || pageHostname.endsWith('.greenhouse.io');
-      const parentForm = !isGreenhousePage ? await page.$('form').catch(() => null) : null;
-      const embeddedApplicationUrl = currentEmbeddedUrl || (parentForm
-        ? await waitForEmbeddedGreenhouseApplicationUrl(page, EMBEDDED_GREENHOUSE_FRAME_WAIT_MS)
-        : null);
+      
+      let embeddedApplicationUrl = currentEmbeddedUrl;
+      if (!embeddedApplicationUrl && !isGreenhousePage) {
+        const currentParsed = new URL(page.url());
+        const hasGhJid = currentParsed.searchParams.has('gh_jid');
+        const hasIframe = await page.$('iframe').catch(() => null);
+        const parentForm = await page.$('form').catch(() => null);
+
+        if (hasGhJid || !!hasIframe || !!parentForm) {
+          embeddedApplicationUrl = await waitForEmbeddedGreenhouseApplicationUrl(
+            page,
+            EMBEDDED_GREENHOUSE_FRAME_WAIT_MS
+          );
+        }
+
+        if (!embeddedApplicationUrl) {
+          const directIframeSrc = await page.evaluate(() => {
+            const el = document.querySelector('iframe[src*="greenhouse.io"], iframe[src*="grnh.se"]');
+            return el ? el.getAttribute('src') : null;
+          }).catch(() => null);
+          if (directIframeSrc && directIframeSrc.startsWith('http')) {
+            embeddedApplicationUrl = directIframeSrc;
+          }
+        }
+      }
+
       if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
         await page.goto(embeddedApplicationUrl, {
           waitUntil: 'domcontentloaded',
@@ -526,10 +625,24 @@ export class PlaywrightScanner {
       // Check if redirected to generic index page without job path
       const currentUrl = page.url();
       if (!currentUrl.includes('/jobs/') && !currentUrl.includes('/embed/job_app') && !currentUrl.includes('job_app')) {
-        const formCheck = await page.$('form#application_form, form#app_form, form');
+        let formCheck = await page.$('form#application_form, form#app_form, form');
+        if (!formCheck) {
+          // Allow client-side React/Next.js hydration settling on custom career domains
+          formCheck = await page.waitForSelector('form#application_form, form#app_form, form, iframe[src*="greenhouse"]', { timeout: 3500 }).catch(() => null);
+        }
         if (!formCheck) {
           template.isExpired = true;
           return template;
+        } else if (!isGreenhousePage) {
+          // Re-check if an embedded Greenhouse iframe mounted during hydration
+          const lateEmbeddedUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+          if (lateEmbeddedUrl && lateEmbeddedUrl !== page.url()) {
+            await page.goto(lateEmbeddedUrl, {
+              waitUntil: 'domcontentloaded',
+              timeout: this.timeoutMs,
+            });
+            template.jobUrl = lateEmbeddedUrl;
+          }
         }
       }
 
@@ -699,6 +812,13 @@ export class PlaywrightScanner {
           }
         }
 
+        const customSurveys = await extractCustomDemographicSurveys(page);
+        for (const cs of customSurveys) {
+          if (!fields.some((existing) => existing.name === cs.name || existing.fieldId === cs.fieldId)) {
+            fields.push(cs);
+          }
+        }
+
         if (fields.length > 0) {
           const fieldsWithMetadata = await captureFormControlMetadata(page, fields);
           const fieldsWithRequiredState = await markHiddenRequiredFields(page, fieldsWithMetadata);
@@ -800,7 +920,7 @@ export class PlaywrightScanner {
           ? 'SCAN_PLAYWRIGHT_NAVIGATE'
           : 'SCAN_FIELD_EXTRACTION';
 
-      await emitFailureDiagnostic({
+      await this.onFailureDiagnostic({
         category,
         stage: 'url_scan',
         reason: error?.message || 'Error scanning job posting URL',
@@ -931,16 +1051,7 @@ export class PlaywrightScanner {
           // Transaction rollback & verification: restore baseline
           const restored = await restoreCascadeBaseline(page, baseline);
           if (!restored) {
-            log.warn(
-              `[Playwright Scanner] ⚠️ Cascade probe restore failed for ${parentField.fieldId} (${optVal}). Discarding probe.`
-            );
-            await emitFailureDiagnostic({
-              category: 'SCAN_FIELD_EXTRACTION',
-              stage: 'cascade_probing',
-              reason: `Cascade probe restoration failed for ${parentField.fieldId}`,
-              isTerminal: false,
-              isRetryable: true,
-            }).catch(() => {});
+            // Non-terminal discard: DOM does not allow pristine rollback without reload; safely discard probe
             continue;
           }
 

@@ -14,9 +14,10 @@ export interface ProxyConfig {
 }
 
 export interface ProxyOptions {
-  provider?: 'massive' | 'dataimpulse';
+  provider?: 'massive' | 'dataimpulse' | 'apify';
   login?: string;
   password?: string;
+  apifyString?: string;
   host?: string;
   port?: number | string;
   massiveUsername?: string;
@@ -31,6 +32,32 @@ export class InvalidCountryError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'InvalidCountryError';
+  }
+}
+
+function parseApifyProxyUrl(value: string | undefined): { server: string; username: string; password: string } {
+  try {
+    if (!value) throw new Error();
+    const url = new URL(value);
+    const authority = value.match(/^http:\/\/[^/@]+@(?:\[[^\]]+\]|[^:/?#]+):(\d+)\/?$/i);
+    if (
+      url.protocol !== 'http:' ||
+      !authority ||
+      Number(authority[1]) < 1 ||
+      Number(authority[1]) > 65535 ||
+      !url.hostname ||
+      !url.username ||
+      !url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    ) throw new Error();
+    const username = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    if (!username.trim() || !password.trim()) throw new Error();
+    return { server: `http://${url.hostname}:${authority[1]}`, username, password };
+  } catch {
+    throw new Error('Ashby Apify proxy requires APIFY_STRING as http://username:password@hostname:port.');
   }
 }
 
@@ -105,6 +132,15 @@ const PHONE_PREFIX_TO_ISO: Record<string, string> = {
   '48': 'pl',
 };
 
+export const US_STATE_CODES = new Set([
+  'al', 'ak', 'az', 'ar', 'ca', 'co', 'ct', 'de', 'fl', 'ga',
+  'hi', 'id', 'il', 'in', 'ia', 'ks', 'ky', 'la', 'me', 'md',
+  'ma', 'mi', 'mn', 'ms', 'mo', 'mt', 'ne', 'nv', 'nh', 'nj',
+  'nm', 'ny', 'nc', 'nd', 'oh', 'ok', 'or', 'pa', 'ri', 'sc',
+  'sd', 'tn', 'tx', 'ut', 'vt', 'va', 'wa', 'wv', 'wi', 'wy',
+  'dc', 'pr',
+]);
+
 /**
  * Normalizes country strings to ISO 2-letter country codes for DataImpulse.
  * Rejects invalid or unresolvable values by throwing InvalidCountryError (fail-closed).
@@ -136,11 +172,17 @@ export function extractCountryFromLocation(location?: string | null): string | n
 
   // Check the last segment first
   const lastPart = parts[parts.length - 1];
+  if (US_STATE_CODES.has(lastPart.toLowerCase())) {
+    return 'us';
+  }
   try {
     return parseCountryCode(lastPart);
   } catch {
     // If last part is not a country, try other parts in reverse order
     for (let i = parts.length - 2; i >= 0; i--) {
+      if (US_STATE_CODES.has(parts[i].toLowerCase())) {
+        return 'us';
+      }
       try {
         return parseCountryCode(parts[i]);
       } catch {
@@ -249,6 +291,7 @@ export function buildAshbyProxyConfig(
   const preferDataImpulse =
     requestedProvider === 'dataimpulse' ||
     (hasExplicitDataImpulseOptions && !options.massiveUsername && !options.massivePassword);
+  const apifyString = options.apifyString ?? process.env.APIFY_STRING;
 
   const massiveUser =
     options.massiveUsername !== undefined
@@ -267,6 +310,17 @@ export function buildAshbyProxyConfig(
     process.env.MASSIVE_ENDPOINT ||
     'https://network.joinmassive.com:65535'
   ).trim();
+
+  if (requestedProvider === 'apify') {
+    const proxy = parseApifyProxyUrl(apifyString);
+    const countryCode = resolveCountryCode(profile).toUpperCase();
+    const sessionId = randomBytes(16).toString('hex');
+    return {
+      server: proxy.server,
+      username: `groups-RESIDENTIAL,country-${countryCode},session-${sessionId}`,
+      password: proxy.password,
+    };
+  }
 
   if (!preferDataImpulse && massiveUser && massivePass) {
     const countryCode = resolveCountryCode(profile).toUpperCase();
@@ -338,6 +392,8 @@ export interface ProxyPreflightResult {
   exitIpHash?: string;
   error?: string;
   outcome?: 'success' | 'http_status' | 'timeout' | 'invalid_ip' | 'country_mismatch' | 'network_error';
+  latencyMs?: number;
+  errorKind?: 'tcp_reset' | 'http_block' | 'timeout' | 'unknown';
 }
 
 /**
@@ -355,11 +411,13 @@ export async function verifyProxyPreflight(
   options: { timeoutMs?: number; endpointUrl?: string } = {}
 ): Promise<ProxyPreflightResult> {
   const timeoutMs = options.timeoutMs ?? 3000;
-  const primaryUrl = options.endpointUrl || 'https://ipapi.co/json/';
+  const primaryUrl = options.endpointUrl || 'https://api64.ipify.org?format=json';
   // Retry HTTP 400 with another JSON IP endpoint that does not need query parameters.
   const fallbackUrls = ['https://ipwho.is/'];
   const probeUrls = [primaryUrl, ...fallbackUrls.filter((u) => u !== primaryUrl)];
   let outcome: ProxyPreflightResult['outcome'];
+  let lastStatus = 0;
+  const startTime = Date.now();
 
   let timer: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -370,7 +428,6 @@ export async function verifyProxyPreflight(
 
   try {
     const probePromise = (async (): Promise<ProxyPreflightResult> => {
-      let lastStatus = 0;
       for (const url of probeUrls) {
         const response = await page.request.get(url, { timeout: timeoutMs });
         lastStatus = response.status();
@@ -380,7 +437,9 @@ export async function verifyProxyPreflight(
             continue;
           }
           outcome = 'http_status';
-          throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
+          const error: any = new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
+          error.status = lastStatus;
+          throw error;
         }
         const data = await response.json();
         const ip = data?.ip || data?.query;
@@ -412,6 +471,7 @@ export async function verifyProxyPreflight(
           success: true,
           exitIpHash,
           outcome: 'success',
+          latencyMs: Date.now() - startTime,
         };
       }
       throw new Error(`Preflight probe failed with HTTP status ${lastStatus}`);
@@ -419,11 +479,24 @@ export async function verifyProxyPreflight(
 
     return await Promise.race([probePromise, timeoutPromise]);
   } catch (err: any) {
+    const latencyMs = Date.now() - startTime;
     outcome ??= /timed out/i.test(err?.message || '') ? 'timeout' : 'network_error';
+
+    let errorKind: ProxyPreflightResult['errorKind'] = 'unknown';
+    if (outcome === 'timeout' || /timed out|timeout/i.test(err?.message || '')) {
+      errorKind = 'timeout';
+    } else if (err?.status === 403 || lastStatus === 403 || /403|forbidden|blocked/i.test(err?.message || '')) {
+      errorKind = 'http_block';
+    } else if (/econnrefused|econnreset|socket hang up|connection refused|reset/i.test(err?.message || '')) {
+      errorKind = 'tcp_reset';
+    }
+
     return {
       success: false,
       error: err?.message || 'Preflight probe failed',
       outcome,
+      latencyMs,
+      errorKind,
     };
   } finally {
     if (timer) {

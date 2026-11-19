@@ -60,12 +60,12 @@ describe('End-to-End Verification: Ingest Run Latest Date Queue & Email Paginati
     assert.equal(parsed.toDate, '2026-11-05');
   });
 
-  it('4. Operator dashboard header UI strictly enforces latest batch badge and no date input', () => {
+  it('4. Operator dashboard header exposes a date picker and application date', () => {
     const headerPath = path.resolve(process.cwd(), 'dashboard/components/Header/DashboardHeader.tsx');
     const headerCode = fs.readFileSync(headerPath, 'utf8');
 
-    assert.doesNotMatch(headerCode, /<input[\s\S]*?type=["']date["']/);
+    assert.match(headerCode, /data-testid="application-date-picker"/);
     assert.match(headerCode, /data-testid="latest-batch-badge"/);
-    assert.match(headerCode, /Latest Batch/);
+    assert.match(headerCode, /Application Date/);
   });
 });

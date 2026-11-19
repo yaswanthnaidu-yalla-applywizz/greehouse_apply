@@ -9,15 +9,17 @@ import fs from 'fs';
 import * as fastCsv from 'fast-csv';
 import { createLogger, haltWithDevAlert } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
-import { isAshbyUrl } from './atsDetector.js';
+import { isAshbyUrl, isLeverUrl, isRipplingHost, toRipplingApplicationUrl } from './atsDetector.js';
 
 const log = createLogger('Csv Deduplicator');
 
 /**
- * Returns 'ashby' if URL matches Ashby patterns, else 'greenhouse'.
+ * Returns 'ashby' if URL matches Ashby patterns, 'lever' if Lever, else 'greenhouse'.
  */
-export function atsFromUrl(url: string): 'greenhouse' | 'ashby' {
-  return isAshbyUrl(url) ? 'ashby' : 'greenhouse';
+export function atsFromUrl(url: string): 'greenhouse' | 'ashby' | 'lever' {
+  if (isAshbyUrl(url)) return 'ashby';
+  if (isLeverUrl(url)) return 'lever';
+  return 'greenhouse';
 }
 
 /**
@@ -46,6 +48,11 @@ export interface DeduplicatorOptions {
    * Optional logger callback for progress updates.
    */
   onProgress?: (stats: { parsedRows: number; uniqueUrls: number; resolvedShortlinks: number }) => void;
+  onFatal?: (message: string, error?: unknown) => never;
+  resolveShortlinksBatch?: (
+    shortlinks: string[],
+    concurrency?: number,
+  ) => Promise<Map<string, string>>;
 }
 
 /**
@@ -88,6 +95,51 @@ export function normalizeAshbyUrl(rawUrl: string): string {
   } catch {
     return trimmed;
   }
+}
+
+/**
+ * Normalizes a Lever job URL by stripping tracking parameters,
+ * while preserving required path structure.
+ */
+export function normalizeLeverUrl(rawUrl: string): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return '';
+
+  try {
+    const urlObj = new URL(trimmed);
+    urlObj.protocol = 'https:';
+    urlObj.hostname = urlObj.hostname.toLowerCase();
+    urlObj.hash = '';
+
+    const keysToDelete: string[] = [];
+    urlObj.searchParams.forEach((_, key) => {
+      if (TRACKING_PARAM_REGEX.test(key) || key.toLowerCase().startsWith('lever-')) {
+        keysToDelete.push(key);
+      }
+    });
+    for (const key of keysToDelete) {
+      urlObj.searchParams.delete(key);
+    }
+
+    let pathname = urlObj.pathname;
+    while (pathname.length > 1 && pathname.endsWith('/')) {
+      pathname = pathname.slice(0, -1);
+    }
+    urlObj.pathname = pathname;
+
+    return urlObj.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
+/**
+ * Normalizes a supported Rippling job URL to its application route while preserving
+ * all query parameters, which may carry application state required by Rippling.
+ */
+export function normalizeRipplingUrl(rawUrl: string): string {
+  return toRipplingApplicationUrl(rawUrl) ?? '';
 }
 
 /**
@@ -236,7 +288,9 @@ export async function readAndDeduplicateUrls(
     resolveShortlinks = true,
     limit,
     onProgress,
+    resolveShortlinksBatch: resolveShortlinksBatchAdapter,
   } = options;
+  const fail = options.onFatal ?? ((message: string, error?: unknown): never => haltWithDevAlert('CSV', message, error));
 
   if (!fs.existsSync(csvPath)) {
     throw new Error(`Input CSV file not found at path: "${csvPath}"`);
@@ -244,21 +298,22 @@ export async function readAndDeduplicateUrls(
 
   const rawUrlsSet = new Set<string>();
   const shortlinkSet = new Set<string>();
+  const unsupportedRipplingUrls = new Set<string>();
   let parsedRows = 0;
 
   const compact = isPipelineCompactLogging();
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const stream = fs.createReadStream(csvPath);
 
     fastCsv
       .parseStream(stream, { headers: true, trim: true, ignoreEmpty: true })
       .on('error', (error) => {
-        haltWithDevAlert(
-          'CSV',
-          'CSV parse failure — malformed CSV or zero valid rows parsed',
-          error
-        );
+        try {
+          fail('CSV parse failure — malformed CSV or zero valid rows parsed', error);
+        } catch (failure) {
+          reject(failure);
+        }
       })
       .on('data', (row: Record<string, string>) => {
         parsedRows++;
@@ -266,12 +321,21 @@ export async function readAndDeduplicateUrls(
         // Case-insensitive column resolution for job URL
         const rawUrl = row.url || row.URL || row.Url || row.job_url || row['Job URL'] || '';
         if (rawUrl) {
-          const isAshby = isAshbyUrl(rawUrl);
-          const normalized = isAshby ? normalizeAshbyUrl(rawUrl) : normalizeGreenhouseUrl(rawUrl);
-          if (normalized) {
-            rawUrlsSet.add(normalized);
-            if (!isAshby && normalized.includes('grnh.se')) {
-              shortlinkSet.add(normalized);
+          if (isRipplingHost(rawUrl)) {
+            unsupportedRipplingUrls.add(rawUrl.trim());
+          } else {
+            const isAshby = isAshbyUrl(rawUrl);
+            const isLever = isLeverUrl(rawUrl);
+            const normalized = isAshby
+              ? normalizeAshbyUrl(rawUrl)
+              : isLever
+              ? normalizeLeverUrl(rawUrl)
+              : normalizeGreenhouseUrl(rawUrl);
+            if (normalized) {
+              rawUrlsSet.add(normalized);
+              if (!isAshby && !isLever && normalized.includes('grnh.se')) {
+                shortlinkSet.add(normalized);
+              }
             }
           }
         }
@@ -295,14 +359,18 @@ export async function readAndDeduplicateUrls(
   });
 
   if (parsedRows === 0) {
-    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+    fail('CSV parse failure — malformed CSV or zero valid rows parsed');
   }
 
   const finalUrlsSet = new Set<string>();
 
+  if (unsupportedRipplingUrls.size > 0) {
+    log.warn(`[CSV Deduplicator] Unsupported Rippling URLs excluded from this scan (${unsupportedRipplingUrls.size}): ${Array.from(unsupportedRipplingUrls).join(', ')}`);
+  }
+
   if (resolveShortlinks && shortlinkSet.size > 0) {
     const shortlinkList = Array.from(shortlinkSet);
-    const resolvedMap = await resolveShortlinksBatch(shortlinkList, concurrency);
+    const resolvedMap = await (resolveShortlinksBatchAdapter || resolveShortlinksBatch)(shortlinkList, concurrency);
 
     for (const url of rawUrlsSet) {
       if (resolvedMap.has(url)) {
@@ -320,7 +388,7 @@ export async function readAndDeduplicateUrls(
 
   const uniqueCanonicalUrls = Array.from(finalUrlsSet).filter(Boolean);
   if (uniqueCanonicalUrls.length === 0) {
-    haltWithDevAlert('CSV', 'CSV parse failure — malformed CSV or zero valid rows parsed');
+    fail('CSV parse failure — malformed CSV or zero valid rows parsed');
   }
   if (compact) {
     log.info(

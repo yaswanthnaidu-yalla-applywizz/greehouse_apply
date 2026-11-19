@@ -231,12 +231,16 @@ export function groupReadyForReviewByManager(
   }));
 }
 
-export function buildExecutiveInitialEmailHtml(summary: {
+export interface ExecutiveInitialSummary {
   totalTasks: number;
   clientCount: number;
   managers: ManagerTaskSummary[];
-}): string {
-  const { totalTasks, clientCount, managers } = summary;
+  totalApplications?: number;
+  totalQueued?: number;
+}
+
+export function buildExecutiveInitialEmailHtml(summary: ExecutiveInitialSummary): string {
+  const { totalTasks, clientCount, managers, totalApplications, totalQueued } = summary;
   const rowsHtml = managers
     .map(
       (m) => `
@@ -260,11 +264,21 @@ export function buildExecutiveInitialEmailHtml(summary: {
     )
     .join('');
 
+  const metricsHtml = (totalApplications !== undefined || totalQueued !== undefined)
+    ? `
+<div style="background: #f1f5f9; border-left: 4px solid #2563eb; padding: 12px 16px; border-radius: 4px; margin: 16px 0; font-size: 14px;">
+  ${totalApplications !== undefined ? `<span style="margin-right: 20px;">Total Applications Ingested: <strong>${totalApplications}</strong></span>` : ''}
+  ${totalQueued !== undefined ? `<span style="margin-right: 20px;">Currently Queued: <strong>${totalQueued}</strong></span>` : ''}
+  <span>Ready for Review: <strong>${totalTasks}</strong></span>
+</div>`
+    : '';
+
   return `
 <h2>Ingestion Review Summary — Manager Breakdown</h2>
 <p style="font-size: 16px;">
   <strong>${totalTasks} tasks for ${clientCount} clients are ready for review across managers.</strong>
 </p>
+${metricsHtml}
 <ul style="font-size: 14px; line-height: 1.6; margin: 12px 0;">
   ${bulletsText}
 </ul>
@@ -350,10 +364,12 @@ export interface LeadershipInitialSummary {
   clientCount: number;
   caCount: number;
   perCa: Array<{ caEmail: string; appCount: number; clientCount: number }>;
+  totalApplications?: number;
+  totalQueued?: number;
 }
 
 export function buildLeadershipInitialEmailHtml(summary: LeadershipInitialSummary): string {
-  const { totalTasks, clientCount, caCount, perCa } = summary;
+  const { totalTasks, clientCount, caCount, perCa, totalApplications, totalQueued } = summary;
   const rowsHtml = perCa
     .map(
       (ca) => `
@@ -365,11 +381,21 @@ export function buildLeadershipInitialEmailHtml(summary: LeadershipInitialSummar
     )
     .join('');
 
+  const metricsHtml = (totalApplications !== undefined || totalQueued !== undefined)
+    ? `
+<div style="background: #f1f5f9; border-left: 4px solid #2563eb; padding: 12px 16px; border-radius: 4px; margin: 16px 0; font-size: 14px;">
+  ${totalApplications !== undefined ? `<span style="margin-right: 20px;">Total Applications Ingested: <strong>${totalApplications}</strong></span>` : ''}
+  ${totalQueued !== undefined ? `<span style="margin-right: 20px;">Currently Queued: <strong>${totalQueued}</strong></span>` : ''}
+  <span>Ready for Review: <strong>${totalTasks}</strong></span>
+</div>`
+    : '';
+
   return `
 <h2>Ingestion Review Summary</h2>
 <p style="font-size: 16px;">
   <strong>${totalTasks} tasks for ${clientCount} clients across ${caCount} CAs are ready for review.</strong>
 </p>
+${metricsHtml}
 <table style="width: 100%; max-width: 600px; border-collapse: collapse; margin: 16px 0; font-family: sans-serif; font-size: 14px;">
   <thead>
     <tr style="background: #f7f7f7; text-align: left;">
@@ -725,6 +751,11 @@ export async function sendCaNotificationEmails(
     return empty;
   }
 
+  if (config.DISABLE_EMAIL) {
+    log.info('[CA Notification] Email sending disabled (DISABLE_EMAIL=true) — skipping CA emails');
+    return empty;
+  }
+
   if (!isAzureEmailConfigured()) {
     log.warn('[CA Notification] Azure email not configured — skipping CA emails');
     return empty;
@@ -781,6 +812,8 @@ export interface LeadershipIngestionSummaryOptions {
   followupOptions?: FollowupPollOptions;
   sendEmailFn?: (options: any) => Promise<any>;
   caToManagerMap?: Map<string, string>;
+  totalApplications?: number;
+  totalQueued?: number;
 }
 
 /**
@@ -794,6 +827,11 @@ export async function sendLeadershipIngestionSummary(
 ): Promise<void> {
   if (!isSupabaseConfigured()) {
     log.info('[Leadership Summary] Supabase not configured — skipping summary');
+    return;
+  }
+
+  if (config.DISABLE_EMAIL) {
+    log.info('[Leadership Summary] Email sending disabled (DISABLE_EMAIL=true) — skipping summary');
     return;
   }
 
@@ -834,11 +872,49 @@ export async function sendLeadershipIngestionSummary(
       if (r.applywizz_id) clientSet.add(r.applywizz_id.trim().toUpperCase());
     }
 
+    let totalApplications = options?.totalApplications;
+    let totalQueued = options?.totalQueued;
+
+    if (totalApplications === undefined || totalQueued === undefined) {
+      try {
+        const supabase = getDbClient();
+        let startIso: string;
+        if (options?.targetDate) {
+          const { getISTDateRangeUtc } = await import('../server/dashboardDateRange.js');
+          startIso = getISTDateRangeUtc(options.targetDate).startIso;
+        } else if (runStartedAt) {
+          startIso = runStartedAt instanceof Date ? runStartedAt.toISOString() : String(runStartedAt);
+        } else {
+          startIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+        }
+
+        if (totalApplications === undefined) {
+          const { count } = await supabase
+            .from('gh_candidate_applications')
+            .select('*', { count: 'exact', head: true })
+            .gte('created_at', startIso);
+          if (typeof count === 'number') totalApplications = count;
+        }
+
+        if (totalQueued === undefined) {
+          const { count } = await supabase
+            .from('gh_candidate_applications')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'QUEUED');
+          if (typeof count === 'number') totalQueued = count;
+        }
+      } catch (err: any) {
+        log.warn(`[Leadership Summary] Could not query totals: ${err?.message || err}`);
+      }
+    }
+
     const summaryData: LeadershipInitialSummary = {
       totalTasks,
       clientCount: clientSet.size,
       caCount: summaries.length,
       perCa: summaries,
+      totalApplications,
+      totalQueued,
     };
 
     // 1. Dispatch Leadership initial email (per-CA breakdown)
@@ -869,6 +945,8 @@ export async function sendLeadershipIngestionSummary(
           totalTasks,
           clientCount: clientSet.size,
           managers: managerSummaries,
+          totalApplications,
+          totalQueued,
         }),
         text: `${totalTasks} tasks for ${clientSet.size} clients ready for review across managers.`,
       });

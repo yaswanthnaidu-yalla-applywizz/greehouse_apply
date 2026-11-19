@@ -28,7 +28,9 @@ import { resolveTier2 } from './tier2ResumeParse.js';
 import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getSessionLlmMetrics, resetSessionLlmMetrics } from './tier5LLM.js';
-import { getEffectiveFieldOptions, getPersistedFieldOptions } from './llmSynthesizer.js';
+import { createIngestTier5Stages } from './tier5LLM.js';
+import { preserveNewerAuthoritativeAnswers, resolveIngestTier5, type IngestTier5Work } from './ingestTier5Coordinator.js';
+import { classifyTier5Question, getEffectiveFieldOptions, getPersistedFieldOptions } from './llmSynthesizer.js';
 import { generateFingerprint, normalizeText } from './fingerprint.js';
 import {
   recordAiReviewProposals,
@@ -57,6 +59,7 @@ import type {
   ScannedField,
   ScannedJobTemplate,
 } from '../types/index.js';
+import { ResolverProgressTracker, type ResolverProgressCallback } from './progressTracker.js';
 import { createLogger, haltWithDevAlert, isMissingTableError, isSupabaseConnectionError } from '../utils/logger.js';
 import { isPipelineCompactLogging } from '../utils/pipelineLogging.js';
 import { throwIfPipelineAborted } from '../orchestrator/pipelineAbort.js';
@@ -138,8 +141,8 @@ export function isUnsupportedUuidAnswer(field: ScannedField, answer: string): bo
  * them as optional alternatives, such as "LinkedIn Profile or Resume".
  * Ordinary optional questions must continue to bypass the resolver waterfall.
  */
-export function isAttachmentObligation(field: ScannedField): boolean {
-  const combined = `${field.fieldId} ${field.name} ${field.label}`;
+export function isAttachmentObligation(field: ScannedField | ResolvedField): boolean {
+  const combined = `${field.fieldId || ''} ${field.name || ''} ${field.label || ''}`;
   return field.type === 'file' && /resume|curriculum vitae|\bcv\b/i.test(combined) && !/cover\s*letter|cover_letter/i.test(combined);
 }
 
@@ -200,13 +203,44 @@ export function alignResolvedChoice(
       confidence: 0,
     };
   }
+  const isUrlField =
+    (field.metadata as any)?.inputType === 'url' ||
+    (field as any).type === 'url' ||
+    /\b(?:url|website|portfolio|linkedin|github)\b/i.test(`${field.label} ${field.name} ${field.fieldId}`);
+  if (
+    isUrlField &&
+    (/^(?:yes|no|true|false)$/i.test(resolved.value.trim()) ||
+      /^(?:https?:\/\/(?:www\.)?)?(?:n\/?a|none|null|not applicable)$/i.test(resolved.value.trim()))
+  ) {
+    log.warn(`[Resolver] Rejected non-URL answer "${resolved.value}" for URL field "${field.label}"`);
+    return {
+      ...baseWithOptions,
+      value: '',
+      source: 'unresolved',
+      resolvedByTier: null,
+      confidence: 0,
+    };
+  }
   if (field.type === 'checkbox') {
     if (
       !field.isRequired ||
       field.optionsComplete === false ||
-      !options?.length ||
-      /^(?:true|false)$/i.test(resolved.value.trim())
+      !options?.length
     ) {
+      return baseWithOptions;
+    }
+    if (/^(?:true|false)$/i.test(resolved.value.trim())) {
+      const isTrue = resolved.value.trim().toLowerCase() === 'true';
+      const hasNegativeOption = options.some((opt) =>
+        /\b(?:not agree|disagree|do not|decline|no)\b/i.test(opt)
+      );
+      if (isTrue && options.length > 0 && !hasNegativeOption && !/^(?:true|false)$/i.test(options[0].trim())) {
+        const affirmativeOpt =
+          options.find((opt) => /^i agree\b/i.test(opt.trim())) ||
+          options.find((opt) => /\b(?:agree|read|accept|certify|yes)\b/i.test(opt)) ||
+          options[0];
+        return { ...baseWithOptions, value: affirmativeOpt };
+      }
       return baseWithOptions;
     }
     const matchedCheckbox = matchSingleCheckboxOption(resolved.value, options);
@@ -221,8 +255,8 @@ export function alignResolvedChoice(
   }
   if (field.type !== 'select' && field.type !== 'radio') return baseWithOptions;
 
-  // System fields with no scanned options (e.g. Ashby _systemfield_location autocomplete select)
-  if (field.fieldId?.startsWith('_systemfield_') && (!options || options.length === 0)) {
+  // Select fields with no scanned options (e.g. Ashby autocomplete or custom select controls where options were empty)
+  if ((field.fieldId?.startsWith('_systemfield_') || field.type === 'select') && (!options || options.length === 0)) {
     return baseWithOptions;
   }
 
@@ -248,6 +282,15 @@ export function alignResolvedChoice(
     resolvedByTier: null,
     confidence: 0,
   };
+}
+
+/** Applies the production Tier 5 choice and corporate-policy finalization. */
+export function mergeTier5ResolvedField(field: ScannedField, resolved: ResolvedField): ResolvedField {
+  const aligned = enforceCorporatePolicy(field, alignResolvedChoice(field, resolved, getEffectiveFieldOptions(field)));
+  if (field.metadata) aligned.metadata = { ...field.metadata, ...aligned.metadata };
+  if (field.options) aligned.options = field.options;
+  if (field.optionsComplete !== undefined) aligned.optionsComplete = field.optionsComplete;
+  return aligned;
 }
 
 function alignResolvedChoiceOrNull(field: ScannedField, value: string): string | null {
@@ -282,7 +325,7 @@ export function resolvePreTierField(
   };
 
   // Check Non-Negotiable Corporate Policies first
-  const policyVal = matchCorporatePolicy(field);
+  const policyVal = matchCorporatePolicy(field, profile);
   if (policyVal !== null) {
     const finalVal = alignResolvedChoiceOrNull(field, policyVal);
     if (finalVal) return { ...base, value: finalVal };
@@ -303,7 +346,7 @@ export function resolvePreTierField(
       field.label
     ) ||
     // Additional office/hybrid attendance patterns observed in production (84 AI fallbacks)
-    /\b(?:work from (?:our|the) office|in-office expectation|office-first|able to (?:work|be) (?:in|at) (?:our|the) office|comfortable with this schedule|confirm you are able to work|office presence|days? (?:in-?office|on-?site) (?:per week|a week|each week)|times? per week (?:in|at) (?:the|our) office|hybrid (?:schedule|arrangement|model|policy)|able to commute|able to report|report to (?:the|our) office|on-?site (?:presence|attendance|requirement)|working from (?:the|our) office)\b/i.test(
+    /\b(?:work from (?:our|the)(?:\s+\w+)?\s+office|in-office expectation|office-first|able to (?:work|be) (?:in|at) (?:our|the)(?:\s+\w+)?\s+office|comfortable with this schedule|confirm you are able to work|office presence|days? (?:in-?office|on-?site) (?:per week|a week|each week)|times? per week (?:in|at) (?:the|our)(?:\s+\w+)?\s+office|hybrid (?:schedule|arrangement|model|policy)|able to commute|able to report|report to (?:the|our)(?:\s+\w+)?\s+office|on-?site (?:presence|attendance|requirement)|working from (?:the|our)(?:\s+\w+)?\s+office)\b/i.test(
       field.label
     );
 
@@ -548,9 +591,12 @@ export function formatResolutionSource(resolved: ResolvedField): string {
  * Returns a short resolution source key for batch summary logs.
  */
 export function isResolvedApplicationSuccessful(app: CandidateJobApplication): boolean {
-  if (app.status === 'EXPIRED') return false;
   if (app.status !== 'READY_FOR_REVIEW') return false;
-  return !app.resolvedFields.some((f) => f.source === 'unresolved' || f.resolvedByTier === null);
+  return !app.resolvedFields.some(
+    (field) =>
+      (field.isRequired || isAttachmentObligation(field)) &&
+      (!field.value.trim() || field.source === 'unresolved' || field.resolvedByTier === null)
+  );
 }
 
 export function resolutionSourceKey(resolved: ResolvedField): 'supabase' | 'resume' | 'semantic' | 'fuzzy' | 'llm' | 'unresolved' | 'other' {
@@ -682,6 +728,23 @@ export class AnswerResolver {
     const tier2 = await resolveTier2(applywizzId, resolutionField, parsedResume);
     if (tier2) {
       return { ...tier2, isRequired };
+    }
+
+    if (isPhoneNumberField(field) && profile?.phone) {
+      const fallbackPhone = String(profile.phone).trim();
+      if (/^\+?[\d\s().-]{7,25}$/.test(fallbackPhone)) {
+        return {
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: fallbackPhone,
+          source: 'supabase',
+          resolvedByTier: 1,
+          confidence: 0.95,
+          isRequired,
+        };
+      }
     }
 
     // ------------------------------------------------------------------------
@@ -841,7 +904,9 @@ export class AnswerResolver {
       execution?: ResolutionExecution;
     }
   ): Promise<ResolvedField> {
-    const profile = context.profile || (await getProfile(applywizzId));
+    const profile = context.execution?.mode === 'evaluation'
+      ? context.profile!
+      : context.profile || (await getProfile(applywizzId));
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
     if (isDateComponentField(field) && (!profile || !resolveContextualDateComponent(field, profile))) {
       return this.unresolvedField(field);
@@ -894,7 +959,7 @@ export class AnswerResolver {
       };
     }
 
-    const tier1 = await resolveTier1(applywizzId, resolutionField, profile);
+    const tier1 = await resolveTier1(applywizzId, resolutionField, profile, context.execution);
     if (tier1) {
       return {
         ...tier1,
@@ -917,6 +982,24 @@ export class AnswerResolver {
       };
     }
 
+    if (isPhoneNumberField(field) && profile?.phone) {
+      const fallbackPhone = String(profile.phone).trim();
+      if (/^\+?[\d\s().-]{7,25}$/.test(fallbackPhone)) {
+        return {
+          fieldId: field.fieldId,
+          name: field.name,
+          type: field.type,
+          label: field.label,
+          value: fallbackPhone,
+          source: 'supabase',
+          resolvedByTier: 1,
+          confidence: 0.95,
+          isRequired,
+          provenance: { family: intent.family, evidenceKind: 'candidate_profile', evidenceKey: 'phone' },
+        };
+      }
+    }
+
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
@@ -928,7 +1011,9 @@ export class AnswerResolver {
           resolutionField.type,
           resolutionField.options,
           0.82,
-          profile
+          profile,
+          undefined,
+          context.execution?.semanticSearchAdapters
         )
       : null;
     if (semanticMatch) {
@@ -1009,6 +1094,17 @@ export class AnswerResolver {
     evidence?: CachedResolutionEvidence,
     execution: ResolutionExecution = { mode: 'live' }
   ): Promise<ResolvedField[]> {
+    if (
+      execution.mode === 'evaluation' &&
+      (evidence?.profile === undefined ||
+        evidence.parsedResume === undefined ||
+        evidence.qaEntries === undefined ||
+        !execution.readExactQaAnswer ||
+        !execution.semanticSearchAdapters)
+    ) {
+      throw new Error('Read-only evaluation requires explicit profile, cached resume, QA, exact-answer, and semantic-search adapters.');
+    }
+
     const profile = evidence?.profile !== undefined ? evidence.profile : await getProfile(applywizzId);
     const hasRequiredFields = fields.some(
       (field) => Boolean(field.isRequired || (field as any).required || (field as any).is_required) || isAttachmentObligation(field)
@@ -1150,7 +1246,8 @@ export class AnswerResolver {
 
   public async resolveJobApplication(
     applywizzId: string,
-    template: ScannedJobTemplate
+    template: ScannedJobTemplate,
+    options: { deferTier5?: boolean } = {},
   ): Promise<CandidateJobApplication> {
     const profile = await getProfile(applywizzId);
     const hasRequiredFields =
@@ -1215,7 +1312,7 @@ export class AnswerResolver {
     const resumeText = parsedResume?.raw_text || '';
     const jobDescription = '';
 
-    for (let offset = 0; offset < tier5Pending.length; offset += TIER5_BATCH_CHUNK_SIZE) {
+    for (let offset = 0; !options.deferTier5 && offset < tier5Pending.length; offset += TIER5_BATCH_CHUNK_SIZE) {
       throwIfPipelineAborted('Answer resolution');
       const chunkFields = tier5Pending.slice(offset, offset + TIER5_BATCH_CHUNK_SIZE);
       const chunkSlots = tier5Slots.slice(offset, offset + TIER5_BATCH_CHUNK_SIZE);
@@ -1281,9 +1378,12 @@ export class AnswerResolver {
         application: IngestFilterApplication,
         reason: 'excluded_company' | 'latest_employer' | 'filtered_out'
       ) => void;
+      progressTracker?: ResolverProgressTracker;
+      onProgress?: ResolverProgressCallback;
     }
   ): Promise<CandidateJobApplication[]> {
     this.pendingAutoQueue = [];
+    const tracker = options?.progressTracker ?? new ResolverProgressTracker({ onProgress: options?.onProgress });
     const templateMap = new Map<string, ScannedJobTemplate>();
     for (const t of templates) {
       templateMap.set(t.jobUrl, t);
@@ -1335,6 +1435,8 @@ export class AnswerResolver {
       }
     }
 
+    tracker.startTier14(tasks.length);
+
     const segStats = new Map<
       string,
       { successful: number; unsuccessful: number; noTemplate: number; failed: number; total: number }
@@ -1357,6 +1459,103 @@ export class AnswerResolver {
     let readyForReviewApplications = 0;
     let filteredOutApplications = 0;
     const noTemplateLoggedUrls = new Set<string>();
+
+    const preparedApplications = new Map<number, CandidateJobApplication>();
+    const failedPreparations = new Set<number>();
+    const ingestTier5Work: IngestTier5Work[] = [];
+    let prepareTaskIndex = 0;
+    const prepareResolveTask = async (): Promise<void> => {
+      while (true) {
+        const taskIndex = prepareTaskIndex++;
+        if (taskIndex >= tasks.length) return;
+        const { seg, job } = tasks[taskIndex];
+        let canonical = job.canonicalUrl || job.rawUrl;
+        if (canonical.includes('grnh.se')) canonical = await resolveShortlink(canonical);
+        const template = templateMap.get(canonical) || templateMap.get(job.canonicalUrl) || templateMap.get(job.rawUrl) ||
+          Array.from(templateMap.values()).find((t) => t.jobUrl.includes(canonical) || canonical.includes(t.jobUrl));
+        if (!template || hasSecurityClearanceQuestion(template) || getApplicationExclusionReasons(seg.profile, template.companyName || '').length > 0) {
+          tracker.updateTier14({ completedDelta: 1, skippedDelta: 1 });
+          continue;
+        }
+        try {
+          const app = await this.resolveJobApplication(seg.applywizzId, template, { deferTier5: true });
+          preparedApplications.set(taskIndex, app);
+          if (app.status === 'EXPIRED' || !app.resolvedFields.length) {
+            tracker.updateTier14({ completedDelta: 1, skippedDelta: 1 });
+            continue;
+          }
+          const profile = await getProfile(seg.applywizzId);
+          if (!profile) {
+            tracker.updateTier14({ completedDelta: 1, skippedDelta: 1 });
+            continue;
+          }
+          const parsedResume = await getOrParseResume(seg.applywizzId);
+          let appTier5Count = 0;
+          for (let index = 0; index < template.fields.length; index++) {
+            const scannedField = template.fields[index];
+            const field = {
+              ...scannedField,
+              isRequired: Boolean(scannedField.isRequired || (scannedField as any).required || (scannedField as any).is_required),
+            };
+            const original = app.resolvedFields[index];
+            const creative = classifyTier5Question(field) === 'creative';
+            if (!original || original.source !== 'unresolved' || (!original.isRequired && !isAttachmentObligation(field) && !creative)) continue;
+            appTier5Count++;
+            const fieldKey = `${seg.applywizzId.trim().toUpperCase()}|${template.jobUrl}|${generateFingerprint(field.label, field.type)}|${field.fieldId}|${index}`;
+            ingestTier5Work.push({
+              candidateId: seg.applywizzId,
+              jobUrl: template.jobUrl,
+              fieldKey,
+              field,
+              original,
+              profile,
+              resumeText: parsedResume?.raw_text || '',
+              jobTitle: template.jobTitle || 'Position',
+              companyName: template.companyName || 'Company',
+              jobPostingFacts: template.jobPostingFacts,
+              questionFingerprint: generateFingerprint(field.label, field.type),
+            });
+          }
+          const fieldsResolved = app.resolvedFields.filter((f) => f && f.source !== 'unresolved' && f.value).length;
+          tracker.updateTier14({
+            completedDelta: 1,
+            fieldsResolvedDelta: fieldsResolved,
+            tier5EscapedDelta: appTier5Count,
+          });
+        } catch (error: any) {
+          failedPreparations.add(taskIndex);
+          tracker.updateTier14({ completedDelta: 1, skippedDelta: 1 });
+          if (!compact) log.warn(`[Answer Resolver] Tier 1-4 preparation failed for ${seg.applywizzId}: ${error?.message || error}`);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: poolSize }, () => prepareResolveTask()));
+    tracker.completeTier14();
+
+    if (ingestTier5Work.length) {
+      tracker.startTier5Stage('haiku', ingestTier5Work.length);
+      const runKey = `ingest-${generateFingerprint(ingestTier5Work.map((item) => item.fieldKey).sort().join('\n'), 'tier5')}`;
+      const tier5Results = await resolveIngestTier5(
+        ingestTier5Work,
+        createIngestTier5Stages(runKey, undefined, undefined, (update) => tracker.updateTier5Batch(update))
+      );
+      const workByKey = new Map(ingestTier5Work.map((item) => [item.fieldKey, item]));
+      for (const [taskIndex, app] of preparedApplications) {
+        const { seg, job } = tasks[taskIndex];
+        if (failedPreparations.has(taskIndex)) continue;
+        const canonical = job.canonicalUrl || job.rawUrl;
+        const template = templateMap.get(canonical) || Array.from(templateMap.values()).find((t) => t.jobUrl === app.jobUrl);
+        if (!template) continue;
+        for (let index = 0; index < template.fields.length; index++) {
+          const field = template.fields[index];
+          const key = `${seg.applywizzId.trim().toUpperCase()}|${template.jobUrl}|${generateFingerprint(field.label, field.type)}|${field.fieldId}|${index}`;
+          const resolved = tier5Results.get(key);
+          if (!resolved) continue;
+          app.resolvedFields[index] = mergeTier5ResolvedField(field, resolved);
+        }
+      }
+      for (const key of tier5Results.keys()) if (!workByKey.has(key)) throw new Error(`Tier 5 returned a stale application field key: ${key}`);
+    }
 
 
     const processResolveTask = async (): Promise<void> => {
@@ -1417,9 +1616,14 @@ export class AnswerResolver {
 
         const questionCount = template.fields?.length || 0;
 
+        if (failedPreparations.has(taskIndex) || !preparedApplications.has(taskIndex)) {
+          stats.failed++;
+          continue;
+        }
+
         let app: CandidateJobApplication;
         try {
-          app = await this.resolveJobApplication(seg.applywizzId, template);
+          app = preparedApplications.get(taskIndex)!;
         } catch (resolveErr: any) {
           if (isMissingTableError(resolveErr)) {
             haltWithDevAlert(
@@ -1467,12 +1671,16 @@ export class AnswerResolver {
           try {
             const assignedCaEmail =
               app.assignedCaEmail || (seg as any).assignedCaEmail || seg.profile?.ca_email || null;
-            const shouldFilterOut = applicationShouldBeFilteredOut(app.resolvedFields);
-            const needsReview = applicationNeedsOperatorReview(app.resolvedFields);
             const taskId = job.taskId || app.taskId || null;
             const existing = taskId
               ? await getApplicationByTaskId(taskId)
               : await getApplicationByCandidateAndJob(app.applywizzId, persistJobUrl);
+            app.resolvedFields = preserveNewerAuthoritativeAnswers(
+              app.resolvedFields,
+              (existing as any)?.resolved_fields,
+            );
+            const shouldFilterOut = applicationShouldBeFilteredOut(app.resolvedFields);
+            const needsReview = applicationNeedsOperatorReview(app.resolvedFields);
             const existingStatus = existing?.status;
             const canAutoEnqueue =
               !shouldFilterOut &&
@@ -1608,23 +1816,25 @@ export class AnswerResolver {
 
     let fullyResolvedApps = 0;
     let notFullyResolvedApps = 0;
+    let expiredApps = 0;
     for (const app of applications) {
-      const hasUnresolved = app.resolvedFields.some(
-        (f) => !f.value || f.source === 'unresolved' || f.resolvedByTier === null
-      );
-      if (hasUnresolved) {
-        notFullyResolvedApps++;
-      } else {
+      if (app.status === 'EXPIRED') {
+        expiredApps++;
+      } else if (isResolvedApplicationSuccessful(app)) {
         fullyResolvedApps++;
+      } else {
+        notFullyResolvedApps++;
       }
     }
 
     const sessionMetrics = getSessionLlmMetrics();
     log.info(
       `[Answer Resolver] ✅ Resolution complete: ${applications.length} applications processed ` +
-        `(${fullyResolvedApps} fully resolved, ${notFullyResolvedApps} not fully resolved). ` +
+        `(${fullyResolvedApps} fully resolved, ${notFullyResolvedApps} not fully resolved, ${expiredApps} expired excluded from completion). ` +
         `AI Token Cost: $${sessionMetrics.cost.toFixed(6)} (${sessionMetrics.promptTokens + sessionMetrics.completionTokens} tokens)`
     );
+
+    tracker.finish();
 
     return applications;
   }

@@ -126,6 +126,27 @@ scripts/*
 !scripts/scanZohoConnected.ts
 !scripts/deleteOldJobsAndApplications.ts
 !scripts/fetchEmailProofsDb2.ts
+!scripts/countAutomatedCompanies.ts
 !scripts/resetSandboxDb.ts
 !scripts/resolveFirst5Haiku.ts
 !scripts/README.md
+
+# Temporary report reviews & scratch scripts
+comprehension_report.md
+consolidated_review_report.md
+critic_report.md
+design_draft.md
+implementation_readiness_report.md
+intermediate_zoom_out_report.md
+zoom_out_report.md
+validate_extracted.py
+vite.config.mjs
+
+# Diagnostics, mock runs & session reports
+.ai/diagnostics/
+.ai/anthropic-*
+.ai/end-session-report.md
+.ai/skills/task-observer/scripts/
+
+
+graphify-out/

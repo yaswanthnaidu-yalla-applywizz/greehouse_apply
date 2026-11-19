@@ -419,6 +419,8 @@ export async function updateResolvedFields(
     operator_approved_at?: string | null;
     job_url?: string;
     applywizz_id?: string;
+    remediationReport?: any;
+    error_details?: any;
   }
 ): Promise<void> {
   const updatePayload: Record<string, any> = {
@@ -438,6 +440,15 @@ export async function updateResolvedFields(
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
   const mem = memoryApplications.get(id);
+
+  if (extra?.remediationReport !== undefined || extra?.error_details !== undefined) {
+    const prevDetails = (mem?.error_details as any) || {};
+    updatePayload.error_details = {
+      ...prevDetails,
+      ...(extra.error_details || {}),
+      ...(extra.remediationReport ? { remediationReport: extra.remediationReport } : {}),
+    };
+  }
   const cleanApplywizz = extra?.applywizz_id || mem?.applywizz_id || (id.includes('_') ? id.split('_')[0] : id);
   const targetJobUrl = extra?.job_url || mem?.job_url;
 
@@ -482,12 +493,45 @@ export async function updateResolvedFields(
   }
 }
 
+/**
+ * Merges newly resolved fields into an existing application record and persists to Supabase and memory cache.
+ */
+export async function appendResolvedFields(
+  id: string,
+  newFields: any[],
+  extra?: {
+    job_url?: string;
+    applywizz_id?: string;
+    existingFields?: any[];
+    remediationReport?: any;
+    error_details?: any;
+  }
+): Promise<any[]> {
+  const mem = memoryApplications.get(id);
+  const existing = extra?.existingFields || mem?.resolved_fields || [];
+
+  const fieldMap = new Map<string, any>();
+  for (const f of existing) {
+    const key = f.fieldId || f.label || JSON.stringify(f);
+    fieldMap.set(key, f);
+  }
+  for (const f of newFields) {
+    const key = f.fieldId || f.label || JSON.stringify(f);
+    fieldMap.set(key, f);
+  }
+
+  const merged = Array.from(fieldMap.values());
+  await updateResolvedFields(id, merged, extra);
+  return merged;
+}
+
 
 export async function updateStatus(
   id: string,
   status: ApplicationStatus,
   extra?: UpdateStatusExtra
 ): Promise<boolean> {
+  const mem = memoryApplications.get(id);
   const updatePayload: Partial<ApplicationRow> = {
     status,
     updated_at: new Date().toISOString(),
@@ -510,7 +554,13 @@ export async function updateStatus(
     if (extra.email_proof_attempted_at !== undefined) updatePayload.email_proof_attempted_at = extra.email_proof_attempted_at;
     if (extra.dry_run_screenshot_url !== undefined) updatePayload.dry_run_screenshot_url = extra.dry_run_screenshot_url;
     if (extra.retry_count !== undefined) updatePayload.retry_count = extra.retry_count;
-    if (extra.error_details !== undefined) updatePayload.error_details = extra.error_details;
+    if (extra.error_details !== undefined) {
+      const existingDetails = (mem?.error_details as any) || {};
+      if (existingDetails.remediationReport && extra.error_details && !extra.error_details.remediationReport) {
+        extra.error_details.remediationReport = existingDetails.remediationReport;
+      }
+      updatePayload.error_details = extra.error_details;
+    }
   }
   const expectedStatus = extra && typeof extra === 'object' ? extra.expected_status : undefined;
   const expectedRetryCount = extra && typeof extra === 'object' ? extra.expected_retry_count : undefined;
@@ -528,10 +578,17 @@ export async function updateStatus(
   }
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-  const mem = memoryApplications.get(id);
   const cleanApplywizz = id.includes('_') ? id.split('_')[0] : id;
   const targetJobUrl = (extra && typeof extra === 'object' && extra.job_url) || mem?.job_url;
   let previousStatus: ApplicationStatus | undefined = mem?.status;
+  const isForce = typeof extra === 'object' && extra?.force === true;
+
+  if (status === 'FAILED' && !isForce) {
+    if (previousStatus === 'APPLIED' || previousStatus === 'EMAIL_PROOF_PENDING') {
+      log.warn(`[DB] Refusing illegal status downgrade for ${id}: ${previousStatus} → FAILED`);
+      return false;
+    }
+  }
 
   if (isSupabaseConfigured()) {
     try {
@@ -547,11 +604,20 @@ export async function updateStatus(
         }
         const { data: current } = await statusQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
         previousStatus = current?.status as ApplicationStatus | undefined;
+        if (status === 'FAILED' && !isForce) {
+          if (previousStatus === 'APPLIED' || previousStatus === 'EMAIL_PROOF_PENDING') {
+            log.warn(`[DB] Refusing illegal status downgrade in Supabase for ${id}: ${previousStatus} → FAILED`);
+            return false;
+          }
+        }
       }
-      const query = supabase
+      let query = supabase
         .from('gh_candidate_applications')
         .update(updatePayload)
         .select('id');
+      if (status === 'FAILED' && !isForce) {
+        query = query.neq('status', 'APPLIED').neq('status', 'EMAIL_PROOF_PENDING');
+      }
       let updateRes;
       if (isUuid) {
         let guardedQuery = query.eq('id', id);
@@ -617,6 +683,10 @@ export async function updateStatus(
   }
 
   const existing = memoryApplications.get(id);
+  if (status === 'FAILED' && !isForce && (existing?.status === 'APPLIED' || existing?.status === 'EMAIL_PROOF_PENDING')) {
+    log.warn(`[DB] Refusing illegal status downgrade in memory for ${id}: ${existing.status} → FAILED`);
+    return false;
+  }
   if (expectedStatus && existing?.status !== expectedStatus) {
     throw new Error(`Application ${id} is no longer ${expectedStatus}; refusing the ${status} transition.`);
   }

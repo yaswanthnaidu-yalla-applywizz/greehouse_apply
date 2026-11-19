@@ -4,6 +4,35 @@
 
 const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+export function toRipplingApplicationUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim());
+    if (parsed.protocol !== 'https:' || parsed.hostname.toLowerCase() !== 'ats.rippling.com') return null;
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    if (/^[a-z]{2}-[a-z]{2}$/i.test(segments[0] || '')) segments.shift();
+    if (segments.length < 3 || segments.length > 4 || segments[1] !== 'jobs') return null;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(segments[2])) return null;
+    if (segments.length === 4 && segments[3] !== 'apply') return null;
+    parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}${segments.length === 3 ? '/apply' : ''}`;
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function isRipplingUrl(url: string): boolean {
+  return toRipplingApplicationUrl(url) !== null;
+}
+
+export function isRipplingHost(url: string): boolean {
+  try {
+    return new URL(url.trim()).hostname.toLowerCase() === 'ats.rippling.com';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Canonicalizes an Ashby job/application URL to its application route.
  * Preserves query parameters and returns null for custom domains where slug/path cannot be resolved directly.
@@ -45,7 +74,7 @@ export function isGreenhouseUrl(url: string): boolean {
   try {
     const parsed = new URL(url.trim());
     const host = parsed.hostname.toLowerCase();
-    return host.includes('greenhouse.io') || host.includes('grnh.se');
+    return host.includes('greenhouse.io') || host.includes('grnh.se') || parsed.searchParams.has('gh_jid');
   } catch {
     return false;
   }
@@ -117,5 +146,64 @@ export function ashbyCompanyIdentity(companyName?: string | null, jobUrl?: strin
   }
 
   return '';
+}
+
+/**
+ * Checks if a URL targets Lever ATS.
+ */
+export function isLeverUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url.trim().startsWith('http') ? url.trim() : `https://${url.trim()}`);
+    const host = parsed.hostname.toLowerCase();
+    return host === 'jobs.lever.co' || host === 'api.lever.co' || host.endsWith('.lever.co');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Canonicalizes a Lever job URL to its /apply application route.
+ */
+export function toLeverApplicationUrl(url: string): string | null {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url.trim().startsWith('http') ? url.trim() : `https://${url.trim()}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'jobs.lever.co' && !host.endsWith('.lever.co')) return null;
+
+    const segments = parsed.pathname.split('/').map((s) => s.trim()).filter(Boolean);
+    if (segments.length < 2) return null;
+
+    const company = segments[0];
+    const jobId = segments[1];
+    return `https://${host}/${company}/${jobId}/apply${parsed.search}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extracts company slug and jobId from a Lever job URL.
+ */
+export function extractLeverJobIds(url: string): { company: string; jobId: string } | null {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const parsed = new URL(url.trim().startsWith('http') ? url.trim() : `https://${url.trim()}`);
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'jobs.lever.co' && !host.endsWith('.lever.co') && host !== 'api.lever.co') return null;
+
+    const segments = parsed.pathname.split('/').map((s) => s.trim()).filter(Boolean);
+    // Path could be /v0/postings/<company>/<jobId> or /<company>/<jobId>
+    if (host === 'api.lever.co' && segments[0] === 'v0' && segments[1] === 'postings' && segments.length >= 4) {
+      return { company: segments[2], jobId: segments[3] };
+    }
+    if (segments.length >= 2) {
+      return { company: segments[0], jobId: segments[1] };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 

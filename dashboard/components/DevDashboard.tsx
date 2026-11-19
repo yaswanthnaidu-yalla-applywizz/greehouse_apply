@@ -8,6 +8,7 @@ import { DevTrendChart, type TrendPoint, type TrendMetric, type TrendBucket } fr
 import { TetrominoLoader } from './TetrominoLoader.js';
 import { DevFilteredView } from './DevFilteredView.js';
 import { AnalysisView } from './AnalysisView.js';
+import { DevCandidateVolumeView } from './DevCandidateVolumeView.js';
 
 interface DevHealthProbe {
   name: string;
@@ -171,7 +172,7 @@ function lightClass(status?: string): string {
 export const DevDashboard: React.FC = () => {
   const { token, loading: authLoading, isAuthorized, signOut } = useRequireRole(['dev']);
 
-  const [tab, setTab] = useState<'system' | 'runs' | 'analysis' | 'errors' | 'diagnostics' | 'filtered' | 'queue' | 'integrations' | 'debugger' | 'guide'>('system');
+  const [tab, setTab] = useState<'system' | 'runs' | 'analysis' | 'errors' | 'diagnostics' | 'filtered' | 'candidates' | 'queue' | 'integrations' | 'debugger' | 'guide'>('system');
   const [date, setDate] = useState<string>(getTodayIST);
   const [statsRange, setStatsRange] = useState<'day' | 'week' | 'month' | 'lifetime' | 'custom'>('day');
   const [customFrom, setCustomFrom] = useState<string>(getTodayIST);
@@ -355,8 +356,8 @@ export const DevDashboard: React.FC = () => {
     );
   }
 
-  const tabs: Array<'system' | 'runs' | 'analysis' | 'errors' | 'diagnostics' | 'filtered' | 'queue' | 'integrations' | 'debugger' | 'guide'> =
-    ['system', 'runs', 'analysis', 'errors', 'diagnostics', 'filtered', 'queue', 'integrations', 'debugger', 'guide'];
+  const tabs: Array<'system' | 'runs' | 'analysis' | 'errors' | 'diagnostics' | 'filtered' | 'candidates' | 'queue' | 'integrations' | 'debugger' | 'guide'> =
+    ['system', 'runs', 'analysis', 'errors', 'diagnostics', 'filtered', 'candidates', 'queue', 'integrations', 'debugger', 'guide'];
   const app = debug?.application;
   const timeline = (debug?.timeline && debug.timeline.length > 0)
     ? debug.timeline
@@ -556,7 +557,14 @@ export const DevDashboard: React.FC = () => {
         )}
 
         {tab === 'analysis' && (
-          <AnalysisView loadJson={loadJson} apiEndpoint="/api/dev/analysis" />
+          <AnalysisView
+            loadJson={loadJson}
+            apiEndpoint="/api/dev/analysis"
+            date={date}
+            statsRange={statsRange}
+            customFrom={customFrom}
+            customTo={customTo}
+          />
         )}
 
         {tab === 'errors' && (
@@ -729,6 +737,16 @@ export const DevDashboard: React.FC = () => {
 
         {tab === 'filtered' && (
           <DevFilteredView
+            date={date}
+            statsRange={statsRange}
+            customFrom={customFrom}
+            customTo={customTo}
+            loadJson={loadJson}
+          />
+        )}
+
+        {tab === 'candidates' && (
+          <DevCandidateVolumeView
             date={date}
             statsRange={statsRange}
             customFrom={customFrom}

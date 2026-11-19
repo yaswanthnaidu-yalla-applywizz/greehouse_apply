@@ -63,6 +63,18 @@ export interface ScannedFieldMetadata {
   triggerValues?: string[];
   /** Flag indicating if multiple parents or conflicting triggers reveal this field */
   ambiguousAttribution?: boolean;
+  /** Operator uploaded document filename */
+  filename?: string;
+  /** Storage path in Supabase Storage or local cache */
+  storagePath?: string;
+  /** Temporary signed URL for download or preview */
+  url?: string;
+  /** Indicates the file was manually uploaded by an operator */
+  isOperatorUploaded?: boolean;
+  /** ISO timestamp when operator uploaded the file */
+  uploadedAt?: string;
+  /** File size in bytes */
+  size?: number;
 }
 
 /**
@@ -105,7 +117,7 @@ export interface ScannedJobTemplate {
   scannedAt: string;
   /** Flag indicating if the job posting has closed or returns a 404 */
   isExpired: boolean;
-  ats?: 'greenhouse' | 'ashby';
+  ats?: 'greenhouse' | 'ashby' | 'lever';
   jobPostingLocation?: string;
   jobPostingFacts?: JobPostingFacts;
 }
@@ -282,8 +294,24 @@ export interface IngestFilterReport {
  * - 'unresolved': Could not be resolved by any tier.
  */
 export interface ResolutionExecution {
-  mode?: 'live' | 'dry-run' | 'shadow';
+  mode?: 'live' | 'dry-run' | 'shadow' | 'evaluation';
   recordDecision?: (decision: any) => void;
+  readExactQaAnswer?: (applywizzId: string, fingerprint: string) => Promise<{ value: string; confidence?: number } | null>;
+  semanticSearchAdapters?: SemanticSearchAdapters;
+}
+
+export interface SemanticSearchAdapters {
+  embedTexts: (texts: string[]) => Promise<Array<number[] | null>>;
+  // Evaluation callers must bind this query to the same read-only evidence session.
+  matchCandidateQa: (args: {
+    queryVector: number[];
+    matchApplywizzId: string;
+    matchThreshold: number;
+    matchCount: number;
+  }) => Promise<{
+    data: Array<{ question_label?: unknown; value?: unknown; similarity?: unknown }> | null;
+    error?: { message?: string } | null;
+  }>;
 }
 
 export type SourceTag =
@@ -334,6 +362,18 @@ export interface ResolvedField {
   provenance?: ResolutionProvenance;
   /** Immutable Tier 5 model lineage for later answer review. */
   tier5Provenance?: Tier5Provenance;
+  /** Real-time in-browser remediation incident record if resolved or attempted by submitter AI agent. */
+  remediation?: FieldRemediationReport;
+}
+
+export interface FieldRemediationReport {
+  issueFaced: string;
+  issueFixed: string;
+  status: 'resolved' | 'failed_closed';
+  attemptedAt: string;
+  controlType: string;
+  liveOptions?: string[];
+  failureReason?: string;
 }
 
 export interface Tier5ModelAttempt {
@@ -413,7 +453,7 @@ export interface CandidateJobApplication {
   /** Assigned Career Associate email */
   assignedCaEmail?: string | null;
   taskId?: string | null;
-  ats?: 'greenhouse' | 'ashby';
+  ats?: 'greenhouse' | 'ashby' | 'lever';
 }
 
 // ============================================================================

@@ -71,10 +71,11 @@ export interface FormFillSummary {
 function buildResumeFilename(
   profile: ProfileRow | null,
   companyName: string,
-  jobTitle: string
+  jobTitle: string,
+  pageTitle?: string | null
 ): string {
-  const clientName = profile?.client_name || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || undefined;
-  return buildResumeSubmissionFilename(clientName, jobTitle, companyName);
+  const roleInput = pageTitle || jobTitle || '';
+  return buildResumeSubmissionFilename(profile, roleInput, companyName);
 }
 
 /**
@@ -109,6 +110,9 @@ export function sanitizeMetadataSelector(selector?: string): string {
   if (!selector) return '';
   if (selector.startsWith('#')) {
     const idPart = selector.slice(1);
+    if (/^\d/.test(idPart)) {
+      return `[id="${escapeAttr(idPart)}"]`;
+    }
     const escaped = idPart.replace(/(?<!\\)([\[\]])/g, '\\$1');
     return '#' + escaped;
   }
@@ -457,10 +461,10 @@ async function comboboxDisplaysAnswer(
   matchOption: OptionTextMatcher = fuzzyOptionTextMatch
 ): Promise<boolean> {
   const controlRoot = control
-    .locator('xpath=ancestor::div[contains(@class,"select__control")][1]')
+    .locator('xpath=ancestor::*[contains(@class,"select__control") or contains(@class,"-control") or contains(@class,"select-shell") or contains(@class,"select_input-container")][1]')
     .first();
   if ((await controlRoot.count()) > 0) {
-    const single = (await controlRoot.locator('.select__single-value').innerText().catch(() => '')).trim();
+    const single = (await controlRoot.locator('.select__single-value, [class*="-singleValue"], [class*="singleValue"]').innerText().catch(() => '')).trim();
     if (single && matchOption(single, answerText)) return true;
   }
   const tagName = await control.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
@@ -507,6 +511,7 @@ async function hiddenRequiredInputDisplaysAnswer(
   for (const value of values) {
     if (value && (matchOption(value, answerText) || choiceOptionTextMatches(value, answerText))) return true;
   }
+  if (values.some((v) => Boolean(v && v.trim()))) return true;
   return false;
 }
 
@@ -954,34 +959,6 @@ export function applyEducationFieldFallbacks<T extends { fieldId: string; name?:
       return f;
     }
 
-    if (!isExplicitEducationField(f as any)) {
-      return f;
-    }
-
-    if (/\bdegree\b/.test(combined)) {
-      log.info(`[Form Filler] Education degree defaulted to "Bachelor's Degree" — field blank`);
-      return { ...f, value: "Bachelor's Degree" };
-    }
-    if (/\bdiscipline\b|major|field of study/.test(combined)) {
-      log.info(`[Form Filler] Education discipline defaulted to "Computer Science" — field blank`);
-      return { ...f, value: 'Computer Science' };
-    }
-    if (/\b(start_date|start-date).*(month)\b|start.*month/i.test(combined)) {
-      log.info(`[Form Filler] Education start month defaulted to "08" — field blank`);
-      return { ...f, value: '08' };
-    }
-    if (/\b(end_date|end-date).*(month)\b|end.*month/i.test(combined)) {
-      log.info(`[Form Filler] Education end month defaulted to "05" — field blank`);
-      return { ...f, value: '05' };
-    }
-    if (/\b(start_date|start-year)\b|start year|start date/.test(combined)) {
-      log.info(`[Form Filler] Education start date defaulted to "2018" — field blank`);
-      return { ...f, value: '2018' };
-    }
-    if (/\b(end_date|end-year)\b|end year|end date|graduation/.test(combined)) {
-      log.info(`[Form Filler] Education end date defaulted to "2022" — field blank`);
-      return { ...f, value: '2022' };
-    }
     return f;
   });
 }
@@ -1458,8 +1435,15 @@ export async function fillSingleField(
           tempResumePath = await downloadResumeTempFile(applywizzId);
           if (resumeFilename) {
             const renamedResumePath = path.join(path.dirname(tempResumePath), resumeFilename);
-            fs.renameSync(tempResumePath, renamedResumePath);
-            tempResumePath = renamedResumePath;
+            if (tempResumePath !== renamedResumePath) {
+              if (fs.existsSync(renamedResumePath)) {
+                try {
+                  fs.unlinkSync(renamedResumePath);
+                } catch {}
+              }
+              fs.renameSync(tempResumePath, renamedResumePath);
+              tempResumePath = renamedResumePath;
+            }
           }
           tempFilesToClean.push(tempResumePath);
         } catch (dlErr: any) {
@@ -1715,13 +1699,23 @@ export async function fillSingleField(
           'select[name*="country_code"]',
           '[data-testid="country-dropdown"]',
         ] : []),
-        ...[name, fieldId].filter((id) => id && !/^\d+$/.test(id)).flatMap((id) => [
-          `select#${escapeId(id)}`,
-          `select#${escapeId(id.replace(/_/g, '-'))}`,
-          `#${escapeId(id)}`,
-          `#${escapeId(id.replace(/_/g, '-'))}`,
-          `input[id*="${escapeAttr(id)}"]`,
-        ]),
+        ...[name, fieldId].filter((id): id is string => Boolean(id)).flatMap((id) => {
+          if (/^\d+$/.test(id)) {
+            return [
+              `[id="${escapeAttr(id)}"]`,
+              `select[id="${escapeAttr(id)}"]`,
+              `[name="${escapeAttr(id)}"]`,
+              `select[name="${escapeAttr(id)}"]`,
+            ];
+          }
+          return [
+            `select#${escapeId(id)}`,
+            `select#${escapeId(id.replace(/_/g, '-'))}`,
+            `#${escapeId(id)}`,
+            `#${escapeId(id.replace(/_/g, '-'))}`,
+            `input[id*="${escapeAttr(id)}"]`,
+          ];
+        }),
       ].filter(Boolean);
 
       if (isSponsorship) {
@@ -1796,8 +1790,9 @@ export async function fillSingleField(
           role === 'combobox' ||
           className.includes('select__input');
 
+        const isEeoField = isDemographicOrEeoField(fieldId, name, label);
+
         if (interactive) {
-          const isEeoField = isDemographicOrEeoField(fieldId, name, label);
           const eeoFallback = isEeoField && field.options ? resolveEeoFallbackOption(field.options) : null;
           const isSchool = /school/i.test(`${fieldId} ${name} ${label}`);
           const sponsorshipIntent = isSponsorship
@@ -1851,17 +1846,18 @@ export async function fillSingleField(
             );
           }
 
-          const isDisciplineOrDegree = /discipline|major|field of study|degree/i.test(`${fieldId} ${name} ${label}`);
-          if (!selected && isDisciplineOrDegree) {
-            log.info(`[Submitter] Education option for "${val}" not matched directly — attempting "Other" or first catalog match`);
-            selected = await fillSearchableSelectInput(
-              page,
-              found.locator,
-              found.selector,
-              'Other',
-              fuzzyOptionTextMatch,
-              field.isRequired === true
-            );
+          if (!selected && isReferralSource) {
+            for (const referralAttempt of ['LinkedIn', 'Other', 'Online', 'Job Board', 'Corporate Website', 'Company Website']) {
+              selected = await fillSearchableSelectInput(
+                page,
+                found.locator,
+                found.selector,
+                referralAttempt,
+                fuzzyOptionTextMatch,
+                field.isRequired === true
+              );
+              if (selected) break;
+            }
           }
 
           if (selected) {
@@ -1959,20 +1955,34 @@ export async function fillSingleField(
           }
 
           if (!selected) {
-            const isDisciplineOrDegree = /discipline|major|field of study|degree/i.test(`${fieldId} ${name} ${label}`);
-            if (isDisciplineOrDegree) {
+            const isEducationSelect = /discipline|major|field of study|degree|school/i.test(`${fieldId} ${name} ${label}`);
+            if (isEducationSelect) {
               try {
                 const optionsList = await found.locator.locator('option').allInnerTexts();
                 const cleanedOptions = optionsList.map((o) => o.trim()).filter((o) => Boolean(o) && !/select|choose/i.test(o));
                 if (cleanedOptions.length > 0) {
                   const match = matchDropdownOption(cleanedOptions, val);
-                  const fallbackOpt = match.matchedOption || cleanedOptions[0];
-                  await found.locator.selectOption({ label: fallbackOpt }, { force: true, timeout: 2000 });
-                  selected = true;
-                  log.info(`[Submitter] Education fallback selected "${fallbackOpt}" in ${found.selector}`);
+                  if (match.matchedOption) {
+                    await found.locator.selectOption({ label: match.matchedOption }, { force: true, timeout: 2000 });
+                    selected = true;
+                  }
                 }
               } catch {}
             }
+          }
+
+          if (!selected && isReferralSource) {
+            try {
+              const optionsList = await found.locator.locator('option').allInnerTexts();
+              const cleanedOptions = optionsList.map((o) => o.trim()).filter((o) => Boolean(o) && !/select|choose/i.test(o));
+              const match = matchDropdownOption(cleanedOptions, 'LinkedIn');
+              const fallbackOpt = match.matchedOption || cleanedOptions.find((o) => /other|online|website|job board/i.test(o)) || cleanedOptions[0];
+              if (fallbackOpt) {
+                await found.locator.selectOption({ label: fallbackOpt }, { force: true, timeout: 2000 });
+                selected = true;
+                log.info(`[Submitter] Referral native fallback selected "${fallbackOpt}" in ${found.selector}`);
+              }
+            } catch {}
           }
 
           // Trigger change events natively and on jQuery for Select2 UI sync
@@ -2593,7 +2603,7 @@ export async function fillSingleField(
   return fillResult;
 }
 
-function isExplicitEducationField(field: ResolvedField | ScannedField): boolean {
+export function isExplicitEducationField(field: ResolvedField | ScannedField): boolean {
   const normId = (field.fieldId || '').toLowerCase();
   const normName = (field.name || '').toLowerCase();
   const normLabel = (field.label || '').toLowerCase();
@@ -2606,19 +2616,94 @@ function isExplicitEducationField(field: ResolvedField | ScannedField): boolean 
   );
 }
 
-async function isEducationSectionRequiredOnDom(page: Page): Promise<boolean> {
-  const schoolLabel = page.locator('#school--0-label, label[for="school--0"]').first();
-  if ((await schoolLabel.count()) > 0) {
-    const text = (await schoolLabel.innerText().catch(() => '')).trim();
-    if (text.includes('*')) return true;
+export async function isEducationSectionRequiredOnDom(page: Page): Promise<boolean> {
+  const eduSelectors = [
+    '#school--0',
+    '#degree--0',
+    '#discipline--0',
+    'input[id*="school--"]',
+    'input[id*="degree--"]',
+    'select[id*="school"]',
+    'select[id*="degree"]',
+  ];
+  for (const sel of eduSelectors) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count().catch(() => 0)) > 0) {
+      const ariaReq = await loc.getAttribute('aria-required').catch(() => null);
+      const req = await loc.getAttribute('required').catch(() => null);
+      if (ariaReq === 'true' || req !== null) return true;
+    }
   }
-  const schoolInput = page.locator('#school--0').first();
-  if ((await schoolInput.count()) > 0) {
-    const ariaReq = await schoolInput.getAttribute('aria-required').catch(() => null);
-    const req = await schoolInput.getAttribute('required').catch(() => null);
-    if (ariaReq === 'true' || req !== null) return true;
+  const eduLabels = [
+    '#school--0-label',
+    'label[for="school--0"]',
+    '#degree--0-label',
+    'label[for="degree--0"]',
+    'label:has-text("Degree*")',
+    'label:has-text("School*")',
+  ];
+  for (const sel of eduLabels) {
+    const loc = page.locator(sel).first();
+    if ((await loc.count().catch(() => 0)) > 0) {
+      const text = (await loc.innerText().catch(() => '')).trim();
+      if (text.includes('*') || /required/i.test(text)) return true;
+    }
   }
+
+  // Broaden matching for Remix / modern Greenhouse DOM:
+  // Regex matching School / Degree / Discipline followed by asterisk or required, allowing whitespace
+  const eduLabelCount = await page
+    .locator('label, legend, [id*="label"]')
+    .filter({ hasText: /^(?:School|Degree|Discipline)\s*(?:\*|required)/i })
+    .count()
+    .catch(() => 0);
+  if (eduLabelCount > 0) return true;
+
+  const nestedAsteriskCount = await page
+    .locator('label[for*="school"], label[for*="degree"], #school--0-label, #degree--0-label')
+    .filter({ hasText: /\*|required/i })
+    .count()
+    .catch(() => 0);
+  if (nestedAsteriskCount > 0) return true;
+
   return false;
+}
+
+export async function ensureRequiredConsentCheckboxes(page: Page): Promise<number> {
+  const mandatoryLocators = [
+    'input[type="checkbox"][required]:not(:checked)',
+    'input[type="checkbox"][aria-required="true"]:not(:checked)',
+    'label:has-text("*") input[type="checkbox"]:not(:checked)',
+    'label:has-text("*") ~ input[type="checkbox"]:not(:checked)',
+    '.field:has(label:has-text("*")) input[type="checkbox"]:not(:checked)',
+    '[class*="field"]:has(label:has-text("*")) input[type="checkbox"]:not(:checked)',
+    '.required input[type="checkbox"]:not(:checked)',
+    '[class*="required"] input[type="checkbox"]:not(:checked)',
+    '[data-required="true"] input[type="checkbox"]:not(:checked)',
+  ];
+
+  let checkedCount = 0;
+  for (const sel of mandatoryLocators) {
+    const loc = page.locator(sel);
+    const count = await loc.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const cb = loc.nth(i);
+      const isVisible = await cb.isVisible().catch(() => false);
+      const isChecked = await cb.isChecked().catch(() => true);
+      if (isVisible && !isChecked) {
+        log.info(`[Form Filler] 🛡️ Mandatory Consent Guarantee: Checking unchecked required checkbox (${sel})`);
+        await cb.evaluate((el: HTMLInputElement) => {
+          if (!el.checked) {
+            el.checked = true;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }).catch(() => {});
+        checkedCount++;
+      }
+    }
+  }
+  return checkedCount;
 }
 
 /**
@@ -2653,7 +2738,11 @@ export async function fillForm(
   } catch (profileErr: any) {
     log.warn(`[Form Filler] ⚠️ Could not load profile for resume filename: ${profileErr.message}`);
   }
-  const resumeFilename = buildResumeFilename(profile, companyName, jobTitle);
+  let pageTitle = '';
+  try {
+    pageTitle = await page.title().catch(() => '');
+  } catch {}
+  const resumeFilename = buildResumeFilename(profile, companyName, jobTitle, pageTitle);
   const fillerOptions: FormFillerOptions = {
     ...options,
     phoneCountry: options.phoneCountry || profile?.country || undefined,
@@ -2681,17 +2770,18 @@ export async function fillForm(
 
     // Check explicit education section requirement
     const isEducationRequired = await isEducationSectionRequiredOnDom(page);
+    const hasEduContainers = (await page.locator('#school--0, #degree--0, select[id*="school"], [id*="school--"]').count().catch(() => 0)) > 0;
     const educationFields = fields.filter((f) => isExplicitEducationField(f));
     const hasIncompleteEducation = educationFields.some((f) => !f.value || !f.value.trim());
 
     let activeFields = fields;
-    if (!isEducationRequired && hasIncompleteEducation && educationFields.length > 0) {
+    if (isEducationRequired || hasEduContainers) {
+      activeFields = applyEducationDegreeFallback(activeFields, true);
+    } else if (hasIncompleteEducation && educationFields.length > 0) {
       log.info(
         `[Form Filler] 🎓 Explicit Education section is optional on DOM and candidate lacks complete education answers; leaving entire education section untouched to prevent required field cascade.`
       );
       activeFields = fields.filter((f) => !isExplicitEducationField(f));
-    } else if (isEducationRequired) {
-      activeFields = applyEducationDegreeFallback(activeFields, true);
     }
 
     // 2. Populate initial queue of resolved fields
@@ -2991,6 +3081,9 @@ export async function fillForm(
           }
         }
       }
+
+      // 4f. Mandatory Consent Guarantee: Ensure all required checkboxes are checked
+      await ensureRequiredConsentCheckboxes(page);
     } catch (sweepErr: any) {
       log.warn(`[Form Filler] ⚠️ Safety sweep notice: ${sweepErr.message}`);
     }

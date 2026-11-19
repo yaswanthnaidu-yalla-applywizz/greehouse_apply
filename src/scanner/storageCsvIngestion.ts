@@ -122,12 +122,21 @@ export function computeIngestFunnelStats(
   csvRows: Array<{ task_id?: string; applywizz_id?: string; job_url?: string; company_name?: string }>,
   createdTaskIds: Set<string>,
   profiles: Map<string, { zoho_connected?: boolean }>,
-  templates: Map<string, { is_expired?: boolean }>
+  templates: Map<string, { is_expired?: boolean }>,
+  exclusionContext?: {
+    clearanceUrls?: Set<string>;
+    excludedCompanyPairs?: Set<string>;
+    latestEmployerPairs?: Set<string>;
+    alreadyAppliedPairs?: Set<string>;
+  }
 ) {
   const dropReasons = {
     zoho_disconnected: 0,
     job_expired: 0,
     no_scan_template: 0,
+    security_clearance: 0,
+    excluded_company: 0,
+    latest_employer: 0,
     already_applied: 0,
     exclusions_or_other: 0,
   };
@@ -145,12 +154,16 @@ export function computeIngestFunnelStats(
       continue;
     }
     const cid = (r.applywizz_id || '').toUpperCase();
-    const normUrl = normalizeGreenhouseUrl(r.job_url || '');
+    const rawUrl = r.job_url || '';
+    const normUrl = normalizeGreenhouseUrl(rawUrl);
     const profile = profiles.get(cid);
-    const template = templates.get(normUrl) || templates.get(r.job_url || '');
+    const template = templates.get(normUrl) || templates.get(rawUrl);
 
     let reasonKey: keyof typeof dropReasons = 'exclusions_or_other';
     let reasonText = 'Excluded or filtered at resolution';
+
+    const pairNorm = `${cid}|${normUrl}`;
+    const pairRaw = `${cid}|${rawUrl}`;
 
     if (profile && profile.zoho_connected === false) {
       reasonKey = 'zoho_disconnected';
@@ -161,13 +174,25 @@ export function computeIngestFunnelStats(
     } else if (!template) {
       reasonKey = 'no_scan_template';
       reasonText = 'Job template not found / scanning failed';
+    } else if (exclusionContext?.clearanceUrls && (exclusionContext.clearanceUrls.has(normUrl) || exclusionContext.clearanceUrls.has(rawUrl))) {
+      reasonKey = 'security_clearance';
+      reasonText = 'Security clearance question required';
+    } else if (exclusionContext?.excludedCompanyPairs && (exclusionContext.excludedCompanyPairs.has(pairNorm) || exclusionContext.excludedCompanyPairs.has(pairRaw))) {
+      reasonKey = 'excluded_company';
+      reasonText = 'Excluded company policy';
+    } else if (exclusionContext?.latestEmployerPairs && (exclusionContext.latestEmployerPairs.has(pairNorm) || exclusionContext.latestEmployerPairs.has(pairRaw))) {
+      reasonKey = 'latest_employer';
+      reasonText = 'Previous or current employer conflict';
+    } else if (exclusionContext?.alreadyAppliedPairs && (exclusionContext.alreadyAppliedPairs.has(pairNorm) || exclusionContext.alreadyAppliedPairs.has(pairRaw))) {
+      reasonKey = 'already_applied';
+      reasonText = 'Already applied / duplicate';
     }
 
     dropReasons[reasonKey]++;
     droppedDetails.push({
       applywizzId: cid,
       companyName: r.company_name || 'Unknown',
-      jobUrl: r.job_url || '',
+      jobUrl: rawUrl,
       reason: reasonText,
     });
   }
@@ -371,6 +396,14 @@ export async function ingestCsvFromStorage(options?: {
       log.warn('[Storage CSV Ingestion] CA assignment sync non-blocking warning:', caSyncErr);
     }
     log.info('[Pipeline] stats rollup complete');
+
+    // Purge resumes storage bucket and local cache prior to processing new dropzone CSV
+    try {
+      const { purgeResumesBucket } = await import('../db/storage.js');
+      await purgeResumesBucket();
+    } catch (purgeErr: any) {
+      log.warn('[Storage CSV Ingestion] Resumes bucket purge non-blocking warning:', purgeErr);
+    }
 
     // Run V1Pipeline with single worker concurrency for Railway stability
     const pipeline = new V1Pipeline();

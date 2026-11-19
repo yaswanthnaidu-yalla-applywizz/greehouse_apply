@@ -75,15 +75,20 @@ export function isFilteredOutApplicationJob(row: { status?: string | null }): bo
 }
 
 /**
- * Operator application queue — assigned rows excluding QUEUED, FILTERED_OUT, and SKIPPED.
- * Keeps READY_FOR_REVIEW, OTP_REQUIRED, FAILED, RETRY, etc. unchanged.
+ * Operator application queue — assigned rows excluding QUEUED, FILTERED_OUT, SKIPPED, APPLIED, and FAILED.
+ * Keeps READY_FOR_REVIEW, OTP_REQUIRED, RETRY, etc.
  */
 export function filterOperatorApplicationJobs<T extends ResolutionFieldsCarrier & { status?: string | null }>(
   jobs: T[]
 ): T[] {
   if (!Array.isArray(jobs)) return [];
   return jobs.filter(
-    (job) => !isQueuedApplicationJob(job) && !isFilteredOutApplicationJob(job) && !isSkippedApplicationJob(job)
+    (job) =>
+      !isQueuedApplicationJob(job) &&
+      !isFilteredOutApplicationJob(job) &&
+      !isSkippedApplicationJob(job) &&
+      !isAppliedApplicationJob(job) &&
+      !isFailedApplicationJob(job)
   );
 }
 
@@ -92,16 +97,21 @@ export function isSkippedApplicationJob(row: { status?: string | null }): boolea
   return (row.status || '').trim().toUpperCase() === 'SKIPPED';
 }
 
-/** The job card shows submitted if submitted_at or operator_approved_at is present. */
-export function isOperatorApprovedApplicationJob(row: {
-  operator_approved_at?: string | null;
-  operatorApprovedAt?: string | null;
+export function isAppliedApplicationJob(row: { status?: string | null }): boolean {
+  const s = (row.status || '').trim().toUpperCase();
+  return s === 'APPLIED' || s === 'EMAIL_PROOF_PENDING';
+}
+
+export function isFailedApplicationJob(row: { status?: string | null }): boolean {
+  return (row.status || '').trim().toUpperCase() === 'FAILED';
+}
+
+/** Approval records operator review; only submission time makes a job submitted. */
+export function isSubmittedApplicationJob(row: {
   submitted_at?: string | null;
   submittedAt?: string | null;
 }): boolean {
-  return Boolean(
-    row.submitted_at || row.submittedAt || row.operator_approved_at || row.operatorApprovedAt
-  );
+  return Boolean(row.submitted_at || row.submittedAt);
 }
 
 type ResolvedFieldLike = {
@@ -195,4 +205,25 @@ export function jobCardTitleLabel(job: JobCardTemplateFields): string {
     job.template_job_title;
   if (fromTemplate) return fromTemplate;
   return job.jobTitle || job.job_title || 'Job Application';
+}
+
+export function deduplicateJobsByUrl<T extends { rawUrl?: unknown; updated_at?: unknown }>(
+  jobs: T[]
+): T[] {
+  const seen = new Map<string, T>();
+  for (const job of jobs) {
+    const url = String(job.rawUrl || '').trim();
+    if (!url) continue;
+    const existing = seen.get(url);
+    if (!existing) {
+      seen.set(url, job);
+      continue;
+    }
+    const existingTs = String(existing.updated_at || '');
+    const jobTs = String(job.updated_at || '');
+    if (jobTs > existingTs) {
+      seen.set(url, job);
+    }
+  }
+  return Array.from(seen.values());
 }

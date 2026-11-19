@@ -51,6 +51,18 @@ Input CSV (greenhouse_only_applywizz_prod(in).csv)
 
 **Zoho eligibility during candidate ingestion:** The shared `segregateCandidatesByApplyWizzId` flow checks one live `/api/zoho/ui/users` snapshot after profile sync, matches connected emails to each synced profile's `company_email`, persists both true and false values to `profiles.zoho_connected`, and drops disconnected candidates before Phase D. If the connector request or response is invalid, it uses each profile's stored flag (`NULL` is disconnected); a live persistence error fails the ingestion phase. `SANDBOX=true` retains its Zoho-gate bypass.
 
+## Real-Time In-Browser Agentic Remediation (`src/submitter/realtimeRemediator.ts`)
+
+- **Trigger**: Engaged automatically during live submission if `executeFormFill` leaves required fields uncommitted (`unfilledRequiredLabels > 0`) or pre-submit verification fails.
+- **Strict Warm Hand-Off**: Operates directly on the live Playwright `Page` with 95% of the form already populated. Does not reload the page or re-upload the resume.
+- **Ground Truth Context**: Pairs candidate profile facts (work authorization, location, sponsorship) and parsed resume facts with the live rendered options scraped directly from the DOM (`realtimeDomAction.ts`).
+- **Choice Alignment**: Resolves via fast LLM (`claude-haiku-5-5` or Gemini) with confidence threshold $\ge 0.70$ and strict `matchChoiceOption` alignment against live options. Fails closed if facts are absent.
+- **Atomic Persistence**: Successfully committed fields are appended to `gh_candidate_applications.resolved_fields` with provenance tag `source: 'ai_realtime_remediated'`.
+- **Incident Recording (`issueFaced` & `issueFixed`)**: For every field attempted (both rescued and failed-closed), the LLM synthesizes structured statements of what issue the automation faced on the live form (`issueFaced`) and how it was resolved (`issueFixed`). Persisted per-field in `resolved_fields[i].remediation` and aggregated across the submission in `gh_candidate_applications.error_details.remediationReport`.
+- **On-Demand Dev Export API**: `GET /api/dev/remediations/export` streams standard RFC 4180 CSV (or JSON) filtered by `startDate`, `endDate`, `ats`, and outcome `status` (`resolved` vs `failed_closed`) for upstream template and selector improvements.
+- **Supported Submissions**: Greenhouse (`liveSubmit.ts`) and Ashby (`ashbySubmit.ts`).
+- **Railway Guardrails**: Max 3 fields per application, 20-second hard timeout, zero PNG screenshot memory overhead.
+
 ## 5-Tier Answer Resolution Waterfall & Ashby Short-Circuit
 
 ### Ashby System Field Interception (Pre-Tier 1)
@@ -438,7 +450,7 @@ The codebase was decomposed from earlier monolithic files into cohesive submodul
 
 | Role | Emails | Home | Can open |
 |---|---|---|---|
-| `dev` | `yaswanthnaiduyalla@applywizz.ai` | `/dev` | `/`, `/admin`, `/manager`, `/dev` (header switcher) |
+| `dev` | `yaswanthnaiduyalla@applywizz.ai`, `vivek@applywizz.ai` | `/dev` | `/`, `/admin`, `/manager`, `/dev` (header switcher) |
 | `admin` | `ramakrishna@applywizz.ai`, `anushabandreddy@applywizz.ai` | `/admin` | `/admin` only |
 | `manager` | `balaji@applywizz.ai`, `ramakrishnaa.tejavath@applywizz.ai` | `/manager` | `/manager` only |
 | `operator` | any other signed-up email | `/` | `/` only |

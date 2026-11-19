@@ -14,6 +14,9 @@ import {
   mapSalaryRangeToOption,
   mapWorkplaceLocationToOption,
 } from '../utils/choiceOptions.js';
+import { matchCorporatePolicy } from './corporatePolicies.js';
+
+export { matchCorporatePolicy };
 
 export interface PolicyResolution {
   value: string;
@@ -36,6 +39,22 @@ export function resolveDeterministicPolicy(
   profile?: ProfileRow | null,
   jobContext?: JobContext
 ): PolicyResolution | null {
+  const corpPolicyVal = matchCorporatePolicy(field, profile);
+  if (corpPolicyVal !== null) {
+    return {
+      value: corpPolicyVal,
+      source: 'policy',
+      policyId: 'policy_corporate_rules',
+      confidence: 0.99,
+      provenance: {
+        family: intent.family,
+        policyId: 'policy_corporate_rules',
+        choiceMatch: corpPolicyVal,
+        confidence: 0.99,
+      },
+    };
+  }
+
   const options = field.options || [];
   const text = `${field.label} ${field.name} ${field.fieldId}`.toLowerCase();
 
@@ -414,7 +433,38 @@ export function resolveDeterministicPolicy(
       jobContext?.jobPostingLocation ||
       (jobContext as any)?.postingLocation ||
       jobContext?.jobPostingFacts?.location;
+    const willingToRelocate = profile?.raw_api_payload?.additional_information?.willing_to_relocate;
+    const isRelocationLabel = /relocat/i.test(field.label);
+    const isCandidateRelocationQuestion =
+      /\b(?:willing(?:ness)?\s+to|open\s+to|able\s+to|comfortable\s+with)\s+relocat(?:e|ing|ion)\b/i.test(field.label) ||
+      /\b(?:would|will|can|could)\s+you\s+relocat(?:e|ing|ion)\b/i.test(field.label) ||
+      /\brelocation\s+preference\b/i.test(field.label);
+    if (isCandidateRelocationQuestion && typeof willingToRelocate === 'boolean') {
+      const relocationChoice = willingToRelocate
+        ? matchChoiceOption('Yes', options) || matchChoiceOption('willing', options)
+        : matchChoiceOption('No', options);
+      if (relocationChoice) {
+        const policyId = 'policy_relocation_candidate_preference';
+        return {
+          value: relocationChoice,
+          source: 'policy',
+          policyId,
+          confidence: 0.95,
+          provenance: {
+            family: intent.family,
+            policyId,
+            evidenceKind: 'candidate_profile',
+            evidenceKey: 'willing_to_relocate',
+            choiceMatch: relocationChoice,
+            confidence: 0.95,
+          },
+        };
+      }
+      return null;
+    }
+    if (isCandidateRelocationQuestion && targetLocation) return null;
     if (targetLocation) {
+      if (isRelocationLabel) return null;
       const mapped = mapWorkplaceLocationToOption(targetLocation, options);
       if (mapped) {
         return {
@@ -436,18 +486,19 @@ export function resolveDeterministicPolicy(
     }
 
     // When no posting location exists, check for relocation question
-    if (/relocat/i.test(text)) {
-      const affChoice = matchChoiceOption('Yes', options) || matchChoiceOption('willing', options);
-      if (affChoice) {
+    if (isCandidateRelocationQuestion) {
+      const relocationChoice = matchChoiceOption('Yes', options) || matchChoiceOption('willing', options);
+      if (relocationChoice) {
+        const policyId = 'policy_relocation_affirmative';
         return {
-          value: affChoice,
+          value: relocationChoice,
           source: 'policy',
-          policyId: 'policy_relocation_affirmative',
+          policyId,
           confidence: 0.95,
           provenance: {
             family: intent.family,
-            policyId: 'policy_relocation_affirmative',
-            choiceMatch: affChoice,
+            policyId,
+            choiceMatch: relocationChoice,
             confidence: 0.95,
           },
         };

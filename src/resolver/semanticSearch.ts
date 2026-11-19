@@ -11,7 +11,7 @@ import { createLogger } from '../utils/logger.js';
 import { matchChoiceOption } from '../utils/choiceOptions.js';
 import { getProfileFacts, type ProfileFact } from './profileFacts.js';
 import { classifyFieldIntent, isEvidenceCompatible } from './fieldIntent.js';
-import type { FieldIntent } from '../types/index.js';
+import type { FieldIntent, SemanticSearchAdapters } from '../types/index.js';
 
 const log = createLogger('Semantic');
 
@@ -233,7 +233,8 @@ export async function findSemanticMatch(
   options?: string[],
   threshold: number = 0.88,
   profile?: ProfileRow | null,
-  intent?: FieldIntent
+  intent?: FieldIntent,
+  adapters?: SemanticSearchAdapters
 ): Promise<SemanticMatchResult | null> {
   lastSemanticScore = 0;
   const fieldIntent =
@@ -251,7 +252,9 @@ export async function findSemanticMatch(
     return null;
   }
 
-  const embedding = await embedText(questionLabel);
+  const embedding = adapters
+    ? (await adapters.embedTexts([questionLabel]))[0] || null
+    : await embedText(questionLabel);
   if (!embedding) {
     return null;
   }
@@ -266,7 +269,9 @@ export async function findSemanticMatch(
   );
 
   if (compatibleProfileFacts.length > 0) {
-    const factEmbeddings = await embedTexts(compatibleProfileFacts.map((fact) => fact.label));
+    const factEmbeddings = adapters
+      ? await adapters.embedTexts(compatibleProfileFacts.map((fact) => fact.label))
+      : await embedTexts(compatibleProfileFacts.map((fact) => fact.label));
     const bestFact = bestSemanticProfileFact(
       embedding,
       compatibleProfileFacts,
@@ -294,42 +299,53 @@ export async function findSemanticMatch(
   }
 
   try {
-    const { data, error } = await supabase.rpc('match_candidate_qa', {
-      query_vector: embedding,
-      match_applywizz_id: applywizzId,
-      match_threshold: 0.0,
-      match_count: 10,
-    });
+    const { data, error } = adapters
+      ? await adapters.matchCandidateQa({
+          queryVector: embedding,
+          matchApplywizzId: applywizzId,
+          matchThreshold: 0.0,
+          matchCount: 10,
+        })
+      : await supabase.rpc('match_candidate_qa', {
+          query_vector: embedding,
+          match_applywizz_id: applywizzId,
+          match_threshold: 0.0,
+          match_count: 10,
+        });
 
     if (error) {
-      const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
-      await emitFailureDiagnostic({
-        category: 'RESOLVE_TIER3_VECTOR_SEARCH',
-        stage: 'vector_search',
-        reason: `pgvector match_candidate_qa RPC error: ${error.message}`,
-        error,
-        applywizzId,
-        isTerminal: false,
-        isRetryable: true,
-      }).catch(() => {});
+      if (!adapters) {
+        const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+        await emitFailureDiagnostic({
+          category: 'RESOLVE_TIER3_VECTOR_SEARCH',
+          stage: 'vector_search',
+          reason: `pgvector match_candidate_qa RPC error: ${error.message}`,
+          error,
+          applywizzId,
+          isTerminal: false,
+          isRetryable: true,
+        }).catch(() => {});
+      }
       return null;
     }
 
-    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    const rows = Array.isArray(data) ? data : data ? [data as any] : [];
     const match = selectCompatibleQaMatch(rows, fieldIntent, options, fieldType, threshold);
     if (match) lastSemanticScore = Math.max(lastSemanticScore, match.confidence);
     return match;
   } catch (err: any) {
-    const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
-    await emitFailureDiagnostic({
-      category: 'RESOLVE_TIER3_VECTOR_SEARCH',
-      stage: 'vector_search',
-      reason: `pgvector match_candidate_qa search exception: ${err?.message || String(err)}`,
-      error: err,
-      applywizzId,
-      isTerminal: false,
-      isRetryable: true,
-    }).catch(() => {});
+    if (!adapters) {
+      const { emitFailureDiagnostic } = await import('../utils/failureDiagnostics.js');
+      await emitFailureDiagnostic({
+        category: 'RESOLVE_TIER3_VECTOR_SEARCH',
+        stage: 'vector_search',
+        reason: `pgvector match_candidate_qa search exception: ${err?.message || String(err)}`,
+        error: err,
+        applywizzId,
+        isTerminal: false,
+        isRetryable: true,
+      }).catch(() => {});
+    }
     return null;
   }
 }

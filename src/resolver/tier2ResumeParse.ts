@@ -7,7 +7,10 @@ import fs from 'fs';
 // @ts-ignore
 import _pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { getProfile, updateParsedResume } from '../db/profiles.js';
+import { getProfileFromDatabase } from '../db/profiles.js';
+import { isSandboxTestMode } from '../config/sandboxTestMode.js';
 import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
+import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { normalizeText } from './fingerprint.js';
 import { extractResumePhone, isPhoneNumberField } from './candidateEvidence.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
@@ -50,6 +53,52 @@ export interface ResumeParsedRow {
 
 const pdfParse: (dataBuffer: Buffer, options?: any) => Promise<{ text: string }> =
   (_pdfParse as any).default || _pdfParse;
+
+/**
+ * Invalidates cached resume text and structured facts on profiles (and legacy candidate_resume_parsed).
+ * This forces Tier 2 to re-download the fresh master resume and re-parse structured facts.
+ */
+export async function invalidateResumeParseCache(applywizzIds: string[]): Promise<number> {
+  const cleanIds = (applywizzIds || [])
+    .map((id) => (id || '').trim())
+    .filter(Boolean);
+
+  if (cleanIds.length === 0) return 0;
+
+  let clearedCount = 0;
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getDbClient();
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          resume_text: null,
+          resume_facts: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('applywizz_id', cleanIds);
+
+      if (profileError) {
+        log.warn(`[Tier 2] Failed to invalidate profile resume cache: ${profileError.message}`);
+      } else {
+        clearedCount = cleanIds.length;
+        log.info(`[Tier 2] 🧹 Invalidated parsed resume cache for ${cleanIds.length} candidate profiles.`);
+      }
+
+      // Also clean legacy table if present
+      try {
+        await supabase
+          .from('candidate_resume_parsed')
+          .delete()
+          .in('applywizz_id', cleanIds);
+      } catch {}
+    } catch (err: any) {
+      log.warn(`[Tier 2] Error invalidating resume cache: ${err.message}`);
+    }
+  }
+
+  return clearedCount;
+}
 
 /**
  * Parses raw resume text into structured components.
@@ -164,18 +213,31 @@ function extractStructuredSections(rawText: string): ParsedResumeStructured {
  */
 export async function getOrParseResume(applywizzId: string): Promise<ResumeParsedRow | null> {
   // 1. Check candidate profile in DB
+  let cachedProfile: Awaited<ReturnType<typeof getProfile>> = null;
   try {
-    const profile = await getProfile(applywizzId);
-    if (profile?.resume_text && profile.resume_text.trim().length > 0) {
+    cachedProfile = isSandboxTestMode()
+      ? await getProfileFromDatabase(applywizzId)
+      : await getProfile(applywizzId);
+    if (cachedProfile?.resume_text && cachedProfile.resume_text.trim().length > 0) {
       return {
         applywizz_id: applywizzId,
-        raw_text: profile.resume_text,
-        structured: profile.resume_facts || { skills: [], experience: [], education: [], rawSections: {} },
+        raw_text: cachedProfile.resume_text,
+        structured: cachedProfile.resume_facts || { skills: [], experience: [], education: [], rawSections: {} },
         parse_failed: false,
       };
     }
   } catch (err: any) {
     log.warn(`[Tier 2] Profile resume lookup failed for ${applywizzId}: ${err.message}`);
+  }
+
+  if (isSandboxTestMode()) {
+    if (!cachedProfile?.resume_facts) return null;
+    return {
+      applywizz_id: applywizzId,
+      raw_text: cachedProfile.resume_text || '',
+      structured: cachedProfile.resume_facts,
+      parse_failed: false,
+    };
   }
 
   // 2. Download from profile.resume_url and parse

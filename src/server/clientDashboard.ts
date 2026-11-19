@@ -201,7 +201,7 @@ export function emptyClientDashboard(
   return {
     date,
     dateRange,
-    byAts: stats?.byAts ?? { greenhouse: { total: 0, submitted: 0, applied: 0, failed: 0 }, ashby: { total: 0, submitted: 0, applied: 0, failed: 0 } },
+    byAts: stats?.byAts ?? { greenhouse: { total: 0, submitted: 0, applied: 0, failed: 0 }, ashby: { total: 0, submitted: 0, applied: 0, failed: 0 }, lever: { total: 0, submitted: 0, applied: 0, failed: 0 } },
     ca,
     managerEmail,
     rows: [],

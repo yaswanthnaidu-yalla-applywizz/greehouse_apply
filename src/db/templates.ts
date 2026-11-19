@@ -16,7 +16,7 @@ export interface TemplateRow {
   fields_schema: ScannedField[];
   field_count?: number;
   is_expired?: boolean;
-  ats?: 'greenhouse' | 'ashby';
+  ats?: 'greenhouse' | 'ashby' | 'lever';
   scanned_at?: string;
   updated_at?: string;
   job_posting_location?: string | null;

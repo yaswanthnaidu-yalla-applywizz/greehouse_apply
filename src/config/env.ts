@@ -46,6 +46,7 @@ const envSchema = z.object({
 
   /** Claude Model ID for Tier 5 resolution */
   CLAUDE_MODEL: z.string().default('claude-haiku-5-5'),
+  CLAUDE_SONNET_MODEL: z.string().default('claude-sonnet-5-5'),
 
   /** AWS Region for Bedrock */
   AWS_REGION: z.string().default('us-east-1'),
@@ -85,6 +86,7 @@ const envSchema = z.object({
 
   /** OpenRouter model used for low-confidence Tier 5 escalation. */
   DEEPSEEK_R1_MODEL: z.string().default('deepseek/deepseek-r1-0528'),
+  DEEPSEEK_FLASH_MODEL: z.string().default('deepseek/deepseek-v4.1-flash-1017'),
 
   /** Generic LLM API key fallback */
   LLM_API_KEY: z.string().optional(),
@@ -182,8 +184,8 @@ const envSchema = z.object({
   /** Zoho Mail Reader Login Password */
   ZOHO_CONNECTOR_PASS: z.string().optional(),
 
-  /** Zoho Mail Reader timeout in milliseconds (default: 120000) */
-  ZOHO_CONNECTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
+  /** Zoho Mail Reader timeout in milliseconds (default: 180000) */
+  ZOHO_CONNECTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(180000),
 
   /** Zoho Mail Reader polling interval in milliseconds (default: 5000) */
   ZOHO_CONNECTOR_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
@@ -215,6 +217,16 @@ const envSchema = z.object({
   /** Azure Communication Services Endpoint (Optional) */
   AZURE_COMMUNICATION_ENDPOINT: z.string().optional(),
 
+  /** When true, disables non-auth notification, digest, and report emails (Auth OTP remains enabled) */
+  DISABLE_EMAIL: z.preprocess((val) => {
+    if (typeof val === 'string') {
+      const normalized = val.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1') return true;
+      if (normalized === 'false' || normalized === '0') return false;
+    }
+    return val;
+  }, z.boolean().default(false)),
+
   /**
    * When set, all post-ingest CA notification emails go to this address
    * instead of each CA (sandbox / local testing).
@@ -240,6 +252,9 @@ const envSchema = z.object({
 
   /** DataImpulse Residential Proxy Password */
   DATAIMPULSE_PASSWORD: z.string().optional(),
+
+  /** Apify Residential Proxy URL (http://username:password@hostname:port) */
+  APIFY_STRING: z.string().optional(),
 
   /** DataImpulse Proxy Gateway Host */
   DATAIMPULSE_HOST: z.string().default('gw.dataimpulse.com'),
@@ -351,16 +366,38 @@ const resolvedClaudeWorkspaceId = (
   ''
 ).trim();
 
-const resolvedLlmProvider = 'anthropic' as const;
+const resolvedGeminiApiKey = (
+  rawEnv.GEMINI_API_KEY ||
+  getEnvValue('GEMINI_API_KEY') ||
+  ''
+).trim();
+
+const envLlmProvider = (getEnvValue('LLM_PROVIDER') || rawEnv.LLM_PROVIDER || 'anthropic').toLowerCase();
+const resolvedLlmProvider: 'anthropic' | 'gemini' | 'ollama' | 'openrouter' =
+  envLlmProvider === 'gemini'
+    ? 'gemini'
+    : envLlmProvider === 'ollama'
+      ? 'ollama'
+      : envLlmProvider === 'openrouter'
+        ? 'openrouter'
+        : 'anthropic';
 
 /**
  * Resolves the active LLM API key based on the configured LLM_PROVIDER and available keys.
- * Strictly enforces Anthropic Claude API key for Tier 5 LLM resolution.
  *
  * @param _env - Parsed environment data
  * @returns The active LLM API key string, or empty string if not configured
  */
 function resolveLlmApiKey(_env: typeof rawEnv): string {
+  if (resolvedLlmProvider === 'gemini') {
+    return resolvedGeminiApiKey || resolvedClaudeApiKey;
+  }
+  if (resolvedLlmProvider === 'ollama') {
+    return 'ollama-local';
+  }
+  if (resolvedLlmProvider === 'openrouter') {
+    return rawEnv.OPENROUTER_API_KEY || getEnvValue('OPENROUTER_API_KEY') || resolvedClaudeApiKey;
+  }
   return resolvedClaudeApiKey;
 }
 
@@ -375,10 +412,19 @@ export const config = {
   CLAUDE_API_KEY: resolvedClaudeApiKey || undefined,
   ANTHROPIC_WORKSPACE_ID: resolvedClaudeWorkspaceId || undefined,
   CLAUDE_MODEL: (getEnvValue('CLAUDE_MODEL') || rawEnv.CLAUDE_MODEL || 'claude-haiku-5-5').trim(),
+  CLAUDE_SONNET_MODEL: (getEnvValue('CLAUDE_SONNET_MODEL') || rawEnv.CLAUDE_SONNET_MODEL || 'claude-sonnet-5-5').trim(),
+  GEMINI_API_KEY: resolvedGeminiApiKey || undefined,
+  GEMINI_MODEL: (getEnvValue('GEMINI_MODEL') || 'gemini-3.5-flash-lite').trim(),
+  GEMINI_DEEP_MODEL: (getEnvValue('GEMINI_DEEP_MODEL') || 'gemini-3.5-flash-lite').trim(),
+  GEMINI_FALLBACK_MODEL: (getEnvValue('GEMINI_FALLBACK_MODEL') || 'gemini-flash-lite-latest').trim(),
+  OLLAMA_ENDPOINT: (getEnvValue('OLLAMA_ENDPOINT') || 'http://localhost:11434').trim(),
+  OLLAMA_MODEL: (getEnvValue('OLLAMA_MODEL') || 'llama3.1:latest').trim(),
+  OLLAMA_SONNET_MODEL: (getEnvValue('OLLAMA_SONNET_MODEL') || 'qwen3:latest').trim(),
   OPENROUTER_MODEL: isSandboxEnv
     ? (process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini')
     : rawEnv.OPENROUTER_MODEL,
   DEEPSEEK_R1_MODEL: rawEnv.DEEPSEEK_R1_MODEL,
+  DEEPSEEK_FLASH_MODEL: rawEnv.DEEPSEEK_FLASH_MODEL,
   /** Active LLM API key resolved from LLM_API_KEY or provider-specific keys */
   ACTIVE_LLM_API_KEY: resolveLlmApiKey(rawEnv),
   /** Active Azure / Microsoft 365 Tenant ID */

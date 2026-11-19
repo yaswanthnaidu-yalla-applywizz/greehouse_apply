@@ -84,6 +84,8 @@ describe('leadership and executive notification builders', () => {
     const html = buildExecutiveInitialEmailHtml({
       totalTasks: 15,
       clientCount: 5,
+      totalApplications: 120,
+      totalQueued: 45,
       managers: [
         { managerEmail: 'balaji@applywizz.ai', managerName: 'Balaji', appCount: 10, clientCount: 3 },
         { managerEmail: 'ramakrishnaa.tejavath@applywizz.ai', managerName: 'Ramakrishna Tejavath', appCount: 5, clientCount: 2 },
@@ -91,6 +93,8 @@ describe('leadership and executive notification builders', () => {
     });
     assert.ok(html.includes('<strong>Balaji</strong> has <strong>10</strong> number of tasks to be done'));
     assert.ok(html.includes('<strong>Ramakrishna Tejavath</strong> has <strong>5</strong> number of tasks to be done'));
+    assert.ok(html.includes('Total Applications Ingested: <strong>120</strong>'));
+    assert.ok(html.includes('Currently Queued: <strong>45</strong>'));
     assert.ok(html.includes('Follow-up status check scheduled in 1 hour.'));
   });
 
@@ -109,12 +113,16 @@ describe('leadership and executive notification builders', () => {
       totalTasks: 10,
       clientCount: 4,
       caCount: 2,
+      totalApplications: 120,
+      totalQueued: 45,
       perCa: [
         { caEmail: 'ca1@applywizz.ai', appCount: 6, clientCount: 2 },
         { caEmail: 'ca2@applywizz.ai', appCount: 4, clientCount: 2 },
       ],
     });
     assert.ok(html.includes('10 tasks for 4 clients across 2 CAs are ready for review'));
+    assert.ok(html.includes('Total Applications Ingested: <strong>120</strong>'));
+    assert.ok(html.includes('Currently Queued: <strong>45</strong>'));
     assert.ok(html.includes('ca1@applywizz.ai'));
     assert.ok(html.includes('ca2@applywizz.ai'));
     assert.ok(html.includes('6'));

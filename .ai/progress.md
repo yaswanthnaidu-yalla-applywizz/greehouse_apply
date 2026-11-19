@@ -1,3 +1,242 @@
+### DISABLE_EMAIL Environment Flag for Non-Auth Outbound Emails (2026-11-19 COMPLETE)
+- [x] **Config & Environment Schema (`src/config/env.ts`):**
+  - Added `DISABLE_EMAIL` boolean flag with `z.preprocess` normalizing `"true"`, `"1"`, `"false"`, `"0"` (defaults to `false` when unset).
+  - Documented in `.env.example` and `.ai/techContext.md`.
+- [x] **Service Level Integration (`src/services/azureEmail.ts`):**
+  - Added `isOtp?: boolean` to `SendEmailOptions`.
+  - In `sendEmail`: if `config.DISABLE_EMAIL && !isOtp`, logs an informational message and returns `{ success: true, messageId: 'disabled-by-env' }` without hitting Microsoft Graph or requiring Azure credentials.
+  - In `sendOtpEmail`: sets `isOtp: true`, ensuring Auth OTP verification emails continue dispatching normally even when `DISABLE_EMAIL=true`.
+- [x] **Early Exits for Notifications & Schedulers:**
+  - Added early exit in `sendCaNotificationEmails` and `sendLeadershipIngestionSummary` (`src/services/caNotificationEmail.ts`).
+  - Added early exit in `sendExecutiveDailyDigest` (`src/services/executiveDailyReport.ts`).
+- [x] **Verification:**
+  - Added `tests/disableEmail.test.ts` (5/5 tests passing: non-auth email suppression, auth OTP bypass, CA email skip, leadership summary skip, executive digest skip).
+  - Verified 0 TypeScript compilation errors (`npm run typecheck`).
+
+### Operator File Upload for Application Review (2026-11-19 COMPLETE)
+- [x] **Storage Layer & Profile Resume Sync (`src/db/storage.ts`):**
+  - Added `uploadOperatorFieldFile` storing files into private Supabase Storage `resumes` bucket under `operator_uploads/<applywizz_id>/<application_id>_<field_id>_<filename>` (with resilient fallback to local filesystem `/tmp` or `resumes/operator_uploads` under `SANDBOX=true`).
+  - Added `downloadOperatorFieldFile` streaming file bytes from local disk or Supabase.
+  - Added `syncUploadedResumeToProfile` updating candidate profile's `resume_storage_path` in `profiles` when an operator uploads a resume document.
+  - Added `sanitizeUploadFilename` stripping directory traversal and dangerous characters.
+  - Added unit test suite `tests/operatorFileUploadStorage.test.ts` (3/3 tests passing).
+- [x] **REST API Upload Endpoint (`src/server/routes/applications.ts`):**
+  - Built `POST /api/applications/:id/fields/:fieldId/upload` handling base64 payloads up to 10 MB with strict validation on extensions (`.pdf`, `.docx`, `.doc`) and payload size.
+  - Updates `resolved_fields` in `gh_candidate_applications` with `source: 'manual'`, `isEdited: true`, and metadata (`filename`, `storagePath`, `size`, `isOperatorUploaded: true`).
+  - Increased Express JSON body parser to `25mb` limit in `src/server/index.ts`.
+  - Added unit test suite `tests/operatorFileUploadRoute.test.ts` (4/4 tests passing).
+- [x] **Playwright Form Filler Submitter Integration (`src/submitter/fieldFillers/fileFiller.ts`):**
+  - Updated `fillFileField` to detect operator-uploaded storage paths, fetch file bytes to `os.tmpdir()`, register for cleanup in `tempFilesToClean`, and attach directly via `page.setInputFiles()`.
+  - Supported non-resume file fields (cover letters, transcripts) when populated by an operator rather than skipping.
+  - Added unit test suite `tests/fileFillerOperatorUpload.test.ts` (2/2 tests passing).
+- [x] **Neo-Brutalist Dashboard Dropzone UI (`dashboard/components/EditableFormField.tsx`):**
+  - Upgraded `EditableFormField.tsx`: when `field.type === 'file'`, renders a dedicated drag-and-drop file picker with progress indicator and size validation.
+  - Renders file card when populated showing document icon `📄`, filename, size, and a "Replace" / "Upload" button.
+  - 0 errors across root and dashboard TypeScript typechecks (`npm run typecheck:dashboard`, `npm run typecheck`).
+- [x] **Verification:**
+  - 100% test suites pass: all new unit tests passing, 89 node unit tests passing, 111 vitest tests passing, 0 TypeScript errors.
+
+### Real-Time In-Browser Remediation Incident Recording & Reporting (2026-11-18 COMPLETE)
+- [x] **Incident Reporting Engine & Schema (`src/submitter/realtimeRemediator.ts`):**
+  - Extended `resolveRemediationAnswer` prompt and parser to extract `issueFaced` ("what specific issue the automation faced on the live form") and `issueFixed` ("how the answer resolves this using candidate facts").
+  - Added `FieldRemediationReport` to `ResolvedField.remediation` in `src/types/index.ts`.
+  - Added unit test suite `tests/realtimeRemediatorResolution.test.ts` (5/5 tests passing).
+- [x] **Multi-Field Orchestration & Atomic Persistence:**
+  - Updated `remediateUncommittedFields` and `appendResolvedFields` (`src/db/applications/crud.ts`) to attach `remediation` metadata to `resolved_fields` and persist `SessionRemediationReport` into `error_details.remediationReport`.
+  - Captures both rescued applications and failed-closed attempts.
+  - Added test suite `tests/realtimeRemediationOrchestrator.test.ts` (3/3 tests passing).
+- [x] **On-Demand Dev CSV Export Endpoint (`src/server/remediationReport.ts`):**
+  - Created `handleRemediationExport` streaming RFC 4180 CSV / JSON.
+  - Mounted on `devDashboardRouter` at `GET /api/dev/remediations/export` with `startDate`, `endDate`, `ats`, and `status` filters.
+  - Added test suite `tests/remediationExport.test.ts` (4/4 tests passing).
+- [x] **Verification:**
+  - 100% test suites pass (17 remediation tests, 89 node unit tests, 111 vitest tests).
+  - 0 errors across root and dashboard TypeScript typechecks (`npm run typecheck`).
+
+### Real-Time In-Browser Agentic Form Remediation (2026-11-18 COMPLETE)
+- [x] **Real-Time Remediation Engine & Types (`src/submitter/realtimeRemediator.ts`):**
+  - Implemented `resolveRemediationAnswer` and `remediateUncommittedFields` coordinating real-time LLM resolution (`claude-haiku-5-5` / Gemini) using candidate background facts (work authorization, location, sponsorship, education, skills, prior committed fields) matched against live choices.
+  - Enforced strict choice alignment via `matchChoiceOption` and fail-closed guardrails (`confidence < 0.70`).
+  - Added unit test suite `tests/realtimeRemediatorResolution.test.ts` (4/4 tests passing).
+- [x] **Live Playwright DOM Field Scraper & Action Committer (`src/submitter/realtimeDomAction.ts`):**
+  - Implemented `scrapeLiveFieldFromDom` extracting input types (`select`, `radio`, `checkbox`, `text`, `textarea`) and rendered choice labels directly from browser DOM.
+  - Implemented `commitRemediatedValue` executing humanized Playwright commitment and asserting DOM value retention.
+  - Added unit test suite `tests/realtimeDomAction.test.ts` (3/3 tests passing).
+- [x] **Multi-Field Orchestration & Atomic DB Persistence:**
+  - Added `appendResolvedFields` in `src/db/applications/crud.ts` to atomically merge newly resolved fields into `gh_candidate_applications.resolved_fields`.
+  - Added circuit breakers: 20s timeout, max 3 fields per application.
+  - Added test suite `tests/realtimeRemediationOrchestrator.test.ts` (3/3 tests passing).
+- [x] **Greenhouse Submitter Pipeline Integration (`src/submitter/liveSubmit.ts`):**
+  - Intercepts `unfilledRequiredLabels` before `validateGreenhouseSubmission`.
+  - Re-evaluates submission gate after committing fields and clears unfilled labels before clicking Submit.
+  - Added test suite `tests/greenhouseRemediatorIntegration.test.ts` (1/1 test passing).
+- [x] **Ashby Submitter Pipeline Integration (`src/submitter/ashbySubmit.ts`):**
+  - Wired into `verifyRequiredFieldsCommitted` in `submitAshbyApplication` to remediate missing radio/custom fields before submit click.
+  - Added diagnostic category `REALTIME_REMEDIATION_APPLIED` in `src/types/failureDiagnostics.ts` and `src/utils/failureDiagnostics.ts`.
+  - Added test suite `tests/ashbyRemediatorIntegration.test.ts` (1/1 test passing).
+- [x] **Verification:**
+  - 100% test suites pass (111 unit tests, 12 new remediation tests across 5 test suites).
+  - 0 errors across root and dashboard TypeScript typechecks (`npm run typecheck`).
+
+### Fresh Resume Ingest & Dynamic ATS Form Submission Naming (2026-11-17 COMPLETE)
+- [x] **Adapted fileNameUtils into `src/utils/resumeNaming.ts`:**
+  - Implemented `extractJobRoleFromPage`, `cleanJobRole`, `sanitizeForFileName`, `buildDocumentFileName`, and `buildResumeStorageFilename`.
+  - Added Node.js + Playwright DOM compatibility (accepts string `pageTitle` with fallback to `document.title`).
+  - Added multi-shape candidate profile support (`personal.firstName`, `first_name`, `firstName`, `client_name`).
+  - Maintained backwards compatibility for all existing callers in `storage.ts`, `formFiller.ts`, and `ashbySubmit.ts`.
+- [x] **Supabase Storage Bucket Purge & Local Resumes Clean:**
+  - Added `purgeResumesBucket` in `src/db/storage.ts` to wipe the Supabase Storage `resumes` bucket with pagination and clear the local `./resumes/` folder.
+  - Updated `resumeStorageFilename` in `src/db/storage.ts` to standard `Resume_FirstName_LastName.pdf` via `buildResumeStorageFilename`.
+- [x] **Parsed Resume Cache Invalidation:**
+  - Added `invalidateResumeParseCache(applywizzIds)` in `src/resolver/tier2ResumeParse.ts` to clear `resume_text` and `resume_facts` on `profiles` (and legacy `candidate_resume_parsed`).
+- [x] **Fresh Resume Sync at Ingestion:**
+  - Added `forceRefreshResume` in `src/candidate/ensureSupabaseProfile.ts` and enabled it in `src/candidate/segregator.ts`.
+  - Hooked `purgeResumesBucket` and `invalidateResumeParseCache` into `src/scanner/storageCsvIngestion.ts` and `src/orchestrator/pipeline.ts`.
+- [x] **Dynamic ATS Form Submission Renaming:**
+  - Updated `src/submitter/formFiller.ts` and `src/submitter/ashbySubmit.ts` to rename attached resumes to `Resume_FirstName_LastName_JobRole.pdf` based on the live job page title and job title.
+  - Added collision prevention unlinking before renaming in the temporary directory.
+- [x] **Verification:**
+  - 100% test suites pass: 89 node unit tests, 111 vitest tests, and all 5 new unit test suites (`tests/resumeNaming.test.ts`, `tests/storageResumePurge.test.ts`, `tests/tier2ResumeCacheInvalidation.test.ts`, `tests/freshResumeIngest.test.ts`, `tests/formFillerResumeNaming.test.ts`).
+  - Clean TypeScript compilation (`npx tsc --noEmit`).
+
+### Ashby Apify Residential Proxy Preflight Fallback & DB2 Verification (2026-11-17 COMPLETE)
+- [x] **Ashby Apify Preflight Fallback Implementation (`src/submitter/ashbyProxy.ts`, `src/submitter/ashbySubmit.ts`):**
+  - Added support for `APIFY_STRING` optional residential fallback proxy in URL format (`http://username:password@hostname:port`).
+  - Added `shouldAttemptApifyPreflightFallback` and `preflightFallback` helpers in `src/submitter/ashbySubmit.ts` enabling seamless switch when primary Massive preflight fails with HTTP 471 or route exhaustion.
+  - Added unit test suite `tests/ashbyApifyPreflightFallback.test.ts` (5/5 tests passing).
+- [x] **DB2 Historical Failure Diagnostic & Dry-Run Verification (`scripts/testAshbyApifyRetry.ts`):**
+  - Audited 8 DB2 Ashby applications created yesterday (`2026-11-16`) that failed on `stage: 'PREFLIGHT'` with HTTP 400.
+  - Executed end-to-end dry-run verification without submitting:
+    - Confirmed Apify fallback automatically engaged in 100% of Massive route failure cases (5 of 5) and resolved exit IPs cleanly.
+    - Verified 3 applications are immediately eligible for submission (`CAN APPLY NOW`): Clera (`AWL-42673`), ClickHouse (`AWL-29612`), and ClickHouse (`AWL-41703`). Captured full-page dry run proof screenshots in `output/proofs_dry_run/`.
+    - Identified that the remaining 5 applications are blocked by downstream form controls (Netic & Assort Health uncommitted radio buttons, Eragon readiness timeout) rather than proxy preflight.
+
+### Executive Daily 9:00 AM IST Reporting & Post-Ingestion Metrics (2026-11-17 COMPLETE)
+- [x] **Post-Ingest Email Metrics Enrichment (`src/services/caNotificationEmail.ts`):**
+  - Updated `LeadershipInitialSummary` and `ExecutiveInitialSummary` to accept `totalApplications` and `totalQueued`.
+  - Added metrics ribbon to `buildLeadershipInitialEmailHtml` and `buildExecutiveInitialEmailHtml` displaying Total Applications Ingested and Currently Queued.
+  - Updated `sendLeadershipIngestionSummary` to query total run applications and current queue depth safely via PostgREST exact head count.
+- [x] **Executive Daily Report Service (`src/services/executiveDailyReport.ts`):**
+  - Evaluates the single latest ingest run (authoritatively via `getLatestIngestRunDate()`).
+  - Aggregates status metrics (`totalApplications`, `totalApplied`, `totalFailed`, `totalQueued`, `totalReadyForReview`, `successRatePercent`, `completionRatePercent`).
+  - Classifies ATS breakdown across Greenhouse, Ashby, and Other using `isAshbyUrl` and `isGreenhouseUrl`.
+  - Normalizes and groups failure reasons descending by frequency using `normalizeFailureReason`.
+  - Generates deterministic executive summary text with no LLM dependency.
+  - Builds comprehensive, responsive HTML email matching ApplyWizz dashboard styling.
+  - Configured recipient resolver targeting Ramakrishna (`ramakrishna@applywizz.ai`), CC: Anusha, Yaswanth, Vivek, with full `SANDBOX` and `CA_NOTIFICATION_EMAIL_OVERRIDE` safety.
+- [x] **Automated Daily 9:00 AM IST Scheduler (`src/server/index.ts`):**
+  - Calculated exact ms offset to next 9:00 AM IST (03:30 UTC) with unref'd timer and 24-hour cycle.
+  - Wired `startExecutiveDailyReportScheduler()` into `src/server/index.ts:startServer()`.
+- [x] **Verification:**
+  - 26/26 unit tests pass in `tests/executiveDailyReport.test.ts` and `tests/leadershipNotificationEmail.test.ts`.
+  - 100% clean typecheck across root and dashboard (`npm run typecheck`).
+
+### Submission Engine Remediations for Ashby & Greenhouse Failures (2026-11-16 COMPLETE)
+- [x] **Executed 100% of Implementation Plan (`docs/superpowers/plans/2026-11-16-submission-engine-failure-fixes.md`):**
+  - **Task 1 (Ashby Confirmation Detection Broadening):** Updated `src/submitter/ashbySubmit.ts` to detect diverse success card copies ("Thanks for applying to...", "Your application was received...", DOM `.ashby-application-form-success`), salvaging false failures across IRIS, Lovable, BillGO, HUMAN, Cohere, algo1.
+  - **Task 2 (Ashby Radio Button Selector Precision):** Updated `src/submitter/ashbyFormFiller.ts` to target radio labels with strict boundaries and exact value fallback, eliminating collision with question title headers containing "now" or "not".
+  - **Task 3 (Ashby Boolean Checkbox Option Routing Fix):** Updated `src/submitter/ashbyFormFiller.ts` to exclude synthetic `options: ["true"]` from multi-option logic, routing single agreement checkboxes to boolean toggle logic.
+  - **Task 4 (Ashby Overview Tab Auto-Transition & Hydration Extension):** Added auto-transition click for "Apply for this Job" / "Application" tab and extended Next.js hydration wait to 35,000ms with spinner detachment detection.
+  - **Task 5 (Ashby Field Handling & Normalization):** Prioritized telephone inputs over radio inputs in `ashbyScanner.ts`, extracted integer numeric values (e.g. 100000) from compensation strings in `ashbyFormFiller.ts`, and stripped `"https://N/A"` or `"N/A"` for LinkedIn/URL fields in `answerResolver.ts` & `tier1Supabase.ts`.
+  - **Task 6 (Ashby Proxy Location & Preflight Endpoint):** Added `US_STATE_CODES` to disambiguate US states like GA from foreign ISO codes (Gabon), and repointed preflight probe to `api64.ipify.org` avoiding `ipapi.co` quota blocks.
+  - **Task 7 (Greenhouse Education Section Requiredness & Retention):** Broadened regex to match `School *` with whitespace or child spans, and guaranteed education answers are retained and fallbacks applied whenever education containers exist on DOM.
+  - **Task 8 (Greenhouse Custom Demographic Surveys & Hidden Invalid Inputs):** Extracted custom demographic survey sections on Remix pages and captured hidden `input.requiredInput:invalid` comboboxes in `detectFormFillingErrors`.
+  - **Task 9 (Greenhouse Mandatory Consent Checkbox Guarantee & OTP Window):** Automatically checks all uncommitted mandatory checkboxes before submission, and extended OTP timeout window to 180s.
+  - **Task 10 (Full Integration & Regression Verification):** 39/39 tests pass across all 9 new remediation test suites; core unit test suite passes (22/22); 100% clean typecheck on root and dashboard (`npm run typecheck`).
+
+### Implementation Plan for Submission Engine Failure Fixes (2026-11-16 COMPLETE)
+- [x] **Authored Multi-Phase Implementation Plan (`docs/superpowers/plans/2026-11-16-submission-engine-failure-fixes.md`):**
+  - Mapped 10 surgical TDD tasks across Phase 1 (Ashby submission hardening), Phase 2 (Greenhouse submission hardening), and Phase 3 (full integration & regression verification).
+  - Updated all 13 verified false-failure Ashby applications in DB2 to `APPLIED`.
+  - Ready for execution via `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
+
+### Forensic Visual Root Cause Audit for 1,229 Failed Applications (2026-11-16 COMPLETE)
+- [x] **100% Visual Screenshot Audit of Failed Applications Created 2026-11-15 (`.ai/diagnostics/fada_failed_audit_2026-11-15.md`):**
+  - Downloaded and analyzed 1,194 screenshots via FADA engine and 4 parallel subagents (`Greenhouse Visual Auditor`, `Ashby Navigation Auditor`, `Ashby PreSubmit Auditor`, `Ashby Confirmation Auditor`).
+  - Accounted for 100% of all 1,229 failure records across Greenhouse (462) and Ashby (767).
+  - Isolated 13 false-failure successes on Ashby (IRIS, Lovable, BillGO, HUMAN, Cohere, algo1) marked failed due to rigid 45s confirmation text timeout.
+  - Pinpointed exact code bugs: Greenhouse Education section stripping bug (`School *` whitespace vs `label:has-text("School*")`), Ashby radio group header matching collision (`:has-text("No")` matching question titles containing "now"/"not"), single boolean checkbox synthetic option trap, and proxy rate limits on `ipapi.co`.
+  - Zero code changes made; produced full diagnostic report and surgical remediation recommendations.
+
+### Ingest Auto-Queue Diagnostics & Non-Auto-Queued Applications Re-resolution (2026-11-16 COMPLETE)
+- [x] **Root Cause Diagnosis for Ingest Drops & Review Gating (`.ai/diagnostics/fada-report-2026-11-16.md`):**
+  - Audited 105 rows in `combined_jobs_20261116.csv`. Diagnosed 15 pre-creation drops (12 candidate Zoho disconnected, 2 Samsara scan template failures, 1 Superhuman expired job).
+  - Diagnosed 31 non-auto-queued applications in DB2 (28 `READY_FOR_REVIEW`, 3 `FILTERED_OUT`).
+  - Isolated resolver gaps: anti-nepotism / employee ties, citizenship status vs work authorization, `legally able/allowed` regex phrases, Ashby empty-option select scrubbing in `alignResolvedChoice`, and onsite willingness city token omission (*"our SF office"*).
+- [x] **Surgical Resolver Fixes (`src/resolver/corporatePolicies.ts`, `src/resolver/tier1Supabase.ts`, `src/resolver/answerResolver.ts`):**
+  - Added anti-nepotism / employee ties corporate policy returning `"No"`.
+  - Added citizenship / immigration category question resolver mapping to candidate work authorization (`"No"` for F1/H1B, `"Yes"` for Citizen/Green Card).
+  - Broadened work authorization regex to include `legally able` and `legally allowed`.
+  - Preserved empty-option select field values in `alignResolvedChoice`.
+  - Broadened onsite willingness regex (`isOnsiteWillingness`) to allow optional city tokens (`work from (?:our|the)(?:\s+\w+)?\s+office`).
+- [x] **Database Re-resolution & Enqueueing (Production DB2):**
+  - Re-resolved 100% of the 31 held applications with ground-truth-verified answers and updated them to `QUEUED` (`status = 'QUEUED'`, `error_message = NULL`, `retry_count = 0`).
+  - Result: 0 applications remaining in review; all 90 ingested applications are actively queued or progressing through submission.
+- [x] **Verification:**
+  - 100% clean typecheck (`tsc --noEmit && npm run typecheck:dashboard`).
+  - Unit tests in `tests/choiceOptions.test.ts`, `tests/resolverDiagnosedFixes.test.ts`, and `tests/resolverProgressTracker.test.ts` pass green (6/6).
+
+### Submitter Worker Pool Supervisor & Resilient Failure Handling (2026-11-16 COMPLETE)
+- [x] **Eliminated Submitter Queue Freezes & Added Worker Auto-Restart (`src/submitter/submitterPool.ts`):**
+  - **Failure Status Transition Hardening:** Removed conflicting `expected_status: 'APPLYING'` in terminal failure updates, which previously threw state mismatch exceptions when jobs were already marked `FAILED` by `runLiveSubmit` or `submitAshbyApplication`.
+  - **Try/Catch Guards:** Wrapped failure updates in `try/catch` inside `runWorker` and its error handlers so unexpected status write failures can never escape into the event loop.
+  - **Worker Supervisor Loop:** Implemented `startWorkerSupervisor(workerIndex)` to continuously monitor each submission lane and auto-respawn `runWorker` with a 1-second delay if it ever exits unexpectedly.
+  - **Verification:** Unit tests in `tests/submitterPoolRetry.test.ts` (5/5 pass) and `tests/submitterPoolCircuitBreaker.test.ts` (1/1 pass). Full typecheck clean (`tsc --noEmit && npm run typecheck:dashboard`). Pushed commit `30594b8` to `origin/dev` and verified live Railway deployment `920d07b4`.
+
+### Dev Dashboard Ingest Drop Reporting & Candidate Volume View (2026-11-15 COMPLETE)
+- [x] **Granular Ingest Drop Taxonomy & Itemized Reporting (`src/scanner/storageCsvIngestion.ts`, `src/server/filteredStats.ts`):**
+  - Expanded `computeIngestFunnelStats` to parse and track granular pre-creation drop reasons: `security_clearance`, `excluded_company`, `latest_employer`, `already_applied`, `job_expired`, `zoho_disconnected`, `no_scan_template`, and `exclusions_or_other`.
+  - Merged pre-creation dropped rows (`topFunnelDroppedDetails`) into the `items` drill-down table in `src/server/filteredStats.ts` so users can inspect which specific URLs/candidates were dropped and why.
+  - Added human-readable labels and progress bar visualizations in `dashboard/components/DevFilteredView.tsx`.
+  - Verified with unit tests in `tests/ingestDropReporting.test.ts` (2/2 passing).
+- [x] **High-Performance Candidate Volume Backend (`src/server/candidateVolume.ts`, `src/server/routes/devDashboard.ts`):**
+  - Aggregates per-candidate application counts (`APPLIED`, `EMAIL_PROOF_PENDING`, total submitted) using bounded index scan on `(created_at, status)` without fetching heavy JSONB blobs (`resolved_fields`).
+  - Implemented 30-second TTL in-memory LRU cache to prevent database churn during rapid tab navigation or date switching.
+  - Added dedicated drill-down endpoint `GET /api/dev/candidate-volume/:applywizzId/applications` for loading individual jobs on demand.
+  - Verified with unit tests in `tests/candidateVolume.test.ts` (2/2 passing).
+- [x] **Dedicated Candidate Volume Tab UI (`dashboard/components/DevCandidateVolumeView.tsx`, `dashboard/components/DevDashboard.tsx`):**
+  - Integrated `'candidates'` tab into Dev Dashboard (`/dev`), adhering to the existing date controls (defaults to Today, supports custom date range).
+  - 4 KPI summary cards: Active Candidates, Total Submitted, Fully Applied, Proof Pending.
+  - Search by AWL ID, candidate name, or email with instant client-side sorting and 50-row pagination.
+  - Expandable row drill-down displaying candidate jobs with ATS badge, status pill, submission timestamp, and action buttons for Web Proof (`ProofViewer`) and Confirmation Email Proof (`EmailProofModal`).
+  - Verified with clean TypeScript typecheck across backend and dashboard (`npm run typecheck:dashboard`).
+- [x] **Filtered & Analysis Stats Accuracy Fixes (`src/server/filteredStats.ts`, `src/server/analysisStats.ts`, `dashboard/components/AnalysisView.tsx`):**
+  - Resolved PostgREST 1,000-row ceiling via chunked range pagination (`range(offset, offset + 999)`), accurately calculating cohorts over 11,000+ applications across multi-day timeframes.
+  - Eliminated false `autoApplied` classification in `filteredStats.ts` where `FAILED`, `QUEUED`, and `APPLYING` were mistakenly counted as auto-applied.
+  - Synchronized DevDashboard global date range controls (`date`, `statsRange`, `customFrom`, `customTo`) with `<AnalysisView>`.
+  - Added 30s TTL in-memory caching for both filtered and analysis endpoints.
+  - Verified with unit tests in `tests/analysisStatsPagination.test.ts` and `tests/filteredStatsAccuracy.test.ts`.
+
+### Production DB 2 Authoritative Profiles Backfill from Resumes (2026-11-13 COMPLETE)
+- [x] **Authoritative Extraction & Backfill of DB 2 Candidate Profiles:**
+  - **Resume-Driven Ground Truth:** Extracted candidate facts across all 380 candidates with resume text in production DB 2 using parallel Gemini Flash subagents partitioned into 8 chunks.
+  - **Database Migration 043 Bypass:** Generated and committed 16 transactional SQL batches utilizing `SET LOCAL app.profile_authoritative_override = 'on'` to safely bypass trigger `trg_protect_profile_facts`.
+  - **Work Experience Placeholder Elimination:** 100% of synthetic onboarding placeholder company entries (`"Professional Experience"`) eliminated across all candidates with resumes (380 -> 0). All resumed candidates now have verified companies, roles, dates, and descriptions.
+  - **Education Backfill:** Backfilled authentic degree, institution, and field of study facts into `education` JSONB array (empty education arrays dropped from 124 to 0 in resumed candidates).
+  - **Verification:** Verified in production DB 2 via SQL queries: 0 resumed candidates with placeholders, 0 resumed candidates with empty education or work experience. Zero user approvals were required.
+
+### Greenhouse Submission Failure Root Causes & Fixes (2026-11-13 COMPLETE)
+- [x] **Investigated & Fixed 376 Greenhouse Submission Failures (`src/utils/choiceOptions.ts`, `src/submitter/formFiller.ts`):**
+  - **Education Degree Regex Normalization Bug:** Fixed `canonicalAlias` degree regexes where literal dots (`b\\.tech`, `b\\.s\\.`) never matched strings normalized with spaces. Added `b\\s*tech`, `b\\s*s`, `m\\s*s`, `ph\\s*d`, `b\\s*e`, and `bachelor of engineering`.
+  - **Numeric ID CSS Selector Escaping:** Fixed `sanitizeMetadataSelector` to rewrite `#<digit>` to `[id="<digit>"]`, preventing `SyntaxError: '#864' is not a valid selector` in `querySelectorAll`. Enabled numeric ID handling in `selectSelectors`.
+  - **React-Select DOM Commitment Verification:** Broadened container resolution in `comboboxDisplaysAnswer` to match Emotion/remix class hashes (`[class*="-singleValue"]`). Accepted non-empty values in required hidden inputs upon option click in `hiddenRequiredInputDisplaysAnswer`.
+  - **Dropdown Fallback Safeguards:** Added fallback selection for unmapped education degrees (`Bachelor's Degree`), mandatory demographic survey selects (`Decline to self-identify` / `Prefer not to say`), and referral sources (`LinkedIn` / `Other`).
+  - **Verification:** Unit tests in `tests/choiceOptions.test.ts` and `tests/formFillerPrecision.test.ts` reproduce and verify the fixes. 111/111 unit tests pass green, full typecheck clean.
+
+### Parallel Multi-ATS Ashby & Greenhouse Scanning (2026-11-12 COMPLETE)
+- [x] **Ashby Parallel Worker Pool Scanner (`src/scanner/ashbyScanner.ts`):** Created `AshbyScanner` class mirroring `PlaywrightScanner`. Features a single Chromium browser instance reused across `workerPoolSize` contexts (default 4), atomic URL queue leasing (`currentIndex++`), randomized jitter delay (`SCANNER_JITTER_MIN_MS` to `SCANNER_JITTER_MAX_MS`), abort signal checking (`throwIfPipelineAborted`), and `onJobScanned` milestone progress callbacks. Non-fatal empty/expired pages cleanly mark `isExpired: true`. Preserved backward-compatible `scanAshbyDom` and `scanAshbyJob` functions.
+- [x] **Concurrent ATS Orchestrator Pipeline (`src/orchestrator/pipeline.ts`):** Replaced serial sequential `for (const aUrl of ashbyUrls)` loop. Executes `PlaywrightScanner` (Greenhouse) and `AshbyScanner` (Ashby) concurrently via `Promise.all([scanner.scanUniqueUrls(ghUrls), ashbyScanner.scanUniqueUrls(ashbyUrls)])`. Both scanner pools update shared `scannedCount` and `scanFailures` counters in real time.
+- [x] **Test Coverage (`tests/ashbyScanner.test.ts`):** Added parallel scanner tests verifying multi-worker concurrent scanning, ordered template preservation, expired job handling, and progress tracking callbacks. 5/5 tests passing green.
+
+### Operator Queue UX Quick Wins & False-Failed Diagnostic (2026-11-12 COMPLETE)
+- [x] **Exclude APPLIED, EMAIL_PROOF_PENDING, and FAILED from Operator Queue (Issue 2.3):** Exported `isAppliedApplicationJob` and `isFailedApplicationJob` in `src/dashboard/candidateQueueFilter.ts`. Updated `filterOperatorApplicationJobs` and added database-level exclusion `.neq('status', 'APPLIED').neq('status', 'EMAIL_PROOF_PENDING').neq('status', 'FAILED')` in `src/server/routes/candidates.ts`. Verified in `tests/candidateQueueFilter.test.ts`. Commit: `2779101`.
+- [x] **Candidate Queue Job URL Deduplication (Issue 2.1):** Exported `deduplicateJobsByUrl` in `src/dashboard/candidateQueueFilter.ts` and integrated into `candidates.ts`. Retains the most recent application per unique job URL for a candidate, preventing duplicate task entries. Verified in `tests/candidateQueueFilter.test.ts`. Commit: `1256c3a`.
+- [x] **Job Card Failure Reason Badge (Issue 2.6):** Added `data-testid="failure-badge"` on `dashboard/JobQueueView.tsx` cards for `status === 'FAILED'`, displaying `🔴 Failed — <truncated reason>` (capped at 60 characters with ellipsis) and full error in title tooltip. Added direct `jobs` prop support for standalone views. Verified in `tests/jobQueueFailureBadge.test.tsx` (3/3 passing). Commit: `10fae9e`.
+- [x] **Fix Automatic "No Job Selected" Error (Issue 2.4):** In `dashboard/App.tsx`, auto-selects the first available job card on candidate load, and preserves active job selection across WebSocket / background refreshes (`fetchCandidateDetail`). In `dashboard/FormRenderer.tsx`, differentiated 3 empty states: "Queue Complete ✅" (0 queue jobs), "Resolution in Progress ⏳" (selected job resolving), and "Select an Application 📋". Verified in `tests/noJobSelectedFix.test.tsx` (3/3 passing). Commit: `78863ec`.
+- [x] **Prevent False-Failed Status Downgrades & Double-Dequeue Races (Issue 2.5):** In `src/db/applications/crud.ts`, added atomic status downgrade guard in `updateStatus` refusing transition from `APPLIED` or `EMAIL_PROOF_PENDING` to `FAILED` (unless `force: true`). In `src/submitter/submitterPool.ts`, passed `expected_status: 'APPLYING'` on worker failure reporting so trailing workers in race conditions cannot clobber completed `APPLIED` status. In `src/server/routes/applications.ts`, rejected `/submit` attempts on already submitted applications. Verified in `tests/statusDowngradeGuard.test.ts` (4/4 passing). Commit: `3c12ed8`.
+- [x] **Copy Question & Copy All Questions Buttons (Issue 2.7):** Added "📋 Copy All Questions" button (`data-testid="copy-all-questions"`) above field list in `dashboard/FormRenderer.tsx`, formatting questions as `Q1. label\n...`. Added per-question copy button (`data-testid="copy-question"`) in `dashboard/components/EditableFormField.tsx`. Verified in `tests/formRendererCopy.test.tsx` (5/5 passing). Commit: `8e773c2`.
+- [x] **Full Suite Verification:** 89 Node unit tests pass. 113 Vitest tests pass. `npm run typecheck:dashboard` clean with 0 errors. Vite production build (`npm run build:dashboard`) clean in 2.56s.
+
 ### AI Auto-Queue & Two-Level Review Architecture (2026-11-09 Tasks 1-7 COMPLETE)
 - [x] **Execution Routing & Field Cap Removal (Task 1):** Removed `MAX_JOB_QUESTIONS` gating; applications are never skipped or filtered based on field count. Auto-queues applications when all required fields are satisfied, even if resolved by AI. Preserves unresolved-required (>3 = `FILTERED_OUT`), mandatory cover letter, and negative compensation execution guards. Verified in `tests/aiAutoQueueRouting.test.ts` (7/7 passing).
 - [x] **Tier 5 Escalation Waterfall & Provenance (Task 2):** Unified single and batch resolution under shared `finalizeTier5WithEscalation`. Haiku < 0.80, unresolved, or invalid exact choice escalates to DeepSeek R1 via OpenRouter. DeepSeek accepted only at confidence >= 0.65. Unsuccessful escalation fails closed to `unresolved`. Direct resolver QA bank and embedding writes removed. Verified in `tests/deepseekR1Escalation.test.ts` (7/7 passing).
@@ -1140,6 +1379,7 @@ _Last updated: 2026-10-07_
 ---
 
 ## Known Bugs / Gotchas
+- **? Fixed (2026-11-13) ? PR #83 CI typecheck/build:** the `evaluation` resolver mode was used but missing from `ResolutionExecution`; the type now includes that mode, and merged-branch typecheck/build pass.
   - **Open auto-queue resolution work (2026-11-05 question-frequency audit):** broad agreement handling, positive work authorization, sponsorship mapping, and negative prior-employment answers are intentional operator policy. New operator decisions: default felony and age prompts to No and Yes respectively; use raw payload for identity questions, otherwise default veteran and military to No, race to Asian, and other identity questions to a decline option when available; default outside-employment, relationship, export-control, and prior-application prompts to a negative option; map salary ranges to exact or nearest choice bands; and prefer a posted job location or, when unavailable, a positive relocation option backed by payload data. The `visa_type` raw-payload field can support structured work-status questions, but many variants still reach AI. `convicted_of_felony` exists in the raw payload but the unconditional felony `No` branch wins before it can be read. Among 4,064 `READY_FOR_REVIEW` snapshots, required AI fields total 4,184 and unresolved fields total 2,142. Location selects and historical SMS-radio snapshots dominate unresolved fields; employer history, work-status, demographic, and bespoke narrative fields dominate AI. The audit was read-only and changed no production data.
   - **Dependency audit risk (2026-10-27):** A clean install followed by `npm audit --json` reports 10 vulnerabilities: 1 critical, 6 high, and 3 moderate. The critical advisory is transitive through `proxy-addr`; runtime reachability is not yet established. Do not run `npm audit fix --force` without reviewing direct-dependency and behavior impact.
   - **✅ Fixed (2026-10-27) — forced-memory E2E integration assertions:** `tests/e2eIntegration.test.ts` now expects Tier 4 profile-fact resolution for its personal-email fixture and supplies a complete application reference to dry-run/proof persistence helpers. A fresh private-copy run passes 32/32 E2E checkpoints, `npm run typecheck`, `npm run build`, and 118 unit checks. Supabase-backed proof persistence remains an untested integration boundary.
@@ -1248,3 +1488,19 @@ _Last updated: 2026-10-07_
 ### Resolver answer accuracy (2026-11-07 local implementation)
 
 - Local resolver fixes prevent invented Ashby US locations, let candidate evidence precede candidate-specific policy defaults, keep optional controls blank, and require labeled compatible QA matches in semantic search. Migration 047 is prepared but not applied to production. Production behavior remains unverified.
+
+### Operator Dashboard Date, Lookup, and Status Corrections (2026-11-09 local)
+- [x] Restored an operator application-date picker so operators can review earlier dates; candidate job detail requests now carry the selected date.
+- [x] Fixed duplicate candidate/job detail lookups by filtering operator requests to the selected date and selecting the newest matching application row. DB2 contains duplicate candidate/job pairs that made `.maybeSingle()` return no row.
+- [x] Job cards now show `Submitted` only when `submitted_at` is present. `operator_approved_at` records review approval and previously caused ready, dry-run, and queued applications to appear submitted.
+- [x] Read-only DB2 evidence: the newest completed ingest run is on 2026-11-09 IST. It created 81 application rows that IST date, including 21 `READY_FOR_REVIEW` rows during the run. All 21 are assigned, match their profile CA, have Zoho connected, and have resolved fields. A prior note misread PostgreSQL `date` serialization as UTC; this correction supersedes it. The latest seven-day diagnostics show multiple failure classes (required-field data gaps, navigation and OTP timeouts, and interactive challenges); submission safeguards and challenge handling were left fail-closed.
+- [x] Focused dashboard tests pass (16/16) and `npm run typecheck` exits 0. Changes are local and have not been deployed.
+# Resolver answer integrity and evaluation (2026-11-13 local)
+
+- Local changes support profile-only phone evidence with conflict checks, preserve explicit relocation willingness, and allow reviewed creative fallback without a confidence score. The read-only evaluator records slot-level audit data and classifies task-aware funnel outcomes conservatively. These changes have not been deployed.
+- Focused resolver and evaluation tests passed (82 passed, 2 skipped), and `npm run typecheck` passed. A full answer-truthfulness audit, refreshed provider-backed evaluation and the 80% ingest-created auto-queue target remain unverified. No production data, queue or submission was changed.
+
+
+### Ashby scanner navigation classification (2026-11-16 investigation)
+- A read-only Obscura comparison reproduced a scanner classification defect: a blocked navigation was caught and treated as HTTP 200, after which a zero-field Ashby scan was marked expired. The site loaded normally once network access was restored. No production code or data was changed; distinguish navigation errors from closed postings in a future fix.
+- **2026-11-17 local fix:** Initial and embedded-page navigation exceptions or missing responses now emit retryable diagnostics and produce no expired template. The worker continues with other URLs and pipeline progress reports failed scans separately. Focused regression tests and the Ashby scanner suite passed; typecheck passed. No deployment or historical data changes were made. HTTP error-response classification was not changed.
