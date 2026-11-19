@@ -215,6 +215,44 @@ describe('executiveDailyReport - dispatch service', () => {
     assert.ok(sent.subject.includes('ApplyWizz Executive Daily Report'));
     assert.ok(sent.subject.includes('2026-11-17'));
     assert.ok(sent.html.includes('Daily Executive Operations Digest'));
+
+    const claims = new Set<string>();
+    const scheduledDb = {
+      from: (table: string) => {
+        if (table !== 'gh_executive_daily_report_dispatches') return mockSupabase.from();
+        return {
+          insert: async (claim: { scheduled_date: string; recipient_group: string }) => {
+            const key = JSON.stringify(claim);
+            if (claims.has(key)) return { error: { code: '23505' } };
+            claims.add(key);
+            return { error: null };
+          },
+        };
+      },
+    };
+    const scheduledOptions = {
+      targetDate: '2026-11-17',
+      scheduledDate: '2026-11-18',
+      sendEmailFn: mockSendEmail,
+      supabaseClient: scheduledDb,
+    };
+    const attempts = await Promise.all([
+      sendExecutiveDailyDigest(scheduledOptions),
+      sendExecutiveDailyDigest(scheduledOptions),
+    ]);
+    assert.ok(attempts.every((attempt) => attempt.success));
+    assert.equal(attempts.filter((attempt) => attempt.skipped).length, 1);
+    assert.equal(sentEmails.length, 2);
+
+    const failed = await sendExecutiveDailyDigest({
+      ...scheduledOptions,
+      scheduledDate: '2026-11-19',
+      sendEmailFn: async () => ({ success: false, error: 'Graph delivery failed' }),
+    });
+    assert.deepEqual(failed, { success: false, error: 'Graph delivery failed' });
+    const repeated = await sendExecutiveDailyDigest({ ...scheduledOptions, scheduledDate: '2026-11-19' });
+    assert.equal(repeated.skipped, true);
+    assert.equal(sentEmails.length, 2);
   });
 });
 
