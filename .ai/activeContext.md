@@ -1,3 +1,51 @@
+# Current Session Update (2026-11-19 - Operator File Upload for Application Review Shipped & Verified)
+
+- **Completed 100% Execution of Operator File Upload Feature (`docs/superpowers/plans/2026-11-19-operator-file-upload.md`)**:
+  - **Task 1 (Storage Layer & Profile Resume Fallback Sync)**:
+    - Added `uploadOperatorFieldFile` in `src/db/storage.ts` storing files to private `resumes` Supabase Storage bucket under `operator_uploads/<applywizz_id>/<application_id>_<field_id>_<filename>` (with resilient fallback to local filesystem `/tmp` or `resumes/operator_uploads` under `SANDBOX=true`).
+    - Added `downloadOperatorFieldFile` in `src/db/storage.ts` streaming file bytes from local disk or Supabase.
+    - Added `syncUploadedResumeToProfile` updating candidate profile's `resume_storage_path` in `profiles` when an operator uploads a resume document.
+    - Added `sanitizeUploadFilename` stripping path traversal and dangerous characters.
+    - Tested in `tests/operatorFileUploadStorage.test.ts` (3/3 passing).
+  - **Task 2 (REST API Upload Endpoint)**:
+    - Built `POST /api/applications/:id/fields/:fieldId/upload` in `src/server/routes/applications.ts`.
+    - Handles base64 payloads up to 10 MB with strict validation on extensions (`.pdf`, `.docx`, `.doc`) and payload size.
+    - Updates `resolved_fields` in `gh_candidate_applications` with `source: 'manual'`, `isEdited: true`, and metadata (`filename`, `storagePath`, `size`, `isOperatorUploaded: true`).
+    - Configured Express JSON body parser to `25mb` limit in `src/server/index.ts`.
+    - Tested in `tests/operatorFileUploadRoute.test.ts` (4/4 passing).
+  - **Task 3 (Playwright Form Filler Submitter Integration)**:
+    - Updated `fillFileField` in `src/submitter/fieldFillers/fileFiller.ts` to detect operator-uploaded storage paths, fetch file bytes to `os.tmpdir()`, register for cleanup in `tempFilesToClean`, and attach directly via `page.setInputFiles()`.
+    - Supported non-resume file fields (cover letters, transcripts) when populated by an operator rather than skipping.
+    - Tested in `tests/fileFillerOperatorUpload.test.ts` (2/2 passing).
+  - **Task 4 (Neo-Brutalist Dashboard Dropzone UI)**:
+    - Upgraded `EditableFormField.tsx` in `dashboard/components/EditableFormField.tsx`: when `field.type === 'file'`, renders a dedicated drag-and-drop file picker with progress indicator and size validation.
+    - Renders file card when populated showing document icon `📄`, filename, size, and a "Replace" / "Upload" button.
+    - Verified with `npm run typecheck:dashboard` and root `npm run typecheck` (0 errors).
+  - **Task 5 (Verification)**:
+    - 100% test suites green: all new unit tests passing, 89 node unit tests passing, 111 vitest tests passing, 0 TypeScript errors.
+
+# Current Session Update (2026-11-19 - Production Ingestion Progress & Live Worker Submission Monitoring)
+
+- **Production Ingest & Submission Live Observability (Run `ba4c3654-e976-4b81-81be-b6be22c66db7_combined_jobs_20261118_full.csv`)**:
+  - Monitored live multi-phase ingestion lifecycle across DB 2 (`ingest_runs`, `gh_scanned_job_templates`, `profiles`, `gh_failure_diagnostics`, and `gh_candidate_applications`).
+  - **Phase B (DOM Scanning)**: Completed successfully with 457 unique job schemas scanned into `gh_scanned_job_templates`.
+  - **Phase C (Profile Sync)**: Completed successfully with 148 candidate profiles synchronized from ApplyWizz into `profiles`.
+  - **Phase D (Answer Resolution)**: Completed all 148 candidates through Tiers 1-4. Batched Tier 5 questions through Anthropic Message Batch API (`resolveIngestTier5`), resulting in 1,778 total applications resolved and committed to `gh_candidate_applications` (258 `FILTERED_OUT`, 1,520 `READY_FOR_REVIEW`).
+  - **Auto-Queue & Submission Phase**: `flushPendingAutoQueue` auto-queued eligible applications into `QUEUED`. Worker pool picked up concurrent submissions into `APPLYING`.
+  - **Discovered Systemic Root-Cause Blocker (S3 403 on Resume Downloads)**:
+    - Identified that AWS S3 candidate resume URLs hosted at legacy `applywizz-prod.s3.us-east-2.amazonaws.com/CRM/...` are rejecting HTTP downloads with **HTTP 403 Forbidden** (`AllAccessDisabled`).
+    - Querying ApplyWizz CRM `get-client-details` API confirmed the CRM migrated to `applywizz-prod-v2.s3.us-east-2.amazonaws.com`.
+  - **Production DB 2 Full Profile Sync & Resume Parsing (`scripts/syncAndParseDb2Profiles.ts`)**:
+    - Scanned all 423 candidate profiles in DB 2 against `https://www.apply-wizz.me/api/get-client-details?applywizz_id=`.
+    - Successfully refreshed 415 profiles in DB 2 with fresh API payloads, contact numbers, locations, company emails, education, experience, and work authorizations.
+    - Updated 91 profiles with the fresh, active `applywizz-prod-v2` resume URLs and parsed their full structured resume facts (skills, education, work experience, text) into DB 2 (`with_resume_text` increased to 360, `with_resume_facts` increased to 381).
+    - Preserved existing resume caches and Supabase Storage paths (`resume_storage_path`) for candidates pending migration in CRM.
+  - **Authoritative URL Reconciliation & Column Integrity Audit (`scripts/reconcileProfileUrlsAuthoritative.ts`, `scripts/auditProfileIntegrity.ts`)**:
+    - Reconciled `linkedin_url`, `github_url`, and `website_url` across `raw_api_payload` and `resume_text` using `app.profile_authoritative_override = 'on'`.
+    - Sanitized all placeholder artifacts (`'N/A'`, `'[]'`, `'none'`, empty strings) to strict SQL `NULL` (169 LinkedIn nulls, 339 GitHub nulls, 212 Website nulls).
+    - Filled valid normalized URLs for all candidates with verified values (254 LinkedIn, 84 GitHub, 211 Website/Portfolio).
+    - Verified column-by-column data integrity: 0 invalid URL entries across all 423 profiles.
+
 # Current Session Update (2026-11-18 - Real-Time In-Browser Remediation & Incident Reporting Completed & Verified)
 
 - **Completed Real-Time In-Browser Remediation Incident Recording & Reporting (`docs/superpowers/plans/2026-11-18-remediation-incident-reporting.md`)**:
