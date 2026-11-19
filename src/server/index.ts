@@ -200,7 +200,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
         ],
       })
     );
-    app.use(express.json());
+    app.use(express.json({ limit: '25mb' }));
   app.use(compression());
     app.use(compression());
 
@@ -427,7 +427,7 @@ export function createServer(outputDir: string = config.OUTPUT_DIR): express.App
       ],
     })
   );
-  app.use(express.json());
+  app.use(express.json({ limit: '25mb' }));
   app.use(compression());
 
   // Static directory for master resume PDFs

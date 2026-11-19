@@ -38,6 +38,12 @@ import { isUserAdmin } from './auth.js';
 import { parseDashboardCreatedAtRange } from '../dashboardDateRange.js';
 import type { ResolvedField } from '../../types/index.js';
 import { createLogger } from '../../utils/logger.js';
+import path from 'path';
+import {
+  uploadOperatorFieldFile,
+  sanitizeUploadFilename,
+  syncUploadedResumeToProfile,
+} from '../../db/storage.js';
 import {
   applicationRowHasPersistedResolution,
   filterOperatorApplicationJobs,
@@ -88,6 +94,203 @@ export async function broadcastApplicationStatusChange(event: {
 export const applicationsRouter = Router();
 
 /** Statuses where a worker already owns the application; requeueing would duplicate the submission. */
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(['.pdf', '.docx', '.doc']);
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+
+/**
+ * POST /api/applications/:id/fields/:fieldId/upload
+ * Uploads a document (resume, cover letter, etc.) for a specific application form field.
+ *
+ * Request Body:
+ * {
+ *   "filename": "MyResume.pdf",
+ *   "fileBase64": "JVBERi0xLjQK...",
+ *   "mimeType"?: "application/pdf",
+ *   "jobUrl"?: "https://..."
+ * }
+ */
+applicationsRouter.post('/:id/fields/:fieldId/upload', async (req: Request, res: Response): Promise<void> => {
+  const rawAppId = req.params.id;
+  const rawFieldId = req.params.fieldId;
+  const appId = Array.isArray(rawAppId) ? rawAppId[0] : String(rawAppId || '');
+  const fieldId = Array.isArray(rawFieldId) ? rawFieldId[0] : String(rawFieldId || '');
+
+  const { filename, fileBase64, mimeType } = req.body || {};
+  const reqJobUrl = (req.body?.jobUrl as string) || (req.query?.jobUrl as string) || (req.query?.job_url as string);
+
+  if (!filename || typeof filename !== 'string') {
+    res.status(400).json({ error: 'Request body must contain a string "filename".' });
+    return;
+  }
+
+  if (!fileBase64 || typeof fileBase64 !== 'string') {
+    res.status(400).json({ error: 'Request body must contain a base64 string "fileBase64".' });
+    return;
+  }
+
+  const ext = path.extname(filename).toLowerCase();
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
+    res.status(400).json({
+      error: `Invalid file extension "${ext}". Only .pdf, .docx, and .doc files are permitted.`,
+    });
+    return;
+  }
+
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(fileBase64, 'base64');
+  } catch (err: any) {
+    res.status(400).json({ error: 'Failed to decode base64 file data.' });
+    return;
+  }
+
+  if (buffer.length === 0) {
+    res.status(400).json({ error: 'Uploaded file is empty.' });
+    return;
+  }
+
+  if (buffer.length > MAX_UPLOAD_BYTES) {
+    res.status(413).json({ error: `File exceeds the 10 MB limit (${(buffer.length / (1024 * 1024)).toFixed(2)} MB).` });
+    return;
+  }
+
+  try {
+    // 1. Fetch application
+    let application: any = await getApplication(appId, reqJobUrl);
+
+    if (!application && isSupabaseConfigured()) {
+      const supabase = getDbClient();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(appId);
+      let query = supabase.from('gh_candidate_applications').select('*');
+      if (isUuid) {
+        query = query.eq('id', appId);
+      } else {
+        const candidateId = appId.includes('_') ? appId.split('_')[0] : appId;
+        query = query.eq('applywizz_id', candidateId);
+        if (reqJobUrl) query = query.eq('job_url', reqJobUrl);
+      }
+      const { data } = await query
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      application = data;
+    }
+
+    if (!application) {
+      res.status(404).json({ error: `Application '${appId}' not found.` });
+      return;
+    }
+
+    const userRole = String((req as any).user?.role || '').trim().toLowerCase();
+    const isAdmin = ['admin', 'dev'].includes(userRole);
+    const isOperator = userRole === 'operator' || userRole === 'ca';
+    if (
+      !isAdmin &&
+      !isOperator &&
+      (req as any).user &&
+      application.assigned_ca_email !== null &&
+      application.assigned_ca_email !== undefined &&
+      application.assigned_ca_email.trim().toLowerCase() !== String((req as any).user.email || '').trim().toLowerCase()
+    ) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    const candidateId =
+      application?.applywizz_id ||
+      application?.applywizzId ||
+      (appId.includes('_') ? appId.split('_')[0] : appId);
+
+    // 2. Upload file
+    const effectiveMime = mimeType || (ext === '.pdf' ? 'application/pdf' : 'application/octet-stream');
+    const { storagePath, url } = await uploadOperatorFieldFile(
+      candidateId,
+      application.id || appId,
+      fieldId,
+      filename,
+      buffer,
+      effectiveMime
+    );
+
+    // 3. Update resolved_fields
+    const resolvedFields: ResolvedField[] = Array.isArray(application.resolved_fields)
+      ? [...application.resolved_fields]
+      : Array.isArray(application.resolvedFields)
+      ? [...application.resolvedFields]
+      : [];
+
+    let targetFieldIndex = resolvedFields.findIndex(
+      (f) => f.fieldId === fieldId || f.name === fieldId
+    );
+
+    const safeName = sanitizeUploadFilename(filename);
+    const metadata = {
+      filename: safeName,
+      storagePath,
+      url,
+      isOperatorUploaded: true,
+      uploadedAt: new Date().toISOString(),
+      size: buffer.length,
+    };
+
+    let updatedField: ResolvedField;
+    if (targetFieldIndex !== -1) {
+      const existing = resolvedFields[targetFieldIndex];
+      updatedField = {
+        ...existing,
+        type: 'file',
+        value: storagePath,
+        source: 'manual',
+        isEdited: true,
+        confidence: 1.0,
+        metadata: {
+          ...(existing.metadata || {}),
+          ...metadata,
+        },
+      };
+      resolvedFields[targetFieldIndex] = updatedField;
+    } else {
+      updatedField = {
+        fieldId,
+        name: fieldId,
+        type: 'file',
+        label: fieldId,
+        value: storagePath,
+        source: 'manual',
+        resolvedByTier: 1,
+        confidence: 1.0,
+        isEdited: true,
+        metadata,
+      };
+      resolvedFields.push(updatedField);
+    }
+
+    const finalJobUrl = reqJobUrl || application.job_url || application.jobUrl;
+    await updateResolvedFields(application.id || appId, resolvedFields, {
+      has_manual_edits: true,
+      reviewed_at: new Date().toISOString(),
+      job_url: finalJobUrl,
+      applywizz_id: candidateId,
+    });
+
+    // 4. If resume field, sync to profile fallback
+    const isResume =
+      fieldId === 'resume' ||
+      /resume|cv\b/i.test(fieldId) ||
+      /resume|cv\b/i.test(String(updatedField.label || ''));
+    if (isResume) {
+      await syncUploadedResumeToProfile(candidateId, storagePath);
+    }
+
+    log.info(`[API] Operator uploaded file for field '${fieldId}' on application '${appId}': ${storagePath}`);
+    res.json(updatedField);
+  } catch (err: any) {
+    log.error(`[API] Failed to upload operator field file: ${err.message}`);
+    res.status(500).json({ error: err.message || 'Internal server error during file upload.' });
+  }
+});
+
 /**
  * PATCH /api/applications/:id/fields/:fieldId
  * Modifies an individual form field answer.

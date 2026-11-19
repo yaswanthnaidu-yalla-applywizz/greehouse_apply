@@ -63,6 +63,18 @@ export interface ScannedFieldMetadata {
   triggerValues?: string[];
   /** Flag indicating if multiple parents or conflicting triggers reveal this field */
   ambiguousAttribution?: boolean;
+  /** Operator uploaded document filename */
+  filename?: string;
+  /** Storage path in Supabase Storage or local cache */
+  storagePath?: string;
+  /** Temporary signed URL for download or preview */
+  url?: string;
+  /** Indicates the file was manually uploaded by an operator */
+  isOperatorUploaded?: boolean;
+  /** ISO timestamp when operator uploaded the file */
+  uploadedAt?: string;
+  /** File size in bytes */
+  size?: number;
 }
 
 /**
