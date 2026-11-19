@@ -1,3 +1,26 @@
+### Operator File Upload for Application Review (2026-11-19 COMPLETE)
+- [x] **Storage Layer & Profile Resume Sync (`src/db/storage.ts`):**
+  - Added `uploadOperatorFieldFile` storing files into private Supabase Storage `resumes` bucket under `operator_uploads/<applywizz_id>/<application_id>_<field_id>_<filename>` (with resilient fallback to local filesystem `/tmp` or `resumes/operator_uploads` under `SANDBOX=true`).
+  - Added `downloadOperatorFieldFile` streaming file bytes from local disk or Supabase.
+  - Added `syncUploadedResumeToProfile` updating candidate profile's `resume_storage_path` in `profiles` when an operator uploads a resume document.
+  - Added `sanitizeUploadFilename` stripping directory traversal and dangerous characters.
+  - Added unit test suite `tests/operatorFileUploadStorage.test.ts` (3/3 tests passing).
+- [x] **REST API Upload Endpoint (`src/server/routes/applications.ts`):**
+  - Built `POST /api/applications/:id/fields/:fieldId/upload` handling base64 payloads up to 10 MB with strict validation on extensions (`.pdf`, `.docx`, `.doc`) and payload size.
+  - Updates `resolved_fields` in `gh_candidate_applications` with `source: 'manual'`, `isEdited: true`, and metadata (`filename`, `storagePath`, `size`, `isOperatorUploaded: true`).
+  - Increased Express JSON body parser to `25mb` limit in `src/server/index.ts`.
+  - Added unit test suite `tests/operatorFileUploadRoute.test.ts` (4/4 tests passing).
+- [x] **Playwright Form Filler Submitter Integration (`src/submitter/fieldFillers/fileFiller.ts`):**
+  - Updated `fillFileField` to detect operator-uploaded storage paths, fetch file bytes to `os.tmpdir()`, register for cleanup in `tempFilesToClean`, and attach directly via `page.setInputFiles()`.
+  - Supported non-resume file fields (cover letters, transcripts) when populated by an operator rather than skipping.
+  - Added unit test suite `tests/fileFillerOperatorUpload.test.ts` (2/2 tests passing).
+- [x] **Neo-Brutalist Dashboard Dropzone UI (`dashboard/components/EditableFormField.tsx`):**
+  - Upgraded `EditableFormField.tsx`: when `field.type === 'file'`, renders a dedicated drag-and-drop file picker with progress indicator and size validation.
+  - Renders file card when populated showing document icon `📄`, filename, size, and a "Replace" / "Upload" button.
+  - 0 errors across root and dashboard TypeScript typechecks (`npm run typecheck:dashboard`, `npm run typecheck`).
+- [x] **Verification:**
+  - 100% test suites pass: all new unit tests passing, 89 node unit tests passing, 111 vitest tests passing, 0 TypeScript errors.
+
 ### Real-Time In-Browser Remediation Incident Recording & Reporting (2026-11-18 COMPLETE)
 - [x] **Incident Reporting Engine & Schema (`src/submitter/realtimeRemediator.ts`):**
   - Extended `resolveRemediationAnswer` prompt and parser to extract `issueFaced` ("what specific issue the automation faced on the live form") and `issueFixed` ("how the answer resolves this using candidate facts").
