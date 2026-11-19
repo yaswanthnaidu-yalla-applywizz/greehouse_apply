@@ -182,3 +182,52 @@ test('enforces choice matching: aligns near-match or fails closed if choice is i
 
   assert.equal(invalidDecision, null, 'Unmatched option must fail closed');
 });
+
+test('defaultLlmCall invokes Claude Messages API and parses structured JSON payload', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let capturedUrl = '';
+  let capturedBody: any = null;
+  let capturedHeaders: any = null;
+
+  globalThis.fetch = async (url: any, init?: any) => {
+    capturedUrl = String(url);
+    capturedHeaders = init?.headers;
+    capturedBody = JSON.parse(init?.body as string);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              answer: 'Hybrid (2-3 days)',
+              confidence: 0.95,
+              reasoning: 'Profile states hybrid preference.',
+              issueFaced: 'Radio uncommitted on page.',
+              issueFixed: 'Selected Hybrid based on profile.',
+            }),
+          },
+        ],
+      }),
+    } as any;
+  };
+
+  const testField: RemediationField = {
+    fieldId: 'work_pref',
+    label: 'Work Arrangement',
+    type: 'select',
+    options: ['Onsite Only', 'Hybrid (2-3 days)', 'Remote'],
+  };
+
+  const decision = await resolveRemediationAnswer(testField, mockContext);
+  assert.ok(decision);
+  assert.equal(decision.value, 'Hybrid (2-3 days)');
+  assert.equal(capturedUrl, 'https://api.anthropic.com/v1/messages');
+  assert.ok(capturedBody.model.includes('haiku'));
+  assert.ok(capturedHeaders['x-api-key'], 'API key must be present in headers');
+});
