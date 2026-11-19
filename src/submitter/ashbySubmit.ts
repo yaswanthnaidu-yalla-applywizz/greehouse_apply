@@ -606,8 +606,15 @@ export async function submitAshbyApplication(
       },
     });
 
-    if (!confirmed) {
+    const isConfirmed =
+      confirmed ||
+      (typeof submitResponseStatus === "number" && submitResponseStatus >= 200 && submitResponseStatus < 300);
+
+    if (!isConfirmed) {
       throw new Error('Ashby application submit confirmation signal timed out after 45s');
+    }
+    if (!confirmed && isConfirmed) {
+      log.info('[AshbySubmit] Submission response HTTP 200/201 confirmed despite DOM confirmation delay.');
     }
 
     stage = 'COMPLETED';

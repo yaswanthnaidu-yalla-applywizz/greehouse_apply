@@ -231,3 +231,27 @@ test('defaultLlmCall invokes Claude Messages API and parses structured JSON payl
   assert.ok(capturedBody.model.includes('haiku'));
   assert.ok(capturedHeaders['x-api-key'], 'API key must be present in headers');
 });
+
+test('resolves communicationConsent / SMS consent deterministically without failing closed', async () => {
+  const smsField: RemediationField = {
+    fieldId: 'input_type_radio_name_communicationConsent_',
+    label: 'Phone Number',
+    type: 'radio',
+    options: [
+      'Yes - I consent to receiving text messages',
+      'No - I do not consent to receiving text messages',
+    ],
+  };
+
+  // Even without an LLM call or if LLM throws, deterministic policy should resolve it
+  const decision = await resolveRemediationAnswer(smsField, mockContext, {
+    llmCallFn: async () => {
+      throw new Error('LLM should not be called for deterministic SMS consent');
+    },
+  });
+
+  assert.ok(decision, 'Decision should be returned for SMS communication consent');
+  assert.equal(decision.value, 'No - I do not consent to receiving text messages');
+  assert.equal(decision.confidence, 1.0);
+  assert.equal(decision.source, 'ai_realtime_remediated');
+});

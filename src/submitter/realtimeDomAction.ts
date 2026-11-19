@@ -76,7 +76,7 @@ export async function scrapeLiveFieldFromDom(
     if ((await selectLoc.count()) > 0) {
       const id = (await selectLoc.getAttribute('id')) || '';
       const name = (await selectLoc.getAttribute('name')) || '';
-      const selector = id ? `#${id}` : name ? `select[name="${name}"]` : 'select';
+      const selector = id ? `select[id="${id.replace(/"/g, '\\"')}"]` : name ? `select[name="${name}"]` : 'select';
 
       const rawOptions = await selectLoc.locator('option').allTextContents();
       const options = rawOptions
@@ -133,7 +133,7 @@ export async function scrapeLiveFieldFromDom(
     if ((await textareaLoc.count()) > 0) {
       const id = (await textareaLoc.getAttribute('id')) || '';
       const name = (await textareaLoc.getAttribute('name')) || '';
-      const selector = id ? `#${id}` : name ? `textarea[name="${name}"]` : 'textarea';
+      const selector = id ? `textarea[id="${id.replace(/"/g, '\\"')}"]` : name ? `textarea[name="${name}"]` : 'textarea';
       return {
         found: true,
         label: targetLabel,
@@ -149,7 +149,7 @@ export async function scrapeLiveFieldFromDom(
       const id = (await inputLoc.getAttribute('id')) || '';
       const name = (await inputLoc.getAttribute('name')) || '';
       const type = (await inputLoc.getAttribute('type')) || 'text';
-      const selector = id ? `#${id}` : name ? `input[name="${name}"]` : 'input';
+      const selector = id ? `input[id="${id.replace(/"/g, '\\"')}"]` : name ? `input[name="${name}"]` : 'input';
 
       return {
         found: true,

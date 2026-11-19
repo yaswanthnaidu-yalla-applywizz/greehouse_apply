@@ -510,6 +510,36 @@ export async function fillAshbyForm(
     }
   }
 
+  // Check for uncommitted communication consent radio group (common on Ashby forms under phone)
+  try {
+    const consentRadios = page.locator(
+      'input[type="radio"][name*="communicationConsent"], [data-field-path*="communicationConsent"] input[type="radio"]'
+    );
+    if ((await consentRadios.count()) > 0) {
+      const checkedCount = await page
+        .locator(
+          'input[type="radio"][name*="communicationConsent"]:checked, [data-field-path*="communicationConsent"] input[type="radio"]:checked'
+        )
+        .count();
+      if (checkedCount === 0) {
+        log.info('[AshbyFormFiller] Committing unselected communicationConsent radio group with default policy...');
+        const noOption = page
+          .locator(
+            'label:has-text("No - I do not consent"), label:has-text("do not consent"), input[type="radio"][value*="false"], input[type="radio"][value*="no" i]'
+          )
+          .first();
+        if ((await noOption.count()) > 0 && (await noOption.isVisible())) {
+          await glideCursor(page, noOption, { click: true });
+        } else {
+          await consentRadios.last().check({ force: true });
+        }
+        await sleep(250, 450);
+      }
+    }
+  } catch {
+    // Non-fatal if not present
+  }
+
   return { filledCount: filledFields.length, filledFields };
 }
 

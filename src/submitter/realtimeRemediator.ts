@@ -242,9 +242,34 @@ export async function resolveRemediationAnswer(
 ): Promise<RemediationDecision | null> {
   const minConfidence = options.minConfidence ?? MIN_REMEDIATION_CONFIDENCE;
   const llmCall = options.llmCallFn ?? defaultLlmCall;
+  const hasOptions = Array.isArray(field.options) && field.options.length > 0;
+
+  // Deterministic Policy: SMS / Text message communication consent
+  const isSmsConsent =
+    /communicationConsent/i.test(field.fieldId) ||
+    /\b(?:sms|text message|communication)\b/i.test(field.label) ||
+    (hasOptions && field.options!.some((opt) => /\b(?:text messages?|sms|consent to receiv)\b/i.test(opt)));
+
+  if (isSmsConsent && hasOptions) {
+    const negativeOpt = field.options!.find((opt) => /\b(?:no\b|do not consent|decline)\b/i.test(opt));
+    const affirmativeOpt = field.options!.find((opt) => /\b(?:yes\b|i consent|agree)\b/i.test(opt));
+    const chosen = negativeOpt || affirmativeOpt;
+    if (chosen) {
+      log.info(`[Realtime Remediator] Applied deterministic SMS communication consent policy: "${chosen}"`);
+      return {
+        fieldId: field.fieldId,
+        value: chosen,
+        chosenOptionLabel: chosen,
+        confidence: 1.0,
+        reasoning: 'Applied deterministic candidate communication consent policy.',
+        issueFaced: `Automation left required communication consent question "${field.label}" uncommitted on the live page.`,
+        issueFixed: `Selected "${chosen}" per candidate communication policy.`,
+        source: 'ai_realtime_remediated',
+      };
+    }
+  }
 
   const candidateEvidence = buildCandidateEvidenceSummary(context);
-  const hasOptions = Array.isArray(field.options) && field.options.length > 0;
 
   const systemPrompt = `You are an automated real-time job application form remediation assistant.
 You are given the exact question/label from a job application form, available options (if select/radio), and verified candidate profile facts.
