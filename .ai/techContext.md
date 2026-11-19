@@ -168,6 +168,7 @@ AZURE_CLIENT_ID=
 AZURE_CLIENT_SECRET=
 AZURE_TENANT_ID=
 AZURE_SENDER_EMAIL=
+DISABLE_EMAIL=                        # Set to true to disable non-auth notification, digest, and report emails (Auth OTP remains enabled)
 MS_GRAPH_BASE_URL=https://graph.microsoft.com
 
 # CA-Candidate Ingestion Mapping

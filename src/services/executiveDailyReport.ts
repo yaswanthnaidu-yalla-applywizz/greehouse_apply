@@ -453,6 +453,11 @@ export async function sendExecutiveDailyDigest(
 ): Promise<{ success: boolean; skipped?: boolean; data?: ExecutiveDailyReportData; error?: string }> {
   const sendEmailImpl = options.sendEmailFn || sendEmail;
 
+  if (config.DISABLE_EMAIL) {
+    log.info('[Executive Report] Email sending disabled (DISABLE_EMAIL=true) — skipping daily digest send');
+    return { success: true, skipped: true };
+  }
+
   if (!isAzureEmailConfigured() && !options.sendEmailFn) {
     log.warn('[Executive Report] Azure email not configured — skipping daily digest send');
     return { success: false, error: 'Azure email service not configured' };

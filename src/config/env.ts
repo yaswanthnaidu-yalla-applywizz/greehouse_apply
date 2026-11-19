@@ -217,6 +217,16 @@ const envSchema = z.object({
   /** Azure Communication Services Endpoint (Optional) */
   AZURE_COMMUNICATION_ENDPOINT: z.string().optional(),
 
+  /** When true, disables non-auth notification, digest, and report emails (Auth OTP remains enabled) */
+  DISABLE_EMAIL: z.preprocess((val) => {
+    if (typeof val === 'string') {
+      const normalized = val.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1') return true;
+      if (normalized === 'false' || normalized === '0') return false;
+    }
+    return val;
+  }, z.boolean().default(false)),
+
   /**
    * When set, all post-ingest CA notification emails go to this address
    * instead of each CA (sandbox / local testing).

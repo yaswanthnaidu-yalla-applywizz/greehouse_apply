@@ -1,3 +1,18 @@
+### DISABLE_EMAIL Environment Flag for Non-Auth Outbound Emails (2026-11-19 COMPLETE)
+- [x] **Config & Environment Schema (`src/config/env.ts`):**
+  - Added `DISABLE_EMAIL` boolean flag with `z.preprocess` normalizing `"true"`, `"1"`, `"false"`, `"0"` (defaults to `false` when unset).
+  - Documented in `.env.example` and `.ai/techContext.md`.
+- [x] **Service Level Integration (`src/services/azureEmail.ts`):**
+  - Added `isOtp?: boolean` to `SendEmailOptions`.
+  - In `sendEmail`: if `config.DISABLE_EMAIL && !isOtp`, logs an informational message and returns `{ success: true, messageId: 'disabled-by-env' }` without hitting Microsoft Graph or requiring Azure credentials.
+  - In `sendOtpEmail`: sets `isOtp: true`, ensuring Auth OTP verification emails continue dispatching normally even when `DISABLE_EMAIL=true`.
+- [x] **Early Exits for Notifications & Schedulers:**
+  - Added early exit in `sendCaNotificationEmails` and `sendLeadershipIngestionSummary` (`src/services/caNotificationEmail.ts`).
+  - Added early exit in `sendExecutiveDailyDigest` (`src/services/executiveDailyReport.ts`).
+- [x] **Verification:**
+  - Added `tests/disableEmail.test.ts` (5/5 tests passing: non-auth email suppression, auth OTP bypass, CA email skip, leadership summary skip, executive digest skip).
+  - Verified 0 TypeScript compilation errors (`npm run typecheck`).
+
 ### Operator File Upload for Application Review (2026-11-19 COMPLETE)
 - [x] **Storage Layer & Profile Resume Sync (`src/db/storage.ts`):**
   - Added `uploadOperatorFieldFile` storing files into private Supabase Storage `resumes` bucket under `operator_uploads/<applywizz_id>/<application_id>_<field_id>_<filename>` (with resilient fallback to local filesystem `/tmp` or `resumes/operator_uploads` under `SANDBOX=true`).

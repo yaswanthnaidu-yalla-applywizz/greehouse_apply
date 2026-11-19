@@ -751,6 +751,11 @@ export async function sendCaNotificationEmails(
     return empty;
   }
 
+  if (config.DISABLE_EMAIL) {
+    log.info('[CA Notification] Email sending disabled (DISABLE_EMAIL=true) — skipping CA emails');
+    return empty;
+  }
+
   if (!isAzureEmailConfigured()) {
     log.warn('[CA Notification] Azure email not configured — skipping CA emails');
     return empty;
@@ -822,6 +827,11 @@ export async function sendLeadershipIngestionSummary(
 ): Promise<void> {
   if (!isSupabaseConfigured()) {
     log.info('[Leadership Summary] Supabase not configured — skipping summary');
+    return;
+  }
+
+  if (config.DISABLE_EMAIL) {
+    log.info('[Leadership Summary] Email sending disabled (DISABLE_EMAIL=true) — skipping summary');
     return;
   }
 
