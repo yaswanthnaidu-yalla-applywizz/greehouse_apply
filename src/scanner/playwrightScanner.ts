@@ -154,13 +154,23 @@ export async function waitForEmbeddedGreenhouseApplicationUrl(page: Page, timeou
     const url = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
     if (url) return url;
 
+    const domSrc = await page.evaluate(() => {
+      const el = document.querySelector('iframe[src*="greenhouse.io"], iframe[src*="job_app"]');
+      return el ? el.getAttribute('src') : null;
+    }).catch(() => null);
+
+    if (domSrc && domSrc.startsWith('http')) {
+      const match = findEmbeddedGreenhouseApplicationUrl([domSrc]);
+      if (match) return match;
+    }
+
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return null;
-    await page.waitForTimeout(Math.min(100, remainingMs));
+    await page.waitForTimeout(Math.min(150, remainingMs));
   }
 }
 
-const EMBEDDED_GREENHOUSE_FRAME_WAIT_MS = 1_000;
+const EMBEDDED_GREENHOUSE_FRAME_WAIT_MS = 6_000;
 
 /**
  * Utility to generate a randomized delay within [min, max] range.
@@ -591,27 +601,10 @@ export class PlaywrightScanner {
       
       let embeddedApplicationUrl = currentEmbeddedUrl;
       if (!embeddedApplicationUrl && !isGreenhousePage) {
-        const currentParsed = new URL(page.url());
-        const hasGhJid = currentParsed.searchParams.has('gh_jid');
-        const hasIframe = await page.$('iframe').catch(() => null);
-        const parentForm = await page.$('form').catch(() => null);
-
-        if (hasGhJid || !!hasIframe || !!parentForm) {
-          embeddedApplicationUrl = await waitForEmbeddedGreenhouseApplicationUrl(
-            page,
-            EMBEDDED_GREENHOUSE_FRAME_WAIT_MS
-          );
-        }
-
-        if (!embeddedApplicationUrl) {
-          const directIframeSrc = await page.evaluate(() => {
-            const el = document.querySelector('iframe[src*="greenhouse.io"], iframe[src*="grnh.se"]');
-            return el ? el.getAttribute('src') : null;
-          }).catch(() => null);
-          if (directIframeSrc && directIframeSrc.startsWith('http')) {
-            embeddedApplicationUrl = directIframeSrc;
-          }
-        }
+        embeddedApplicationUrl = await waitForEmbeddedGreenhouseApplicationUrl(
+          page,
+          EMBEDDED_GREENHOUSE_FRAME_WAIT_MS
+        );
       }
 
       if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
@@ -619,7 +612,6 @@ export class PlaywrightScanner {
           waitUntil: 'domcontentloaded',
           timeout: this.timeoutMs,
         });
-        template.jobUrl = embeddedApplicationUrl;
       }
 
       // Check if redirected to generic index page without job path
@@ -635,13 +627,12 @@ export class PlaywrightScanner {
           return template;
         } else if (!isGreenhousePage) {
           // Re-check if an embedded Greenhouse iframe mounted during hydration
-          const lateEmbeddedUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((frame) => frame.url()));
+          const lateEmbeddedUrl = await waitForEmbeddedGreenhouseApplicationUrl(page, 2000);
           if (lateEmbeddedUrl && lateEmbeddedUrl !== page.url()) {
             await page.goto(lateEmbeddedUrl, {
               waitUntil: 'domcontentloaded',
               timeout: this.timeoutMs,
             });
-            template.jobUrl = lateEmbeddedUrl;
           }
         }
       }

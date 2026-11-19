@@ -14,7 +14,8 @@ import { getProfile, type ProfileRow } from '../db/profiles.js';
 import { getOrParseResume, type ResumeParsedRow } from '../resolver/tier2ResumeParse.js';
 import { appendResolvedFields, type ApplicationRow } from '../db/applications.js';
 import type { ResolvedField } from '../types/index.js';
-import { callGemini } from '../resolver/geminiProvider.js';
+import { config } from '../config/env.js';
+import { cleanLLMOutput } from '../resolver/llmSynthesizer.js';
 import { scrapeLiveFieldFromDom, commitRemediatedValue } from './realtimeDomAction.js';
 
 const log = createLogger('Realtime Remediator');
@@ -158,19 +159,63 @@ function buildCandidateEvidenceSummary(context: RemediationCandidateContext): st
 }
 
 /**
- * Executes default real-time LLM inference using configured provider.
+ * Executes default real-time LLM inference using Claude Haiku 5.5.
  */
 async function defaultLlmCall(prompt: string, systemPrompt: string): Promise<LlmCallPayload> {
-  const res = await callGemini({
-    prompt,
-    systemMessage: systemPrompt,
-    maxTokens: 512,
-    temperature: 0.0,
-    responseMimeType: 'application/json',
+  const apiKey = (config.ANTHROPIC_API_KEY || config.CLAUDE_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('No ANTHROPIC_API_KEY or CLAUDE_API_KEY configured for Claude provider.');
+  }
+
+  const modelName = config.CLAUDE_MODEL || 'claude-haiku-5-5';
+  const headers: Record<string, string> = {
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  };
+  const workspaceId = (config.ANTHROPIC_WORKSPACE_ID || config.CLAUDE_WORKSPACE_ID || '').trim();
+  if (workspaceId) {
+    headers['anthropic-workspace-id'] = workspaceId;
+  }
+
+  const requestBody: Record<string, unknown> = {
+    model: modelName,
+    max_tokens: 512,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: prompt }],
+  };
+
+  if (!modelName.includes('5-5') && !modelName.includes('5.5')) {
+    requestBody.temperature = 0.0;
+  }
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(config.LLM_TIMEOUT_MS || 30000),
   });
 
+  if (!res.ok) {
+    const errorBody = await res.text();
+    let message = errorBody;
+    try {
+      const parsed = JSON.parse(errorBody);
+      message = parsed?.error?.message || errorBody;
+    } catch {
+      // ignore
+    }
+    throw new Error(`Claude API returned HTTP ${res.status}: ${message}`);
+  }
+
+  const data = (await res.json()) as any;
+  const rawText = Array.isArray(data?.content)
+    ? data.content.filter((c: any) => c.type === 'text').map((c: any) => c.text || '').join('')
+    : '';
+
   try {
-    const parsed = JSON.parse(res.text.trim());
+    const cleaned = cleanLLMOutput(rawText);
+    const parsed = JSON.parse(cleaned);
     return {
       answer: String(parsed.answer || ''),
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.0,
@@ -182,7 +227,7 @@ async function defaultLlmCall(prompt: string, systemPrompt: string): Promise<Llm
     return {
       answer: '',
       confidence: 0.0,
-      reasoning: 'Failed to parse JSON response from LLM provider.',
+      reasoning: 'Failed to parse JSON response from Claude provider.',
     };
   }
 }

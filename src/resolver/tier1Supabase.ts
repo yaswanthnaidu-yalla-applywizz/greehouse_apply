@@ -293,8 +293,11 @@ export function resolveStandardProfileAttribute(
   const normId = normalizeText(field.fieldId);
   const combined = `${normLabel} ${normName} ${normId}`;
 
-  // Cover Letter - NEVER fill or upload cover letters per policy
+  // Cover Letter handling: if required file upload, provide placeholder/storage path; otherwise skip per policy
   if (/cover\s*letter|cover_letter/i.test(combined)) {
+    if (field.type === 'file' && field.isRequired) {
+      return (profile as any).cover_letter_storage_path || '__FILE_UPLOAD__';
+    }
     return '';
   }
 
@@ -795,13 +798,23 @@ export function resolveStandardProfileAttribute(
     }
   }
 
-  // Location (City, State, Residence) - must not match "United States" in visa questions
+  // Location (City, State, Residence) - must not match "United States" in visa questions or non-location questions
+  const intentFamily = field.intent?.family || classifyFieldIntent(field)?.family;
+  const isNonLocationIntent = intentFamily && ['agreement_consent', 'demographics', 'legal_history', 'work_authorization'].includes(intentFamily);
+
   if (
-    /(candidate location|current location|\bcity\b|\bresidence\b|\baddress\b|\bpostal code\b|\bzip code\b)/i.test(combined) ||
-    (/\bstate\b/i.test(combined) && !/united states|sponsorship|visa|salary|compensation|expected pay|desired pay|hourly|annual|please state|state whether/i.test(combined))
+    !isNonLocationIntent &&
+    (/(candidate location|current location|\bcity\b|\bresidence\b|\baddress\b|\bpostal code\b|\bzip code\b)/i.test(combined) ||
+      (/\bstate\b/i.test(combined) &&
+        !/united states|sponsorship|visa|salary|compensation|expected pay|desired pay|hourly|annual|please state|state whether|statement|consent|disclosure|federal|laws|convicted|felony|background/i.test(combined)))
   ) {
     if (/\bstate\b/i.test(combined) && !/city|location|address/i.test(combined)) {
-      return profile.location ? extractStateValue(profile.location.trim()) : null;
+      const stateVal = profile.location ? extractStateValue(profile.location.trim()) : null;
+      if (!stateVal) return null;
+      if (field.options && field.options.length > 0) {
+        return matchBestOption(stateVal, field.options, field.label);
+      }
+      return stateVal;
     }
     return profile.location ? formatLocationCityStateCountry(profile.location) : null;
   }

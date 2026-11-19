@@ -49,6 +49,21 @@ const uaeCountryAliases = [
   'U.A.E.',
 ];
 
+const US_STATE_CODE_MAP: Record<string, string> = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR', california: 'CA',
+  colorado: 'CO', connecticut: 'CT', delaware: 'DE', florida: 'FL', georgia: 'GA',
+  hawaii: 'HI', idaho: 'ID', illinois: 'IL', indiana: 'IN', iowa: 'IA',
+  kansas: 'KS', kentucky: 'KY', louisiana: 'LA', maine: 'ME', maryland: 'MD',
+  massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS', missouri: 'MO',
+  montana: 'MT', nebraska: 'NE', nevada: 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+  'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', ohio: 'OH',
+  oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT',
+  virginia: 'VA', washington: 'WA', 'west virginia': 'WV', wisconsin: 'WI', wyoming: 'WY',
+  'district of columbia': 'DC',
+};
+const US_STATE_ABBREVIATIONS = new Set(Object.values(US_STATE_CODE_MAP));
+
 function normalize(value: string): string {
   return value
     .toLowerCase()
@@ -91,8 +106,16 @@ function fuzzySimilarity(answer: string, option: string): number {
 function semanticPolarity(value: string): 'affirmative' | 'negative' | null {
   const normalized = normalize(value);
   if (!normalized) return null;
+  if (/^no\s+but\b/.test(normalized)) {
+    return null;
+  }
   if (/^(no|false)\b/.test(normalized) || negativeTokens.some((token) => normalized === token)) {
     return 'negative';
+  }
+  if (
+    /\b(?:f\s*1|f1|opt|stem\s*opt|h1\s*b|h1b|requires?\s+sponsorship|need\s+sponsorship|require\s+sponsorship|will\s+require)\b/i.test(normalized)
+  ) {
+    return 'affirmative';
   }
   if (/^(yes|true)\b/.test(normalized) || affirmativeTokens.some((token) => normalized === token)) {
     return 'affirmative';
@@ -103,6 +126,9 @@ function semanticPolarity(value: string): 'affirmative' | 'negative' | null {
 function optionPolarity(option: string): 'affirmative' | 'negative' | null {
   const normalized = normalize(option);
   if (!normalized) return null;
+  if (/^no\s+but\b/.test(normalized)) {
+    return null;
+  }
   if (
     negativeTokens.some((token) => normalized === token) ||
     /^(no|not|false|decline)\b/.test(normalized) ||
@@ -115,6 +141,7 @@ function optionPolarity(option: string): 'affirmative' | 'negative' | null {
     affirmativeTokens.some((token) => normalized === token) ||
     /^(yes|true|agree|accept|acknowledge|confirm)\b/.test(normalized) ||
     /^(i confirm|i acknowledge|i have reviewed|requires sponsorship)\b/.test(normalized) ||
+    /\b(?:will\s+require|requires\s+sponsorship|need\s+sponsorship|require\s+sponsorship)\b/.test(normalized) ||
     affirmativeTokens.some(
       (token) =>
         normalized.includes(` ${token} `) ||
@@ -207,6 +234,7 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
 
   // Strip letter prefix from options (e.g. "A. ") to match full body answers
   const strippedPrefixMatches = options.filter((option) => {
+    if (!/^[a-zA-Z][.)]\s+/.test(option.trim())) return false;
     const stripped = option.trim().replace(/^[a-zA-Z][.)]\s+/, '');
     const normalizedStripped = normalize(stripped);
     return (
@@ -219,6 +247,24 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
   if (strippedPrefixMatches.length === 1) return strippedPrefixMatches[0];
 
 
+
+  // Support US state code mapping (e.g. "Missouri" or "MO" -> "USA-MO" / "MO")
+  const stateCode = US_STATE_CODE_MAP[normalizedAnswer] || (US_STATE_ABBREVIATIONS.has(normalizedAnswer.toUpperCase()) ? normalizedAnswer.toUpperCase() : null);
+  if (stateCode) {
+    const stateMatches = options.filter((opt) => {
+      const parts = opt.toUpperCase().split(/[^A-Z0-9]+/);
+      return parts.includes(stateCode);
+    });
+    if (stateMatches.length === 1) return stateMatches[0];
+  }
+
+  // High-confidence fuzzy match before polarity (so compound answers like "No, but I'm willing to relocate" don't match simple "No" via polarity)
+  const rankedFuzzy = options
+    .map((option) => ({ option, score: fuzzySimilarity(normalizedAnswer, normalize(option)) }))
+    .sort((left, right) => right.score - left.score);
+  if (rankedFuzzy[0] && rankedFuzzy[0].score >= 0.85 && (!rankedFuzzy[1] || rankedFuzzy[0].score - rankedFuzzy[1].score >= 0.08)) {
+    return rankedFuzzy[0].option;
+  }
 
   const alias = canonicalAlias(answer);
   if (alias) {
@@ -271,6 +317,10 @@ export function matchChoiceOption(answer: string, options?: string[]): string | 
     return normalizedOption.startsWith(normalizedAnswer) || normalizedAnswer.startsWith(normalizedOption);
   });
   if (prefixMatches.length === 1 && normalizedAnswer.length >= 3) return prefixMatches[0];
+  if (prefixMatches.length > 1 && normalizedAnswer.length >= 3) {
+    const jobPostMatch = prefixMatches.find((opt) => /\b(?:job\s*post|job\s*board|jobs?|posting)\b/i.test(opt));
+    if (jobPostMatch) return jobPostMatch;
+  }
 
   const ranked = options
     .map((option) => ({ option, score: fuzzySimilarity(normalizedAnswer, normalize(option)) }))
