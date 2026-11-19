@@ -443,13 +443,14 @@ export function buildExecutiveDailyReportHtml(data: ExecutiveDailyReportData): s
 
 export interface ExecutiveDailyReportOptions {
   targetDate?: string;
+  scheduledDate?: string; // YYYY-MM-DD IST of the 9 a.m. slot
   sendEmailFn?: (options: any) => Promise<any>;
   supabaseClient?: any;
 }
 
 export async function sendExecutiveDailyDigest(
   options: ExecutiveDailyReportOptions = {}
-): Promise<{ success: boolean; data?: ExecutiveDailyReportData; error?: string }> {
+): Promise<{ success: boolean; skipped?: boolean; data?: ExecutiveDailyReportData; error?: string }> {
   const sendEmailImpl = options.sendEmailFn || sendEmail;
 
   if (!isAzureEmailConfigured() && !options.sendEmailFn) {
@@ -465,13 +466,30 @@ export async function sendExecutiveDailyDigest(
     const recipients = resolveExecutiveDailyReportRecipients();
     const subject = `ApplyWizz Executive Daily Report — ${data.targetDate} (${data.totalApplied} applied, ${data.totalFailed} failed)`;
 
-    await sendEmailImpl({
+    const message = {
       to: recipients.to,
       cc: recipients.cc,
       subject,
       html: buildExecutiveDailyReportHtml(data),
       text: data.executiveSummary,
-    });
+    };
+
+    if (options.scheduledDate) {
+      const db = options.supabaseClient || getDbClient();
+      const { error } = await db.from('gh_executive_daily_report_dispatches').insert({
+        scheduled_date: options.scheduledDate,
+        recipient_group: [...new Set([...recipients.to, ...recipients.cc])].sort().join(','),
+      });
+      if (error?.code === '23505') {
+        log.info(`[Executive Report] Daily digest already claimed for ${options.scheduledDate}`);
+        return { success: true, skipped: true };
+      }
+      if (error) throw new Error(`Could not claim daily digest: ${error.message}`);
+    }
+
+    // Keep the claim if delivery fails because Graph may have accepted the message.
+    const result = await sendEmailImpl(message);
+    if (result?.success === false) throw new Error(result.error || 'Email delivery failed');
 
     log.info(
       `[Executive Report] Dispatched daily digest to ${recipients.to.join(', ')} (apps=${data.totalApplications}, applied=${data.totalApplied}, failed=${data.totalFailed})`
@@ -506,7 +524,10 @@ export function startExecutiveDailyReportScheduler(
   }
 
   const scheduleNext = () => {
-    const delayMs = calculateMsUntilNext9AmIst();
+    const now = Date.now();
+    const delayMs = calculateMsUntilNext9AmIst(now);
+    // At 03:30 UTC the UTC and IST calendar dates agree.
+    const scheduledDate = new Date(now + delayMs).toISOString().slice(0, 10);
     log.info(
       `[Executive Report] Next 9:00 AM IST daily report scheduled in ${(delayMs / 3600000).toFixed(2)} hours`
     );
@@ -514,7 +535,7 @@ export function startExecutiveDailyReportScheduler(
     schedulerTimer = setTimeout(async () => {
       try {
         if (!options.dryRun) {
-          await sendExecutiveDailyDigest({ sendEmailFn: options.sendEmailFn });
+          await sendExecutiveDailyDigest({ scheduledDate, sendEmailFn: options.sendEmailFn });
         } else {
           log.info('[Executive Report] Dry-run execution triggered');
         }
