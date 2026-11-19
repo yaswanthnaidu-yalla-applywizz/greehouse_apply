@@ -31,7 +31,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHint, setShowHint] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -99,6 +101,74 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     }
   };
 
+  const handleFileUpload = async (file: File) => {
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File size exceeds the 10 MB limit.');
+      return;
+    }
+
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!['.pdf', '.docx', '.doc'].includes(ext)) {
+      setError('Only .pdf, .docx, and .doc files are permitted.');
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64Data = result.includes(',') ? result.split(',')[1] : result;
+          resolve(base64Data);
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsDataURL(file);
+      });
+
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('applywizz_auth_token') : null;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      const response = await fetch(
+        `/api/applications/${encodeURIComponent(applicationId)}/fields/${encodeURIComponent(field.fieldId)}/upload`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            filename: file.name,
+            fileBase64: base64,
+            mimeType: file.type || (ext === '.pdf' ? 'application/pdf' : 'application/octet-stream'),
+            jobUrl,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error ${response.status}`);
+      }
+
+      const updatedField: ResolvedField = await response.json();
+      setIsEditing(false);
+      setValue(updatedField.value || '');
+      if (onFieldUpdate) {
+        onFieldUpdate(updatedField);
+      }
+    } catch (err: any) {
+      console.error('Failed to upload field document:', err);
+      setError(err.message || 'Failed to upload document');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleCancelEdit = () => {
     setValue(field.value || '');
     setError(null);
@@ -156,6 +226,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   const isIncompleteChoice = (fieldType === 'select' || fieldType === 'radio') && field.optionsComplete === false;
   const isChoiceField = (fieldType === 'select' || fieldType === 'radio') && fieldOptions && !isIncompleteChoice;
   const isCheckbox = fieldType === 'checkbox';
+  const isFile = fieldType === 'file';
   const checkboxValues = isCheckbox && value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
   const isRequired = Boolean(field.isRequired || (field as any).required);
   const isUnrequired = !isRequired && !field.value?.trim();
@@ -230,7 +301,65 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               </button>
             </div>
           )}
-          {isChoiceField ? (
+
+          {isFile ? (
+            <div className="space-y-2">
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  const droppedFile = e.dataTransfer.files?.[0];
+                  if (droppedFile) handleFileUpload(droppedFile);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                className={`p-4 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors ${
+                  isDragging
+                    ? 'border-[#0a84ff] bg-[#0a84ff]/10'
+                    : 'border-[#3a3a3c] hover:border-[#0a84ff]/60 bg-[#2c2c2e]'
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,.doc"
+                  onChange={(e) => {
+                    const selected = e.target.files?.[0];
+                    if (selected) handleFileUpload(selected);
+                  }}
+                  className="hidden"
+                  disabled={isSaving}
+                />
+                <div className="flex flex-col items-center justify-center gap-1.5">
+                  <span className="text-2xl">📁</span>
+                  <p className="text-xs font-semibold text-[#ffffff]">
+                    {isSaving ? 'Uploading document to storage...' : 'Click to browse or drag & drop file here'}
+                  </p>
+                  <p className="text-[10px] text-[#8e8e93]">Supported: PDF, DOCX, DOC (max 10 MB)</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  disabled={isSaving}
+                  className="px-2.5 py-1 bg-[#2c2c2e] hover:bg-[#3a3a3c] text-[#8e8e93] hover:text-[#ffffff] font-medium text-xs rounded-md border border-[#3a3a3c] transition-all"
+                >
+                  Cancel
+                </button>
+                {isSaving && (
+                  <span className="text-[11px] text-[#0a84ff] font-mono animate-pulse">
+                    ⏳ Saving to storage...
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : isChoiceField ? (
             <select
               ref={inputRef as React.RefObject<HTMLSelectElement>}
               value={value}
@@ -292,7 +421,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
             />
           )}
 
-          {!isConfirming ? (
+          {!isFile && !isConfirming && (
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#2c2c2e]">
               <div className="flex items-center gap-2">
                 <button
@@ -317,7 +446,9 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
                 Press Enter to save, Esc to cancel
               </span>
             </div>
-          ) : (
+          )}
+
+          {!isFile && isConfirming && (
             <div className="mt-2.5 p-3 rounded-lg bg-[#2c2c2e] border border-[#ff9f0a]/40 animate-fadeIn">
               <div className="flex items-start gap-2">
                 <span className="text-base leading-none">⚠️</span>
@@ -379,6 +510,41 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
               </div>
             </div>
           )}
+        </div>
+      ) : isFile ? (
+        <div
+          onClick={() => setIsEditing(true)}
+          title="Click to upload or replace file"
+          className="mt-1 p-2.5 rounded-lg bg-[#2c2c2e] border border-[#3a3a3c] hover:border-[#0a84ff]/60 hover:bg-[#3a3a3c]/60 cursor-pointer transition text-xs font-mono flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2 overflow-hidden">
+            <span className="text-base shrink-0">📄</span>
+            {field.value && field.value.trim().length > 0 ? (
+              <div className="flex flex-col min-w-0">
+                <span className="text-[#ffffff] font-medium truncate">
+                  {field.metadata?.filename || field.value.split(/[/\\]/).pop() || field.value}
+                </span>
+                <span className="text-[10px] text-[#8e8e93]">
+                  {field.metadata?.size ? `${(field.metadata.size / 1024).toFixed(1)} KB • ` : ''}
+                  {field.metadata?.isOperatorUploaded ? 'Operator Uploaded' : 'Uploaded document'}
+                </span>
+              </div>
+            ) : isUnrequired ? (
+              <span className="text-[#8e8e93] font-semibold italic">Unrequired (click to upload file)</span>
+            ) : (
+              <span className="text-[#ff453a] font-semibold italic">⚠️ Unresolved document (click to upload .pdf, .docx)</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsEditing(true);
+            }}
+            className="ml-2 px-2.5 py-1 bg-[#3a3a3c] hover:bg-[#48484a] text-[#ffffff] text-[11px] rounded border border-[#545458] transition shrink-0 font-medium"
+          >
+            {field.value ? 'Replace' : 'Upload'}
+          </button>
         </div>
       ) : (
         <div
