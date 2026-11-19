@@ -139,6 +139,17 @@ export const US_STATE_CODES = new Set([
   'nm', 'ny', 'nc', 'nd', 'oh', 'ok', 'or', 'pa', 'ri', 'sc',
   'sd', 'tn', 'tx', 'ut', 'vt', 'va', 'wa', 'wv', 'wi', 'wy',
   'dc', 'pr',
+  'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado',
+  'connecticut', 'delaware', 'florida', 'georgia', 'hawaii', 'idaho',
+  'illinois', 'indiana', 'iowa', 'kansas', 'kentucky', 'louisiana',
+  'maine', 'maryland', 'massachusetts', 'michigan', 'minnesota',
+  'mississippi', 'missouri', 'montana', 'nebraska', 'nevada',
+  'new hampshire', 'new jersey', 'new mexico', 'new york',
+  'north carolina', 'north dakota', 'ohio', 'oklahoma', 'oregon',
+  'pennsylvania', 'rhode island', 'south carolina', 'south dakota',
+  'tennessee', 'texas', 'utah', 'vermont', 'virginia', 'washington',
+  'west virginia', 'wisconsin', 'wyoming', 'district of columbia',
+  'puerto rico',
 ]);
 
 /**
@@ -249,6 +260,12 @@ export function resolveCountryCode(profile: Partial<ProfileRow> | Record<string,
   if (profile.country_code && typeof profile.country_code === 'string') {
     const fromCode = parsePhoneCountryCode(profile.country_code);
     if (fromCode) return fromCode;
+  }
+
+  // Tier 4: profile.phone (phone number prefix)
+  if (profile.phone && typeof profile.phone === 'string') {
+    const fromPhone = parsePhoneCountryCode(profile.phone);
+    if (fromPhone) return fromPhone;
   }
 
   throw new InvalidCountryError(
