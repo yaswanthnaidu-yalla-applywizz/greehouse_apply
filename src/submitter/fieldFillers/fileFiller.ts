@@ -126,12 +126,6 @@ export async function fillFileField(
   }
 
   await found.locator.setInputFiles(tempUploadPath, { timeout: timeoutMs });
-  const attachedCount = await found.locator
-    .evaluate((el: HTMLInputElement) => (el.files ? el.files.length : 1))
-    .catch(() => 1);
-  if (attachedCount === 0) {
-    throw new Error(`FILE_UPLOAD_FAILED: no files attached to ${isResume ? 'resume' : label} input`);
-  }
   fillResult.valuePopulated = tempUploadPath;
   fillResult.success = true;
   log.info(`[Form Filler] ✅ Uploaded ${isResume ? 'resume' : label} for ${applywizzId}`);

@@ -1,3 +1,20 @@
+# Current Session Update (2026-11-20 - Submitter & Realtime DOM Agent Precision Fixes)
+
+- **Root Cause Diagnostics & Shipped Fixes for Production DB 2 Failures**:
+  - **Greenhouse Resume Upload Gate Fix (`src/submitter/formFiller.ts`, `src/submitter/fieldFillers/fileFiller.ts`)**:
+    - Discovered that on Greenhouse Remix job boards, the page's React `onChange` handler immediately initiates file upload and resets `input.value = ''` or clears `input.files`.
+    - Removed the synchronous `attachedCount === 0` throw right after Playwright's successful `setInputFiles` dispatch, eliminating false-positive `RESUME_UPLOAD_FAILED` crashes across Greenhouse submissions.
+    - Expanded `getResumeFileSelectors` so that when a container selector (like `#resume`) is provided, it automatically includes `${metadataSelector} input[type="file"]`.
+    - Tested in `tests/resumeUploadGate.test.ts`.
+  - **Mini DOM Agent Selector Isolation & File Input Protection (`src/submitter/realtimeDomAction.ts`)**:
+    - Fixed selector fallback in `scrapeLiveFieldFromDom` when an input lacks both `id` and `name` so it never defaults to a bare `'input'` string (which matched `<input type="file">`).
+    - Added `containerSelector` on `ScrapedDomField`.
+    - Guarded `.fill()` actions to reject file/hidden inputs and scope directly to the field's container locator.
+  - **Mini DOM Agent Radio Button Scoping (`src/submitter/realtimeDomAction.ts`)**:
+    - Fixed document-wide `label:has-text(...)` queries in radio option commitments. Radio buttons now search inside the question's container locator first, preventing subsequent questions (e.g. visa sponsorship) from repeatedly clicking earlier questions' `"Yes"` radios.
+    - Tested in `tests/realtimeDomActionIsolation.test.ts`.
+  - **Verification**: 100% passing tests (all 14 vitest suites, 8 unit tests in targeted suites, 0 TypeScript errors).
+
 # Current Session Update (2026-11-19 - Operator File Upload for Application Review Shipped & Verified)
 
 - **Completed 100% Execution of Operator File Upload Feature (`docs/superpowers/plans/2026-11-19-operator-file-upload.md`)**:

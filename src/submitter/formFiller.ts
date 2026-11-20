@@ -127,8 +127,15 @@ export function getResumeFileSelectors(
   name?: string,
   fieldId?: string
 ): string[] {
+  const expandedMeta = metadataSelector
+    ? [
+        metadataSelector.includes('input') ? metadataSelector : `${metadataSelector} input[type="file"]`,
+        `input[type="file"]${metadataSelector}`,
+        metadataSelector,
+      ]
+    : [];
   return [
-    metadataSelector,
+    ...expandedMeta,
     'input[type="file"][data-field*="resume" i]',
     'input[type="file"][accept*="pdf" i]',
     '.resume-upload-wrapper input[type="file"]',
@@ -1466,12 +1473,6 @@ export async function fillSingleField(
       }
 
       await found.locator.setInputFiles(tempResumePath, { timeout: timeoutMs });
-      const attachedCount = await found.locator
-        .evaluate((el: HTMLInputElement) => (el.files ? el.files.length : 1))
-        .catch(() => 1);
-      if (attachedCount === 0) {
-        throw new Error('RESUME_UPLOAD_FAILED: no files attached to resume input');
-      }
       fillResult.valuePopulated = tempResumePath;
       fillResult.success = true;
       log.info(`[Form Filler] ✅ Uploaded resume for ${applywizzId}`);
