@@ -290,16 +290,42 @@ export async function fillAshbyForm(
 
     // 2. Radio Button Group
     if (controlType === 'radio') {
-      const escapedAnswer = answer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const radioOption = container
+      const cleanAnswer = answer.trim().replace(/\u00a0/g, ' ');
+      const escapedAnswer = cleanAnswer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      let radioOption = container
         .locator('label.ashby-application-form-input-radio-group-option-label, [class*="radio-group-option"], label:has(input[type="radio"])')
         .filter({ hasText: new RegExp(`^\\s*${escapedAnswer}\\s*$`, 'i') })
         .first();
+
+      if ((await radioOption.count()) === 0) {
+        radioOption = container.locator('label').filter({ hasText: cleanAnswer }).first();
+      }
+
       const radioInput = container
-        .locator(`input[type="radio"][value="${answer}" i], input[type="radio"][value="${answer}"]`)
+        .locator(`input[type="radio"][value="${cleanAnswer}" i], input[type="radio"][value="${cleanAnswer}"]`)
         .first();
 
-      if ((await radioOption.count()) > 0 && (await radioOption.isVisible())) {
+      let targetInput: Locator | null = null;
+      if ((await radioOption.count()) > 0) {
+        const labelFor = await radioOption.getAttribute('for').catch(() => null);
+        if (labelFor) {
+          const byId = container.locator(`input[id="${labelFor}"]`).first();
+          if ((await byId.count()) > 0) {
+            targetInput = byId;
+          }
+        }
+        if (!targetInput) {
+          const nestedInput = radioOption.locator('input[type="radio"]').first();
+          if ((await nestedInput.count()) > 0) {
+            targetInput = nestedInput;
+          }
+        }
+      }
+
+      if (targetInput) {
+        await targetInput.check({ force: true });
+        await dispatchReactChangeEvent(targetInput);
+      } else if ((await radioOption.count()) > 0 && (await radioOption.isVisible())) {
         await glideCursor(page, radioOption, { click: true });
       } else if ((await radioInput.count()) > 0) {
         await glideCursor(page, radioInput, { click: true });
@@ -513,27 +539,34 @@ export async function fillAshbyForm(
   // Check for uncommitted communication consent radio group (common on Ashby forms under phone)
   try {
     const consentRadios = page.locator(
-      'input[type="radio"][name*="communicationConsent"], [data-field-path*="communicationConsent"] input[type="radio"]'
+      'input[type="radio"][name*="consent" i], input[type="radio"][name*="sms" i], input[type="radio"][name*="whatsapp" i], [data-field-path*="consent" i] input[type="radio"]'
     );
     if ((await consentRadios.count()) > 0) {
-      const checkedCount = await page
-        .locator(
-          'input[type="radio"][name*="communicationConsent"]:checked, [data-field-path*="communicationConsent"] input[type="radio"]:checked'
-        )
-        .count();
-      if (checkedCount === 0) {
-        log.info('[AshbyFormFiller] Committing unselected communicationConsent radio group with default policy...');
-        const noOption = page
-          .locator(
-            'label:has-text("No - I do not consent"), label:has-text("do not consent"), input[type="radio"][value*="false"], input[type="radio"][value*="no" i]'
-          )
-          .first();
-        if ((await noOption.count()) > 0 && (await noOption.isVisible())) {
-          await glideCursor(page, noOption, { click: true });
-        } else {
-          await consentRadios.last().check({ force: true });
+      const radioNames = await consentRadios.evaluateAll((inputs: HTMLInputElement[]) => {
+        const names = new Set<string>();
+        for (const input of inputs) {
+          if (input.name) names.add(input.name);
         }
-        await sleep(250, 450);
+        return Array.from(names);
+      }).catch(() => []);
+
+      for (const name of radioNames) {
+        const group = page.locator(`input[type="radio"][name="${name}"]`);
+        const checked = await page.locator(`input[type="radio"][name="${name}"]:checked`).count();
+        if (checked === 0) {
+          log.info(`[AshbyFormFiller] Committing unselected consent radio group "${name}" with default policy...`);
+          const noInput = page
+            .locator(
+              `input[type="radio"][name="${name}"][value*="notGiven" i], input[type="radio"][name="${name}"][value*="false" i], input[type="radio"][name="${name}"][value*="no" i]`
+            )
+            .first();
+          if ((await noInput.count()) > 0) {
+            await noInput.check({ force: true });
+          } else {
+            await group.last().check({ force: true });
+          }
+          await sleep(200, 400);
+        }
       }
     }
   } catch {
@@ -630,6 +663,12 @@ export async function verifyRequiredFieldsCommitted(
           if (checkedRadio || activeRadio) {
             continue;
           } else {
+            const textOrTel = container.querySelector<HTMLInputElement>(
+              'input[type="tel"], input[type="text"]:not([class*="radio"])'
+            );
+            if (textOrTel && textOrTel.value && textOrTel.value.trim().length >= 5) {
+              continue;
+            }
             missingList.push(path);
             continue;
           }

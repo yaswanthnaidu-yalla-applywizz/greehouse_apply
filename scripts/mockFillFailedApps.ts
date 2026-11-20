@@ -7,6 +7,7 @@ import { fillForm } from '../src/submitter/formFiller.js';
 import { fillAshbyForm, verifyRequiredFieldsCommitted } from '../src/submitter/ashbyFormFiller.js';
 import { remediateUncommittedFields } from '../src/submitter/realtimeRemediator.js';
 import { toAshbyApplicationUrl } from '../src/scanner/atsDetector.js';
+import { findEmbeddedGreenhouseApplicationUrl } from '../src/scanner/playwrightScanner.js';
 
 dotenv.config();
 
@@ -140,6 +141,25 @@ async function run() {
         console.log(`      Navigating to Greenhouse application page...`);
         await page.goto(app.job_url, { waitUntil: 'domcontentloaded', timeout: 35000 });
         await page.waitForTimeout(2000);
+
+        let embeddedApplicationUrl: string | null = null;
+        const iframeEl = await page
+          .waitForSelector('iframe[src*="greenhouse"], iframe[src*="job_app"]', { timeout: 3000 })
+          .catch(() => null);
+        if (iframeEl) {
+          const src = await iframeEl.getAttribute('src').catch(() => null);
+          if (src && /greenhouse\.io/i.test(src) && /job_app/i.test(src)) {
+            embeddedApplicationUrl = src;
+          }
+        }
+        if (!embeddedApplicationUrl) {
+          embeddedApplicationUrl = findEmbeddedGreenhouseApplicationUrl(page.frames().map((f) => f.url()));
+        }
+        if (embeddedApplicationUrl && embeddedApplicationUrl !== page.url()) {
+          console.log(`      🔀 Detected embedded Greenhouse form: ${embeddedApplicationUrl}`);
+          await page.goto(embeddedApplicationUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+          await page.waitForTimeout(2000);
+        }
 
         console.log(`      Mock filling Greenhouse form fields...`);
         const fillSummary = await fillForm(page, appPayload, {

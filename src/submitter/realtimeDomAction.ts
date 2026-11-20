@@ -47,37 +47,46 @@ export async function scrapeLiveFieldFromDom(
   if (!targetLabel) return null;
 
   try {
-    // 1. Try finding by label or legend element
-    const labelLocators = [
-      page.locator(`label:has-text("${targetLabel}")`).first(),
-      page.locator(`legend:has-text("${targetLabel}")`).first(),
-      page.locator(`div:has-text("${targetLabel}")`).last(),
-    ];
-
-    let foundLabelLoc: Locator | null = null;
-    for (const loc of labelLocators) {
-      if ((await loc.count()) > 0) {
-        foundLabelLoc = loc;
-        break;
-      }
-    }
-
-    if (!foundLabelLoc) {
-      log.warn(`[Realtime DOM] Could not locate DOM container for label: "${targetLabel}"`);
-      return null;
-    }
-
-    // Determine surrounding field container (form group / fieldset / parent div)
-    const container = foundLabelLoc.locator('xpath=./ancestor-or-self::*[self::fieldset or contains(@class, "field") or contains(@class, "form-group") or contains(@class, "input")][1]');
-    const root = (await container.count()) > 0 ? container : foundLabelLoc.locator('..');
-
-    const rootId = (await root.getAttribute('id')) || '';
-    const dataFieldPath = (await root.getAttribute('data-field-path')) || '';
+    let root: Locator | null = null;
     let containerSelector: string | undefined = undefined;
-    if (rootId) {
-      containerSelector = `[id="${rootId.replace(/"/g, '\\"')}"]`;
-    } else if (dataFieldPath) {
-      containerSelector = `[data-field-path="${dataFieldPath.replace(/"/g, '\\"')}"]`;
+
+    const escapedRaw = fieldLabel.replace(/"/g, '\\"');
+    const directPath = page.locator(`[data-field-path="${escapedRaw}"], [id="${escapedRaw}"], [name="${escapedRaw}"]`).first();
+    if ((await directPath.count()) > 0) {
+      root = directPath;
+      containerSelector = `[data-field-path="${escapedRaw}"]`;
+    } else {
+      // 1. Try finding by label or legend element
+      const labelLocators = [
+        page.locator(`label:has-text("${targetLabel}")`).first(),
+        page.locator(`legend:has-text("${targetLabel}")`).first(),
+        page.locator(`div:has-text("${targetLabel}")`).last(),
+      ];
+
+      let foundLabelLoc: Locator | null = null;
+      for (const loc of labelLocators) {
+        if ((await loc.count()) > 0) {
+          foundLabelLoc = loc;
+          break;
+        }
+      }
+
+      if (!foundLabelLoc) {
+        log.warn(`[Realtime DOM] Could not locate DOM container for label: "${targetLabel}"`);
+        return null;
+      }
+
+      // Determine surrounding field container (form group / fieldset / parent div)
+      const container = foundLabelLoc.locator('xpath=./ancestor-or-self::*[self::fieldset or contains(@class, "field") or contains(@class, "form-group") or contains(@class, "input")][1]');
+      root = (await container.count()) > 0 ? container : foundLabelLoc.locator('..');
+
+      const rootId = (await root.getAttribute('id')) || '';
+      const dataFieldPath = (await root.getAttribute('data-field-path')) || '';
+      if (rootId) {
+        containerSelector = `[id="${rootId.replace(/"/g, '\\"')}"]`;
+      } else if (dataFieldPath) {
+        containerSelector = `[data-field-path="${dataFieldPath.replace(/"/g, '\\"')}"]`;
+      }
     }
 
     // 2. Check for standard <select>
