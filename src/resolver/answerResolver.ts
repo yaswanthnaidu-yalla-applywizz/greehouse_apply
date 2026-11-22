@@ -345,8 +345,8 @@ export function resolvePreTierField(
     /\b(?:open to working in-person|willing to work in the office|comply with onsite expectations|working onsite|onsite full-time|onsite as required|commit to the hybrid policy)\b/i.test(
       field.label
     ) ||
-    // Additional office/hybrid attendance patterns observed in production (84 AI fallbacks)
-    /\b(?:work from (?:our|the)(?:\s+\w+)?\s+office|in-office expectation|office-first|able to (?:work|be) (?:in|at) (?:our|the)(?:\s+\w+)?\s+office|comfortable with this schedule|confirm you are able to work|office presence|days? (?:in-?office|on-?site) (?:per week|a week|each week)|times? per week (?:in|at) (?:the|our)(?:\s+\w+)?\s+office|hybrid (?:schedule|arrangement|model|policy)|able to commute|able to report|report to (?:the|our)(?:\s+\w+)?\s+office|on-?site (?:presence|attendance|requirement)|working from (?:the|our)(?:\s+\w+)?\s+office)\b/i.test(
+    // Expanded onsite/in-person/hybrid willingness patterns
+    /\b(?:work from (?:our|the)(?:\s+\w+)?\s+office|in-office expectation|office-first|able to (?:work|be) (?:in|at) (?:our|the)(?:\s+\w+)?\s+office|comfortable with this schedule|confirm you are able to work|office presence|days? (?:in-?office|on-?site) (?:per week|a week|each week)|times? per week (?:in|at) (?:the|our)(?:\s+\w+)?\s+office|hybrid (?:schedule|arrangement|model|policy)|able to commute|able to report|report to (?:the|our)(?:\s+\w+)?\s+office|on-?site (?:presence|attendance|requirement)|working from (?:the|our)(?:\s+\w+)?\s+office|\d+\s*days?\s*(?:a\s*week|per\s*week|in(?:-|\s*)person|on(?:-|\s*)site)|(?:\d+|five|four|three)\s*days|willingness to work (?:in|on)|comfortable with (?:a|an)?\s*(?:hybrid|onsite|in-person)|willing to commute|willing to relocate|based in our [A-Za-z\s]+ office)\b/i.test(
       field.label
     );
 
