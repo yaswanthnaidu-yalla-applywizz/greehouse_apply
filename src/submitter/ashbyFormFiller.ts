@@ -521,8 +521,17 @@ export async function fillAshbyForm(
     const input = container.locator('input, textarea').first();
     if ((await input.count()) > 0 && (await input.isVisible())) {
       const inputType = await input.getAttribute('type').catch(() => null);
-      const textToType = inputType === 'number' ? extractNumericValue(answer) : answer;
+      let textToType = inputType === 'number' ? extractNumericValue(answer) : answer;
+      if ((textToType === 'N/A' || textToType === 'NA') && (inputType === 'url' || /linkedin|website|portfolio|url/i.test(questionText) || /linkedin|website|portfolio|url/i.test(fieldPath))) {
+        textToType = 'https://linkedin.com';
+      }
       await humanType(page, input, textToType);
+      // If HTML5 input validation flags invalid after filling N/A, fallback to https://linkedin.com
+      const isInvalid = await input.evaluate((el: HTMLInputElement) => el.validity && !el.validity.valid).catch(() => false);
+      if (isInvalid && (textToType === 'N/A' || textToType === 'NA')) {
+        textToType = 'https://linkedin.com';
+        await humanType(page, input, textToType);
+      }
       await dispatchReactChangeEvent(input);
       await sleep(350, 650);
 
