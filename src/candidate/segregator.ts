@@ -432,15 +432,6 @@ export async function segregateCandidatesByApplyWizzId(
     const queue = [...candidateIds];
     const workers: Promise<void>[] = [];
 
-    if (options.downloadResumes && !isSandboxTestMode() && candidateIds.length > 0) {
-      try {
-        const { invalidateResumeParseCache } = await import('../resolver/tier2ResumeParse.js');
-        await invalidateResumeParseCache(candidateIds);
-      } catch (invErr: any) {
-        log.warn(`[Segregator] ⚠️ Non-blocking parsed cache invalidation: ${invErr?.message}`);
-      }
-    }
-
     const worker = async () => {
       while (queue.length > 0) {
         throwIfPipelineAborted('Candidate profile sync');
@@ -458,7 +449,7 @@ export async function segregateCandidatesByApplyWizzId(
             : await ensureSupabaseProfile(id, {
                 allowOutboundApi,
                 downloadResumes,
-                forceRefreshResume: options.forceRefreshResume ?? true,
+                forceRefreshResume: options.forceRefreshResume ?? false,
                 client: client!,
               });
 

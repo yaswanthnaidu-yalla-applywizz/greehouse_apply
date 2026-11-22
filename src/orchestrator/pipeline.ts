@@ -315,15 +315,6 @@ export class V1Pipeline {
     // -------------------------------------------------------------
     // Phase C: Candidate Segregation & Profile Sync (Branch 2)
     // -------------------------------------------------------------
-    if (!isSandboxTestMode() && !options.skipScanIfCached) {
-      try {
-        const { purgeResumesBucket } = await import('../db/storage.js');
-        await purgeResumesBucket();
-      } catch (purgeErr: any) {
-        log.warn(`[Pipeline Phase C] ⚠️ Non-blocking resumes bucket purge: ${purgeErr?.message}`);
-      }
-    }
-
     if (compact) {
       log.info('[Pipeline] phase C segregate start');
     } else {

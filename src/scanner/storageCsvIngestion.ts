@@ -397,14 +397,6 @@ export async function ingestCsvFromStorage(options?: {
     }
     log.info('[Pipeline] stats rollup complete');
 
-    // Purge resumes storage bucket and local cache prior to processing new dropzone CSV
-    try {
-      const { purgeResumesBucket } = await import('../db/storage.js');
-      await purgeResumesBucket();
-    } catch (purgeErr: any) {
-      log.warn('[Storage CSV Ingestion] Resumes bucket purge non-blocking warning:', purgeErr);
-    }
-
     // Run V1Pipeline with single worker concurrency for Railway stability
     const pipeline = new V1Pipeline();
     log.info(`[Storage CSV Ingestion] pipeline start file="${targetFile.name}" workers=${config.WORKER_POOL_SIZE || 1}`);

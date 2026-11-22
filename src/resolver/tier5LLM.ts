@@ -117,8 +117,8 @@ export function createIngestTier5Stages(
         customId: ids[index],
         prompt,
         system: stage === 'haiku'
-          ? 'Answer job application questions from only the supplied candidate evidence. Return one JSON answers array item with answer, confidence, and exact supportQuote. Return an empty answer when unsupported.'
-          : 'Review and correct using candidate evidence and supplied organization policy/context. Preserve natural first-person candidate voice, invent no candidate facts, and obey explicit word or character limits exactly. Return an empty answer if correction cannot satisfy the question without changing meaning. Return one JSON answers array item with answer, confidence, and exact supportQuote.',
+          ? 'Answer job application questions using the supplied candidate evidence and role context. For workplace, hybrid, attendance, and onsite questions, resolve affirmatively closest to candidate truth and preference. For standard demographic, diversity, or EEOC questions, prefer decline to state or truthful defaults when choices exist. Return one JSON answers array item with answer, confidence, and exact supportQuote.'
+          : 'Review and correct using candidate evidence and supplied organization policy/context. Preserve natural first-person candidate voice, invent no candidate facts, and obey explicit word or character limits exactly. For attendance and standard workplace policies, resolve affirmatively. Return one JSON answers array item with answer, confidence, and exact supportQuote.',
       };
     });
     let result: Awaited<ReturnType<LLMSynthesizer['runAnthropicPromptBatch']>> | undefined;

@@ -220,7 +220,21 @@ export async function fillTextField(
   if (found) {
     await found.locator.scrollIntoViewIfNeeded().catch(() => {});
     await found.locator.click().catch(() => {});
-    await found.locator.fill(val, { timeout: timeoutMs });
+    let fillValue = val;
+    if (fillValue === 'N/A' || fillValue === 'NA') {
+      const isUrlInput = await found.locator.evaluate((el: HTMLInputElement) => el.type === 'url' || el.matches(':invalid')).catch(() => false);
+      if (isUrlInput) {
+        fillValue = 'https://linkedin.com';
+      }
+    }
+    await found.locator.fill(fillValue, { timeout: timeoutMs });
+    // If HTML5 validation flags invalid after filling N/A on a URL input, fallback to https://linkedin.com
+    if (fillValue === 'N/A' || fillValue === 'NA') {
+      const isInvalid = await found.locator.evaluate((el: HTMLInputElement) => el.validity && !el.validity.valid).catch(() => false);
+      if (isInvalid) {
+        await found.locator.fill('https://linkedin.com', { timeout: timeoutMs });
+      }
+    }
     await dispatchReactInputEvents(found.locator);
     fillResult.success = true;
   } else {

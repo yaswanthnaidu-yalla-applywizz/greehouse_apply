@@ -47,29 +47,47 @@ export async function scrapeLiveFieldFromDom(
   if (!targetLabel) return null;
 
   try {
-    // 1. Try finding by label or legend element
-    const labelLocators = [
-      page.locator(`label:has-text("${targetLabel}")`).first(),
-      page.locator(`legend:has-text("${targetLabel}")`).first(),
-      page.locator(`div:has-text("${targetLabel}")`).last(),
-    ];
+    let root: Locator | null = null;
+    let containerSelector: string | undefined = undefined;
 
-    let foundLabelLoc: Locator | null = null;
-    for (const loc of labelLocators) {
-      if ((await loc.count()) > 0) {
-        foundLabelLoc = loc;
-        break;
+    const escapedRaw = fieldLabel.replace(/"/g, '\\"');
+    const directPath = page.locator(`[data-field-path="${escapedRaw}"], [id="${escapedRaw}"], [name="${escapedRaw}"]`).first();
+    if ((await directPath.count()) > 0) {
+      root = directPath;
+      containerSelector = `[data-field-path="${escapedRaw}"]`;
+    } else {
+      // 1. Try finding by label or legend element
+      const labelLocators = [
+        page.locator(`label:has-text("${targetLabel}")`).first(),
+        page.locator(`legend:has-text("${targetLabel}")`).first(),
+        page.locator(`div:has-text("${targetLabel}")`).last(),
+      ];
+
+      let foundLabelLoc: Locator | null = null;
+      for (const loc of labelLocators) {
+        if ((await loc.count()) > 0) {
+          foundLabelLoc = loc;
+          break;
+        }
+      }
+
+      if (!foundLabelLoc) {
+        log.warn(`[Realtime DOM] Could not locate DOM container for label: "${targetLabel}"`);
+        return null;
+      }
+
+      // Determine surrounding field container (form group / fieldset / parent div)
+      const container = foundLabelLoc.locator('xpath=./ancestor-or-self::*[self::fieldset or contains(@class, "field") or contains(@class, "form-group") or contains(@class, "input")][1]');
+      root = (await container.count()) > 0 ? container : foundLabelLoc.locator('..');
+
+      const rootId = (await root.getAttribute('id')) || '';
+      const dataFieldPath = (await root.getAttribute('data-field-path')) || '';
+      if (rootId) {
+        containerSelector = `[id="${rootId.replace(/"/g, '\\"')}"]`;
+      } else if (dataFieldPath) {
+        containerSelector = `[data-field-path="${dataFieldPath.replace(/"/g, '\\"')}"]`;
       }
     }
-
-    if (!foundLabelLoc) {
-      log.warn(`[Realtime DOM] Could not locate DOM container for label: "${targetLabel}"`);
-      return null;
-    }
-
-    // Determine surrounding field container (form group / fieldset / parent div)
-    const container = foundLabelLoc.locator('xpath=./ancestor-or-self::*[self::fieldset or contains(@class, "field") or contains(@class, "form-group") or contains(@class, "input")][1]');
-    const root = (await container.count()) > 0 ? container : foundLabelLoc.locator('..');
 
     // 2. Check for standard <select>
     const selectLoc = root.locator('select').first();
@@ -89,6 +107,7 @@ export async function scrapeLiveFieldFromDom(
         type: 'select',
         options,
         locatorSelector: selector,
+        containerSelector,
       };
     }
 
@@ -125,6 +144,7 @@ export async function scrapeLiveFieldFromDom(
         type: 'radio',
         options,
         locatorSelector: selector,
+        containerSelector,
       };
     }
 
@@ -140,6 +160,7 @@ export async function scrapeLiveFieldFromDom(
         type: 'textarea',
         options: [],
         locatorSelector: selector,
+        containerSelector,
       };
     }
 
@@ -149,7 +170,11 @@ export async function scrapeLiveFieldFromDom(
       const id = (await inputLoc.getAttribute('id')) || '';
       const name = (await inputLoc.getAttribute('name')) || '';
       const type = (await inputLoc.getAttribute('type')) || 'text';
-      const selector = id ? `input[id="${id.replace(/"/g, '\\"')}"]` : name ? `input[name="${name}"]` : 'input';
+      const selector = id
+        ? `input[id="${id.replace(/"/g, '\\"')}"]`
+        : name
+        ? `input[name="${name}"]`
+        : 'input:not([type="hidden"]):not([type="submit"]):not([type="file"])';
 
       return {
         found: true,
@@ -157,6 +182,7 @@ export async function scrapeLiveFieldFromDom(
         type: type === 'checkbox' ? 'checkbox' : 'text',
         options: [],
         locatorSelector: selector,
+        containerSelector,
       };
     }
 
@@ -180,8 +206,16 @@ export async function commitRemediatedValue(
   log.info(`[Realtime DOM] Committing "${valueToCommit}" to ${field.type} ("${field.label}")...`);
 
   try {
+    const container = field.containerSelector
+      ? page.locator(field.containerSelector).first()
+      : page.locator(`label:has-text("${cleanLabel(field.label)}"), legend:has-text("${cleanLabel(field.label)}")`).first().locator('xpath=./ancestor-or-self::*[self::fieldset or contains(@class, "field") or contains(@class, "form-group") or contains(@class, "input")][1]');
+    const rootLoc = (await container.count()) > 0 ? container : page;
+
     if (field.type === 'select') {
-      const select = page.locator(field.locatorSelector).first();
+      const select = (await rootLoc.locator(field.locatorSelector).count()) > 0
+        ? rootLoc.locator(field.locatorSelector).first()
+        : page.locator(field.locatorSelector).first();
+
       await select.selectOption({ label: valueToCommit }).catch(async () => {
         // Fallback: match by value or partial text
         await select.selectOption({ value: valueToCommit });
@@ -199,15 +233,26 @@ export async function commitRemediatedValue(
     }
 
     if (field.type === 'radio') {
-      // Find matching label or radio button
-      const labelMatch = page.locator(`label:has-text("${valueToCommit}")`).first();
-      if ((await labelMatch.count()) > 0 && (await labelMatch.isVisible())) {
+      // Find matching label inside this question's container first to avoid picking same-labeled options from other questions
+      let labelMatch = rootLoc.locator(`label:has-text("${valueToCommit}")`).first();
+      if ((await labelMatch.count()) > 0 && (await labelMatch.isVisible().catch(() => false))) {
         await labelMatch.click({ timeout: 3000 });
       } else {
-        // Try clicking input directly
-        const radio = page.locator(`${field.locatorSelector}[value*="${valueToCommit}"]`).first();
-        if ((await radio.count()) > 0) {
-          await radio.check({ force: true, timeout: 3000 });
+        // Try clicking matching radio input inside container
+        const radioInRoot = rootLoc.locator(`input[type="radio"][value*="${valueToCommit}" i]`).first();
+        if ((await radioInRoot.count()) > 0) {
+          await radioInRoot.check({ force: true, timeout: 3000 });
+        } else {
+          // Fall back to selector or document-wide matching label
+          const radio = page.locator(`${field.locatorSelector}[value*="${valueToCommit}"]`).first();
+          if ((await radio.count()) > 0) {
+            await radio.check({ force: true, timeout: 3000 });
+          } else {
+            const docLabelMatch = page.locator(`label:has-text("${valueToCommit}")`).first();
+            if ((await docLabelMatch.count()) > 0 && (await docLabelMatch.isVisible().catch(() => false))) {
+              await docLabelMatch.click({ timeout: 3000 });
+            }
+          }
         }
       }
 
@@ -218,7 +263,10 @@ export async function commitRemediatedValue(
     }
 
     if (field.type === 'checkbox') {
-      const chk = page.locator(field.locatorSelector).first();
+      const chk = (await rootLoc.locator(field.locatorSelector).count()) > 0
+        ? rootLoc.locator(field.locatorSelector).first()
+        : page.locator(field.locatorSelector).first();
+
       if (/^(yes|true|1|agree|accept)\b/i.test(valueToCommit)) {
         await chk.check({ force: true, timeout: 3000 });
       } else {
@@ -232,7 +280,15 @@ export async function commitRemediatedValue(
     }
 
     if (field.type === 'text' || field.type === 'textarea') {
-      const input = page.locator(field.locatorSelector).first();
+      let input = (await rootLoc.locator(field.locatorSelector).count()) > 0
+        ? rootLoc.locator(field.locatorSelector).first()
+        : page.locator(field.locatorSelector).first();
+
+      const inputType = (await input.getAttribute('type').catch(() => '')) || '';
+      if (inputType === 'file' || inputType === 'hidden' || (await input.count()) === 0) {
+        input = rootLoc.locator('input:not([type="file"]):not([type="hidden"]):not([type="submit"]), textarea').first();
+      }
+
       await input.fill(valueToCommit, { timeout: 3000 });
       await input.dispatchEvent('change').catch(() => {});
       await input.dispatchEvent('blur').catch(() => {});

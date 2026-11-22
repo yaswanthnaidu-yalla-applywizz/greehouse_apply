@@ -135,14 +135,27 @@ function buildCandidateEvidenceSummary(context: RemediationCandidateContext): st
     }
   }
 
-  // 4. Resume facts (education, skills)
+  // 4. Resume facts & Background Evidence
   if (context.resumeFacts) {
-    if (Array.isArray(context.resumeFacts.degrees) && context.resumeFacts.degrees.length > 0) {
-      facts.push(`Education Degrees: ${context.resumeFacts.degrees.join('; ')}`);
+    const eduList = Array.isArray(context.resumeFacts.education)
+      ? context.resumeFacts.education.map((e: any) => `${e.degree || ''} at ${e.institution || ''} (${e.year || ''})`.trim()).filter(Boolean)
+      : (Array.isArray(context.resumeFacts.degrees) ? context.resumeFacts.degrees : []);
+    if (eduList.length > 0) {
+      facts.push(`Education Degrees: ${eduList.join('; ')}`);
     }
     if (Array.isArray(context.resumeFacts.skills) && context.resumeFacts.skills.length > 0) {
-      facts.push(`Key Skills: ${context.resumeFacts.skills.slice(0, 15).join(', ')}`);
+      facts.push(`Key Skills: ${context.resumeFacts.skills.slice(0, 20).join(', ')}`);
     }
+    if (Array.isArray(context.resumeFacts.experience) && context.resumeFacts.experience.length > 0) {
+      const expSummary = context.resumeFacts.experience.slice(0, 3).map((exp: any) => `${exp.title || ''} at ${exp.company || ''} (${exp.duration || ''})`.trim()).filter(Boolean);
+      if (expSummary.length > 0) {
+        facts.push(`Work Experience: ${expSummary.join('; ')}`);
+      }
+    }
+  }
+  if (p.resume_text && typeof p.resume_text === 'string' && p.resume_text.length > 20) {
+    facts.push(`Resume Summary Excerpt:
+${p.resume_text.slice(0, 1000).trim()}`);
   }
 
   // 5. Existing committed answers on this form
@@ -277,8 +290,13 @@ Your goal is to provide a truthful, accurate answer for this candidate, and repo
 
 Rules:
 1. If options are provided, you MUST select an answer that best represents the candidate from those options.
-2. If the candidate facts genuinely do NOT provide enough information to answer truthfully, return an empty string for "answer", confidence < 0.5, and explain in "issueFaced" and "issueFixed".
-3. For Yes/No questions on work authorization:
+2. For demographic, EEOC, diversity, sexual orientation, or gender identity questions:
+   - If "Decline to state", "I choose not to disclose", "Prefer not to say", or similar option exists, select it.
+   - For free-form text on sexual orientation or identity, provide "Decline to state" (or "Heterosexual" if candidate evidence supports it).
+   - For transgender status questions: provide "No" (or "Decline to state" if options exist).
+   - For protected veteran questions: map truthfully from candidate facts (e.g. "I am not a protected veteran" -> "No").
+3. For onsite / office attendance / hybrid willingness questions: provide "Yes" (candidate is willing and flexible).
+4. For Yes/No questions on work authorization:
    - If candidate is US Citizen/Permanent Resident, they do NOT require sponsorship (Sponsorship = "No", Authorized = "Yes").
 4. In "issueFaced", concisely explain what issue the automation encountered on the live form (e.g., "Automation left required radio unselected on page; options required specific phrasing").
 5. In "issueFixed", concisely explain how the answer resolves this using candidate facts (e.g., "Selected 'No' because candidate is a US Citizen requiring no sponsorship").
@@ -428,8 +446,8 @@ export async function remediateUncommittedFields(
     profile,
     resumeFacts,
     alreadyResolvedFields: [...alreadyResolved],
-    jobTitle: application.job_url ? 'Applicant' : '',
-    companyName: '',
+    jobTitle: application.job_title || 'Software Professional',
+    companyName: application.company_name || 'Hiring Organization',
   };
 
   // 2. Iterate each uncommitted field

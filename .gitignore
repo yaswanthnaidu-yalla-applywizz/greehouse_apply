@@ -128,6 +128,7 @@ scripts/*
 !scripts/fetchEmailProofsDb2.ts
 !scripts/countAutomatedCompanies.ts
 !scripts/resetSandboxDb.ts
+!scripts/mockFillFailedApps.ts
 !scripts/resolveFirst5Haiku.ts
 !scripts/README.md
 
