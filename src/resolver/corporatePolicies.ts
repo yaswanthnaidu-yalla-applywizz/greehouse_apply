@@ -34,9 +34,21 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
     return matchChoiceOption('No', field.options) || 'No';
   }
 
-  // 1b. Employee Relatives & Personal Ties (Anti-Nepotism / Conflict of Interest) -> Always "No"
+  // 1d. Employee Relatives & Personal Ties (Anti-Nepotism / Conflict of Interest) -> Always "No"
   if (
     /\b(?:related to|family member|relative|personal ties|close ties)\b.*(?:employee|worker|staff|anyone (?:at|with))|any.*(?:employee|worker|staff).*(?:related to|family member|relative|personal ties|close ties)/i.test(
+      combined
+    )
+  ) {
+    if (field.type === 'checkbox') {
+      return 'false';
+    }
+    return matchChoiceOption('No', field.options) || 'No';
+  }
+
+  // 1e. Employee Referral & Internal Applicant Screening -> Always "No"
+  if (
+    /\b(?:referral from a current employee|referred by a current employee|are you an internal candidate|applying as an internal candidate|currently an employee (?:with|at|of))\b/i.test(
       combined
     )
   ) {
@@ -90,7 +102,7 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
 
   // 4. Job Source / How did you hear about us -> Prefers "LinkedIn"
   if (
-    /\b(?:how did you (?:hear|learn)|where did you (?:hear|learn)|source of application|job source|referral source)\b/i.test(
+    /\b(?:how did you (?:(?:\w+)\s+)?(?:hear|learn)|where did you (?:(?:\w+)\s+)?(?:hear|learn)|source of application|job source|referral source|hear about (?:this|the|us|[A-Z])|find this (?:job|role|posting|opportunity))\b/i.test(
       combined
     )
   ) {
@@ -113,6 +125,46 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
       return field.options[0];
     }
     return 'LinkedIn';
+  }
+
+  // 4b. Availability & Notice Period -> "2 weeks" / "Immediately"
+  if (
+    /\b(?:current notice period|notice required|notice period)\b/i.test(combined)
+  ) {
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      const opt = field.options.find((o) => /\b(?:immediate|2 weeks|two weeks|1 month)\b/i.test(o));
+      if (opt) return opt;
+      return field.options[0];
+    }
+    return '2 weeks';
+  }
+  if (
+    /\b(?:date (?:you can|you are available to) start|when (?:can you|are you available to) start|availability to start|earliest start date)\b/i.test(combined)
+  ) {
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      const opt = field.options.find((o) => /\b(?:immediate|immediately|within 2 weeks|two weeks)\b/i.test(o));
+      if (opt) return opt;
+      return field.options[0];
+    }
+    return 'Immediately';
+  }
+
+  // 4c. In-Person / Hybrid Work Attendance Commitment -> Affirmative
+  if (
+    /\b(?:work from the office|in-person.*days|hybrid.*work model|able to work in person|meet this in-person requirement|willing and able to work.*(?:onsite|on-site|hybrid))\b/i.test(combined)
+  ) {
+    if (field.type === 'checkbox') {
+      return 'true';
+    }
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      const affOpt = field.options.find((opt) =>
+        /^(?:yes\b|willing to relocate)/i.test(opt.trim()) ||
+        /\b(?:based in this location|able to work from the office|meet this requirement)\b/i.test(opt)
+      );
+      if (affOpt) return affOpt;
+      return matchChoiceOption('Yes', field.options) || field.options[0];
+    }
+    return 'Yes';
   }
 
   // 5. Sanctioned Countries & Export Controls

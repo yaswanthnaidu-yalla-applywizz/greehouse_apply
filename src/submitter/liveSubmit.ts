@@ -1535,6 +1535,20 @@ export async function runLiveSubmit(
       timeout: timeoutMs,
     });
 
+    // Check if on a marketing overview page that links to a dedicated apply page (e.g. AlixPartners)
+    try {
+      const applyNowBtn = page.locator('#apply-btn, a[href*="apply-now"]').first();
+      if ((await applyNowBtn.count().catch(() => 0)) > 0 && (await applyNowBtn.isVisible().catch(() => false))) {
+        const href = await applyNowBtn.getAttribute('href').catch(() => null);
+        if (href && !href.startsWith('#')) {
+          const target = new URL(href, page.url()).toString();
+          log.info(`[Live Submit] 🔀 Following "Apply now" link to application page: ${target}`);
+          await page.goto(target, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(() => {});
+          await page.waitForTimeout(2500);
+        }
+      }
+    } catch {}
+
     // Company marketing pages often host the real Greenhouse form in an iframe.
     // Follow the embedded application URL so live submission interacts directly with the ATS DOM.
     let embeddedApplicationUrl: string | null = null;

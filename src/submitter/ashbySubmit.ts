@@ -215,7 +215,7 @@ export async function waitForSubmitConfirmation(
   page: Page,
   options: ConfirmationWaitOptions = {}
 ): Promise<boolean> {
-  const timeoutMs = options.timeoutMs ?? 45000;
+  const timeoutMs = options.timeoutMs ?? 75000;
   const graceWindowMs = options.graceWindowMs ?? 3000;
   const pollIntervalMs = options.pollIntervalMs ?? 1500;
   const startTime = Date.now();
@@ -383,10 +383,14 @@ export async function submitAshbyApplication(
       ],
     });
 
+    const isMac = process.platform === 'darwin';
+    const userAgent = isMac
+      ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
     context = await browserManager.createSterileContext(managedBrowser.browser, {
       viewport: { width: 1440, height: 900 },
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      userAgent,
       timezoneId: 'America/New_York',
       locale: 'en-US',
     });
@@ -609,6 +613,12 @@ export async function submitAshbyApplication(
       throw new Error('Submit button not found on Ashby form');
     }
 
+    log.info('[AshbySubmit] Pre-submit token settlement dwell: allowing background anti-bot telemetry to passively establish trust...');
+    await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight * 0.8, behavior: 'smooth' })).catch(() => {});
+    await sleep(5000, 8000);
+    await glideCursor(page, submitBtn, { click: false });
+    await sleep(3000, 5000);
+
     log.info('[AshbySubmit] Clicking submit button with humanized cursor glide...');
     submitClickedAt = new Date().toISOString();
     submitClicked = true;
@@ -620,7 +630,7 @@ export async function submitAshbyApplication(
     // "Success: Your application was successfully submitted. We'll contact you if there are next steps."
     stage = 'WAIT_CONFIRMATION';
     const confirmed = await waitForSubmitConfirmation(page, {
-      timeoutMs: 60000,
+      timeoutMs: 75000,
       graceWindowMs: 3000,
       pollIntervalMs: 1500,
       onChallengeDetected: (c) => {

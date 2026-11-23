@@ -23,6 +23,7 @@ import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { config } from '../config/env.js';
 import { browserManager } from './browserManager.js';
 import { getRetryReason, isAutomaticRetryAllowed } from './submissionRetry.js';
+import { extractTenantKey, tenantRateLimiter } from './tenantRateLimiter.js';
 
 const log = createLogger('Submitter Pool');
 
@@ -362,6 +363,7 @@ export class SubmitterPool {
       this.workerBusy[workerIndex] = true;
       const { application } = work;
       const applicationId = application.id || application.applywizz_id;
+      const tenantKey = extractTenantKey(application);
       try {
         await this.updateStatusFn(applicationId, 'APPLYING', {
           job_url: application.job_url,
@@ -370,6 +372,9 @@ export class SubmitterPool {
           `[Submitter] 🚀 Starting submission for app-${applicationId} (${application.applywizz_id || 'unknown'}) [${application.job_url || ''}]`
         );
         await logQueueStatusChange(applicationId, 'QUEUED', 'APPLYING');
+
+        // Enforce global tenant-level rate limiting across workers to prevent ATS anti-bot bursts
+        await tenantRateLimiter.waitForCooldown(tenantKey);
 
         const result =
           application.ats === 'ashby'
@@ -397,6 +402,12 @@ export class SubmitterPool {
           );
         } else if (result.status === 'FAILED') {
           const failureMessage = result.errorMessage || 'Submission execution failed.';
+          if (
+            /captcha|challenge|turnstile|recaptcha|hcaptcha/i.test(failureMessage) ||
+            ((result as any).telemetry?.challengeType && (result as any).telemetry.challengeType !== 'none')
+          ) {
+            tenantRateLimiter.recordCaptcha(tenantKey);
+          }
           log.warn(
             `[Submitter] ❌ Terminal Status → FAILURE (app-${applicationId}) - reason: ${failureMessage}`
           );
@@ -441,6 +452,12 @@ export class SubmitterPool {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (
+          /captcha|challenge|turnstile|recaptcha|hcaptcha/i.test(message) ||
+          (error as any)?.classification === 'EXTERNAL_POLICY:INTERACTIVE_CHALLENGE'
+        ) {
+          tenantRateLimiter.recordCaptcha(tenantKey);
+        }
         let finalStatus = 'FAILED';
         const retryReason = getRetryReason(error instanceof Error ? error : String(error));
         if (isAutomaticRetryAllowed(retryReason)) {

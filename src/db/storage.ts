@@ -613,6 +613,16 @@ export async function fetchResumePdfBuffer(applywizzId: string): Promise<Buffer>
   }
 
   const profile = await getProfile(applywizzId).catch(() => null);
+
+  // Fast check: check local resumes folder first (zero network latency, avoids S3 timeouts)
+  if (profile?.resume_storage_path) {
+    const localPath = path.resolve(process.cwd(), config.RESUMES_DIR || 'resumes', path.basename(profile.resume_storage_path));
+    if (fs.existsSync(localPath) && fs.statSync(localPath).size > 100) {
+      log.info(`[Storage] Resume loaded directly from local resumes cache: ${localPath}`);
+      return fs.readFileSync(localPath);
+    }
+  }
+
   const resumeUrl = profile?.resume_url?.trim();
 
   let httpError: Error | null = null;

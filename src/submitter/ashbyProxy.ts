@@ -345,7 +345,8 @@ export function buildAshbyProxyConfig(
 
     const cleanId = String(profile.applywizz_id || 'candidate').replace(/[^a-zA-Z0-9]/g, '');
     const attemptToken = options.attemptToken || randomBytes(4).toString('hex');
-    const deviceType = options.deviceType || process.env.MASSIVE_DEVICE_TYPE || 'mobile';
+    // Adaptive device type: Align with desktop Playwright Chromium automation (fixed broadband residential)
+    const deviceType = options.deviceType || process.env.MASSIVE_DEVICE_TYPE || 'residential';
 
     let username = massiveUser;
     if (deviceType && deviceType !== 'auto') {
@@ -427,7 +428,7 @@ export async function verifyProxyPreflight(
   expectedCountryCode?: string,
   options: { timeoutMs?: number; endpointUrl?: string } = {}
 ): Promise<ProxyPreflightResult> {
-  const timeoutMs = options.timeoutMs ?? 3000;
+  const timeoutMs = options.timeoutMs ?? 7000;
   const primaryUrl = options.endpointUrl || 'https://api64.ipify.org?format=json';
   // Retry HTTP 400 with another JSON IP endpoint that does not need query parameters.
   const fallbackUrls = ['https://ipwho.is/'];

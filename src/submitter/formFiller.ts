@@ -473,7 +473,13 @@ async function comboboxDisplaysAnswer(
     .first();
   if ((await controlRoot.count()) > 0) {
     const single = (await controlRoot.locator('.select__single-value, [class*="-singleValue"], [class*="singleValue"]').innerText().catch(() => '')).trim();
-    if (single && matchOption(single, answerText)) return true;
+    if (single) {
+      if (matchOption(single, answerText)) return true;
+      if (/^\+\d+/.test(single) && answerText.includes(single)) return true;
+      if (answerText.startsWith(single) || single.startsWith(answerText)) return true;
+    }
+    const hasValue = (await controlRoot.locator('.select__value-container--has-value').count().catch(() => 0)) > 0;
+    if (hasValue && single) return true;
   }
   const tagName = await control.evaluate((el: HTMLElement) => el.tagName.toUpperCase()).catch(() => '');
   if (tagName === 'INPUT') return false;

@@ -14,10 +14,11 @@ interface VerificationSurface {
   visible: boolean;
   text: string;
   widget: boolean;
+  attrs?: string;
 }
 
 const HUMAN_PROMPT = /verify (?:that )?you are human|confirm (?:that )?you are not a robot|complete (?:the )?(?:captcha|security check)|human verification required/i;
-const PUZZLE = /select all (?:the )?images?|click (?:on )?all (?:the )?images?|pick all (?:the )?images?|complete the puzzle|click verify to continue/i;
+const PUZZLE = /select all (?:the )?(?:images?|squares?)|click (?:on )?all (?:the )?(?:images?|squares?)|pick all (?:the )?(?:images?|squares?)|complete the puzzle|click verify (?:once|to continue)/i;
 const WIDGET_ERROR = /(?:error(?:\s+code)?\s*[:#]\s*([a-z0-9_-]+)|invalid[- ]domain[- ]for[- ]site[- ]key|invalid[- ]site[- ]key|missing[- ]input[- ]secret)/i;
 
 function providerFrom(value: string): VerificationProvider {
@@ -78,7 +79,7 @@ async function frameSurface(frame: Frame): Promise<VerificationSurface | null> {
   }
   const provider = providerFrom(`${metadata} ${frame.url()} ${frame.name()}`);
   if (provider === 'unknown' && !/captcha|turnstile|recaptcha|challenge|verification|security|human/i.test(`${metadata} ${frame.url()} ${frame.name()}`)) return null;
-  return { provider, visible, text, widget: true };
+  return { provider, visible, text, widget: true, attrs: `${metadata} ${frame.url()} ${frame.name()}` };
 }
 
 interface DocumentVerificationEvidence {
@@ -93,7 +94,7 @@ export async function observeAtsVerification(page: Page, _ats: VerificationAts):
 
   const documentEvidence = await page.evaluate<DocumentVerificationEvidence>(`(() => {
     const humanPrompt = /verify (?:that )?you are human|confirm (?:that )?you are not a robot|complete (?:the )?(?:captcha|security check)|human verification required/i;
-    const puzzlePrompt = /select all (?:the )?images?|click (?:on )?all (?:the )?images?|pick all (?:the )?images?|complete the puzzle|click verify to continue/i;
+    const puzzlePrompt = /select all (?:the )?(?:images?|squares?)|click (?:on )?all (?:the )?(?:images?|squares?)|pick all (?:the )?(?:images?|squares?)|complete the puzzle|click verify (?:once|to continue)/i;
 
     function isRendered(el) {
       if (el.closest('[hidden], [aria-hidden="true"]')) return false;
@@ -194,7 +195,9 @@ export async function observeAtsVerification(page: Page, _ats: VerificationAts):
   }
 
   for (const surface of frameSurfaces) {
-    if (surface.visible && PUZZLE.test(surface.text)) return { kind: 'interactive', provider: surface.provider, evidence: 'puzzle' };
+    const isPuzzleText = PUZZLE.test(surface.text);
+    const isRecaptchaBframe = Boolean(surface.attrs && (surface.attrs.includes('bframe') || surface.attrs.toLowerCase().includes('recaptcha challenge')));
+    if (surface.visible && (isPuzzleText || isRecaptchaBframe)) return { kind: 'interactive', provider: surface.provider, evidence: 'puzzle' };
     if (surface.visible && HUMAN_PROMPT.test(surface.text)) return { kind: 'interactive', provider: surface.provider, evidence: 'human_prompt' };
   }
   if (documentEvidence.visiblePuzzlePrompt) return { kind: 'interactive', provider: documentProvider, evidence: 'puzzle' };
