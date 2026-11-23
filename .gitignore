@@ -130,6 +130,7 @@ scripts/*
 !scripts/resetSandboxDb.ts
 !scripts/mockFillFailedApps.ts
 !scripts/resolveFirst5Haiku.ts
+!scripts/verifyDryRunReapplications.ts
 !scripts/README.md
 
 # Temporary report reviews & scratch scripts
