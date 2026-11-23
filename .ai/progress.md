@@ -1,3 +1,19 @@
+### Tenant Rate Limiter, 75s Confirmation Timeout & Ashby CAPTCHA Backoff (2026-11-24 COMPLETE)
+- [x] **Tenant Rate Limiter & Abuse Backoff Engine:**
+  - Implemented `TenantRateLimiter` class in `src/submitter/tenantRateLimiter.ts` extracting employer domain keys and enforcing 120s baseline inter-application spacing.
+  - Added `recordCaptcha(tenantKey, 900_000)` imposing an automatic 15-minute penalty cooldown on interactive CAPTCHA interception.
+  - Integrated into `src/submitter/submitterPool.ts` before task dispatch and error handlers.
+  - Verified with `tests/tenantRateLimiter.test.ts` (3/3 passing).
+- [x] **Submit Confirmation & Fast-Quarantine Detection:**
+  - Extended submit confirmation timeout to 75s in `src/submitter/ashbySubmit.ts` to accommodate residential proxy upload processing.
+  - Expanded pre-submit settlement dwell to 8–13s (5–8s scroll dwell + 3–5s cursor glide hesitation) for passive anti-bot trust scoring.
+  - Broadened `PUZZLE` regex in `src/submitter/atsVerification.ts` to match `"select all squares"` and Google reCAPTCHA `bframe` widgets, quarantining challenges in ~4.3s instead of stalling 45s.
+- [x] **Greenhouse Combobox Dial Code Matching & Auto-Navigation:**
+  - Patched `comboboxDisplaysAnswer` in `src/submitter/formFiller.ts` to match country dial codes (`/^\+\d+/` for `+1`) and `.select__value-container--has-value`.
+  - Added auto-navigation across marketing overview landing pages in `src/submitter/liveSubmit.ts`.
+- [x] **Benchmark Conversion Progress:**
+  - Converted benchmark from 22/59 (37.3%) to **51/59 (86.4%) positive conversions** (12 `APPLIED`, 37 `EMAIL_PROOF_PENDING`, 2 `OTP_REQUIRED`), cutting failures from 37 to 8. Commit `fd8c8be` pushed to `origin/dev`.
+
 ### Ashby Custom Question UUID Label Extraction (2026-11-23 COMPLETE)
 - [x] **Ashby Custom Question UUID Label Extraction:**
   - Implemented `extractContainerQuestionTitle` and `isTechnicalOrUuidLabel` in `src/submitter/realtimeDomAction.ts` to inspect container DOM elements (`legend`, `label:not(.radio):not(.checkbox)`, `div[class*="label" i]`, `h3`, `p`) when field paths are UUIDs or technical tokens.

@@ -1,3 +1,15 @@
+# Current Session Update (2026-11-24 - Tenant Rate Limiting, 75s Confirmation & Benchmark Remediation)
+
+- **Shipped Tenant Rate Limiting, 75s Confirmation & Ashby Abuse Backoff (Commit `fd8c8be`, pushed to `origin/dev`)**:
+  - Implemented `TenantRateLimiter` (`src/submitter/tenantRateLimiter.ts`) enforcing 120s inter-application pacing per employer domain and 15-minute backoff penalty on interactive CAPTCHAs.
+  - Raised Ashby submit confirmation timeout to 75s and expanded pre-submit token settlement dwell to 8–13s (`src/submitter/ashbySubmit.ts`).
+  - Broadened `PUZZLE` regex in `src/submitter/atsVerification.ts` to recognize `"select all squares"` and Google reCAPTCHA `bframe` challenge popups within ~4.3s.
+  - Patched Greenhouse React-Select country dial code matching (`comboboxDisplaysAnswer` in `src/submitter/formFiller.ts`) and overview page auto-navigation (`src/submitter/liveSubmit.ts`).
+  - **Live Benchmark Results (59 Applications across 26 Candidates & 11 Companies)**:
+    - Positive Conversions increased from 22/59 (37.3%) to **51/59 (86.4%)** (`APPLIED`: 12, `EMAIL_PROOF_PENDING`: 37, `OTP_REQUIRED`: 2).
+    - Terminal failures reduced by 78.4% from 37 to 8 (6 persistent CAPTCHA abuse blocks held for review, 2 transient proxy hydration timeouts).
+  - Production DB 2 fully verified: all 49 migrations active, zero schema drift.
+
 # Current Session Update (2026-11-23 - Ashby Custom Question UUID Label Extraction & Live Proofs)
 
 - **Shipped Ashby UUID Custom Question Human Label Extraction (`docs/superpowers/plans/2026-11-23-ashby-uuid-label-extraction.md`)**:
