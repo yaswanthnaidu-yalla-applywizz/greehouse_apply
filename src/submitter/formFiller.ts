@@ -25,6 +25,7 @@ import type { ApplicationRow } from '../db/applications.js';
 import { createLogger } from '../utils/logger.js';
 import { choiceOptionTextMatches, matchChoiceOption } from '../utils/choiceOptions.js';
 import { buildResumeSubmissionFilename } from '../utils/resumeNaming.js';
+import { dismissBlockingOverlays } from './fieldFillers/overlayDismissal.js';
 
 const log = createLogger('Form Filler');
 
@@ -2753,6 +2754,13 @@ export async function fillForm(
   // Normalize resolved fields array
   const rawFields = appObj.resolved_fields || appObj.resolvedFields || [];
   const fields: ResolvedField[] = Array.isArray(rawFields) ? [...rawFields] : [];
+
+  // Auto-dismiss blocking overlays (age verification gates, cookie consent modals)
+  try {
+    await dismissBlockingOverlays(page);
+  } catch (overlayErr: any) {
+    log.warn(`[Form Filler] Overlay dismissal skipped or non-fatal: ${overlayErr.message}`);
+  }
 
   log.info(
     `[Form Filler] 📝 Populating ${fields.length} initial resolved fields for candidate ${applywizzId} on ${jobUrl}...`

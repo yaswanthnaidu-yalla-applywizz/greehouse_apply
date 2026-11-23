@@ -10,6 +10,7 @@ import path from 'path';
 import type { Page, Locator } from 'playwright';
 import type { ResolvedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
+import { dismissBlockingOverlays } from './fieldFillers/overlayDismissal.js';
 
 const log = createLogger('AshbyFormFiller');
 
@@ -188,6 +189,11 @@ export async function fillAshbyForm(
   resolvedFields: ResolvedField[],
   resumeLocalPath: string
 ): Promise<{ filledCount: number; filledFields: FilledAshbyField[] }> {
+  // Dismiss any initial age-gates or cookie modals
+  try {
+    await dismissBlockingOverlays(page);
+  } catch {}
+
   const filledFields: FilledAshbyField[] = [];
 
   for (let i = 0; i < resolvedFields.length; i++) {
