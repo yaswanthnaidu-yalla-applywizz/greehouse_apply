@@ -60,7 +60,7 @@ async function validateAshbyResponse(page: Page, response: Awaited<ReturnType<ty
   return false;
 }
 
-function expiredAshbyTemplate(url: string): ScannedJobTemplate {
+export function expiredAshbyTemplate(url: string): ScannedJobTemplate {
   return {
     jobUrl: url,
     companyName: '',
@@ -69,6 +69,11 @@ function expiredAshbyTemplate(url: string): ScannedJobTemplate {
     scannedAt: new Date().toISOString(),
     isExpired: true,
   };
+}
+
+export async function isAshbyJobClosedOnDom(page: Page): Promise<boolean> {
+  const pageText = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
+  return /404|no longer available|position has been filled|job (?:not found|is closed|has ended)|no longer accepting/i.test(pageText);
 }
 
 function sleepRandomJitter(minMs: number, maxMs: number): Promise<void> {
@@ -135,6 +140,12 @@ export async function extractAshbyFieldsFromPage(
         }
       }
     }
+  }
+
+  // Fast check: is job closed or 404?
+  if (await isAshbyJobClosedOnDom(page)) {
+    log.info(`[Ashby Scanner] Fast-detected closed/404 job posting on ${url}`);
+    return expiredAshbyTemplate(url);
   }
 
   let selectorFound = await page.waitForSelector('[data-field-path]', { timeout: 15000 }).catch(() => null);

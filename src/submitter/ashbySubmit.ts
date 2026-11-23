@@ -73,6 +73,16 @@ export async function preflightFallback<TPage>(options: {
 export async function waitForAshbyApplicationReady(page: Page, timeoutMs = 35000): Promise<void> {
   const startTime = Date.now();
 
+  // 0. Fast check for closed / 404 postings
+  const pageText = await page.evaluate(() => (document.body ? document.body.innerText : '')).catch(() => '');
+  if (/404|no longer available|position has been filled|job (?:not found|is closed|has ended)|no longer accepting/i.test(pageText)) {
+    const err: any = new Error('Job not found or no longer accepting applications on Ashby (404/closed)');
+    err.code = 'JOB_CLOSED';
+    err.stage = 'PAGE_LOAD';
+    err.classification = 'DATA_FAULT:JOB_CLOSED';
+    throw err;
+  }
+
   // 1. If loading spinner is present, wait for it to detach
   try {
     const spinner = page.locator('.ashby-loading-spinner, svg[class*="loading-spinner"]');
@@ -275,6 +285,16 @@ export async function submitAshbyApplication(
   const isHeadless = options.headless ?? (process.env.RAILWAY_ENV === 'true' || process.env.HEADLESS !== 'false');
   const deployedCommit = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || 'local';
   const statusUpdater = options.updateStatusFn || updateStatus;
+
+  // Pre-submission guard: Ensure resolved_fields is not empty
+  if (!Array.isArray(application.resolved_fields) || application.resolved_fields.length === 0) {
+    const emptyErr: any = new Error(
+      `Cannot submit Ashby application ${applicationId}: resolved_fields is empty or missing.`
+    );
+    emptyErr.stage = 'PREFLIGHT';
+    emptyErr.classification = 'DATA_FAULT:EMPTY_RESOLVED_FIELDS';
+    throw emptyErr;
+  }
 
   log.info(`[AshbySubmit] 🚀 Starting Ashby submission for ${application.applywizz_id} [${application.job_url}]`);
 
