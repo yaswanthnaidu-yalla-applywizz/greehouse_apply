@@ -57,23 +57,16 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
     return 'Human';
   }
 
-  // 2. Communication / SMS / WhatsApp Consent
-  // On ATS forms with explicit affirmative SMS consent radio options (e.g. Ashby), choose affirmative SMS consent.
+  // 2. Communication / SMS / WhatsApp Consent & Recruitment Marketing Opt-Out -> Always "No"
   if (
-    Array.isArray(field.options) &&
-    field.options.some((opt) => /receiving (?:sms|text messages)/i.test(opt))
-  ) {
-    const smsConsent = field.options.find((opt) => /yes.*consent.*sms/i.test(opt));
-    if (smsConsent) return smsConsent;
-  }
-
-  if (
-    /\b(?:sms|text message|text messages|whatsapp|mobile messaging)\b/i.test(combined) &&
-    /\b(?:receive|consent|opt-in|opt in|updates|notifications|contact you|reach you)\b/i.test(combined)
+    /\b(?:sms|text message|text messages|whatsapp|mobile messaging|marketing|promotional|talent network|talent community)\b/i.test(combined) &&
+    /\b(?:receive|consent|opt-in|opt in|updates|notifications|contact you|reach you|keep in touch|future opportunities|promotions)\b/i.test(combined)
   ) {
     if (field.type === 'checkbox') {
       return 'false';
     }
+    const negativeOpt = field.options?.find((opt) => /\b(?:no\b|do not consent|decline|opt out)\b/i.test(opt));
+    if (negativeOpt) return negativeOpt;
     return matchChoiceOption('No', field.options) || 'No';
   }
 
@@ -178,6 +171,27 @@ export function matchCorporatePolicy(field: ScannedField, profile?: ProfileRow |
       const target = isCandidateSanctioned ? 'Yes' : 'No';
       return matchChoiceOption(target, field.options) || target;
     }
+  }
+
+  // 5b. Future Sponsorship Polarity for F1 / H1B / Non-immigrants
+  if (
+    /\b(?:future.*(?:sponsor|visa|work auth)|(?:sponsor|visa).*future|now or in the future|at any point in the future|will you (?:at any time )?require (?:visa )?sponsorship)/i.test(
+      combined
+    )
+  ) {
+    const isNonImmigrantVisa =
+      profile?.requires_sponsorship === true ||
+      profile?.work_authorization === 'F1' ||
+      profile?.work_authorization === 'H1B' ||
+      profile?.work_authorization === 'OPT' ||
+      profile?.work_authorization === 'CPT' ||
+      profile?.work_authorization === 'Other';
+
+    const target = isNonImmigrantVisa ? 'Yes' : 'No';
+    if (field.type === 'checkbox') {
+      return isNonImmigrantVisa ? 'true' : 'false';
+    }
+    return matchChoiceOption(target, field.options) || target;
   }
 
   // 6. Work Authorization Status Dropdown (e.g. Similarweb)

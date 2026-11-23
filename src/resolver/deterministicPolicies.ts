@@ -167,10 +167,28 @@ export function resolveDeterministicPolicy(
 
   // 4. Sponsorship
   if (intent.family === 'sponsorship') {
-    if (profile?.requires_sponsorship !== undefined && profile?.requires_sponsorship !== null) {
-      const isYes =
+    if (profile) {
+      const isNonImmigrantVisa =
+        profile.requires_sponsorship === true ||
+        profile.work_authorization === 'F1' ||
+        profile.work_authorization === 'H1B' ||
+        profile.work_authorization === 'OPT' ||
+        profile.work_authorization === 'CPT' ||
+        profile.work_authorization === 'Other';
+
+      const isFutureSponsorshipQuestion =
+        /\b(?:in the future|future|now or in the future|at any point in the future)\b/i.test(
+          field.label || field.name
+        );
+
+      let isYes =
         profile.requires_sponsorship === true ||
         String(profile.requires_sponsorship).toLowerCase() === 'yes';
+
+      if (isFutureSponsorshipQuestion && isNonImmigrantVisa) {
+        isYes = true;
+      }
+
       const mapped = matchChoiceOption(isYes ? 'Yes' : 'No', options);
       if (mapped) {
         return {

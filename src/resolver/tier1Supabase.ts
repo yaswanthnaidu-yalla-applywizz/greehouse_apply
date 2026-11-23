@@ -472,12 +472,26 @@ export function resolveStandardProfileAttribute(
   // Spousal Sponsorship Dependency (Always "No")
   if (/dependent upon.*spouse|spouse.*sponsorship/i.test(combined)) {
     if (field.type === 'checkbox') return 'false';
-    return matchBestOption('No', field.options, field.label) || 'No';
+    const negativeOpt = field.options?.find((opt) => /\b(?:no\b|do not consent|decline|opt out)\b/i.test(opt));
+    return negativeOpt || matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Visa Sponsorship (must precede general work authorization to prevent false "Yes" match)
-  if (/sponsorship|require.*visa|future.*sponsorship|visa status|immigration.*sponsor|sponsor.*immigration|sponsor.*work authorization/i.test(combined)) {
-    const rawVal = profile.requires_sponsorship ? 'Yes' : 'No';
+  if (/sponsorship|require.*visa|future.*sponsorship|future.*work authorization|visa status|immigration.*sponsor|sponsor.*immigration|sponsor.*work authorization|will you now or in the future require/i.test(combined)) {
+    const isNonImmigrantVisa =
+      profile.requires_sponsorship === true ||
+      profile.work_authorization === 'F1' ||
+      profile.work_authorization === 'H1B' ||
+      profile.work_authorization === 'OPT' ||
+      profile.work_authorization === 'CPT' ||
+      profile.work_authorization === 'Other';
+
+    const isFutureSponsorshipQuestion =
+      /\b(?:in the future|future|now or in the future|at any point in the future|will you (?:at any time )?require (?:visa )?sponsorship)\b/i.test(
+        combined
+      );
+
+    const rawVal = (isFutureSponsorshipQuestion && isNonImmigrantVisa) || profile.requires_sponsorship ? 'Yes' : 'No';
     return matchBestOption(rawVal, field.options, field.label);
   }
 
@@ -513,17 +527,19 @@ export function resolveStandardProfileAttribute(
     )
   ) {
     if (field.type === 'checkbox') return 'false';
-    return matchBestOption('No', field.options, field.label) || 'No';
+    const negativeOpt = field.options?.find((opt) => /\b(?:no\b|do not consent|decline|opt out)\b/i.test(opt));
+    return negativeOpt || matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Communication & SMS/WhatsApp Consent (Always "No" / false)
   if (
-    /(communications? via (?:sms|whatsapp|text)|receive text messages|text message communications?|opt-in.*(?:sms|text message)|consent to receive text)/i.test(
+    /(communications? via (?:sms|whatsapp|text)|receive.*(?:text messages|sms)|text message communications?|opt(?:-|\s*)in.*(?:sms|text message)|consent to receive text|recruitment marketing|promotional.*text|talent (?:network|community)|contact you.*(?:sms|text|marketing))/i.test(
       combined
     )
   ) {
     if (field.type === 'checkbox') return 'false';
-    return matchBestOption('No', field.options, field.label) || 'No';
+    const negativeOpt = field.options?.find((opt) => /\b(?:no\b|do not consent|decline|opt out)\b/i.test(opt));
+    return negativeOpt || matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Prior Employment / Former Employee / Previous Interview History (Always "No")
@@ -537,7 +553,8 @@ export function resolveStandardProfileAttribute(
     if (field.type === 'checkbox') {
       return 'false';
     }
-    return matchBestOption('No', field.options, field.label) || 'No';
+    const negativeOpt = field.options?.find((opt) => /\b(?:no\b|do not consent|decline|opt out)\b/i.test(opt));
+    return negativeOpt || matchBestOption('No', field.options, field.label) || 'No';
   }
 
   // Restrictive Covenants / Non-Compete / NDAs / Restrictive Agreements (Always "No")
