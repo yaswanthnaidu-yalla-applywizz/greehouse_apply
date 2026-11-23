@@ -549,7 +549,9 @@ export async function submitAshbyApplication(
       });
 
       try {
-        const remediation = await remediateUncommittedFields(page, missingLabels, application);
+        const remediation = await remediateUncommittedFields(page, missingLabels, application, {
+          resumeLocalPath,
+        });
         if (remediation.remediatedCount > 0) {
           log.info(
             `[AshbySubmit] ✅ Real-time remediation committed ${remediation.remediatedCount} field(s).`

@@ -64,7 +64,7 @@ export function translateTechnicalLabel(rawLabel: string): string {
 export interface RemediationField {
   fieldId: string;
   label: string;
-  type: 'text' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'combobox';
+  type: 'text' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'combobox' | 'file';
   options?: string[];
   currentValue?: string;
   errorHint?: string;
@@ -76,6 +76,7 @@ export interface RemediationCandidateContext {
   alreadyResolvedFields: ResolvedField[];
   jobTitle: string;
   companyName: string;
+  resumeLocalPath?: string;
 }
 
 export interface RemediationDecision {
@@ -357,6 +358,28 @@ export async function resolveRemediationAnswer(
     }
   }
 
+  // Deterministic Policy: File upload / resume attachment
+  const isResumeField =
+    field.type === 'file' ||
+    /(?:resume|cv|curriculum vitae)\b/i.test(field.label) ||
+    field.fieldId.toLowerCase().includes('resume');
+  if (isResumeField) {
+    const resumePath =
+      context.resumeLocalPath ||
+      (context.profile as any)?.resume_local_path ||
+      'resumes/my-resume.pdf';
+    log.info(`[Realtime Remediator] Applied deterministic file upload resolution for "${field.label}": "${resumePath}"`);
+    return {
+      fieldId: field.fieldId,
+      value: resumePath,
+      confidence: 1.0,
+      reasoning: 'Attached candidate resume file.',
+      issueFaced: `Automation left file upload dropzone "${field.label}" uncommitted on the live page.`,
+      issueFixed: 'Attached candidate resume from local workspace path.',
+      source: 'ai_realtime_remediated',
+    };
+  }
+
   const candidateEvidence = buildCandidateEvidenceSummary(context);
 
   const systemPrompt = `You are an automated real-time job application form remediation assistant.
@@ -523,6 +546,7 @@ export async function remediateUncommittedFields(
     alreadyResolvedFields: [...alreadyResolved],
     jobTitle: application.job_title || 'Software Professional',
     companyName: application.company_name || 'Hiring Organization',
+    resumeLocalPath: options.resumeLocalPath,
   };
 
   // 2. Iterate each uncommitted field

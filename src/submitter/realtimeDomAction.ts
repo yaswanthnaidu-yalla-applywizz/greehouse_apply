@@ -5,6 +5,8 @@
  * executes humanized commitment actions, and verifies DOM state retention.
  */
 
+import fs from 'fs';
+import path from 'path';
 import type { Page, Locator } from 'playwright';
 import { createLogger } from '../utils/logger.js';
 import type { RemediationDecision } from './realtimeRemediator.js';
@@ -14,10 +16,11 @@ const log = createLogger('Realtime DOM Action');
 export interface ScrapedDomField {
   found: boolean;
   label: string;
-  type: 'text' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'combobox';
+  type: 'text' | 'textarea' | 'select' | 'radio' | 'checkbox' | 'combobox' | 'file';
   options: string[];
   locatorSelector: string;
   containerSelector?: string;
+  isFileDropzone?: boolean;
 }
 
 export interface CommitResult {
@@ -164,7 +167,33 @@ export async function scrapeLiveFieldFromDom(
       };
     }
 
-    // 5. Check for standard text / URL input
+    // 5. Check for file upload / dropzone
+    const fileLoc = root.locator('input[type="file"]').first();
+    const isFileRelated =
+      /(?:resume|cv|upload resume|file|attachment|document)\b/i.test(targetLabel) ||
+      fieldLabel.toLowerCase().includes('resume');
+    if ((await fileLoc.count()) > 0 || (isFileRelated && (await page.locator('input[type="file"]').count()) > 0)) {
+      const loc = (await fileLoc.count()) > 0 ? fileLoc : page.locator('input[type="file"]').first();
+      const id = (await loc.getAttribute('id')) || '';
+      const name = (await loc.getAttribute('name')) || '';
+      const selector = id
+        ? `input[type="file"][id="${id.replace(/"/g, '\\"')}"]`
+        : name
+        ? `input[type="file"][name="${name}"]`
+        : 'input[type="file"]';
+
+      return {
+        found: true,
+        label: targetLabel,
+        type: 'file',
+        options: [],
+        locatorSelector: selector,
+        containerSelector,
+        isFileDropzone: true,
+      };
+    }
+
+    // 6. Check for standard text / URL input
     const inputLoc = root.locator('input:not([type="hidden"]):not([type="submit"]):not([type="file"])').first();
     if ((await inputLoc.count()) > 0) {
       const id = (await inputLoc.getAttribute('id')) || '';
@@ -277,6 +306,59 @@ export async function commitRemediatedValue(
         success: true,
         committedValue: valueToCommit,
       };
+    }
+
+    if (field.type === 'file' || field.isFileDropzone) {
+      let fileInput = rootLoc.locator(field.locatorSelector).first();
+      if ((await fileInput.count()) === 0) {
+        fileInput = rootLoc.locator('input[type="file"]').first();
+      }
+      if ((await fileInput.count()) === 0) {
+        fileInput = page.locator('input[type="file"]').first();
+      }
+
+      let filePath = valueToCommit;
+      // If valueToCommit is not a file on disk, check standard candidate resume locations
+      if (!fs.existsSync(filePath)) {
+        const candidatePaths = [
+          path.resolve(process.cwd(), 'resumes/my-resume.pdf'),
+          path.resolve(process.cwd(), 'resumes/AWL-YASHANTH_resume.pdf'),
+          path.resolve(process.cwd(), 'resumes', path.basename(filePath)),
+        ];
+        const found = candidatePaths.find((p) => fs.existsSync(p));
+        if (found) {
+          filePath = found;
+        }
+      }
+
+      if (fs.existsSync(filePath)) {
+        await fileInput.setInputFiles(filePath, { timeout: 5000 });
+        log.info(`[Realtime DOM] ✅ Attached file "${filePath}" to file dropzone ("${field.label}")`);
+        return {
+          success: true,
+          committedValue: path.basename(filePath),
+        };
+      } else {
+        // If file input already has a file or page shows an uploaded file indicator
+        const previewChip = rootLoc
+          .locator(
+            '[class*="file"], [class*="chip"], [class*="uploaded"], [aria-label*="remove" i], button:has-text("Remove")'
+          )
+          .first();
+        if ((await previewChip.count()) > 0 && (await previewChip.isVisible().catch(() => false))) {
+          log.info(`[Realtime DOM] Detected existing uploaded file indicator for "${field.label}"`);
+          return {
+            success: true,
+            committedValue: 'existing_file_verified',
+          };
+        }
+
+        return {
+          success: false,
+          committedValue: '',
+          error: `Resume or document file does not exist on disk for upload: "${filePath}"`,
+        };
+      }
     }
 
     if (field.type === 'text' || field.type === 'textarea') {
