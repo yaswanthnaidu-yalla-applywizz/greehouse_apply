@@ -40,6 +40,65 @@ function cleanLabel(text: string): string {
 }
 
 /**
+ * Detects if a label string is a technical identifier or UUID rather than a human question.
+ */
+export function isTechnicalOrUuidLabel(label: string): boolean {
+  if (!label) return true;
+  const trimmed = label.trim();
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (UUID_REGEX.test(trimmed)) return true;
+  if (/^_systemfield_/i.test(trimmed)) return true;
+  if (/^[a-f0-9]{24,}$/i.test(trimmed)) return true; // Mongo/hex IDs
+  // If it's a single word with underscores/dashes/hashes and no spaces
+  if (!trimmed.includes(' ') && (trimmed.includes('_') || (trimmed.includes('-') && trimmed.length > 15))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Extracts the true human-readable question title from within a field container.
+ */
+export async function extractContainerQuestionTitle(root: Locator, fallbackLabel: string): Promise<string> {
+  try {
+    // 1. Try finding a dedicated label, legend, or title element
+    const titleLocators = [
+      root.locator('label:not([class*="radio"]):not([class*="checkbox"]):not([for*="radio"]):not([for*="checkbox"])').first(),
+      root.locator('legend').first(),
+      root.locator('[class*="label" i]:not(input):not(select):not([role="radio"]):not([role="checkbox"])').first(),
+      root.locator('[class*="title" i], [class*="header" i], [class*="prompt" i]').first(),
+      root.locator('h3, h4, h5, p, [role="heading"]').first(),
+    ];
+
+    for (const loc of titleLocators) {
+      if ((await loc.count().catch(() => 0)) > 0) {
+        const text = (await loc.innerText().catch(() => '')).trim();
+        const cleaned = cleanLabel(text);
+        if (
+          cleaned &&
+          cleaned.length >= 3 &&
+          !isTechnicalOrUuidLabel(cleaned) &&
+          !/^(?:yes|no|male|female|other|decline|true|false)$/i.test(cleaned)
+        ) {
+          log.info(`[Realtime DOM] Extracted human question title from container: "${cleaned}" (was: "${fallbackLabel}")`);
+          return cleaned;
+        }
+      }
+    }
+
+    // 2. Fallback: inspect direct aria-label on root
+    const ariaLabel = (await root.getAttribute('aria-label').catch(() => '')) || '';
+    if (ariaLabel && !isTechnicalOrUuidLabel(ariaLabel)) {
+      return cleanLabel(ariaLabel);
+    }
+  } catch (err: any) {
+    log.warn(`[Realtime DOM] Error extracting container title: ${err.message}`);
+  }
+
+  return fallbackLabel;
+}
+
+/**
  * Scrapes a live field container, its control type, and any rendered choices from the DOM.
  */
 export async function scrapeLiveFieldFromDom(
@@ -92,6 +151,11 @@ export async function scrapeLiveFieldFromDom(
       }
     }
 
+    let finalLabel = targetLabel;
+    if (isTechnicalOrUuidLabel(targetLabel) && root) {
+      finalLabel = await extractContainerQuestionTitle(root, targetLabel);
+    }
+
     // 2. Check for standard <select>
     const selectLoc = root.locator('select').first();
     if ((await selectLoc.count()) > 0) {
@@ -106,7 +170,7 @@ export async function scrapeLiveFieldFromDom(
 
       return {
         found: true,
-        label: targetLabel,
+        label: finalLabel,
         type: 'select',
         options,
         locatorSelector: selector,
@@ -143,7 +207,7 @@ export async function scrapeLiveFieldFromDom(
 
       return {
         found: true,
-        label: targetLabel,
+        label: finalLabel,
         type: 'radio',
         options,
         locatorSelector: selector,
@@ -159,7 +223,7 @@ export async function scrapeLiveFieldFromDom(
       const selector = id ? `textarea[id="${id.replace(/"/g, '\\"')}"]` : name ? `textarea[name="${name}"]` : 'textarea';
       return {
         found: true,
-        label: targetLabel,
+        label: finalLabel,
         type: 'textarea',
         options: [],
         locatorSelector: selector,
@@ -184,7 +248,7 @@ export async function scrapeLiveFieldFromDom(
 
       return {
         found: true,
-        label: targetLabel,
+        label: finalLabel,
         type: 'file',
         options: [],
         locatorSelector: selector,
@@ -207,7 +271,7 @@ export async function scrapeLiveFieldFromDom(
 
       return {
         found: true,
-        label: targetLabel,
+        label: finalLabel,
         type: type === 'checkbox' ? 'checkbox' : 'text',
         options: [],
         locatorSelector: selector,
