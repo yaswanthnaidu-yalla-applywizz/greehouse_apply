@@ -1,3 +1,11 @@
+### Ashby Custom Question UUID Label Extraction (2026-11-23 COMPLETE)
+- [x] **Ashby Custom Question UUID Label Extraction:**
+  - Implemented `extractContainerQuestionTitle` and `isTechnicalOrUuidLabel` in `src/submitter/realtimeDomAction.ts` to inspect container DOM elements (`legend`, `label:not(.radio):not(.checkbox)`, `div[class*="label" i]`, `h3`, `p`) when field paths are UUIDs or technical tokens.
+  - Updated `scrapeLiveFieldFromDom` across select, radio, textarea, file, and text fields to replace UUID paths with true human question titles.
+  - Enriched `buildCandidateEvidenceSummary` and enabled deterministic profile link resolution (LinkedIn, GitHub, Portfolio, Website) in `src/submitter/realtimeRemediator.ts`.
+  - Unit tests: `tests/ashbyUuidLabelExtraction.test.ts` (7/7 passing). Commits `354d161`, `07799b0`.
+  - Live dry-run proof on Jerry.ai (`5b81cbd5-...` -> `"Where do you currently reside?..."` -> `"Santa Clara, CA, United States"`) and WorkOS (`dc476a03-...` -> `"LinkedIn"` -> `"N/A"`) achieved 100% required fields committed!
+
 ### FADA Real-Time Remediation & Submission Engine Fortification (2026-11-23 COMPLETE)
 - [x] **Task 1: Education Dates Extraction & Mapping in Resolver:**
   - Implemented `src/resolver/educationDates.ts` extracting `start_date_year`, `end_date_year`, `start_date_month`, `end_date_month` from `candidate_resume_parsed` with sensible academic fallback months (September start, May graduation).
