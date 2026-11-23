@@ -1,3 +1,54 @@
+### FADA Real-Time Remediation & Submission Engine Fortification (2026-11-23 COMPLETE)
+- [x] **Task 1: Education Dates Extraction & Mapping in Resolver:**
+  - Implemented `src/resolver/educationDates.ts` extracting `start_date_year`, `end_date_year`, `start_date_month`, `end_date_month` from `candidate_resume_parsed` with sensible academic fallback months (September start, May graduation).
+  - Integrated into Tier 2 (`src/resolver/tier2ResumeParse.ts`) and main resolver (`src/resolver/answerResolver.ts`).
+  - Unit tests: `tests/educationDatesResolver.test.ts` (18/18 passing). Commit `0aad156`.
+- [x] **Task 2: Real-Time Remediator Human Labels & Elevated Circuit Breaker:**
+  - Implemented `translateTechnicalLabel` in `src/submitter/realtimeRemediator.ts` mapping technical Ashby paths (`_systemfield_name` -> "Full Legal Name", `_systemfield_email` -> "Email Address", etc.).
+  - Raised default circuit breaker ceiling `maxFields` from 3 to 6.
+  - Added academic month fallback in `resolveRemediationAnswer`.
+  - Unit tests: `tests/realtimeRemediatorHumanLabels.test.ts` (7/7 passing). Commit `efb5e83`.
+- [x] **Task 3: Mini DOM Agent File Upload Dropzone Handling:**
+  - Enhanced `src/submitter/realtimeDomAction.ts` to detect `input[type="file"]` and file dropzones for resume/CV fields.
+  - Extended `commitRemediatedValue` to attach local candidate resumes via `setInputFiles` and verify existing file chips.
+  - Unit tests: `tests/realtimeDomActionFileUpload.test.ts` (3/3 passing). Commit `004d413`.
+- [x] **Task 4: Submitter Overlays Auto-Dismissal (Age Gates & Cookie Modals):**
+  - Created `src/submitter/fieldFillers/overlayDismissal.ts` auto-detecting and dismissing age-verification gates (e.g. Manhattan Beer `"I'm Over 21"`) and cookie banners.
+  - Wired into `fillForm` (`src/submitter/formFiller.ts`) and `fillAshbyForm` (`src/submitter/ashbyFormFiller.ts`).
+  - Unit tests: `tests/submitterOverlayDismissal.test.ts` (3/3 passing). Commit `ce537a5`.
+- [x] **Task 5: Ashby Scanner 404 Detection & Empty `resolved_fields` Guard:**
+  - Added fast 404/closed job detection in `src/scanner/ashbyScanner.ts` (`isAshbyJobClosedOnDom`) avoiding 15-second timeouts.
+  - Added fast `JOB_CLOSED` throw in `waitForAshbyApplicationReady` (`src/submitter/ashbySubmit.ts`).
+  - Added pre-submission guard in `submitAshbyApplication` rejecting applications with empty or null `resolved_fields`.
+  - Unit tests: `tests/ashbyClosedAndEmptyGuard.test.ts` (6/6 passing). Commit `d2a0617`.
+- [x] **Task 6: Future Sponsorship Polarity & Marketing Opt-Out Policy:**
+  - Enforced future sponsorship polarity in `src/resolver/corporatePolicies.ts`, `src/resolver/tier1Supabase.ts`, and `src/resolver/deterministicPolicies.ts` to resolve `Yes` for F1/H-1B visa holders and `No` for US Citizens.
+  - Enforced strict `No` opt-out for recruitment marketing and promotional communications.
+  - Unit tests: `tests/sponsorshipAndSmsPolicy.test.ts` (7/7 passing). Commit `f122219`.
+
+### DB 2 Rescan, LinkedIn "N/A" Normalization & 100% Auto-Queue Cohort Push (2026-11-23 COMPLETE)
+- [x] **Preserved Status Invariants & DB 2 Deletion:**
+  - Deleted non-applied applications in DB 2 for tasks in `combined_jobs_20261122.csv`.
+  - Preserved 100% of tasks in `APPLIED` (47) and `EMAIL_PROOF_PENDING` (31) intact.
+- [x] **Candidate Qualification & Task Cohort:**
+  - Enforced `zoho_connected = true` filter against DB 2 `profiles`.
+  - Isolated exactly 834 eligible application tasks across 82 candidates in `data/eligible_jobs_20261122.csv`.
+- [x] **LinkedIn "N/A" Resolver Fixes (`src/resolver/answerResolver.ts`, `src/resolver/tier1Supabase.ts`, `src/resolver/llmSynthesizer.ts`):**
+  - Updated `alignResolvedChoice` to explicitly retain and normalize `"N/A"` for LinkedIn fields rather than rejecting them as invalid URLs.
+  - Added deterministic fallback to `"N/A"` at Tier 1/2 in `resolveField` and `resolveFieldThroughTier2Raw` when no LinkedIn URL is found in candidate profile or parsed resume.
+  - Added fallback search for `linkedin_url` in `profile.raw_api_payload`.
+  - Replaced fake synthetic LinkedIn URL generation in `llmSynthesizer.ts` with `"N/A"`.
+- [x] **Full Template Scanning Coverage:**
+  - Scanned all 187 missing Ashby and Greenhouse URLs using PlaywrightScanner (`scripts/scanMissingUrls.ts`).
+  - Achieved 100% URL coverage (271/271 unique URLs covered across 420 templates in `output/scanned_jobs.json`).
+- [x] **Tiers 1–4 & Tier 5 Swarm Resolution:**
+  - Resolved 6,774 / 8,095 required fields (83.7%) via Tiers 1–4.
+  - Resolved all 1,321 Tier 5 questions across 4 shards with parent agent verification (1,242 direct matches, 79 normalized options).
+  - Reached **100.00% Auto-Queue conversion (834/834 fully resolved applications, 0 remaining for review)**.
+- [x] **Production DB 2 Upsert:**
+  - Upserted all 834 applications to `gh_candidate_applications` with `status: 'QUEUED'` using `ON CONFLICT (task_id) DO UPDATE`.
+  - Production submitter pool automatically initiated processing.
+
 ### DISABLE_EMAIL Environment Flag for Non-Auth Outbound Emails (2026-11-19 COMPLETE)
 - [x] **Config & Environment Schema (`src/config/env.ts`):**
   - Added `DISABLE_EMAIL` boolean flag with `z.preprocess` normalizing `"true"`, `"1"`, `"false"`, `"0"` (defaults to `false` when unset).

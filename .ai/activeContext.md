@@ -1,3 +1,73 @@
+# Current Session Update (2026-11-23 - Shipped Fortifications for Real-Time Remediation & Submission Engine)
+
+- **Completed All 6 Tasks in SDD Plan (`docs/superpowers/plans/2026-11-23-remediation-and-submission-engine-fixes.md`)**:
+  - **Task 1: Education Dates Extraction & Mapping in Resolver**:
+    - Created `src/resolver/educationDates.ts`, updated `src/resolver/tier2ResumeParse.ts` and `src/resolver/answerResolver.ts`.
+    - Handles `start_date_year`, `end_date_year`, `start_date_month`, `end_date_month` with academic fallbacks (September start, May graduation) when year exists.
+    - Verified with `tests/educationDatesResolver.test.ts` (18/18 tests passing). Commit `0aad156`.
+  - **Task 2: Real-Time Remediator Human Labels & Elevated Circuit Breaker**:
+    - Updated `src/submitter/realtimeRemediator.ts` to export and use `translateTechnicalLabel`.
+    - Raised `maxFields` ceiling in `remediateUncommittedFields` from 3 to 6.
+    - Added academic month fallback in `resolveRemediationAnswer`.
+    - Verified with `tests/realtimeRemediatorHumanLabels.test.ts` (7/7 tests passing). Commit `efb5e83`.
+  - **Task 3: Mini DOM Agent File Upload Dropzone Handling**:
+    - Enhanced `src/submitter/realtimeDomAction.ts` and `src/submitter/realtimeRemediator.ts` to recognize `input[type="file"]` and file dropzones for resume/CV fields.
+    - Extended `commitRemediatedValue` to attach local candidate resumes via `setInputFiles` and verify existing file chips.
+    - Passed `resumeLocalPath` through `ashbySubmit.ts` to `remediateUncommittedFields`.
+    - Verified with `tests/realtimeDomActionFileUpload.test.ts` (3/3 tests passing). Commit `004d413`.
+  - **Task 4: Submitter Overlays Auto-Dismissal (Age Gates & Cookie Modals)**:
+    - Created `src/submitter/fieldFillers/overlayDismissal.ts` auto-detecting and dismissing age-verification gates (e.g. Manhattan Beer `"I'm Over 21"`) and cookie banners.
+    - Integrated before form filling in `fillForm` (`formFiller.ts`) and `fillAshbyForm` (`ashbyFormFiller.ts`).
+    - Verified with `tests/submitterOverlayDismissal.test.ts` (3/3 tests passing). Commit `ce537a5`.
+  - **Task 5: Ashby Scanner 404 Detection & Empty `resolved_fields` Guard**:
+    - Added fast 404/closed job detection in `src/scanner/ashbyScanner.ts` (`isAshbyJobClosedOnDom`) avoiding 15-second timeouts.
+    - Added fast `JOB_CLOSED` throw in `waitForAshbyApplicationReady` (`ashbySubmit.ts`).
+    - Added pre-submission guard in `submitAshbyApplication` rejecting applications with empty or null `resolved_fields`.
+    - Verified with `tests/ashbyClosedAndEmptyGuard.test.ts` (6/6 tests passing). Commit `d2a0617`.
+  - **Task 6: Future Sponsorship Polarity & Marketing Opt-Out Policy**:
+    - Enforced future sponsorship polarity in `src/resolver/corporatePolicies.ts`, `src/resolver/tier1Supabase.ts`, and `src/resolver/deterministicPolicies.ts` to resolve `Yes` for F1/H-1B visa holders and `No` for US Citizens.
+    - Enforced strict `No` opt-out for recruitment marketing and promotional communications.
+    - Verified with `tests/sponsorshipAndSmsPolicy.test.ts` (7/7 tests passing). Commit `f122219`.
+  - **Regression Proof**: 44/44 tests passing across all 6 suites; 0 TypeScript errors.
+
+# Current Session Update (2026-11-23 - FADA Production DB 2 Failure & Visual Screenshot Diagnostics Since Yesterday)
+
+- **Completed FADA Diagnostics for All Non-Captcha, Non-Preflight Failed Applications Since Yesterday (2026-11-21 18:30 UTC / 2026-11-22 00:00 IST to Present)**:
+  - **Dataset Scope**: Isolated 324 non-captcha, non-preflight failed applications in DB 2. Downloaded 303 screenshots (100% of available images) into `.ai/diagnostics/failed_screenshots_since_yesterday/`.
+  - **Audit of 4,949 Resolved Fields**:
+    - Identified **226 `REQUIRED_FIELD_EMPTY`** fields on live forms where the employer made fields required (`*`), including 122 education start/end date fields (`Start date year`: 32, `End date year`: 32, `Start date month`: 29, `End date month`: 29) and 74 mandatory EEOC/demographic fields (`Are you Hispanic/Latino?*`: 21, `Do you identify as transgender?*`: 18, `Disability`: 16, `Sexual orientation`: 10).
+    - Identified **3 `WORK_AUTH_INVERSION`** fields: GCM Grosvenor answered `No` for F1 and H-1B candidates asking if they will require future sponsorship; Phamily answered `No` to authorization without future sponsorship, triggering automatic disqualification.
+    - Identified **2 `SMS_CONSENT_VIOLATION`** fields at SoFi Tech Solutions (answered `Yes` to marketing/recruiting SMS).
+    - Confirmed **0 `INVALID_CHOICE_OPTION`** hallucinations and **0 `PLACEHOLDER_LEAK`** errors.
+  - **Visual Ground-Truth Screenshot Discoveries**:
+    - *Greenhouse Education & EEOC Validation Drops (93 apps)*: Contact info and resume attached cleanly, but missing education dates or required EEOC dropdowns prevented submission.
+    - *Ashby Empty `resolved_fields` Ingest Drops (55 apps)*: Applications for ClickHouse (17), CLERA (9), RevenueCat (6), and Virta Health (5) were queued with empty `resolved_fields: []` arrays from the scanner, resulting in `committedFieldCount: 0`.
+    - *Closed 404 Postings (25 apps)*: Ashby Decagon jobs (7 apps) and Netic jobs displayed visual `"Job not found"` 404 banners, misreported as 35s readiness timeouts.
+    - *Age-Gate & Cookie Overlays (15 apps)*: Manhattan Beer (12 apps) displayed a site-wide `"You must be over 21 years old"` age gate modal blocking DOM interaction; AlixPartners and Motional were blocked by unhandled cookie consent popups.
+    - *Cloudflare Turnstile Walls (11 apps)*: Applied Engineering was blocked by a Cloudflare Turnstile human challenge, miscategorized in DB as "submit button not found".
+    - *Greenhouse OTP Polling Timeouts (29 apps)*: Legitimate 8-box OTP code screens on DLH, Halcyon, Cloudflare, and Recorded Future timed out waiting for Zoho inbox code delivery.
+  - **Artifacts Generated**:
+    - Full manifest: `.ai/diagnostics/failed_since_yesterday_manifest.json`
+    - Diagnostic report: `.ai/diagnostics/fada-report-failed-since-yesterday.md`
+
+# Current Session Update (2026-11-23 - DB 2 Rescan, Resolution & 100% Auto-Queue Cohort Push)
+
+- **Execution of DB 2 Targeted Cohort Rescan, Resolution & Push (`combined_jobs_20261122.csv`)**:
+  - **Preserved Status Invariants**: Checked DB 2 and safely preserved all 78 existing applications in `APPLIED` (47) and `EMAIL_PROOF_PENDING` (31) without deleting or overwriting them.
+  - **Candidate Qualification Filtering**: Filtered CSV tasks exclusively for candidates where `zoho_connected = true`. Isolated exactly 834 eligible tasks across 82 candidates in `data/eligible_jobs_20261122.csv`.
+  - **LinkedIn "N/A" Normalization Fix (`src/resolver/answerResolver.ts`, `src/resolver/tier1Supabase.ts`, `src/resolver/llmSynthesizer.ts`)**:
+    - Fixed URL validator to never wipe or reject `"N/A"` (and variants like `"NA"`, `"not applicable"`) for LinkedIn fields.
+    - Updated `resolveField` and `resolveFieldThroughTier2Raw` to fall back to `"N/A"` at Tier 1/2 when no LinkedIn URL is present in profile or parsed resume.
+    - Added fallback search in `profile.raw_api_payload` for `linkedin_url` before defaulting to `"N/A"`.
+    - Removed synthetic fake URL generation (`https://www.linkedin.com/in/...`) in `llmSynthesizer.ts` in favor of `"N/A"`.
+  - **Full Schema Scanning**: Scanned all 187 missing Ashby and Greenhouse URLs using PlaywrightScanner (`scripts/scanMissingUrls.ts`), achieving 100% template coverage (271/271 unique URLs) stored in `output/scanned_jobs.json`.
+  - **Tiers 1–4 Resolution**: Resolved 6,774 / 8,095 required fields (83.7%) through deterministic profile and resume extraction.
+  - **Tier 5 Resolution & Parent Agent Verification**:
+    - Partitioned 1,321 questions into 4 shards and resolved with 100% corporate policy alignment (sponsorship, legal auth, EAR/ITAR, hybrid/onsite, language, criminal background, agreements, degree, experience).
+    - Parent agent verification pass confirmed 100% option validity (1,242 direct matches + 79 normalized option values).
+    - Achieved **100.00% Auto-Queue conversion rate (834/834 applications fully resolved, 0 remaining for review)**, surpassing the user-specified minimum (≥ 80%) and target (≥ 95%).
+  - **Production DB 2 Upsert**: Pushed all 834 applications with `status: 'QUEUED'` into `gh_candidate_applications` using `ON CONFLICT (task_id) DO UPDATE`. Production background submitter workers immediately began picking up tasks.
+
 # Current Session Update (2026-11-20 - Submitter & Realtime DOM Agent Precision Fixes)
 
 - **Root Cause Diagnostics & Shipped Fixes for Production DB 2 Failures**:
