@@ -22,6 +22,45 @@ const log = createLogger('Realtime Remediator');
 
 export const MIN_REMEDIATION_CONFIDENCE = 0.70;
 
+/**
+ * Translates Ashby system tokens or technical DOM IDs into human-readable question labels.
+ */
+export function translateTechnicalLabel(rawLabel: string): string {
+  if (!rawLabel) return '';
+  const trimmed = rawLabel.trim();
+  const knownMappings: Record<string, string> = {
+    '_systemfield_name': 'Full Legal Name',
+    '_systemfield_first_name': 'First Name',
+    '_systemfield_last_name': 'Last Name',
+    '_systemfield_email': 'Email Address',
+    '_systemfield_phone': 'Phone Number',
+    '_systemfield_resume': 'Resume',
+    '_systemfield_linkedin_url': 'LinkedIn URL',
+    '_systemfield_website_url': 'Personal Website / Portfolio',
+    '_systemfield_location': 'Current Location',
+    '_systemfield_cover_letter': 'Cover Letter',
+  };
+
+  const lower = trimmed.toLowerCase();
+  if (knownMappings[lower]) {
+    return knownMappings[lower];
+  }
+
+  if (lower.startsWith('_systemfield_')) {
+    const rawName = trimmed.replace(/^_systemfield_/i, '').replace(/[_-]+/g, ' ').trim();
+    return rawName.charAt(0).toUpperCase() + rawName.slice(1);
+  }
+
+  if (!trimmed.includes(' ') && (trimmed.includes('_') || trimmed.includes('-'))) {
+    const humanized = trimmed.replace(/^[_#-]+/, '').replace(/[_-]+/g, ' ').trim();
+    if (humanized.length > 0) {
+      return humanized.charAt(0).toUpperCase() + humanized.slice(1);
+    }
+  }
+
+  return trimmed;
+}
+
 export interface RemediationField {
   fieldId: string;
   label: string;
@@ -99,6 +138,7 @@ export interface RemediationOrchestratorOptions extends RemediationOptions {
   getProfileFn?: (applywizzId: string) => Promise<ProfileRow | null>;
   getResumeFn?: (applywizzId: string) => Promise<ResumeParsedRow | null>;
   persistToDb?: boolean;
+  resumeLocalPath?: string;
 }
 
 /**
@@ -282,6 +322,41 @@ export async function resolveRemediationAnswer(
     }
   }
 
+  // Deterministic Policy: Education Start / End Month
+  const isMonthField =
+    /\bmonth\b/i.test(field.label) ||
+    (hasOptions && field.options!.some((o) => /^(?:january|jan|01|february|feb|02)$/i.test(o.trim())));
+  if (isMonthField && hasOptions) {
+    const isStart = /\b(?:start|from|beginning|entry)\b/i.test(field.label);
+    const isEnd = /\b(?:end|to|graduation|completion|finish)\b/i.test(field.label);
+
+    if (isStart || isEnd) {
+      const targetMonths = isStart
+        ? ['august', 'aug', '08', '8', 'september', 'sep', 'sept', '09', '9']
+        : ['may', '05', '5', 'june', 'jun', '06', '6'];
+      for (const tm of targetMonths) {
+        const match = field.options!.find(
+          (opt) => opt.trim().toLowerCase() === tm || opt.trim().toLowerCase().startsWith(tm)
+        );
+        if (match) {
+          log.info(
+            `[Realtime Remediator] Applied deterministic education month resolution: "${match}" for "${field.label}"`
+          );
+          return {
+            fieldId: field.fieldId,
+            value: match,
+            chosenOptionLabel: match,
+            confidence: 0.95,
+            reasoning: `Selected default education ${isStart ? 'start' : 'graduation'} month based on standard academic calendar.`,
+            issueFaced: `Automation left education month dropdown "${field.label}" uncommitted on page.`,
+            issueFixed: `Selected "${match}" per standard academic calendar defaults.`,
+            source: 'ai_realtime_remediated',
+          };
+        }
+      }
+    }
+  }
+
   const candidateEvidence = buildCandidateEvidenceSummary(context);
 
   const systemPrompt = `You are an automated real-time job application form remediation assistant.
@@ -393,7 +468,7 @@ export async function remediateUncommittedFields(
 ): Promise<RemediationRunResult> {
   const timeoutMs = options.timeoutMs ?? 20000;
   const deadline = Date.now() + timeoutMs;
-  const maxFields = options.maxFields ?? 3;
+  const maxFields = options.maxFields ?? 6;
 
   const result: RemediationRunResult = {
     attemptedCount: 0,
@@ -459,12 +534,16 @@ export async function remediateUncommittedFields(
       break;
     }
 
+    const humanLabel = translateTechnicalLabel(label);
     result.attemptedCount++;
-    log.info(`[Realtime Remediator] [${result.attemptedCount}/${labelsToProcess.length}] Remediating "${label}"...`);
+    log.info(`[Realtime Remediator] [${result.attemptedCount}/${labelsToProcess.length}] Remediating "${label}" (human: "${humanLabel}")...`);
 
     try {
       // Step A: Scrape live DOM
-      const scraped = await scrapeLiveFieldFromDom(page, label);
+      let scraped = await scrapeLiveFieldFromDom(page, label);
+      if (!scraped && humanLabel !== label) {
+        scraped = await scrapeLiveFieldFromDom(page, humanLabel);
+      }
       if (!scraped) {
         const errorMsg = `Field "${label}" could not be located in live DOM.`;
         result.errors.push(errorMsg);
@@ -485,7 +564,7 @@ export async function remediateUncommittedFields(
       // Step B: Resolve answer
       const remediationField: RemediationField = {
         fieldId: scraped.locatorSelector.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 64) || 'remediated_field',
-        label: scraped.label,
+        label: scraped.label || humanLabel,
         type: scraped.type,
         options: scraped.options,
       };
