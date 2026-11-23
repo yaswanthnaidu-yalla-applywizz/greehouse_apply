@@ -2167,9 +2167,10 @@ ${CORPORATE_POLICY_PROMPT_GUIDELINES}`;
     // URLs must NEVER return prose paragraphs
     if (/linkedin|website|portfolio|github|\burl\b|blog|personal site/i.test(combined)) {
       if (/linkedin/i.test(combined)) {
-        if (profile.linkedinUrl) return profile.linkedinUrl;
-        const cleanName = (profile.clientName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return cleanName ? `https://www.linkedin.com/in/${cleanName}` : '';
+        if (profile.linkedinUrl && !/^(?:https?:\/\/(?:www\.)?)?(?:n\/?a|none|null|not applicable)$/i.test(profile.linkedinUrl.trim())) {
+          return profile.linkedinUrl;
+        }
+        return 'N/A';
       }
       if (/github/i.test(combined)) {
         return profile.githubUrl || '';

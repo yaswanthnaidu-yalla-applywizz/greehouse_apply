@@ -444,7 +444,10 @@ export function resolveStandardProfileAttribute(
     );
   }
   if (/linkedin/i.test(combined)) {
-    return normalizeProfileUrl(profile.linkedin_url);
+    return (
+      normalizeProfileUrl(profile.linkedin_url) ||
+      findPayloadUrl(profile, ['linkedin_url', 'linkedin', 'linkedInUrl', 'linkedinUrl'])
+    );
   }
 
   // Website / Portfolio

@@ -207,8 +207,20 @@ export function alignResolvedChoice(
     (field.metadata as any)?.inputType === 'url' ||
     (field as any).type === 'url' ||
     /\b(?:url|website|portfolio|linkedin|github)\b/i.test(`${field.label} ${field.name} ${field.fieldId}`);
+  const isLinkedInField = /\blinkedin\b/i.test(`${field.label} ${field.name} ${field.fieldId}`);
+  if (
+    isLinkedInField &&
+    /^(?:https?:\/\/(?:www\.)?)?(?:n\/?a|none|null|not applicable)$/i.test(resolved.value.trim())
+  ) {
+    return {
+      ...baseWithOptions,
+      value: 'N/A',
+      confidence: Math.max(resolved.confidence, 0.95),
+    };
+  }
   if (
     isUrlField &&
+    !isLinkedInField &&
     (/^(?:yes|no|true|false)$/i.test(resolved.value.trim()) ||
       /^(?:https?:\/\/(?:www\.)?)?(?:n\/?a|none|null|not applicable)$/i.test(resolved.value.trim()))
   ) {
@@ -747,6 +759,20 @@ export class AnswerResolver {
       }
     }
 
+    if (/\blinkedin\b/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: 'N/A',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 0.95,
+        isRequired,
+      };
+    }
+
     // ------------------------------------------------------------------------
     // Tier 3: Semantic Search (vector embedding match against candidate_qa_bank)
     // ------------------------------------------------------------------------
@@ -998,6 +1024,21 @@ export class AnswerResolver {
           provenance: { family: intent.family, evidenceKind: 'candidate_profile', evidenceKey: 'phone' },
         };
       }
+    }
+
+    if (/\blinkedin\b/i.test(`${field.label} ${field.name} ${field.fieldId}`)) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: 'N/A',
+        source: 'supabase',
+        resolvedByTier: 1,
+        confidence: 0.95,
+        isRequired,
+        provenance: { family: intent.family, evidenceKind: 'candidate_profile', evidenceKey: 'linkedin_url_fallback' },
+      };
     }
 
     // ------------------------------------------------------------------------
