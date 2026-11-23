@@ -13,6 +13,7 @@ import { downloadResumeTempFile, deleteResumeTempFile } from '../db/storage.js';
 import { getDbClient, isSupabaseConfigured } from '../db/client.js';
 import { normalizeText } from './fingerprint.js';
 import { extractResumePhone, isPhoneNumberField } from './candidateEvidence.js';
+import { extractEducationDateSubfield } from './educationDates.js';
 import type { ResolvedField, ScannedField } from '../types/index.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -508,6 +509,29 @@ export async function resolveTier2(
         confidence: 0.85,
       };
     }
+  }
+
+  // 4b. Education Date Subfields (Start Year, End Year, Start Month, End Month)
+  const eduDate = extractEducationDateSubfield(
+    field.label,
+    field.name,
+    field.fieldId,
+    structured.education?.length
+      ? structured.education
+      : [{ year: resume.raw_text.match(/\b(20\d{2}|19\d{2})\b/)?.[0] || '' }],
+    field.options
+  );
+  if (eduDate) {
+    return {
+      fieldId: field.fieldId,
+      name: field.name,
+      type: field.type,
+      label: field.label,
+      value: eduDate.value,
+      source: 'resume_parse',
+      resolvedByTier: 2,
+      confidence: eduDate.confidence,
+    };
   }
 
   // 4. GPA / Graduation details if present in raw text

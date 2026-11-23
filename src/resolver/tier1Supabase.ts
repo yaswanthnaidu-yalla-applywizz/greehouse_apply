@@ -131,7 +131,7 @@ export function getDateComponentContext(field: ScannedField): 'education' | 'emp
 }
 
 export function isDateComponentField(field: ScannedField): boolean {
-  return /\b(?:month|year)\b/i.test(field.label) && /\b(?:start|end|graduation)\b/i.test(field.label);
+  return /\b(?:month|year)\b/i.test(field.label) && /\b(?:start|end|graduation|from|to)\b/i.test(field.label);
 }
 
 export function resolveContextualDateComponent(field: ScannedField, profile: ProfileRow): string | null {

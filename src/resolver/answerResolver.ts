@@ -20,11 +20,11 @@ import { findAnswersByCandidate, type QABankRow } from '../db/qaBank.js';
 import { getOrParseResume, type ResumeParsedRow } from './tier2ResumeParse.js';
 import {
   isDateComponentField,
-  resolveContextualDateComponent,
   resolveFromPayloadStructured,
   resolveTier1,
 } from './tier1Supabase.js';
 import { resolveTier2 } from './tier2ResumeParse.js';
+import { extractEducationDateSubfield } from './educationDates.js';
 import { findSemanticMatch } from './semanticSearch.js';
 import { resolveTier3 } from './tier3FuzzyMatch.js';
 import { resolveTier5, resolveTier5Batch, TIER5_BATCH_CHUNK_SIZE, getSessionLlmMetrics, resetSessionLlmMetrics } from './tier5LLM.js';
@@ -692,9 +692,6 @@ export class AnswerResolver {
     const profile = context?.profile || (await getProfile(applywizzId));
     const jobContext = context?.jobContext || { companyName: 'Company', jobTitle: 'Position' };
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
-    if (isDateComponentField(field) && (!profile || !resolveContextualDateComponent(field, profile))) {
-      return this.unresolvedField(field);
-    }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
 
     const ashbySystem = resolveAshbySystemField(field, profile, isRequired);
@@ -740,6 +737,31 @@ export class AnswerResolver {
     const tier2 = await resolveTier2(applywizzId, resolutionField, parsedResume);
     if (tier2) {
       return { ...tier2, isRequired };
+    }
+
+    const eduDateRaw = extractEducationDateSubfield(
+      field.label,
+      field.name,
+      field.fieldId,
+      parsedResume?.structured?.education || (profile?.education as any),
+      field.options
+    );
+    if (eduDateRaw) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: eduDateRaw.value,
+        source: 'resume_parse',
+        resolvedByTier: 2,
+        confidence: eduDateRaw.confidence,
+        isRequired,
+      };
+    }
+
+    if (isDateComponentField(field)) {
+      return this.unresolvedField(field);
     }
 
     if (isPhoneNumberField(field) && profile?.phone) {
@@ -934,9 +956,6 @@ export class AnswerResolver {
       ? context.profile!
       : context.profile || (await getProfile(applywizzId));
     const isRequired = Boolean(field.isRequired || (field as any).required || (field as any).is_required);
-    if (isDateComponentField(field) && (!profile || !resolveContextualDateComponent(field, profile))) {
-      return this.unresolvedField(field);
-    }
     const resolutionField = field.optionsComplete === false ? { ...field, options: undefined } : field;
     const intent = field.intent || classifyFieldIntent(field);
 
@@ -1006,6 +1025,32 @@ export class AnswerResolver {
         isRequired,
         provenance: tier2.provenance || { family: intent.family, evidenceKind: 'tier2_resume' },
       };
+    }
+
+    const eduDateTier2 = extractEducationDateSubfield(
+      field.label,
+      field.name,
+      field.fieldId,
+      parsedResume?.structured?.education || (profile?.education as any),
+      field.options
+    );
+    if (eduDateTier2) {
+      return {
+        fieldId: field.fieldId,
+        name: field.name,
+        type: field.type,
+        label: field.label,
+        value: eduDateTier2.value,
+        source: 'resume_parse',
+        resolvedByTier: 2,
+        confidence: eduDateTier2.confidence,
+        isRequired,
+        provenance: { family: intent.family, evidenceKind: 'tier2_resume' },
+      };
+    }
+
+    if (isDateComponentField(field)) {
+      return this.unresolvedField(field);
     }
 
     if (isPhoneNumberField(field) && profile?.phone) {
