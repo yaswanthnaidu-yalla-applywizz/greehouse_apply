@@ -17,6 +17,7 @@ import type { ResolvedField } from '../types/index.js';
 import { config } from '../config/env.js';
 import { cleanLLMOutput } from '../resolver/llmSynthesizer.js';
 import { scrapeLiveFieldFromDom, commitRemediatedValue } from './realtimeDomAction.js';
+import { resolveStandardProfileAttribute } from '../resolver/tier1Supabase.js';
 
 const log = createLogger('Realtime Remediator');
 
@@ -156,6 +157,21 @@ function buildCandidateEvidenceSummary(context: RemediationCandidateContext): st
   }
   if (p.location || p.country) {
     facts.push(`Location: ${[p.location, p.country].filter(Boolean).join(', ')}`);
+  }
+  if (p.linkedin_url) {
+    facts.push(`LinkedIn Profile: ${p.linkedin_url}`);
+  }
+  if (p.github_url) {
+    facts.push(`GitHub Profile: ${p.github_url}`);
+  }
+  if (p.website_url) {
+    facts.push(`Portfolio/Website: ${p.website_url}`);
+  }
+  if (p.phone) {
+    facts.push(`Phone: ${p.phone}`);
+  }
+  if (p.company_email || p.email) {
+    facts.push(`Email: ${p.company_email || p.email}`);
   }
 
   // 2. Work Authorization & Sponsorship
@@ -378,6 +394,37 @@ export async function resolveRemediationAnswer(
       issueFixed: 'Attached candidate resume from local workspace path.',
       source: 'ai_realtime_remediated',
     };
+  }
+
+  // Deterministic standard profile link attributes (LinkedIn, GitHub, Portfolio, Website)
+  const isLinkField =
+    /linkedin|github|portfolio|website|personal\s*site/i.test(field.label) ||
+    /linkedin|github|portfolio|website/i.test(field.fieldId);
+  if (isLinkField && context.profile) {
+    const scannedProxy = {
+      fieldId: field.fieldId,
+      name: field.fieldId,
+      label: field.label,
+      type: (field.type || 'text') as any,
+      isRequired: true,
+      options: field.options,
+    };
+    const standardAttr = resolveStandardProfileAttribute(scannedProxy, context.profile);
+    if (standardAttr && standardAttr.trim().length > 0) {
+      log.info(
+        `[Realtime Remediator] Applied deterministic standard profile attribute resolution for "${field.label}": "${standardAttr}"`
+      );
+      return {
+        fieldId: field.fieldId,
+        value: standardAttr,
+        chosenOptionLabel: field.options && field.options.length > 0 ? standardAttr : undefined,
+        confidence: 0.98,
+        reasoning: `Resolved from candidate standard profile data.`,
+        issueFaced: `Automation left standard profile field "${field.label}" uncommitted on the live page.`,
+        issueFixed: `Populated standard profile value "${standardAttr}".`,
+        source: 'ai_realtime_remediated',
+      };
+    }
   }
 
   const candidateEvidence = buildCandidateEvidenceSummary(context);
